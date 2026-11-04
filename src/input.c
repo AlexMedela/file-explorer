@@ -802,6 +802,15 @@ static void on_mouse_up(void) {
         return;
     }
     Pane *p = A.drag_pane;
+    if (A.drag == DRAG_ITEMS && p && pane_exists(p) && (A.drop_split_panel || A.drop_newtab)) { // folders: open them
+        Panel *pn = A.drop_split_panel ? A.drop_split_panel : A.drop_newtab;
+        int n, zone = A.drop_split_panel ? A.drop_split : -1;
+        char **paths = pane_selection_paths(p, &n);
+        drag_cancel();
+        open_dirs_at(pn, zone, paths, n);
+        strv_free(paths, n);
+        return;
+    }
     if (A.drag == DRAG_ITEMS && p && pane_exists(p) && A.drop_qa >= 0 && A.drop_qa < A.nqa) { // onto a group header
         int n, g = A.drop_qa;
         char **paths = pane_selection_paths(p, &n);

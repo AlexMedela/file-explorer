@@ -1409,6 +1409,60 @@ static int run_selftest_m6(void) {
     st_wait_ops();
     ST_CHECK(st_exists(M6_BASE "/c/file2.txt") && !st_exists(M6_BASE "/a/file2.txt"));
 
+    { // drag folders onto a panel edge -> opened in a new split there; onto the empty part of a tab bar -> new tabs
+        panel_activate(p0);
+        pane_navigate(active_pane(), M6_BASE, true); st_wait();
+        Pane *src = active_pane();
+        int np = A.npanels, nt = A.ntabs;
+        st_select(src, "b");
+        f32 ry = st_row_y(src, "b"), ex = p0->area.x + p0->area.w - S(10), ey = p0->area.y + p0->area.h * 0.6f;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, src->ly.col_name + S(20), ry, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, ex - S(40), ey, 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, ex, ey, 0, 0, 0);
+        ST_CHECK(A.drag == DRAG_ITEMS && A.drop_split_panel == p0 && A.drop_split == ZONE_RIGHT && !A.drop_dir[0]);
+        st_frames(1);
+        st_shot("folder-edge-drop");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        st_wait();
+        Panel *pb = A.ap;
+        Node *nb = node_find(A.root, pb);
+        ST_CHECK(A.npanels == np + 1 && pb != p0 && nb && nb->parent && nb->parent->kind == NODE_HSPLIT && nb->parent->b == nb);
+        ST_CHECK(!strcmp(active_pane()->path, M6_BASE "/b") && st_exists(M6_BASE "/b"));
+        // two folders onto p0's empty bar space: two new tabs, the first one shown
+        panel_activate(p0);
+        st_select(src, "c");
+        f32 dy = st_row_y(src, "d");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, src->ly.col_name + S(20), dy, SDL_BUTTON_LEFT, 1, SDL_KMOD_CTRL); // Ctrl+click adds
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, src->ly.col_name + S(20), dy, SDL_BUTTON_LEFT, 1, SDL_KMOD_CTRL);
+        ST_CHECK(src->sel_count == 2);
+        nt = A.ntabs;
+        int n0 = panel_ntabs(p0);
+        f32 bx = (p0->plus.x + p0->plus.w + p0->splitbtn.x) * 0.5f, by = p0->bar.y + p0->bar.h * 0.5f;
+        ry = st_row_y(src, "c");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, src->ly.col_name + S(20), ry, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, bx, by + S(30), 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, bx, by, 0, 0, 0);
+        ST_CHECK(A.drag == DRAG_ITEMS && A.drop_newtab == p0 && !A.drop_split_panel);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        st_wait();
+        ST_CHECK(A.ntabs == nt + 2 && panel_ntabs(p0) == n0 + 2 && A.ap == p0 && !strcmp(active_pane()->path, M6_BASE "/c"));
+        ST_CHECK(!strcmp(panel_tab(p0, -1)->pane[0].path, M6_BASE "/d"));
+        // a file is no folder: the edge stays a normal drop (into the pane under it)
+        panel_activate(p1);
+        pane_navigate(active_pane(), M6_BASE "/b", true); st_wait();
+        src = active_pane();
+        st_select(src, "file1.txt");
+        ry = st_row_y(src, "file1.txt");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, src->ly.col_name + S(20), ry, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, pb->area.x + S(50), pb->area.y + pb->area.h * 0.6f, 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, pb->area.x + S(8), pb->area.y + pb->area.h * 0.6f, 0, 0, 0);
+        ST_CHECK(A.drag == DRAG_ITEMS && !A.drop_split_panel && !A.drop_newtab);
+        drag_cancel();
+        panel_activate(pb); // close the new panel again (the session check below numbers panels by creation order)
+        while (panel_alive(pb)) run_command(CMD_CLOSE_PANEL);
+        panel_activate(p0);
+    }
+
     // session round trip of the whole tree
     int ntabs0 = A.ntabs, npan0 = A.npanels;
     char lay0[1024];

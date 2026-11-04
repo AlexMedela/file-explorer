@@ -38,6 +38,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | F4 | Open terminal here (`$TERMINAL`, else `xdg-terminal-exec`, else the first one found: Ptyxis, GNOME Console, Konsole, COSMIC, Xfce, MATE, ... xterm) |
 | Right-click, Menu key, Shift+F10 | Context menu |
 | Drag a file by its name | Move onto a folder, pane, or sidebar place (Ctrl = copy, Shift = move; other drives copy by default) |
+| Drag folders by their name | Onto a panel edge (top, bottom, left, right) = open them in a new split there (snap overlay); onto the empty part of a tab bar = open them as new tabs |
 | Drop files from other apps | Copy into the folder under the cursor |
 | Ctrl+P | Go to anything: fuzzy match over every folder and file under ~ and mounts (hidden ones skipped), recent folders, places, tabs. Enter on a file shows it in its folder, Ctrl+Enter opens it |
 | Ctrl+Shift+P (or type `>`) | Command palette |

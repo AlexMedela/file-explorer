@@ -271,9 +271,10 @@ static void draw_panel_bar(Panel *pn) {
     if (sh) draw_rrect(sr.x, sr.y, sr.w, sr.h, S(6), C(COL_HOVER));
     draw_split_icon(sr, sh && (SDL_GetModState() & SDL_KMOD_SHIFT), sh ? C(COL_TEXT) : C(COL_TEXT_DIM));
     // insertion caret while dragging a tab over this bar
-    if (A.drag == DRAG_TAB && A.tdrop_kind == TD_BAR && A.tdrop_panel == pn) {
+    bool tab_caret = A.drag == DRAG_TAB && A.tdrop_kind == TD_BAR && A.tdrop_panel == pn;
+    if (tab_caret || (A.drag == DRAG_ITEMS && A.drop_newtab == pn)) { // ... or folders that become new tabs (at the end)
         Tab *lt2 = panel_tab(pn, -1);
-        f32 x = A.tdrop_before ? A.tdrop_before->r.x : (lt2 ? lt2->r.x + lt2->r.w : tb.x + S(8));
+        f32 x = tab_caret && A.tdrop_before ? A.tdrop_before->r.x : (lt2 ? lt2->r.x + lt2->r.w : tb.x + S(8));
         draw_rrect(x - S(1.5f), tb.y + S(7), S(3), tb.h - S(12), S(1.5f), C(COL_ACCENT));
     }
     draw_clip_pop(cs);
@@ -289,23 +290,26 @@ static void draw_node_dividers(Node *n) {
     draw_node_dividers(n->b);
 }
 
-// Snap-assist overlay while dragging a tab.
+// Where a dropped tab / folder would go in panel pn: the half on side zone, or all of it (ZONE_CENTER).
+static void draw_split_zone(Panel *pn, int zone) {
+    Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
+    Rect z = a;
+    if (zone == ZONE_LEFT) z.w = roundf(a.w * 0.5f);
+    else if (zone == ZONE_RIGHT) { z.w = roundf(a.w * 0.5f); z.x = a.x + a.w - z.w; }
+    else if (zone == ZONE_TOP) z.h = roundf(a.h * 0.5f);
+    else if (zone == ZONE_BOTTOM) { z.h = roundf(a.h * 0.5f); z.y = a.y + a.h - z.h; }
+    f32 in = roundf(S(6));
+    draw_rrect(z.x + in, z.y + in, z.w - in * 2, z.h - in * 2, S(10), CA(COL_ACCENT, 0.18f));
+    draw_rrect_outline(z.x + in, z.y + in, z.w - in * 2, z.h - in * 2, S(10), MAX(1.f, S(2)), CA(COL_ACCENT, 0.9f));
+}
+
+// Snap-assist overlay while dragging a tab (or folders onto a panel edge).
 static void draw_tab_drop(void) {
+    if (A.drag == DRAG_ITEMS && A.drop_split_panel) draw_split_zone(A.drop_split_panel, A.drop_split);
     if (A.drag != DRAG_TAB || !A.drag_tab) return;
     Panel *pn = A.tdrop_panel;
-    if (pn && (A.tdrop_kind == TD_CENTER || A.tdrop_kind == TD_EDGE)) {
-        Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
-        Rect z = a;
-        if (A.tdrop_kind == TD_EDGE) {
-            if (A.tdrop_zone == ZONE_LEFT) z.w = roundf(a.w * 0.5f);
-            else if (A.tdrop_zone == ZONE_RIGHT) { z.w = roundf(a.w * 0.5f); z.x = a.x + a.w - z.w; }
-            else if (A.tdrop_zone == ZONE_TOP) z.h = roundf(a.h * 0.5f);
-            else { z.h = roundf(a.h * 0.5f); z.y = a.y + a.h - z.h; }
-        }
-        f32 in = roundf(S(6));
-        draw_rrect(z.x + in, z.y + in, z.w - in * 2, z.h - in * 2, S(10), CA(COL_ACCENT, 0.18f));
-        draw_rrect_outline(z.x + in, z.y + in, z.w - in * 2, z.h - in * 2, S(10), MAX(1.f, S(2)), CA(COL_ACCENT, 0.9f));
-    }
+    if (pn && (A.tdrop_kind == TD_CENTER || A.tdrop_kind == TD_EDGE))
+        draw_split_zone(pn, A.tdrop_kind == TD_EDGE ? A.tdrop_zone : ZONE_CENTER);
     // ghost of the dragged tab under the cursor
     Pane *p = &A.drag_tab->pane[0];
     const char *label = p->path[1] ? path_basename(p->path) : "/";
@@ -2931,7 +2935,11 @@ static void draw_drag_badge(void) {
     Font *f = &A.font_small;
     char buf[NAME_MAX + 96];
     u32 n = p->sel_count;
-    if (A.drop_dir[0]) {
+    bool open = A.drop_split_panel || A.drop_newtab;
+    if (open) {
+        snprintf(buf, sizeof buf, "Open %u folder%s in a new %s", n, n == 1 ? "" : "s",
+                 A.drop_split_panel ? "panel" : n == 1 ? "tab" : "tabs");
+    } else if (A.drop_dir[0]) {
         const char *to = A.drop_dir[1] ? path_basename(A.drop_dir) : "/";
         snprintf(buf, sizeof buf, "%s %u item%s to %s", A.drop_copy ? "Copy" : "Move", n, n == 1 ? "" : "s", to);
     } else {
@@ -2941,7 +2949,7 @@ static void draw_drag_badge(void) {
     f32 w = text_width(f, buf, len) + S(42), h = roundf(S(28));
     f32 x = roundf(A.mx + S(18)), y = roundf(A.my + S(20)); // clear of the row under the cursor
     draw_rrect(x + S(1), y + S(3), w, h, S(7), CA(0x000000, 0.4f));
-    draw_rrect(x, y, w, h, S(7), C(A.drop_dir[0] ? COL_SEL_FOCUS : COL_CONTROL));
+    draw_rrect(x, y, w, h, S(7), C(A.drop_dir[0] || open ? COL_SEL_FOCUS : COL_CONTROL));
     f32 is = roundf(S(14));
     draw_file_icon(x + S(8), y + (h - is) * 0.5f, is, COL_ACCENT);
     draw_text(f, x + S(28), text_y(f, y, h), buf, len, C(COL_SEL_TEXT));

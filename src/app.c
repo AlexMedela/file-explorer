@@ -490,6 +490,9 @@ static struct {
     i64 drop_row;
     int drop_place;
     bool drop_copy;
+    Panel *drop_split_panel; // dragged folders onto a panel edge: open them in a new split on side drop_split
+    int drop_split;
+    Panel *drop_newtab;      // ... onto the empty part of a tab bar: open them as new tabs there
     char **ext_drop;
     int next_drop;
     f32 ext_x, ext_y;
@@ -2222,6 +2225,8 @@ static void drag_cancel(void) {
     A.drop_qa = -1;
     A.drag_tab = NULL;
     A.drop_tab = NULL;
+    A.drop_split_panel = NULL;
+    A.drop_newtab = NULL;
     A.drag_node = NULL;
     A.tdrop_kind = TD_NONE;
     A.tdrop_panel = NULL;
@@ -5872,6 +5877,38 @@ static int place_at(f32 y) {
     return -1;
 }
 
+// Is everything dragged out of p a folder? (Then it can be opened as tabs.)
+static bool drag_all_dirs(Pane *p) {
+    if (!p->order || !p->sel_count || pane_du_on(p)) return false;
+    for (u32 i = 0; i < p->count; i++)
+        if (p->sel[p->order[i]] && !(p->L->entries[p->order[i]].flags & ENT_DIR)) return false;
+    return true;
+}
+
+// Thin strip along a panel's edges (below its tab bar) where dragged folders open in a new split; the rest of
+// the panel stays a normal drop. ZONE_* or -1.
+static int panel_edge_zone(Panel *pn, f32 x, f32 y) {
+    Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
+    if (!in_rect(a, x, y)) return -1;
+    f32 bw = MIN(S(44), a.w * 0.15f), bh = MIN(S(44), a.h * 0.15f);
+    f32 d[4] = {(x - a.x) / bw, (a.x + a.w - x) / bw, (y - a.y) / bh, (a.y + a.h - y) / bh};
+    int zone = -1;
+    f32 best = 1.f;
+    for (int k = 0; k < 4; k++)
+        if (d[k] < best) { best = d[k]; zone = k; }
+    return zone;
+}
+
+// Open folders dragged onto a panel edge (zone) in a new split there, or (zone < 0) as new tabs in panel pn.
+static void open_dirs_at(Panel *pn, int zone, char **paths, int n) {
+    if (!n || !panel_alive(pn)) return;
+    Panel *np = zone >= 0 ? panel_split(pn, zone, NULL, paths[0]) : pn;
+    if (!np) return;
+    for (int i = zone >= 0 ? 1 : 0; i < n; i++) tab_new_in(np, paths[i], panel_end_index(np), zone < 0 && i == 0);
+    panel_activate(np);
+    layout();
+}
+
 // Find the folder under (x,y) that items would be dropped into. src may be NULL (external drop).
 static void drop_target(Pane *src, f32 x, f32 y) {
     A.drop_dir[0] = 0;
@@ -5880,13 +5917,22 @@ static void drop_target(Pane *src, f32 x, f32 y) {
     A.drop_row = -1;
     A.drop_place = -1;
     A.drop_tab = NULL;
+    A.drop_split_panel = NULL;
+    A.drop_newtab = NULL;
+    bool dirs = src && drag_all_dirs(src);
     Panel *bp = panel_at(x, y);
+    int zone = dirs && bp ? panel_edge_zone(bp, x, y) : -1;
     if (bp && in_rect(bp->bar, x, y)) {
         for (int i = 0; i < A.ntabs; i++)
             if (A.tabs[i]->panel == bp && in_rect(A.tabs[i]->r, x, y)) {
                 A.drop_tab = A.tabs[i];
                 snprintf(A.drop_dir, sizeof A.drop_dir, "%s", A.tabs[i]->pane[0].path);
             }
+        if (!A.drop_tab && dirs) { A.drop_newtab = bp; return; }
+    } else if (zone >= 0) {
+        A.drop_split_panel = bp;
+        A.drop_split = zone;
+        return;
     } else if (in_rect(A.r_sidebar, x, y)) {
         int idx = place_at(y);
         if (idx >= 0 && A.places[idx].kind == PK_GROUP) { // onto a group header: pin the dragged folders there
