@@ -58,7 +58,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Ctrl+wheel over files, Ctrl+Shift+1…6, status-bar buttons | **Views**: Details, List, Grid (small → extra large icons with thumbnails) |
 | Right-click a column header | Show/hide columns (Date created, Extension, Permissions, Owner…), size bars, alternating rows; drag headers to reorder, drag edges to resize |
 | Right-click empty space → Group by | Group by date / type / size; click a group header to collapse it |
-| Right-click empty space → view options | Views, sort and grouping are remembered **per folder**; "Use this view in subfolders" / "everywhere" / "Reset folder view" |
+| Right-click empty space → view options | A tab keeps its **view** (Details, List, icon size) while you browse; new tabs open in the default view (Options → Views; "Each folder keeps its own view" remembers it per folder instead). Sort and grouping are remembered **per folder**; "Use this view in subfolders" / "everywhere" / "Reset folder view" |
 | Right-click a file → Open with… | Pick an app (with icons), optionally make it the default. Console apps (`Terminal=true`, e.g. vim, htop) open in a terminal |
 | Alt+Enter, right-click → Properties | Size (live totals), dates, owner, editable permissions, opening app, MD5/SHA-256 |
 | F2 with several selected | Batch rename: `{name} {ext} {n} {n:3} {date} {time} {parent} {orig}`, find/replace, case, live preview + conflicts, undo |

@@ -1693,7 +1693,15 @@ static int run_selftest_m7(void) {
     st_wait();
     ST_CHECK(p->nhdr == 0);
 
-    // per-folder view: grid here, details elsewhere; subfolders inherit when asked
+    // by default the tab keeps its view while browsing (new tabs start in the default view)
+    set_zoom_level(p, 4);
+    pane_navigate(p, M7_BASE "/sub", true); st_wait();
+    ST_CHECK(p->view == VIEW_GRID && p->icon_px == g_zoom[4].px);
+    pane_history(p, -1); st_wait();
+    ST_CHECK(p->view == VIEW_GRID);
+    set_zoom_level(p, 0);
+    // per-folder view (when folders keep their own): grid here, details elsewhere; subfolders inherit when asked
+    A.view_per_folder = true;
     set_zoom_level(p, 4);
     pane_navigate(p, M7_BASE "/sub", true); st_wait();
     ST_CHECK(p->view == VIEW_DETAILS);
@@ -1710,6 +1718,7 @@ static int run_selftest_m7(void) {
     folder_view_action(p, ACT_FV_RESET);
     st_wait();
     ST_CHECK(p->view == VIEW_DETAILS && !folder_view_find(M7_BASE, true));
+    A.view_per_folder = false;
 
 m7_done:
     st_rmrf(M7_BASE);

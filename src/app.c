@@ -503,6 +503,7 @@ static struct {
     int pal_n, pal_sel, pal_top;
     Rect pal_r, pal_list;
     int def_view, def_icon, def_group;
+    bool view_per_folder; // off: a tab keeps its view (layout, icon size) while browsing; new tabs start in def_view
     char icon_theme_name[64]; // from settings, applied once the renderer exists (custom themes are scanned first)
     Rect r_viewbtn[3], r_gear, r_feat, r_xfer;
     // columns (shared by all panes)
