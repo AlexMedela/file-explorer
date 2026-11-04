@@ -2,6 +2,12 @@
 
 [README](../README.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
 
+**Updates and several windows.** Installing or updating never touches your settings. Each window (and the
+background instance) saves only what it changed itself, so two windows don't undo each other's changes. A window
+still running the old version after an update restarts as the new one the next time you open something in it
+(unless a transfer or a terminal tab is running). `settings_version` lets a later version adjust a stored default;
+the previous file is kept as `settings.conf.bak` when that happens.
+
 `~/.config/file-explorer/settings.conf` (plain `key=value`, saved automatically; "Open settings file" in the
 palette). Remembers zoom, hidden files, folder sizes, search scope, sort order, preview panel, window size,
 pinned folders, columns, and your tabs/split panes (`restore_session=0` to start fresh). `transfers_at_once=1`

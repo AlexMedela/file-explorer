@@ -4307,6 +4307,70 @@ static int run_selftest_m10(void) {
         #undef ST_PICK_OUT
     }
 
+    { // --- several processes share settings.conf: a save writes only what this one changed ---
+        // mine, base (mine at the last sync), disk (the file now), disk_base (the file at the last sync)
+        char *r = settings_merge("# h\na=2\nb=1\npin=x\n", "# h\na=1\nb=1\npin=x\npin=y\n", "a=1\nb=3\nc=9\npin=x\npin=y\n",
+                                 "a=1\nb=1\npin=x\npin=y\n");
+        ST_CHECK(!strncmp(r, "# h\n", 4) && strstr(r, "\na=2\n") && strstr(r, "\nb=3\n") && strstr(r, "\nc=9\n")); // ours, theirs, new there
+        ST_CHECK(strstr(r, "pin=x\n") && !strstr(r, "pin=y")); // a group (all its lines) changed here: ours whole
+        free(r);
+        r = settings_merge("a=1\n", "a=1\nold=1\n", "a=1\nold=1\n", "a=1\nold=1\n"); // removed here, untouched there: gone
+        ST_CHECK(!strstr(r, "old="));
+        free(r);
+        r = settings_merge("a=1\nsrv=1\n", "a=1\nsrv=1\n", "a=1\n", "a=1\nsrv=1\n"); // removed there, untouched here: gone
+        ST_CHECK(!strstr(r, "srv="));
+        free(r);
+        r = settings_merge("a=1\nb=2\n", "a=1\nb=2\n", "a=1\n", "a=1\n"); // a short (hand-written, old) file: ours fill it in
+        ST_CHECK(strstr(r, "b=2\n") != NULL);
+        free(r);
+        // the session and Quick Access are one group each: never one window's layout with another's tabs
+        const char *s1 = "layout=P0\nptab=0\t1\t/a\t0:96\nactive_panel=0\n";
+        r = settings_merge(s1, s1, "layout=H0.500(P0,P1)\nptab=0\t1\t/b\t0:96\nptab=1\t1\t/c\t0:96\nactive_panel=1\n", s1);
+        ST_CHECK(strstr(r, "layout=H0.500(P0,P1)") && strstr(r, "\t/b\t") && strstr(r, "\t/c\t") && !strstr(r, "\t/a\t"));
+        free(r);
+        r = settings_merge("qa_group=G\t0\nqa=A\t/a\nqa_group=H\t0\nqa=B\t/b\n", "qa_group=G\t0\nqa=A\t/a\n", "qa_group=G\t0\nqa=Z\t/z\n",
+                           "qa_group=G\t0\nqa=A\t/a\n");
+        ST_CHECK(strstr(r, "qa_group=G\t0\nqa=A\t/a\nqa_group=H\t0\nqa=B\t/b\n") && !strstr(r, "/z"));
+        free(r);
+        r = settings_merge("a=1\n", "a=0\n", NULL, NULL); // no file (yet): ours
+        ST_CHECK(!strcmp(r, "a=1\n"));
+        free(r);
+        // for real: another process changes title_bar while this one changes dim_inactive; both survive
+        char sp[PATH_MAX], text[65536];
+        settings_file(sp, sizeof sp, false);
+        settings_save();
+        settings_snapshot();
+        st_read_text(sp, text, sizeof text);
+        char *tb = strstr(text, "title_bar=auto");
+        ST_CHECK(tb != NULL);
+        if (tb) memcpy(tb, "title_bar=app ", 14); // "another process" ("app " + the line's own newline)
+        st_write_text(sp, text);
+        bool dim = A.dim_inactive;
+        A.dim_inactive = !dim;
+        settings_save();
+        st_read_text(sp, text, sizeof text);
+        ST_CHECK(strstr(text, "title_bar=app") && strstr(text, A.dim_inactive ? "dim_inactive=1" : "dim_inactive=0"));
+        ST_CHECK(strstr(text, "settings_version=") != NULL);
+        A.dim_inactive = dim;
+        // a file from before settings_version: backed up on load (settings_migrate runs on the original)
+        char bak[PATH_MAX + 8];
+        snprintf(bak, sizeof bak, "%s.bak", sp);
+        unlink(bak);
+        char *v = strstr(text, "settings_version=");
+        if (v) memcpy(v, "#", 1);
+        st_write_text(sp, text);
+        settings_load();
+        ST_CHECK(access(bak, F_OK) == 0);
+        settings_save(); // (writes the version again)
+        st_read_text(sp, text, sizeof text);
+        ST_CHECK(strstr(text, "\nsettings_version=") != NULL);
+        A.title_bar = TITLEBAR_AUTO;
+        settings_save();
+        // an update replaced the binary while running: the old process notices
+        char l1[] = "/usr/bin/file-explorer (deleted)", l2[] = "/usr/bin/file-explorer";
+        ST_CHECK(exe_link_replaced(l1) && !strcmp(l1, "/usr/bin/file-explorer") && !exe_link_replaced(l2));
+    }
+
     fprintf(stderr, "selftest-m10: %s (%d failures)\n", st_fail ? "FAIL" : "ok", st_fail);
     return st_fail ? 1 : 0;
 }

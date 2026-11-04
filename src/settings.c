@@ -123,14 +123,45 @@ static void settings_keep_other(const char *k, const char *v) {
     g_settings_other_len += (size_t)snprintf(g_settings_other + g_settings_other_len, sizeof g_settings_other - g_settings_other_len, "%s=%s\n", k, v);
 }
 
+#define SETTINGS_VERSION 1 // bumped when a migration in settings_migrate() changes a stored value
+
+static char *file_read_all(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
+    size_t cap = 8192, n = 0;
+    char *s = xmalloc(cap);
+    size_t r;
+    while ((r = fread(s + n, 1, cap - n - 1, f)) > 0) {
+        n += r;
+        if (n + 1 >= cap) { cap *= 2; s = xrealloc(s, cap); }
+    }
+    fclose(f);
+    s[n] = 0;
+    return s;
+}
+
+static char *g_settings_base; // this process's settings when it last synced (started up / saved); NULL: not yet
+static char *g_settings_disk; // the file as it was then (NULL: there was none)
+static int g_settings_file_version; // settings_version= of the file loaded (0: from before it was written)
+
+// Changes to stored values when a default changes (only ever for values the user can't have picked themselves).
+// from: the file's settings_version. The file was copied to settings.conf.bak first.
+static void settings_migrate(int from) {
+    (void)from; // (none yet: version 1 is the first)
+}
+
 static void settings_load(void) {
     settings_defaults();
     g_settings_other_len = 0;
     g_settings_other[0] = 0;
+    g_settings_file_version = 0;
+    free(g_settings_base); // (a load replaces what this process knew: until settings_snapshot, saves write it all)
+    free(g_settings_disk);
+    g_settings_base = g_settings_disk = NULL;
     char path[PATH_MAX];
     settings_file(path, sizeof path, false);
     FILE *f = fopen(path, "r");
-    if (!f) return;
+    if (!f) { g_settings_file_version = SETTINGS_VERSION; return; }
     char line[PATH_MAX * 2 + 64];
     while (fgets(line, sizeof line, f)) {
         line[strcspn(line, "\r\n")] = 0;
@@ -213,6 +244,7 @@ static void settings_load(void) {
             }
             session_line("ptab", v);
         } else if (!strcmp(k, "dim_inactive")) A.dim_inactive = atoi(v);
+        else if (!strcmp(k, "settings_version")) g_settings_file_version = atoi(v);
         else if (!strcmp(k, "title_bar")) A.title_bar = !strcmp(v, "system") ? TITLEBAR_SYSTEM : !strcmp(v, "app") ? TITLEBAR_APP : TITLEBAR_AUTO;
         else if (!strcmp(k, "alt_rows")) A.alt_rows = atoi(v);
         else if (!strcmp(k, "load_times")) A.load_times = atoi(v);
@@ -264,6 +296,15 @@ static void settings_load(void) {
         else settings_keep_other(k, v);
     }
     fclose(f);
+    if (g_settings_file_version < SETTINGS_VERSION) {
+        char bak[PATH_MAX + 8];
+        snprintf(bak, sizeof bak, "%s.bak", path);
+        char *old = file_read_all(path);
+        FILE *b = old ? fopen(bak, "w") : NULL;
+        if (b) { fputs(old, b); fclose(b); }
+        free(old);
+        settings_migrate(g_settings_file_version);
+    }
     A.win_w = CLAMP(A.win_w, 760, 10000);
     A.win_h = CLAMP(A.win_h, 420, 10000);
 }
@@ -288,20 +329,115 @@ static void session_write(FILE *f) {
     fprintf(f, "active_panel=%d\n", panel_index(A.ap));
 }
 
-static void settings_save(void) {
-    if (picker_active()) return; // a file chooser window never changes the settings or the session
-    char dir[PATH_MAX], path[PATH_MAX], tmp[PATH_MAX + 8];
-    settings_file(dir, sizeof dir, true);
-    settings_file(path, sizeof path, false);
-    mkdir_p(dir, 0700);
-    snprintf(tmp, sizeof tmp, "%s.tmp", path);
-    FILE *f = fopen(tmp, "w");
-    if (!f) return;
+// --- merging saves ----------------------------------------------------------------------------------------------
+// Several app processes can share settings.conf: a second window, one still running after an update, the background
+// instance. Each would write its whole in-memory copy and undo what the others changed. So per setting: changed here
+// since the last sync (mine vs base) -> ours; else changed in the file since then (disk vs disk_base: another
+// process) -> the file's; else ours. Compared per key ("group": all its lines in order); keys that only make sense
+// together are one group.
+
+typedef struct { char key[64]; char *text; } SetGroup;
+typedef struct { SetGroup *g; int n; } SetGroups;
+
+static void setg_key(const char *line, char *key, size_t cap) {
+    size_t k = strcspn(line, "=");
+    snprintf(key, cap, "%.*s", (int)MIN(k, cap - 1), line);
+    static const char *session[] = {"layout", "ptab", "active_panel", "tab"}, *qa[] = {"qa_group", "qa"};
+    for (size_t i = 0; i < ARRAY_COUNT(session); i++) if (!strcmp(key, session[i])) snprintf(key, cap, "@session");
+    for (size_t i = 0; i < ARRAY_COUNT(qa); i++) if (!strcmp(key, qa[i])) snprintf(key, cap, "@quick_access");
+}
+
+static SetGroup *setg_find(SetGroups *s, const char *key) {
+    for (int i = 0; s && i < s->n; i++) if (!strcmp(s->g[i].key, key)) return &s->g[i];
+    return NULL;
+}
+
+static void setg_parse(const char *text, SetGroups *s) {
+    s->g = NULL;
+    s->n = 0;
+    for (const char *l = text; l && *l;) {
+        const char *e = strchr(l, '\n');
+        size_t len = e ? (size_t)(e - l) + 1 : strlen(l);
+        if (l[0] != '#' && l[0] != '\n' && memchr(l, '=', len)) {
+            char key[64];
+            setg_key(l, key, sizeof key);
+            SetGroup *g = setg_find(s, key);
+            if (!g) {
+                s->g = xrealloc(s->g, (size_t)(s->n + 1) * sizeof(SetGroup));
+                g = &s->g[s->n++];
+                snprintf(g->key, sizeof g->key, "%s", key);
+                g->text = xcalloc(1, 1);
+            }
+            size_t o = strlen(g->text);
+            g->text = xrealloc(g->text, o + len + 2);
+            memcpy(g->text + o, l, len);
+            g->text[o + len] = 0;
+            if (l[len - 1] != '\n') strcat(g->text, "\n");
+        }
+        l += len;
+    }
+}
+
+static void setg_free(SetGroups *s) {
+    for (int i = 0; i < s->n; i++) free(s->g[i].text);
+    free(s->g);
+}
+
+// mine: this process's settings now, base: at the last sync (NULL: unknown, ours win); disk: the file now,
+// disk_base: the file at the last sync (NULL: none then / none now). Returns the text to write (malloc'd).
+static char *settings_merge(const char *mine, const char *base, const char *disk, const char *disk_base) {
+    if (!base || !disk) return strdup(mine);
+    SetGroups m, b, d, db;
+    setg_parse(mine, &m);
+    setg_parse(base, &b);
+    setg_parse(disk, &d);
+    setg_parse(disk_base ? disk_base : "", &db);
+    size_t cap = strlen(mine) + strlen(disk) + 256, o = 0;
+    char *out = xmalloc(cap);
+    out[0] = 0;
+    for (const char *l = mine; *l == '#';) { // the header comment
+        const char *e = strchr(l, '\n');
+        size_t len = e ? (size_t)(e - l) + 1 : strlen(l);
+        memcpy(out + o, l, len);
+        o += len;
+        out[o] = 0;
+        l += len;
+    }
+    for (int i = 0; i < m.n; i++) {
+        SetGroup *bg = setg_find(&b, m.g[i].key), *dg = setg_find(&d, m.g[i].key), *dbg = setg_find(&db, m.g[i].key);
+        const char *t = m.g[i].text;
+        bool mine_changed = !bg || strcmp(bg->text, t);
+        bool disk_changed = (dg == NULL) != (dbg == NULL) || (dg && strcmp(dg->text, dbg->text));
+        if (!mine_changed && disk_changed) t = dg ? dg->text : ""; // another process changed it (or removed it)
+        size_t len = strlen(t);
+        if (o + len + 1 > cap) { cap = (o + len) * 2 + 256; out = xrealloc(out, cap); }
+        memcpy(out + o, t, len + 1);
+        o += len;
+    }
+    for (int i = 0; i < d.n; i++) { // only in the file: another process's or a newer version's, unless removed here
+        if (setg_find(&m, d.g[i].key)) continue;
+        SetGroup *bg = setg_find(&b, d.g[i].key), *dbg = setg_find(&db, d.g[i].key);
+        if (bg && dbg && !strcmp(dbg->text, d.g[i].text)) continue; // ours once, removed here, untouched there
+        size_t len = strlen(d.g[i].text);
+        if (o + len + 1 > cap) { cap = (o + len) * 2 + 256; out = xrealloc(out, cap); }
+        memcpy(out + o, d.g[i].text, len + 1);
+        o += len;
+    }
+    setg_free(&m);
+    setg_free(&b);
+    setg_free(&d);
+    setg_free(&db);
+    return out;
+}
+
+
+static void settings_write(FILE *f) {
     if (A.win && !A.screenshot) {
         A.maximized = SDL_GetWindowFlags(A.win) & SDL_WINDOW_MAXIMIZED;
         if (!A.maximized) SDL_GetWindowSize(A.win, &A.win_w, &A.win_h);
     }
     fprintf(f, "# File Explorer settings (edited by the app; safe to edit while it's closed)\n");
+    fprintf(f, "settings_version=%d\n", SETTINGS_VERSION);
     fprintf(f, "zoom=%.2f\nshow_hidden=%d\nfolder_sizes=%d\nsearch_subfolders=%d\n", A.zoom, A.show_hidden, A.folder_sizes,
             A.search_recursive);
     fprintf(f, "git_status=%d\n", A.git_status);
@@ -346,7 +482,49 @@ static void settings_save(void) {
     }
     fprintf(f, "\n");
     session_write(f);
-    if (fclose(f) == 0) rename(tmp, path);
+}
+
+// This process's settings as text (what a save would write if it were alone).
+static char *settings_text(void) {
+    char *buf = NULL;
+    size_t len = 0;
+    FILE *f = open_memstream(&buf, &len);
+    if (!f) return NULL;
+    settings_write(f);
+    fclose(f);
+    return buf;
+}
+
+// Remember the settings as they are now as "unchanged here" (after startup): from then on a save only writes changes.
+static void settings_snapshot(void) {
+    char path[PATH_MAX];
+    settings_file(path, sizeof path, false);
+    free(g_settings_base);
+    free(g_settings_disk);
+    g_settings_base = settings_text();
+    g_settings_disk = file_read_all(path);
+}
+
+static void settings_save(void) {
+    if (picker_active()) return; // a file chooser window never changes the settings or the session
+    char dir[PATH_MAX], path[PATH_MAX], tmp[PATH_MAX + 8];
+    settings_file(dir, sizeof dir, true);
+    settings_file(path, sizeof path, false);
+    mkdir_p(dir, 0700);
+    snprintf(tmp, sizeof tmp, "%s.tmp.%d", path, (int)getpid()); // (per process: two saving at once don't mix)
+    char *mine = settings_text();
+    if (!mine) return;
+    char *disk = file_read_all(path);
+    char *text = settings_merge(mine, g_settings_base, disk, g_settings_disk);
+    FILE *f = fopen(tmp, "w");
+    bool ok = f && fputs(text, f) >= 0;
+    if (f && fclose(f) == 0 && ok) rename(tmp, path);
+    else unlink(tmp);
+    free(g_settings_base);
+    free(g_settings_disk);
+    g_settings_base = mine; // synced: ours as they are, the file as written
+    g_settings_disk = text;
+    free(disk);
     folders_save();
     A.settings_dirty = false;
     A.settings_saved = now_ns();

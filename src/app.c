@@ -3475,6 +3475,7 @@ static bool sheet_busy(void);
 static void openwith_open(char **paths, int n);
 static void options_open(void);
 static void ipc_handle(char *msg);
+static bool exe_link_replaced(char *link);
 static bool options_is_open(void);
 enum { OC_APPEARANCE, OC_BEHAVIOUR, OC_VIEWS, OC_KEYBOARD, OC_LAYOUTS, OC_ADVANCED, OC_COUNT }; // Options pages
 static void options_open_page(int cat);
@@ -9852,8 +9853,54 @@ static Tab *open_target(const char *in, bool split, bool activate) {
 }
 
 // Another launch handed us its arguments (see ipc.c).
+// An update replaced our binary while we ran (the package manager unlinks the old file): /proc/self/exe then reads
+// "<path> (deleted)". link: that text; on true it's cut back to the path of the new binary.
+static bool exe_link_replaced(char *link) {
+    static const char suf[] = " (deleted)";
+    size_t n = strlen(link), sl = sizeof suf - 1;
+    if (n <= sl || strcmp(link + n - sl, suf)) return false;
+    link[n - sl] = 0;
+    return true;
+}
+
+// A later launch handed us its folders but we're the old version: save, then become the new binary with those
+// folders (tabs come back through the session, or as arguments without it). Not while it would lose something:
+// transfers running, terminal sessions, the picker. Returns only if it didn't restart.
+static void restart_if_updated(const char *msg) {
+    if (A.selftest || picker_active() || A.nops > 0) return;
+    for (int i = 0; i < A.ntabs; i++) if (A.tabs[i]->term) return;
+    char exe[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (n <= 0) return;
+    exe[n] = 0;
+    if (!exe_link_replaced(exe) || access(exe, X_OK) != 0) return;
+    char *argv[2 * MAX_TABS + 8];
+    int argc = 0;
+    argv[argc++] = exe;
+    if (!A.restore_session) // the current tabs as arguments, the session won't bring them back
+        for (int i = 0; i < A.ntabs && argc < MAX_TABS; i++) argv[argc++] = strdup(A.tabs[i]->pane[0].path);
+    char *copy = strdup(msg);
+    for (char *p = copy, *line; (line = strsep(&p, "\n"));) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = 0;
+        if (!strcmp(line, "open") && argc < 2 * MAX_TABS) argv[argc++] = tab + 1;
+        else if (!strcmp(line, "split") && argc < 2 * MAX_TABS) { argv[argc++] = "--split"; argv[argc++] = tab + 1; }
+        else if (!strcmp(line, "token")) setenv("XDG_ACTIVATION_TOKEN", tab + 1, 1);
+    }
+    argv[argc] = NULL;
+    settings_save();
+    ipc_shutdown();
+    SDL_DestroyRenderer(A.ren);
+    SDL_DestroyWindow(A.win);
+    SDL_Quit();
+    execv(exe, argv);
+    _exit(127); // (the window is gone: nothing sensible to go back to)
+}
+
 static void ipc_handle(char *msg) {
     if (getenv("FE_IPC_DEBUG")) fprintf(stderr, "IPC[%s]\n", msg);
+    restart_if_updated(msg);
     bool first = true;
     for (char *p = msg, *line; (line = strsep(&p, "\n"));) {
         char *tab = strchr(line, '\t');
@@ -9957,6 +10004,8 @@ int main(int argc, char **argv) {
 
     if (any_selftest) {
         setenv("XDG_CONFIG_HOME", "/tmp/fe-selftest-config", 1); // never touch the user's settings
+        unlink("/tmp/fe-selftest-config/file-explorer/settings.conf"); // each run starts clean (saves merge with the file)
+        unlink("/tmp/fe-selftest-config/file-explorer/settings.conf.bak");
         setenv("XDG_CACHE_HOME", "/tmp/fe-selftest-cache", 1);
     }
 #ifdef __GLIBC__
@@ -10099,6 +10148,7 @@ int main(int argc, char **argv) {
     if (A.single_instance && !A.screenshot && !picker_active() && (!any_selftest || A.ipc_test)) ipc_listen(ipc_handle);
     if (!any_selftest && !A.screenshot && !picker_active()) tray_update();
     if (select_tab >= 0) tab_select(select_tab);
+    settings_snapshot(); // started: from here on, saves write only what this process changes (settings_merge)
     SDL_StartTextInput(A.win);
     if (selftest) return run_selftest();
     if (selftest_ops) return run_selftest_ops();
