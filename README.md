@@ -11,20 +11,20 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-9ece6a?style=flat)](LICENSE)
 ![Linux](https://img.shields.io/badge/Linux-Wayland%20%7C%20X11-bb9af7?style=flat&logo=linux&logoColor=white)
 ![C11 + SDL3](https://img.shields.io/badge/C11-SDL3-e0af68?style=flat&logo=c&logoColor=white)
-<img src="docs/img/pills/made-with-ai.svg" alt="Made with AI" height="20">
+![Made with AI](https://img.shields.io/badge/made_with-AI-bf3989?style=flat)
 
 <img src="docs/img/hero.png" alt="File Explorer: a Git repository and an image folder side by side" width="900">
 
-<img src="docs/img/pills/instant-on-huge-folders.svg" alt="Instant on huge folders">
-<img src="docs/img/pills/keyboard-first.svg" alt="Keyboard-first">
-<img src="docs/img/pills/split-panels-tabs.svg" alt="Split panels + tabs">
-<img src="docs/img/pills/terminal-tabs.svg" alt="Terminal tabs">
-<img src="docs/img/pills/disk-usage-map.svg" alt="Disk usage map">
-<img src="docs/img/pills/git-status.svg" alt="Git status">
-<img src="docs/img/pills/compare-sync.svg" alt="Compare + sync">
-<img src="docs/img/pills/iphone-android.svg" alt="iPhone + Android">
-<img src="docs/img/pills/archives-as-folders.svg" alt="Archives as folders">
-<img src="docs/img/pills/snapshots.svg" alt="Snapshots">
+![Instant on huge folders](https://img.shields.io/badge/Instant_on_huge_folders-bf8700?style=flat)
+![Keyboard-first](https://img.shields.io/badge/Keyboard--first-0969da?style=flat)
+![Split panels + tabs](https://img.shields.io/badge/Split_panels_%2B_tabs-8250df?style=flat)
+![Terminal tabs](https://img.shields.io/badge/Terminal_tabs-1a7f37?style=flat&logo=gnometerminal&logoColor=white)
+![Disk usage map](https://img.shields.io/badge/Disk_usage_map-bc4c00?style=flat)
+![Git status](https://img.shields.io/badge/Git_status-cf222e?style=flat&logo=git&logoColor=white)
+![Compare + sync](https://img.shields.io/badge/Compare_%2B_sync-0598bc?style=flat)
+![iPhone + Android](https://img.shields.io/badge/iPhone_%2B_Android-1b7c83?style=flat&logo=android&logoColor=white)
+![Archives as folders](https://img.shields.io/badge/Archives_as_folders-0550ae?style=flat)
+![Snapshots](https://img.shields.io/badge/Snapshots-a475f9?style=flat)
 
 </div>
 
