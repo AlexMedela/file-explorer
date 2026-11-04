@@ -1,17 +1,17 @@
 <!-- OBS (build.opensuse.org, home:AlexMedela/file-explorer): takes the source from GitHub, names the version
-     0.9.0~git<date>.<commit> until a release tag exists, and builds the RPM (spec) and Debian (debian.*) packages. -->
+     0.9.0~git<date>.<commit> until a release tag exists, makes the source tarball on the server (the build
+     roots of Debian / Ubuntu / Fedora have no obs-service-* tools) and builds the RPM (spec) and Debian (debian.*) packages. -->
 <services>
-  <service name="obs_scm">
+  <service name="tar_scm">
     <param name="url">https://github.com/AlexMedela/file-explorer.git</param>
     <param name="scm">git</param>
     <param name="revision">main</param>
     <param name="versionformat">0.9.0~git%cd.%h</param>
     <param name="filename">file-explorer</param>
   </service>
-  <service name="tar" mode="buildtime"/>
-  <service name="recompress" mode="buildtime">
+  <service name="recompress">
     <param name="file">*.tar</param>
     <param name="compression">gz</param>
   </service>
-  <service name="set_version" mode="buildtime"/>
+  <service name="set_version"/>
 </services>
