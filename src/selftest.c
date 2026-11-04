@@ -5974,7 +5974,8 @@ static int run_selftest_admin(void) {
         ST_CHECK(A.nops == ci + 1 && !op->dismissed);
         setenv("FE_PKEXEC", ADM_BASE "/tools/pkexec", 1);
         st_click_rect(A.op_retry[ci]); // (the old card is dismissed and freed)
-        ST_CHECK(st_last_op() && st_last_op()->admin && st_last_op()->kind == OP_COPY);
+        // the retry is an administrator copy (on a fast machine it may already be done: a card that worked goes away)
+        ST_CHECK((st_last_op() && st_last_op()->admin && st_last_op()->kind == OP_COPY) || st_exists(ADM_BASE "/locked/a.txt"));
         st_wait_ops();
         st_frames(2);
         ST_CHECK(st_exists(ADM_BASE "/locked/a.txt") && (!A.nops || !A.ops[A.nops - 1]->nerr)); // (a card that worked goes away)
