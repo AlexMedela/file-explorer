@@ -638,6 +638,8 @@ static struct {
     struct { char serial[96], rel[PATH_MAX]; u64 t; bool active, reconnecting; } dev_back; // a phone that dropped off: where we were
 
     const char *screenshot;
+    const char *demo;    // --demo SCRIPT: play it headless and record a video (demo.c)
+    bool demo_rec;       // the frame being drawn goes into the recording
     char shot_once[PATH_MAX]; // save the next frame here (tests)
     int screenshot_frames;
     bool quit;
@@ -9696,6 +9698,24 @@ static void app_icon_sync(void) {
     app_icon_write(dh, done);
 }
 
+// Screenshots and demo recordings: everything on screen has loaded (listings, thumbnails, scans, a shell prompt).
+static bool shot_ready(void) {
+    if (g_atlas_full) return false;
+    for (int i = 0; i < A.npanels; i++) {
+        if (!A.panels[i]->cur) continue;
+        Pane *p = &A.panels[i]->cur->pane[0];
+        int st = p->L ? atomic_load(&p->L->state) : LST_ERROR;
+        if ((st != LST_COMPLETE && st != LST_ERROR) || p->sort_pending) return false;
+    }
+    for (int i = 0; i < g_nthumbs; i++)
+        if (g_thumbs[i].state == 1) return false; // wait for visible thumbnails
+    for (int i = 0; i < A.ntabs; i++)
+        if (A.tabs[i]->term && !term_settled(A.tabs[i]->term)) return false; // a shell prompt takes a moment
+    return !(git_busy() || du_busy() || snapview_busy() || (g_cmp.on && !cmp_ready()));
+}
+
+static void demo_capture(void);
+
 static void frame(void) {
     trash_size_poll();
     icons_sync_theme();
@@ -9745,19 +9765,7 @@ static void frame(void) {
     A.frame_ms = (f32)((now_ns() - t0) / 1e6);
 
     if (A.screenshot) {
-        bool ready = !g_atlas_full;
-        for (int i = 0; i < A.npanels; i++) {
-            if (!A.panels[i]->cur) continue;
-            Pane *p = &A.panels[i]->cur->pane[0];
-            int st = p->L ? atomic_load(&p->L->state) : LST_ERROR;
-            if ((st != LST_COMPLETE && st != LST_ERROR) || p->sort_pending) ready = false;
-        }
-        for (int i = 0; i < g_nthumbs; i++)
-            if (g_thumbs[i].state == 1) ready = false; // wait for visible thumbnails
-        for (int i = 0; i < A.ntabs; i++)
-            if (A.tabs[i]->term && !term_settled(A.tabs[i]->term)) ready = false; // a shell prompt takes a moment
-        if (git_busy() || du_busy() || snapview_busy() || (g_cmp.on && !cmp_ready())) ready = false;
-        if (ready && ++A.screenshot_frames >= 3) {
+        if (shot_ready() && ++A.screenshot_frames >= 3) {
             SDL_Surface *s = SDL_RenderReadPixels(A.ren, NULL);
             if (s) {
                 SDL_SaveBMP(s, A.screenshot);
@@ -9775,6 +9783,7 @@ static void frame(void) {
         A.shot_once[0] = 0;
     }
     rec_frame();
+    if (A.demo_rec) demo_capture();
     SDL_RenderPresent(A.ren);
     if (g_atlas_full) {
         atlas_reset();
@@ -9860,6 +9869,7 @@ static int run_bench(const char *path, const char *query) {
 
 
 #include "selftest.c"
+#include "demo.c"
 
 #ifdef FE_ADDON
 #include "addon.c" // compiled-in add-ons (addons.c)
@@ -9974,7 +9984,8 @@ static void usage(void) {
            "  Folders open as tabs, files open their folder with the file selected. If File Explorer is already\n"
            "  running they open in that window (Options > Behaviour), unless --new-window / -n is given.\n"
            "       file-explorer --bench PATH            time listing a directory (headless)\n"
-           "       file-explorer --screenshot OUT.bmp [PATH...]\n");
+           "       file-explorer --screenshot OUT.bmp [PATH...]\n"
+           "       file-explorer --demo SCRIPT OUT.mp4 [PATH...]  play a demo script headless, record it (needs ffmpeg)\n");
 }
 
 static bool resolve_dir(const char *in, char *out) {
@@ -10004,6 +10015,7 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--bench") && i + 1 < argc) return run_bench(argv[i + 1], i + 2 < argc ? argv[i + 2] : NULL);
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) A.screenshot = argv[++i];
+        else if (!strcmp(argv[i], "--demo") && i + 2 < argc) { A.demo = argv[++i]; g_demo_out = argv[++i]; }
         else if (!strcmp(argv[i], "--tab") && i + 1 < argc) { if (nextra < MAX_TABS - 1) extra_tabs[nextra++] = argv[++i]; }
         else if (!strcmp(argv[i], "--split") && i + 1 < argc) split_path = argv[++i];
         else if (!strcmp(argv[i], "--selftest")) selftest = true;
@@ -10049,10 +10061,10 @@ int main(int argc, char **argv) {
     if (A.rec_dir && !A.rec_dir[0]) A.rec_dir = NULL;
     bool any_selftest = selftest || selftest_ops || selftest_m4 || selftest_m5 || selftest_m6 || selftest_m7 || selftest_m8 || selftest_m9 || selftest_m10 || selftest_m11 || selftest_git || selftest_grep || selftest_du || selftest_cmp || selftest_admin;
     A.selftest = any_selftest;
-    if (any_selftest || A.screenshot) setenv("XDG_STATE_HOME", "/tmp/fe-selftest-state", 1); // don't touch the user's recent list
+    if (any_selftest || A.screenshot || A.demo) setenv("XDG_STATE_HOME", "/tmp/fe-selftest-state", 1); // don't touch the user's recent list
     // Self-tests and screenshots run headless: no window on the user's screen (a window the compositor isn't
     // showing can also stall presenting), rendering into memory. SDL_VIDEODRIVER overrides.
-    bool headless = (any_selftest || A.screenshot) && !getenv("SDL_VIDEODRIVER");
+    bool headless = (any_selftest || A.screenshot || A.demo) && !getenv("SDL_VIDEODRIVER");
     if (headless) SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
 
     if (any_selftest) {
@@ -10067,7 +10079,7 @@ int main(int argc, char **argv) {
     if (!getenv("MESA_VK_IGNORE_CONFORMANCE_WARNING")) setenv("MESA_VK_IGNORE_CONFORMANCE_WARNING", "1", 1);
     settings_load();
     // Single instance: hand the arguments to a running window and quit (before SDL starts: instant).
-    if (!any_selftest && !A.screenshot && !force_new_window && A.single_instance && !A.rec_dir) {
+    if (!any_selftest && !(A.screenshot || A.demo) && !force_new_window && A.single_instance && !A.rec_dir) {
         size_t cap = 256, o = 0;
         for (int i = 0; i < npaths; i++) cap += strlen(paths[i]) + PATH_MAX;
         cap += (size_t)nextra * PATH_MAX + PATH_MAX;
@@ -10102,7 +10114,7 @@ int main(int argc, char **argv) {
     A.win = SDL_CreateWindow(APP_NAME, A.win_w, A.win_h,
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (A.maximized ? SDL_WINDOW_MAXIMIZED : 0) |
                              (A.csd ? SDL_WINDOW_BORDERLESS : 0) |
-                             (g_bg_start && !any_selftest && !A.screenshot ? SDL_WINDOW_HIDDEN : 0));
+                             (g_bg_start && !any_selftest && !(A.screenshot || A.demo) ? SDL_WINDOW_HIDDEN : 0));
     if (g_bg_start) A.win_hidden = true;
     if (!A.win) { fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError()); return 1; }
     window_icon_update();
@@ -10120,7 +10132,7 @@ int main(int argc, char **argv) {
     if (!A.ren) { fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError()); return 1; }
     // Self-tests and screenshots don't need vsync, and with it a window the compositor isn't showing
     // (another workspace on Wayland) blocks in present forever.
-    SDL_SetRenderVSync(A.ren, any_selftest || A.screenshot ? 0 : 1);
+    SDL_SetRenderVSync(A.ren, any_selftest || A.screenshot || A.demo ? 0 : 1);
     g_ren = A.ren;
     A.cur_default = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
     A.cur_ew = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
@@ -10153,8 +10165,8 @@ int main(int argc, char **argv) {
     init_places();
     trash_size_refresh();
     watch_init();
-    addon_start((!any_selftest || getenv("FE_SYSTEMCTL")) && !A.screenshot && !picker_active());
-    A.devs_enabled = !any_selftest || getenv("FE_LSBLK");
+    addon_start((!any_selftest || getenv("FE_SYSTEMCTL")) && !(A.screenshot || A.demo) && !picker_active());
+    A.devs_enabled = (!any_selftest && !A.demo) || getenv("FE_LSBLK"); // (a demo shows no real drives)
     if (A.devs_enabled) {
         if (!any_selftest) devices_watch_start();
         devices_refresh();
@@ -10176,7 +10188,7 @@ int main(int argc, char **argv) {
         Tab *t0 = tab_new(path, 0, true);
         if (t0 && selname[0]) snprintf(t0->pane[0].select_name, sizeof t0->pane[0].select_name, "%s", selname);
     } else {
-        restored = A.restore_session && !A.screenshot && session_restore();
+        restored = A.restore_session && !(A.screenshot || A.demo) && session_restore();
         if (!restored) {
             if (!getcwd(path, sizeof path) || !strcmp(path, "/")) snprintf(path, sizeof path, "%s", getenv("HOME") ? getenv("HOME") : "/");
             tab_new(path, 0, true);
@@ -10198,12 +10210,12 @@ int main(int argc, char **argv) {
         g_cmp.diff_only = !strcmp(getenv("FE_SHOT_CMP"), "diff");
         cmp_start(A.panels[0]->cur, A.panels[1]->cur);
     }
-    if (A.single_instance && !A.screenshot && !picker_active() && (!any_selftest || A.ipc_test)) ipc_listen(ipc_handle);
-    if (!any_selftest && !A.screenshot && !picker_active()) tray_update();
+    if (A.single_instance && !(A.screenshot || A.demo) && !picker_active() && (!any_selftest || A.ipc_test)) ipc_listen(ipc_handle);
+    if (!any_selftest && !(A.screenshot || A.demo) && !picker_active()) tray_update();
     if (select_tab >= 0) tab_select(select_tab);
     settings_snapshot(); // started: from here on, saves write only what this process changes (settings_merge)
-    if (A.ig_fm1 && !any_selftest && !A.screenshot) ig_fm1_start(); // "Show in folder" (integration.c)
-    if (!any_selftest && !A.screenshot && !g_bg_start) ig_first_run();
+    if (A.ig_fm1 && !any_selftest && !(A.screenshot || A.demo)) ig_fm1_start(); // "Show in folder" (integration.c)
+    if (!any_selftest && !(A.screenshot || A.demo) && !g_bg_start) ig_first_run();
     ig_update_check(); // (AppImage only)
     SDL_StartTextInput(A.win);
     if (selftest) return run_selftest();
@@ -10221,6 +10233,7 @@ int main(int argc, char **argv) {
     if (selftest_du) return run_selftest_du();
     if (selftest_cmp) return run_selftest_cmp();
     if (selftest_admin) return run_selftest_admin();
+    if (A.demo) return run_demo(A.demo);
 
     A.redraw = true;
     while (!A.quit) {

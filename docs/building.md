@@ -39,6 +39,9 @@ nothing touches your settings or recent list, and a running instance is left alo
 (or `x11`) to watch them in a real window.
 
 - `./build/file-explorer --screenshot out.bmp DIR [--tab DIR]... [--split DIR]` – render one frame to an image
+- `./build/file-explorer --demo SCRIPT OUT.mp4 [PATH]` – play a script of keys and typing headless at an even 30 fps
+  and record it with ffmpeg (launch videos, docs); the commands (`size`, `zoom`, `wait`, `hold`, `key`, `type`, `cmd`,
+  `view`, `mark`, `shot`) are listed at the top of `src/demo.c`. Key presses go to `OUT.mp4.log` with their video times
 - `./build/file-explorer --selftest DIR` – drive tabs/split/selection/navigation through the real input
   handlers (use with `./build.sh debug`; DIR should have >1000 entries with folders first, e.g. from mkfiles.sh)
 - `./build/file-explorer --selftest-ops` – file operations end-to-end in `/tmp/fe-ops-test` with a private
