@@ -321,3 +321,21 @@ static int rename_noreplace(int ofd, const char *from, int nfd, const char *to) 
     }
     return renameat(ofd, from, nfd, to);
 }
+
+// Running from an AppImage? Its path ($APPIMAGE, set by the AppImage runtime), else NULL.
+static const char *appimage_path(void) {
+    const char *a = getenv("APPIMAGE");
+    return a && a[0] == '/' && access(a, X_OK) == 0 ? a : NULL;
+}
+
+// This program for "run as administrator" (pkexec). From an AppImage the running binary sits in a FUSE mount root
+// can't read, so root runs the AppImage itself, unpacked (extra = "--appimage-extract-and-run", goes right after).
+static bool admin_exe(char *exe, size_t cap, const char **extra) {
+    const char *ai = appimage_path();
+    *extra = NULL;
+    if (ai) { snprintf(exe, cap, "%s", ai); *extra = "--appimage-extract-and-run"; return true; }
+    ssize_t n = readlink("/proc/self/exe", exe, cap - 1);
+    if (n <= 0) return false;
+    exe[n] = 0;
+    return true;
+}

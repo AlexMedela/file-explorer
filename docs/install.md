@@ -34,9 +34,15 @@ git clone https://github.com/AlexMedela/file-explorer && cd file-explorer/packag
 ```
 An AUR package follows once the AUR reopens account registration (paused because of spam).
 
-## Other distros
-Ubuntu 24.04 LTS and Debian 12 don't ship SDL 3, which the app needs: an AppImage for them (and any other distro) is
-coming. Meanwhile, [build from source](building.md) with SDL 3.2 or newer.
+## Any other distro: AppImage
+Ubuntu 22.04 / 24.04 LTS, Debian 12 and anything newer (x86_64 and ARM64): download
+`file-explorer-<version>-<arch>.AppImage` from [Releases](https://github.com/AlexMedela/file-explorer/releases), then
+```sh
+chmod +x file-explorer-*.AppImage && ./file-explorer-*.AppImage
+```
+It brings its own SDL 3 and libraries. It looks for a new version once a day and offers it (Options > Integration to
+turn that off); AppImageUpdate / Gear Lever can update it in place. For the menu entry, the phone udev rule and the
+administrator prompt's own polkit message, install a package instead, or integrate it with Gear Lever / AppImageLauncher.
 
 ## Removing
 `sudo apt remove file-explorer` / `sudo dnf remove file-explorer` / `sudo zypper remove file-explorer`, then delete the

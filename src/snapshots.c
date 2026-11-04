@@ -224,14 +224,19 @@ static int snap_admin_main(const char *path) {
 static void *snap_admin_thread(void *arg) {
     SnapJob *j = arg;
     char exe[PATH_MAX];
-    ssize_t el = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    const char *extra;
+    bool have = admin_exe(exe, sizeof exe, &extra);
     const char *pk = getenv("FE_PKEXEC") ? getenv("FE_PKEXEC") : "pkexec";
     int out[2] = {-1, -1};
     pid_t pid = 0;
     int rc = -1;
-    if (el > 0 && pipe2(out, O_CLOEXEC) == 0) {
-        exe[el] = 0;
-        char *av[] = {"sh", "-c", "\"$@\"; printf '\\n@rc=%d\\n' $?", "sh", (char *)pk, exe, "--admin-op", "versions", j->path, NULL};
+    if (have && pipe2(out, O_CLOEXEC) == 0) {
+        char *av[12];
+        int na = 0;
+        av[na++] = "sh"; av[na++] = "-c"; av[na++] = "\"$@\"; printf '\\n@rc=%d\\n' $?"; av[na++] = "sh";
+        av[na++] = (char *)pk; av[na++] = exe;
+        if (extra) av[na++] = (char *)extra;
+        av[na++] = "--admin-op"; av[na++] = "versions"; av[na++] = j->path; av[na] = NULL;
         posix_spawn_file_actions_t fa;
         posix_spawn_file_actions_init(&fa);
         posix_spawn_file_actions_adddup2(&fa, out[1], 1);
@@ -677,12 +682,16 @@ static void *snap_allow_thread(void *arg) { // the app side: pkexec the helper, 
 }
 
 static SnapCmd *snap_allow_start(const char *cfg) {
-    char exe[PATH_MAX];
-    ssize_t el = readlink("/proc/self/exe", exe, sizeof exe - 1);
-    exe[el > 0 ? el : 0] = 0;
+    char exe[PATH_MAX] = "";
+    const char *extra;
+    admin_exe(exe, sizeof exe, &extra);
     struct passwd *pw = getpwuid(getuid());
     const char *pk = getenv("FE_PKEXEC") ? getenv("FE_PKEXEC") : "pkexec";
-    const char *av[] = {pk, exe, "--admin-op", "snapper-allow", cfg, pw ? pw->pw_name : "", NULL};
+    const char *av[8];
+    int na = 0;
+    av[na++] = pk; av[na++] = exe;
+    if (extra) av[na++] = extra;
+    av[na++] = "--admin-op"; av[na++] = "snapper-allow"; av[na++] = cfg; av[na++] = pw ? pw->pw_name : ""; av[na] = NULL;
     SnapCmd *c = xcalloc(1, sizeof *c);
     for (int i = 0; av[i]; i++) c->argv[i] = strdup(av[i]);
     c->cap = 4096;

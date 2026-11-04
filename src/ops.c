@@ -994,9 +994,8 @@ static int admin_main(int argc, char **argv) {
 // The app side: run the operation in the helper and mirror what it reports into this Op.
 static void run_admin(Op *op) {
     char exe[PATH_MAX];
-    ssize_t el = readlink("/proc/self/exe", exe, sizeof exe - 1);
-    if (el <= 0) { op_error(op, "Can't find this program to run it as administrator"); return; }
-    exe[el] = 0;
+    const char *extra;
+    if (!admin_exe(exe, sizeof exe, &extra)) { op_error(op, "Can't find this program to run it as administrator"); return; }
     const char *pk = getenv("FE_PKEXEC") ? getenv("FE_PKEXEC") : "pkexec";
     bool pairs = op->kind == OP_SYNC || op->kind == OP_RENAME;
     int na = 0;
@@ -1008,6 +1007,7 @@ static void run_admin(Op *op) {
     av[na++] = "sh";
     av[na++] = (char *)pk;
     av[na++] = exe;
+    if (extra) av[na++] = (char *)extra;
     av[na++] = "--admin-op";
     av[na++] = (char *)g_admin_kinds[op->kind];
     if (op->policy == CF_REPLACE) av[na++] = "--replace";

@@ -1,0 +1,64 @@
+name: Release
+
+# Push a tag "v<version>" (matching APP_VERSION in src/app.c) to build the AppImages, publish the GitHub Release and
+# have OBS rebuild the distro packages. "Run workflow" (manual) only builds the AppImages, as downloadable artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  appimage:
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm] # x86_64, aarch64
+    runs-on: ${{ matrix.runner }}
+    container: ubuntu:22.04 # (glibc 2.35: runs on Ubuntu 22.04+, Debian 12+ and newer)
+    steps:
+      - name: Git for checkout
+        run: apt-get update -qq && apt-get install -y -qq git ca-certificates >/dev/null
+      - uses: actions/checkout@v4
+      - name: Tag matches the app's version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v=$(sed -n 's/^#define APP_VERSION "\(.*\)".*/\1/p' src/app.c)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "::error::tag ${GITHUB_REF_NAME} but APP_VERSION is $v"; exit 1; }
+      - name: Build AppImage
+        run: OUT=$PWD/dist sh packaging/appimage/build.sh
+      - name: Runs
+        run: APPIMAGE_EXTRACT_AND_RUN=1 dist/*.AppImage --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage-${{ matrix.runner }}
+          path: dist/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: appimage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "File Explorer ${GITHUB_REF_NAME#v}" \
+            --generate-notes --verify-tag
+
+  obs:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebuild the distro packages on OBS
+        env:
+          OBS_TOKEN: ${{ secrets.OBS_TOKEN }} # osc token --create home:AlexMedela file-explorer (a runservice token)
+        run: |
+          if [ -z "$OBS_TOKEN" ]; then echo "::warning::no OBS_TOKEN secret: OBS not triggered"; exit 0; fi
+          curl -fsS -X POST -H "Authorization: Token $OBS_TOKEN" \
+            "https://api.opensuse.org/trigger/runservice?project=home:AlexMedela&package=file-explorer"

@@ -5142,6 +5142,17 @@ static int run_selftest_grep(void) {
         ig_picker_set(false);
         st_read_text(pc, text, sizeof text);
         ST_CHECK(!ig_picker_on() && strstr(text, "FileChooser=gtk") && access(w, F_OK) != 0 && access(t, F_OK) != 0);
+        // new versions (AppImage): version compare, GitHub's answer, never looked for outside an AppImage
+        ST_CHECK(ig_vercmp("v0.9.1", "0.9.0") > 0 && ig_vercmp("0.9.0", "0.9.0") == 0 && ig_vercmp("0.10.0", "0.9.9") > 0 &&
+                 ig_vercmp("1.0", "1.0.1") < 0 && ig_vercmp("0.9.0", "0.9.0~git2026") == 0);
+        char tag[64];
+        ig_tag_from_json("{\"url\": \"x\", \"tag_name\": \"v1.2.3\", \"name\": \"1.2.3\"}", tag, sizeof tag);
+        ST_CHECK(!strcmp(tag, "v1.2.3"));
+        ig_tag_from_json("{\"message\": \"Not Found\"}", tag, sizeof tag);
+        ST_CHECK(!tag[0]);
+        i64 chk0 = A.ig_update_checked;
+        ig_update_check(); // (self-test, not an AppImage: nothing happens)
+        ST_CHECK(A.ig_update_checked == chk0);
         // "Show in folder": the activation file only while it's on; requests open folders / select items
         char svc[PATH_MAX + 64];
         ig_fm1_service_path(svc, sizeof svc);

@@ -13,7 +13,11 @@ static void units_dir(char *out, size_t cap) {
     else snprintf(out, cap, "%s/.config/systemd/user", h ? h : "/tmp");
 }
 
+// This program's path for things that outlive the process (autostart, systemd units, D-Bus activation, the picker
+// wrapper): the AppImage file when running from one (the running binary's mount goes away with it).
 static void exe_path(char *out, size_t cap) {
+    const char *ai = appimage_path();
+    if (ai) { snprintf(out, cap, "%s", ai); return; }
     ssize_t n = readlink("/proc/self/exe", out, cap - 1);
     out[n > 0 ? n : 0] = 0;
 }

@@ -9,7 +9,7 @@ enum {
     OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
-    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER,
+    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES,
 };
 
 typedef struct {
@@ -56,6 +56,7 @@ static const OptDef g_opts[] = {
     {OC_INTEGRATION, OK_BOOL, OPT_IG_DEFAULT_FM, "Default file manager", "Folders from other apps open here"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_FM1, "\"Show in folder\" opens here", "From browsers and other apps"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_PICKER, "File chooser for other apps", "Their Open and Save dialogs open here"},
+    {OC_INTEGRATION, OK_BOOL, OPT_IG_UPDATES, "Look for new versions", "AppImage: once a day, on GitHub"},
     {OC_ADVANCED, OK_CHOICE, OPT_RENDERER, "Renderer", "GPU backend (takes effect after a restart)"},
     {OC_ADVANCED, OK_BUTTON, OPT_SETTINGS_FILE, "Settings file", "Open settings.conf in your text editor"},
     {OC_ADVANCED, OK_BUTTON, OPT_REINDEX, "Re-index folders", "Rebuild the folder index used by Go to (Ctrl+P)"},
@@ -129,6 +130,9 @@ static const char *opt_desc(const OptDef *o) {
         break;
     case OPT_IG_PICKER:
         if (!ig_picker_portal_installed()) return "Needs the termfilechooser portal";
+        break;
+    case OPT_IG_UPDATES:
+        if (!appimage_path()) return "Packages update with your system";
         break;
     }
     return o->desc;
@@ -280,6 +284,7 @@ static bool opt_bool_get(int id) {
     case OPT_IG_DEFAULT_FM: return ig_default_fm_on();
     case OPT_IG_FM1: return A.ig_fm1;
     case OPT_IG_PICKER: return ig_picker_on();
+    case OPT_IG_UPDATES: return A.ig_check_updates;
     }
     return false;
 }
@@ -313,6 +318,7 @@ static void opt_bool_toggle(int id) {
         else if (g_fm1.state == IG_FM1_NO_DBUS) toast("No D-Bus session bus (libdbus-1) found");
         break;
     case OPT_IG_PICKER: ig_picker_set(!ig_picker_on()); break;
+    case OPT_IG_UPDATES: A.ig_check_updates = !A.ig_check_updates; break;
     case OPT_TRAY:
         A.close_to_tray = !A.close_to_tray;
         tray_update();

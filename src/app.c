@@ -588,6 +588,8 @@ static struct {
     char ig_prev_fm[256]; // integration.c: the folder handler before we became the default (put back when turned off)
     bool ig_fm1;          // answer "Show in folder" (org.freedesktop.FileManager1)
     bool ig_asked;        // the first-run "use for folders?" question was shown
+    bool ig_check_updates; // AppImage: look for a new release once a day
+    i64 ig_update_checked; // when it last looked (unix time)
     bool csd;      // we do right now: buttons top right, the tab strips drag the window
     SDL_Cursor *cur_ns;
     // global layout
@@ -10155,6 +10157,7 @@ int main(int argc, char **argv) {
     settings_snapshot(); // started: from here on, saves write only what this process changes (settings_merge)
     if (A.ig_fm1 && !any_selftest && !A.screenshot) ig_fm1_start(); // "Show in folder" (integration.c)
     if (!any_selftest && !A.screenshot && !g_bg_start) ig_first_run();
+    ig_update_check(); // (AppImage only)
     SDL_StartTextInput(A.win);
     if (selftest) return run_selftest();
     if (selftest_ops) return run_selftest_ops();

@@ -4,6 +4,7 @@
 // puts back what was there. Included from app.c before ui_tools.c (the Options page uses it).
 
 static Tab *open_target(const char *in, bool split, bool activate);
+static void open_path(const char *full);
 static void window_show(void);
 
 static void ig_config_dir(char *out, size_t cap) { // $XDG_CONFIG_HOME
@@ -427,4 +428,76 @@ static void ig_first_run(void) {
                 "Folders opened from other apps and the desktop would open here. You can change this, and make it the "
                 "file chooser or the target of \"Show in folder\", in Options > Integration.",
                 b, 2, 0, 1, NULL, ig_ask_cb, NULL);
+}
+
+// --- new versions (AppImage only: packages update through the system) -----------------------------------------------
+// At most once a day, in the background, asks GitHub for the latest release (curl or wget, whichever is there) and
+// offers it when it's newer. Off in Options > Integration; never in self-tests.
+
+#define IG_RELEASES "https://github.com/AlexMedela/file-explorer/releases"
+
+// "1.2.3" vs "1.10" -> <0 / 0 / >0 (a leading 'v' and anything after a '-' or '~' ignored)
+static int ig_vercmp(const char *a, const char *b) {
+    if (*a == 'v') a++;
+    if (*b == 'v') b++;
+    while (*a || *b) {
+        if (*a == '-' || *a == '~') a = "";
+        if (*b == '-' || *b == '~') b = "";
+        if (!*a && !*b) break;
+        long x = strtol(a, (char **)&a, 10), y = strtol(b, (char **)&b, 10);
+        if (x != y) return x < y ? -1 : 1;
+        if (*a == '.') a++;
+        if (*b == '.') b++;
+    }
+    return 0;
+}
+
+// The tag in GitHub's "latest release" answer ("tag_name": "v1.2.3"), or "".
+static void ig_tag_from_json(const char *json, char *tag, size_t cap) {
+    tag[0] = 0;
+    const char *k = strstr(json, "\"tag_name\"");
+    if (!k || !(k = strchr(k + 10, '"'))) return;
+    const char *e = strchr(k + 1, '"');
+    if (e && (size_t)(e - k - 1) < cap) snprintf(tag, cap, "%.*s", (int)(e - k - 1), k + 1);
+}
+
+static char g_ig_new_tag[64];
+
+static void ig_update_cb(int choice, bool check, void *ud) {
+    (void)check;
+    (void)ud;
+    if (choice == 0) open_path(IG_RELEASES "/latest");
+    else if (choice == 2) { A.ig_check_updates = false; A.settings_dirty = true; }
+}
+
+static void ig_update_found(void *arg) {
+    (void)arg;
+    char msg[256];
+    snprintf(msg, sizeof msg, "%s %s is out (you have %s). Download the new AppImage and replace this one; your settings "
+             "stay.", APP_NAME, g_ig_new_tag, APP_VERSION);
+    static const char *b[] = {"Download", "Later", "Don't check again"};
+    if (!A.dlg.open) dialog_open("New version", msg, b, 3, 0, 1, NULL, ig_update_cb, NULL);
+}
+
+static void *ig_update_thread(void *arg) {
+    (void)arg;
+    char out[65536];
+    char *curl[] = {"curl", "-fsSL", "--max-time", "15", "https://api.github.com/repos/AlexMedela/file-explorer/releases/latest", NULL};
+    char *wget[] = {"wget", "-qO-", "--timeout=15", "https://api.github.com/repos/AlexMedela/file-explorer/releases/latest", NULL};
+    int rc = in_path("curl") ? run_capture(curl, out, sizeof out) : in_path("wget") ? run_capture(wget, out, sizeof out) : -1;
+    if (rc == 0) {
+        ig_tag_from_json(out, g_ig_new_tag, sizeof g_ig_new_tag);
+        if (g_ig_new_tag[0] && ig_vercmp(g_ig_new_tag, APP_VERSION) > 0) main_post(ig_update_found, NULL);
+    }
+    return NULL;
+}
+
+static void ig_update_check(void) {
+    if (!appimage_path() || !A.ig_check_updates || A.selftest || A.screenshot) return;
+    i64 now = (i64)time(NULL);
+    if (now - A.ig_update_checked < 24 * 3600) return;
+    A.ig_update_checked = now;
+    A.settings_dirty = true;
+    pthread_t t;
+    if (pthread_create(&t, NULL, ig_update_thread, NULL) == 0) pthread_detach(t);
 }
