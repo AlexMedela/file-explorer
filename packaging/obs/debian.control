@@ -1,0 +1,18 @@
+Source: file-explorer
+Section: utils
+Priority: optional
+Maintainer: AlexMedela <70584290+AlexMedela@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13), pkgconf, libsdl3-dev, libfreetype-dev, libfontconfig-dev, libarchive-dev,
+ libvterm-dev, libfuse3-dev, libssl-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/AlexMedela/file-explorer
+
+Package: file-explorer
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: xdg-utils, polkitd | policykit-1, udisks2
+Suggests: rclone, xdg-desktop-portal-termfilechooser
+Description: Just another file explorer: fast, keyboard-first, GPU-rendered
+ A fast, keyboard-first file manager for Linux with a GPU-drawn interface: split panels with tabs, terminal tabs,
+ previews, search inside files, a disk usage map, folder compare, archives as folders, phones on a cable and Git
+ status. It never takes over your default file manager or file chooser unless you turn that on.

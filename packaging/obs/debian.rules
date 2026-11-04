@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+# File Explorer - Debian / Ubuntu package (built on OBS from debian.* files, see _service).
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	CFLAGS_PKG="$$(dpkg-buildflags --get CFLAGS) $$(dpkg-buildflags --get CPPFLAGS)" \
+	LDFLAGS_PKG="$$(dpkg-buildflags --get LDFLAGS)" ./build.sh package
+
+override_dh_auto_install:
+	DESTDIR=$(CURDIR)/debian/file-explorer PREFIX=/usr ./install.sh
+
+override_dh_auto_clean:
+	rm -rf build
+
+override_dh_auto_test:
