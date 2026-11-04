@@ -1,6 +1,6 @@
 # Keyboard and mouse
 
-[README](../README.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
+[README](../README.md) · [Install](install.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
 
 Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 

@@ -1,6 +1,6 @@
 # Settings
 
-[README](../README.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
+[README](../README.md) · [Install](install.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
 
 **Updates and several windows.** Installing or updating never touches your settings. Each window (and the
 background instance) saves only what it changed itself, so two windows don't undo each other's changes. A window

@@ -35,16 +35,15 @@
 - **Looks the same on every desktop.** GNOME, KDE, Xfce, Hyprland, Sway... with themes, icon sets and its own title bar.
 
 ## Install
-| Distro | Command | |
+| Distro | How | |
 |---|---|---|
-| Arch, CachyOS, Manjaro, EndeavourOS | `makepkg -si` in `packaging/arch` of a clone | ![ready](https://img.shields.io/badge/ready-PKGBUILD-9ece6a?style=flat-square) |
-| Debian 13, Ubuntu 24.04+, Mint, Pop!_OS | `sudo apt install file-explorer` | ![soon](https://img.shields.io/badge/soon-apt%20repo-lightgrey?style=flat-square) |
-| Fedora, openSUSE | `sudo dnf install file-explorer` | ![soon](https://img.shields.io/badge/soon-rpm%20repo-lightgrey?style=flat-square) |
+| Debian 13, Ubuntu 25.10+, Mint, Pop!_OS | add the repo once, then `sudo apt install file-explorer` ([commands](docs/install.md#debian-13-ubuntu-2510--2604--2610-mint-pop_os)) | ![ready](https://img.shields.io/badge/ready-apt%20repo-9ece6a?style=flat-square) |
+| Fedora 43 / 44 | add the repo once, then `sudo dnf install file-explorer` ([commands](docs/install.md#fedora-43--44)) | ![ready](https://img.shields.io/badge/ready-rpm%20repo-9ece6a?style=flat-square) |
+| openSUSE Tumbleweed / Leap 16 | add the repo once, then `sudo zypper install file-explorer` ([commands](docs/install.md#opensuse-tumbleweed--leap-160)) | ![ready](https://img.shields.io/badge/ready-rpm%20repo-9ece6a?style=flat-square) |
+| Arch, CachyOS, Manjaro, EndeavourOS | `makepkg -si` in `packaging/arch` of a clone ([commands](docs/install.md#arch-cachyos-manjaro-endeavouros)) | ![ready](https://img.shields.io/badge/ready-PKGBUILD-9ece6a?style=flat-square) |
 | Any distro | AppImage from [Releases](https://github.com/AlexMedela/file-explorer/releases) | ![soon](https://img.shields.io/badge/soon-AppImage-lightgrey?style=flat-square) |
-| From source | see [Building](docs/building.md) | ![ready](https://img.shields.io/badge/ready-source-9ece6a?style=flat-square) |
 
-On Arch: `git clone https://github.com/AlexMedela/file-explorer && cd file-explorer/packaging/arch && makepkg -si`.
-An AUR package follows once the AUR reopens account registration (paused because of spam).
+All packages, x86_64 and ARM64, update with your system. Details and other distros: [docs/install.md](docs/install.md).
 
 Installing never replaces your current file manager or file picker: switch those on in **Options > Integration**
 (default file manager, "Show in folder", file chooser for other apps). See [Integration](docs/integration.md).
@@ -64,7 +63,7 @@ Installing never replaces your current file manager or file picker: switch those
 All keys: [docs/keys.md](docs/keys.md)
 
 ## Docs
-[Keys](docs/keys.md) · [Settings](docs/settings.md) · [Integration](docs/integration.md) · [Building](docs/building.md) · [Architecture](docs/architecture.md)
+[Install](docs/install.md) · [Keys](docs/keys.md) · [Settings](docs/settings.md) · [Integration](docs/integration.md) · [Building](docs/building.md) · [Architecture](docs/architecture.md)
 
 ## Licence
 [MIT](LICENSE). Bundled icon sets and libraries keep their own licences, listed in [Building](docs/building.md#tools-and-self-tests).

@@ -1,6 +1,6 @@
 # Building from source
 
-[README](../README.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
+[README](../README.md) · [Install](install.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
 
 ```sh
 git clone https://github.com/AlexMedela/file-explorer && cd file-explorer

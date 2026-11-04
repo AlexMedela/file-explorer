@@ -1,6 +1,6 @@
 # Integration with the desktop
 
-[README](../README.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
+[README](../README.md) · [Install](install.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
 
 Installing File Explorer never takes over a role from your current file manager, and packages never touch your
 settings or your default apps: no install script runs `xdg-mime`, edits portal configs or writes to `~/.config`.
