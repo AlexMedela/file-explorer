@@ -32,7 +32,7 @@ conflicts=('file-explorer')
 _src="$url.git"
 if [ -n "$FE_SRC" ]; then _src="file://$FE_SRC"
 elif [ -d "$startdir/../../.git" ]; then _src="file://$(cd "$startdir/../.." && pwd)"; fi
-source=("file-explorer::git+$_src")
+source=("file-explorer::git+$_src#branch=main")
 sha256sums=('SKIP')
 
 pkgver() {
