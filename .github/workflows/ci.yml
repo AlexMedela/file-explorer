@@ -38,22 +38,27 @@ jobs:
       options: --shm-size=2g # the cross-device copy tests use /dev/shm (64 MB by default in containers)
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm --needed base-devel git pkgconf sdl3 freetype2 fontconfig libarchive libvterm fuse3 openssl ttf-dejavu
+        run: pacman -Syu --noconfirm --needed base-devel git pkgconf sdl3 freetype2 fontconfig libarchive libvterm fuse3 openssl ttf-dejavu shared-mime-info vim # (m8: file types, an app for text)
       - uses: actions/checkout@v4
       - name: Build (debug)
         run: ./build.sh debug
       - name: Self-tests
+        # As a normal user: root ignores file permissions, which the "permission denied" tests rely on.
         # (--selftest-devices needs FUSE, which containers don't have)
         run: |
-          sh tools/mkfiles.sh /tmp/fe-st 5000
-          ./build/file-explorer --selftest /tmp/fe-st
-          for t in ops admin git grep du cmp m4 m5 m6 m7 m8 m9 m10 m11; do
-            echo "::group::selftest-$t"
-            ./build/file-explorer --selftest-$t || { echo "::error::selftest-$t failed"; exit 1; }
-            echo "::endgroup::"
-          done
+          useradd -m tester
+          chown -R tester .
+          su tester -c '
+            set -e
+            sh tools/mkfiles.sh /tmp/fe-st 5000
+            ./build/file-explorer --selftest /tmp/fe-st
+            for t in ops admin git grep du cmp m4 m5 m6 m7 m8 m9 m10 m11; do
+              echo "::group::selftest-$t"
+              ./build/file-explorer --selftest-$t || { echo "::error::selftest-$t failed"; exit 1; }
+              echo "::endgroup::"
+            done'
       - name: Screenshot
-        run: ./build/file-explorer --screenshot shot.bmp /usr
+        run: su tester -c './build/file-explorer --screenshot shot.bmp /usr'
       - uses: actions/upload-artifact@v4
         with:
           name: screenshot
