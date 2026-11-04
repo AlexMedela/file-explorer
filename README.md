@@ -7,6 +7,7 @@
 **Just another file explorer.** Fast, keyboard-first, for Linux.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/AlexMedela/file-explorer/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/AlexMedela/file-explorer/actions)
+[![Release](https://img.shields.io/github/v/release/AlexMedela/file-explorer?style=flat-square&color=7aa2f7)](https://github.com/AlexMedela/file-explorer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-9ece6a?style=flat-square)](LICENSE)
 ![Linux](https://img.shields.io/badge/Linux-Wayland%20%7C%20X11-bb9af7?style=flat-square)
 ![C11 + SDL3](https://img.shields.io/badge/C11-SDL3-e0af68?style=flat-square)
@@ -41,7 +42,7 @@
 | Fedora 43 / 44 | add the repo once, then `sudo dnf install file-explorer` ([commands](docs/install.md#fedora-43--44)) | ![ready](https://img.shields.io/badge/ready-rpm%20repo-9ece6a?style=flat-square) |
 | openSUSE Tumbleweed / Leap 16 | add the repo once, then `sudo zypper install file-explorer` ([commands](docs/install.md#opensuse-tumbleweed--leap-160)) | ![ready](https://img.shields.io/badge/ready-rpm%20repo-9ece6a?style=flat-square) |
 | Arch, CachyOS, Manjaro, EndeavourOS | `makepkg -si` in `packaging/arch` of a clone ([commands](docs/install.md#arch-cachyos-manjaro-endeavouros)) | ![ready](https://img.shields.io/badge/ready-PKGBUILD-9ece6a?style=flat-square) |
-| Any distro | AppImage from [Releases](https://github.com/AlexMedela/file-explorer/releases) | ![soon](https://img.shields.io/badge/soon-AppImage-lightgrey?style=flat-square) |
+| Any distro (Ubuntu 22.04+, Debian 12+...) | AppImage from [Releases](https://github.com/AlexMedela/file-explorer/releases/latest) ([how](docs/install.md#any-other-distro-appimage)) | ![ready](https://img.shields.io/badge/ready-AppImage-9ece6a?style=flat-square) |
 
 All packages, x86_64 and ARM64, update with your system. Details and other distros: [docs/install.md](docs/install.md).
 
