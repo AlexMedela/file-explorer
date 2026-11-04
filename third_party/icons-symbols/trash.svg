@@ -1,0 +1,5 @@
+<!-- File Explorer addition in the Symbols style (the set has no trash icon) -->
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M3.5 6.5H20.5M9 6.5V4.5C9 3.94772 9.44772 3.5 10 3.5H14C14.5523 3.5 15 3.94772 15 4.5V6.5M5.5 6.5L6.6 19.1C6.69 20.18 7.6 21 8.68 21H15.32C16.4 21 17.31 20.18 17.4 19.1L18.5 6.5" stroke="#FEFEFE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M10 10.5V17M14 10.5V17" stroke="#FEFEFE" stroke-width="2" stroke-linecap="round"/>
+</svg>

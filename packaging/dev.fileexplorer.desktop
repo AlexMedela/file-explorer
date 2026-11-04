@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=File Explorer
+GenericName=File Manager
+Comment=Just another file explorer: fast and keyboard-first
+Exec=file-explorer %F
+Icon=dev.fileexplorer
+Terminal=false
+Categories=System;FileTools;FileManager;Utility;Core;
+MimeType=inode/directory;
+Keywords=files;folders;explorer;browser;manager;
+StartupNotify=true
+StartupWMClass=dev.fileexplorer

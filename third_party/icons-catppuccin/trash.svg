@@ -1,0 +1,7 @@
+<!-- File Explorer addition in the Catppuccin style (the set has no trash icon) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+	<g fill="none" stroke-linecap="round" stroke-linejoin="round">
+		<path stroke="#FEFEFE" d="M1.5 4.5h13M5.5 4.5v-2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M3 4.5l.8 9a1.5 1.5 0 0 0 1.5 1.5h5.4a1.5 1.5 0 0 0 1.5-1.5l.8-9" />
+		<path stroke="#FEFEFE" d="M6.5 7.5v4.5M9.5 7.5v4.5" />
+	</g>
+</svg>

@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Portable build on the distros SDL 3.2+ is packaged for; warnings fail the job.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [archlinux:latest, fedora:latest, debian:trixie, ubuntu:26.04]
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install dependencies
+        run: |
+          case "${{ matrix.image }}" in
+            archlinux*) pacman -Syu --noconfirm --needed base-devel git pkgconf sdl3 freetype2 fontconfig libarchive libvterm fuse3 openssl ;;
+            fedora*)    dnf install -y gcc git pkgconf-pkg-config SDL3-devel freetype-devel fontconfig-devel libarchive-devel libvterm-devel fuse3-devel openssl-devel ;;
+            debian*|ubuntu*)
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential git pkg-config libsdl3-dev libfreetype-dev libfontconfig-dev libarchive-dev libvterm-dev libfuse3-dev libssl-dev ;;
+          esac
+      - uses: actions/checkout@v4
+      - name: Build (package mode)
+        run: |
+          ./build.sh package 2>&1 | tee build.log
+          if grep -q 'warning:' build.log; then echo "::error::compiler warnings"; exit 1; fi
+          ./build/file-explorer --version
+
+  # Debug build (ASan/UBSan) + the headless self-tests.
+  selftest:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm --needed base-devel git pkgconf sdl3 freetype2 fontconfig libarchive libvterm fuse3 openssl ttf-dejavu
+      - uses: actions/checkout@v4
+      - name: Build (debug)
+        run: ./build.sh debug
+      - name: Self-tests
+        # (--selftest-devices needs FUSE, which containers don't have)
+        run: |
+          sh tools/mkfiles.sh /tmp/fe-st 5000
+          ./build/file-explorer --selftest /tmp/fe-st
+          for t in ops admin git grep du cmp m4 m5 m6 m7 m8 m9 m10 m11; do
+            echo "::group::selftest-$t"
+            ./build/file-explorer --selftest-$t || { echo "::error::selftest-$t failed"; exit 1; }
+            echo "::endgroup::"
+          done
+      - name: Screenshot
+        run: ./build/file-explorer --screenshot shot.bmp /usr
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshot
+          path: shot.bmp

@@ -1,0 +1,45 @@
+# Maintainer: amedela
+# Builds File Explorer from a local git checkout.
+#   cd packaging/arch && makepkg -si
+pkgname=file-explorer-git
+pkgver=r0
+pkgrel=1
+pkgdesc="File Explorer - Just another file explorer: fast, keyboard-first, GPU-rendered (C, SDL3)"
+arch=('x86_64')
+url="file://$HOME/Projects/file-explorer"
+license=('MIT')
+depends=('sdl3' 'freetype2' 'fontconfig' 'libarchive' 'glibc' 'libvterm' 'fuse3' 'openssl'
+         'libdecor')  # title bar on GNOME Wayland (no server-side decorations there)
+makedepends=('git' 'gcc' 'pkgconf')
+optdepends=('gtk3: GTK look for the libdecor title bar (GNOME)'
+            'polkit: retry as administrator (needs an authentication agent running)'
+            'xdg-utils: open files with their default app'
+            'ffmpegthumbnailer: video previews'
+            'evince: PDF previews (thumbnailer)'
+            'glycin: previews for HEIF, JXL, SVG and more (thumbnailers)'
+            'udisks2: mount and eject drives from the sidebar'
+            'gvfs: network locations (smb://, sftp://, ...)'
+            'gvfs-smb: Windows shares'
+            'gvfs-mtp: phones the built-in connector leaves to GVfs (MTP)'
+            'gvfs-gphoto2: cameras the built-in connector leaves to GVfs (PTP)'
+            'rclone: cloud storage (Google Drive, OneDrive, S3...) in the sidebar'
+            'noto-fonts-emoji: colour emoji in file names')
+provides=('file-explorer')
+conflicts=('file-explorer')
+source=("file-explorer::git+file://${FE_SRC:-$HOME/Projects/file-explorer}")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd file-explorer
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd file-explorer
+  CFLAGS_PKG="$CFLAGS" LDFLAGS_PKG="$LDFLAGS" ./build.sh package
+}
+
+package() {
+  cd file-explorer
+  DESTDIR="$pkgdir" PREFIX=/usr ./install.sh
+}

@@ -1,0 +1,5 @@
+src/
+pkg/
+file-explorer/
+*.pkg.tar.zst
+*.log
