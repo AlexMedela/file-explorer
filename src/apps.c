@@ -410,24 +410,97 @@ static bool app_launch(const DesktopApp *a, char **files, int nfiles) {
     return ok;
 }
 
-static void app_set_default(const DesktopApp *a, const char *mime) {
-    char *argv[] = {"xdg-mime", "default", a->id, (char *)mime, NULL};
-    pid_t pid;
-    posix_spawnp(&pid, "xdg-mime", NULL, spawn_attr(), argv, environ);
-    // update our view right away
+// Set (id) or remove (NULL) "mime=" in a mimeapps.list's [Default Applications]. only_if_listed: leave the file
+// alone unless it already names this type there (desktop-specific files). Written to a temp file, then renamed.
+static bool mimeapps_edit(const char *path, const char *mime, const char *id, bool only_if_listed) {
+    FILE *f = fopen(path, "r");
+    if (!f && only_if_listed) return false;
+    char *out = NULL;
+    size_t olen = 0;
+    FILE *o = open_memstream(&out, &olen);
+    if (!o) { if (f) fclose(f); return false; }
+    char line[8192];
+    size_t ml = strlen(mime);
+    bool in_def = false, done = false, saw_def = false, listed = false;
+    while (f && fgets(line, sizeof line, f)) {
+        if (line[0] == '[') {
+            if (in_def && !done && id) { fprintf(o, "%s=%s;\n", mime, id); done = true; } // end of the group: add
+            in_def = !strncmp(line, "[Default Applications]", 22);
+            saw_def |= in_def;
+        } else if (in_def && !strncmp(line, mime, ml) && line[ml] == '=') {
+            listed = true;
+            if (id && !done) { fprintf(o, "%s=%s;\n", mime, id); done = true; }
+            continue; // (removed, or replaced above)
+        }
+        fputs(line, o);
+        if (line[0] && line[strlen(line) - 1] != '\n') fputc('\n', o);
+    }
+    if (f) fclose(f);
+    if (id && !done) {
+        if (!saw_def) fprintf(o, "%s[Default Applications]\n", olen || ftell(o) ? "\n" : "");
+        else if (!in_def) fprintf(o, "\n[Default Applications]\n"); // (another group came last)
+        fprintf(o, "%s=%s;\n", mime, id);
+    }
+    fclose(o);
+    bool ok = true;
+    if (!only_if_listed || listed) {
+        char tmp[PATH_MAX + 16], dir[PATH_MAX];
+        snprintf(tmp, sizeof tmp, "%s.fe-tmp", path);
+        snprintf(dir, sizeof dir, "%s", path);
+        char *sl = strrchr(dir, '/');
+        if (sl) { *sl = 0; mkdir_p(dir, 0755); }
+        FILE *w = fopen(tmp, "w");
+        ok = w && fputs(out, w) >= 0;
+        if (w && fclose(w) == 0 && ok) ok = rename(tmp, path) == 0;
+        else { ok = false; unlink(tmp); }
+    }
+    free(out);
+    return ok;
+}
+
+// The user's choice of default app for a type (NULL: remove ours), written where the spec says: the config home's
+// mimeapps.list, and the desktop's own "<desktop>-mimeapps.list" there when it already names the type (it would win).
+static bool mimeapps_set_default(const char *mime, const char *id) {
+    const char *home = getenv("HOME") ? getenv("HOME") : "/";
+    const char *xc = getenv("XDG_CONFIG_HOME");
+    char dir[PATH_MAX], p[PATH_MAX + 64];
+    if (xc && xc[0] == '/') snprintf(dir, sizeof dir, "%s", xc);
+    else snprintf(dir, sizeof dir, "%s/.config", home);
+    snprintf(p, sizeof p, "%s/mimeapps.list", dir);
+    bool ok = mimeapps_edit(p, mime, id, false);
+    const char *cur = getenv("XDG_CURRENT_DESKTOP");
+    char desks[256];
+    snprintf(desks, sizeof desks, "%s", cur ? cur : "");
+    char *save = NULL;
+    for (char *d = strtok_r(desks, ":", &save); d; d = strtok_r(NULL, ":", &save)) {
+        for (char *c = d; *c; c++) *c = (char)ascii_lower((u8)*c);
+        snprintf(p, sizeof p, "%s/%s-mimeapps.list", dir, d);
+        mimeapps_edit(p, mime, id, true);
+    }
+    // our view right away: the first entry for the type is the one that counts
     for (int i = 0; i < g_ndef; i++)
         if (!strcmp(g_def_mime[i], mime)) {
             free(g_def_apps[i]);
-            g_def_apps[i] = xmalloc(strlen(a->id) + 2);
-            sprintf(g_def_apps[i], "%s;", a->id);
-            return;
+            g_def_apps[i] = id ? xmalloc(strlen(id) + 2) : strdup("");
+            if (id) sprintf(g_def_apps[i], "%s;", id);
+            return ok;
         }
+    if (!id) return ok;
     g_def_mime = xrealloc(g_def_mime, (size_t)(g_ndef + 1) * sizeof(char *));
     g_def_apps = xrealloc(g_def_apps, (size_t)(g_ndef + 1) * sizeof(char *));
-    g_def_mime[g_ndef] = strdup(mime);
-    g_def_apps[g_ndef] = xmalloc(strlen(a->id) + 2);
-    sprintf(g_def_apps[g_ndef++], "%s;", a->id);
+    memmove(g_def_mime + 1, g_def_mime, (size_t)g_ndef * sizeof(char *)); // first: above the system's defaults
+    memmove(g_def_apps + 1, g_def_apps, (size_t)g_ndef * sizeof(char *));
+    g_def_mime[0] = strdup(mime);
+    g_def_apps[0] = xmalloc(strlen(id) + 2);
+    sprintf(g_def_apps[0], "%s;", id);
+    g_ndef++;
+    return ok;
 }
+
+static void app_set_default(const DesktopApp *a, const char *mime) {
+    mimeapps_set_default(mime, a->id);
+}
+
 
 // --- SHA-256 (FIPS 180-4) ----------------------------------------------------
 

@@ -14,6 +14,8 @@ makedepends=('git' 'gcc' 'pkgconf')
 optdepends=('gtk3: GTK look for the libdecor title bar (GNOME)'
             'polkit: retry as administrator (needs an authentication agent running)'
             'xdg-utils: open files with their default app'
+            'dbus: "Show in folder" from browsers and other apps (Options > Integration)'
+            'xdg-desktop-portal-termfilechooser: be the file chooser of other apps (Options > Integration)'
             'ffmpegthumbnailer: video previews'
             'evince: PDF previews (thumbnailer)'
             'glycin: previews for HEIF, JXL, SVG and more (thumbnailers)'

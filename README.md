@@ -43,8 +43,8 @@
 | Any distro | AppImage from [Releases](https://github.com/AlexMedela/file-explorer/releases) | ![soon](https://img.shields.io/badge/soon-AppImage-lightgrey?style=flat-square) |
 | From source | see [Building](docs/building.md) | ![ready](https://img.shields.io/badge/ready-source-9ece6a?style=flat-square) |
 
-Installing never replaces your current file manager or file picker. To use it as the default or as the file
-chooser of other apps, see [Integration](docs/integration.md).
+Installing never replaces your current file manager or file picker: switch those on in **Options > Integration**
+(default file manager, "Show in folder", file chooser for other apps). See [Integration](docs/integration.md).
 
 ## First steps
 | Key | |

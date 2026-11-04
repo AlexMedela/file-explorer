@@ -6,16 +6,23 @@ Installing File Explorer never takes over a role from your current file manager,
 settings or your default apps: no install script runs `xdg-mime`, edits portal configs or writes to `~/.config`.
 Each of these is your choice.
 
-## Default file manager
-Folders opened from other apps (and `xdg-open ~/Downloads`) use the default handler for `inode/directory`:
-```sh
-xdg-mime default dev.fileexplorer.desktop inode/directory
-```
-To go back, set your previous one the same way (e.g. `org.gnome.Nautilus.desktop`, `org.kde.dolphin.desktop`).
-"Show in folder" from browsers goes through the `org.freedesktop.FileManager1` D-Bus service, which File Explorer
-doesn't provide yet.
+## Options > Integration
+Three switches, each showing who has the role now. Turning one off puts back what was there before.
 
-## File chooser (Open / Save dialogs of other apps)
+| Switch | What it does |
+|---|---|
+| **Default file manager** | Sets `inode/directory` in your `~/.config/mimeapps.list` (and in the desktop's own `<desktop>-mimeapps.list` when that one names folders), remembering the previous app to restore later. |
+| **"Show in folder" opens here** | Answers `org.freedesktop.FileManager1` on the session bus (ShowItems / ShowFolders: browsers' downloads, "Open containing folder" in many apps) while File Explorer runs, and writes a user D-Bus activation file so it can start on request. Another file manager that is running keeps the name. |
+| **File chooser for other apps** | With [xdg-desktop-portal-termfilechooser](https://github.com/hunkyburrito/xdg-desktop-portal-termfilechooser) installed: writes a small wrapper, termfilechooser's config and `~/.config/xdg-desktop-portal/<desktop>-portals.conf` (`FileChooser=termfilechooser`), then restarts the portal. Files that were there are kept as `*.fe-backup`. |
+
+On the first start, File Explorer asks once whether it should be the default file manager.
+
+The same by hand:
+```sh
+xdg-mime default dev.fileexplorer.desktop inode/directory     # default file manager
+```
+
+## The picker window
 System file chooser: `file-explorer --pick file|files|dir|save --out FILE [PATH]` opens a picker window (app id
 `dev.fileexplorer.picker`) with an Open / Save / Choose bar and writes the chosen path(s) to FILE. With
 [xdg-desktop-portal-termfilechooser](https://github.com/hunkyburrito/xdg-desktop-portal-termfilechooser) and the

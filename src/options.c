@@ -1,6 +1,6 @@
 // options.c - Options window (Ctrl+,): every setting in one searchable sheet (included from ui_tools.c)
 
-static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Advanced"};
+static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Integration", "Advanced"};
 
 enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON };
 
@@ -9,7 +9,7 @@ enum {
     OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
-    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR,
+    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER,
 };
 
 typedef struct {
@@ -53,6 +53,9 @@ static const OptDef g_opts[] = {
     {OC_VIEWS, OK_CHOICE, OPT_DEF_SORT, "Default sort", "Sort column for new tabs"},
     {OC_VIEWS, OK_BOOL, OPT_SORT_DESC, "Sort descending", "Reverse the default sort order"},
     {OC_VIEWS, OK_CHOICE, OPT_DEF_GROUP, "Default grouping", "Group items in the details view"},
+    {OC_INTEGRATION, OK_BOOL, OPT_IG_DEFAULT_FM, "Default file manager", "Folders from other apps open here"},
+    {OC_INTEGRATION, OK_BOOL, OPT_IG_FM1, "\"Show in folder\" opens here", "From browsers and other apps"},
+    {OC_INTEGRATION, OK_BOOL, OPT_IG_PICKER, "File chooser for other apps", "Their Open and Save dialogs open here"},
     {OC_ADVANCED, OK_CHOICE, OPT_RENDERER, "Renderer", "GPU backend (takes effect after a restart)"},
     {OC_ADVANCED, OK_BUTTON, OPT_SETTINGS_FILE, "Settings file", "Open settings.conf in your text editor"},
     {OC_ADVANCED, OK_BUTTON, OPT_REINDEX, "Re-index folders", "Rebuild the folder index used by Go to (Ctrl+P)"},
@@ -64,6 +67,7 @@ static const struct { int id; const char *title; } g_opt_sections[] = {
     {OPT_THEME, "Theme"}, {OPT_FONT, "Text"}, {OPT_DIM_INACTIVE, "Display"}, {OPT_TERM_LOOK, "Terminal"}, {OPT_THEME_NEW, "Custom themes"},
     {OPT_HIDDEN, "Files and folders"}, {OPT_RESTORE, "Startup"}, {OPT_SINGLE_CLICK, "Mouse"}, {OPT_TRANSFERS, "Copying and moving"},
     {OPT_KEYS_RESET, "Shortcuts"}, {OPT_DEF_VIEW, "New folders"}, {OPT_RENDERER, "Rendering"}, {OPT_SETTINGS_FILE, "Maintenance"},
+    {OPT_IG_DEFAULT_FM, "Desktop roles (yours to give: installing never takes them)"},
 };
 
 static const char *opt_section_title(int id) {
@@ -109,6 +113,26 @@ static struct {
     TextEdit lname;
     bool lname_focus;
 } g_opt;
+
+// The description, with live state for the integration switches.
+static const char *opt_desc(const OptDef *o) {
+    static char buf[320];
+    switch (o->id) {
+    case OPT_IG_DEFAULT_FM: {
+        const char *id = ig_folder_app();
+        DesktopApp *a = id[0] ? app_by_id(id) : NULL;
+        if (!ig_default_fm_on()) { snprintf(buf, sizeof buf, "Folders open in %s now", a ? a->name : "no app"); return buf; }
+        break;
+    }
+    case OPT_IG_FM1:
+        if (A.ig_fm1 && g_fm1.state == IG_FM1_TAKEN) return "Another file manager has it now";
+        break;
+    case OPT_IG_PICKER:
+        if (!ig_picker_portal_installed()) return "Needs the termfilechooser portal";
+        break;
+    }
+    return o->desc;
+}
 
 static void opt_hit(Rect r, int part, int opt, int arg) {
     if (g_opt.nhits < (int)ARRAY_COUNT(g_opt.hits)) g_opt.hits[g_opt.nhits++] = (OptHit){r, part, opt, arg};
@@ -253,6 +277,9 @@ static bool opt_bool_get(int id) {
     case OPT_AUTOSTART: return autostart_enabled();
     case OPT_TRAY: return A.close_to_tray;
     case OPT_VERIFY: return A.verify_copies;
+    case OPT_IG_DEFAULT_FM: return ig_default_fm_on();
+    case OPT_IG_FM1: return A.ig_fm1;
+    case OPT_IG_PICKER: return ig_picker_on();
     }
     return false;
 }
@@ -279,6 +306,13 @@ static void opt_bool_toggle(int id) {
         break;
     case OPT_AUTOSTART: autostart_set(!autostart_enabled()); break;
     case OPT_VERIFY: A.verify_copies = !A.verify_copies; break;
+    case OPT_IG_DEFAULT_FM: ig_default_fm_set(!ig_default_fm_on()); break;
+    case OPT_IG_FM1:
+        ig_fm1_set(!A.ig_fm1);
+        if (g_fm1.state == IG_FM1_TAKEN) toast("Another file manager is answering now; this one takes over when it isn't running");
+        else if (g_fm1.state == IG_FM1_NO_DBUS) toast("No D-Bus session bus (libdbus-1) found");
+        break;
+    case OPT_IG_PICKER: ig_picker_set(!ig_picker_on()); break;
     case OPT_TRAY:
         A.close_to_tray = !A.close_to_tray;
         tray_update();
@@ -823,7 +857,8 @@ static void options_draw(void) {
                 if (hv) g_opt.hover_row = k; // (no highlight: rows are static, their controls react)
                 f32 tx = rr.x + S(16), ctlw = MIN(roundf(S(380)), rr.w * 0.55f), lw = rr.w - ctlw - S(44);
                 draw_text_fit(f, tx, roundf(y + rh * 0.5f - f->line_h + S(2)), lw, ok->label, (int)strlen(ok->label), C(COL_TEXT), 0);
-                draw_text_fit(fs, tx, roundf(y + rh * 0.5f + S(3)), lw, ok->desc, (int)strlen(ok->desc), C(COL_TEXT_DIM), 0);
+                const char *desc = opt_desc(ok);
+                draw_text_fit(fs, tx, roundf(y + rh * 0.5f + S(3)), lw, desc, (int)strlen(desc), C(COL_TEXT_DIM), 0);
                 opt_draw_control(ok, rr.x + rr.w - ctlw - S(14), y + rh * 0.5f, ctlw);
             }
             y += rh;

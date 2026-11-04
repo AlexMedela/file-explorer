@@ -2,6 +2,7 @@
 #include "base.h"
 #include <ctype.h>
 #include <regex.h>
+#include <dlfcn.h>
 #include <SDL3/SDL.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H

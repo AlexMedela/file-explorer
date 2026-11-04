@@ -42,6 +42,8 @@ static void settings_defaults(void) {
     A.sess_layout[0] = 0;
     A.dim_inactive = true;
     A.title_bar = TITLEBAR_AUTO;
+    A.ig_prev_fm[0] = 0;
+    A.ig_fm1 = A.ig_asked = false;
     for (int i = 0; i < A.ndev_names; i++) { free(A.dev_names[i].key); free(A.dev_names[i].name); }
     A.ndev_names = 0;
     A.devs_collapsed = A.nets_collapsed = false;
@@ -245,6 +247,9 @@ static void settings_load(void) {
             session_line("ptab", v);
         } else if (!strcmp(k, "dim_inactive")) A.dim_inactive = atoi(v);
         else if (!strcmp(k, "settings_version")) g_settings_file_version = atoi(v);
+        else if (!strcmp(k, "integration_prev_folder_app")) snprintf(A.ig_prev_fm, sizeof A.ig_prev_fm, "%s", v);
+        else if (!strcmp(k, "integration_show_in_folder")) A.ig_fm1 = atoi(v);
+        else if (!strcmp(k, "integration_asked")) A.ig_asked = atoi(v);
         else if (!strcmp(k, "title_bar")) A.title_bar = !strcmp(v, "system") ? TITLEBAR_SYSTEM : !strcmp(v, "app") ? TITLEBAR_APP : TITLEBAR_AUTO;
         else if (!strcmp(k, "alt_rows")) A.alt_rows = atoi(v);
         else if (!strcmp(k, "load_times")) A.load_times = atoi(v);
@@ -473,6 +478,8 @@ static void settings_write(FILE *f) {
     fprintf(f, "view=%s\nicon_size=%d\ngroup=%d\n", A.def_view == VIEW_GRID ? "grid" : A.def_view == VIEW_LIST ? "list" : "details",
             A.def_icon, A.def_group);
     fprintf(f, "verify_copies=%d\ntransfers_at_once=%d\n", A.verify_copies, A.transfers_at_once);
+    fprintf(f, "integration_prev_folder_app=%s\nintegration_show_in_folder=%d\nintegration_asked=%d\n", A.ig_prev_fm, A.ig_fm1,
+            A.ig_asked);
     fprintf(f, "title_bar=%s\n", A.title_bar == TITLEBAR_SYSTEM ? "system" : A.title_bar == TITLEBAR_APP ? "app" : "auto");
     fprintf(f, "dim_inactive=%d\nalt_rows=%d\nsize_bars=%d\nload_times=%d\ncolumns=", A.dim_inactive, A.alt_rows, A.size_bars, A.load_times);
     for (int i = 0; i < A.ncols; i++) {

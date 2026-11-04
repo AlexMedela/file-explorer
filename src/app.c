@@ -585,6 +585,9 @@ static struct {
     int nclosed;
     bool dim_inactive;
     int title_bar; // TITLEBAR_*: who draws the window's title bar (setting)
+    char ig_prev_fm[256]; // integration.c: the folder handler before we became the default (put back when turned off)
+    bool ig_fm1;          // answer "Show in folder" (org.freedesktop.FileManager1)
+    bool ig_asked;        // the first-run "use for folders?" question was shown
     bool csd;      // we do right now: buttons top right, the tab strips drag the window
     SDL_Cursor *cur_ns;
     // global layout
@@ -3477,7 +3480,7 @@ static void options_open(void);
 static void ipc_handle(char *msg);
 static bool exe_link_replaced(char *link);
 static bool options_is_open(void);
-enum { OC_APPEARANCE, OC_BEHAVIOUR, OC_VIEWS, OC_KEYBOARD, OC_LAYOUTS, OC_ADVANCED, OC_COUNT }; // Options pages
+enum { OC_APPEARANCE, OC_BEHAVIOUR, OC_VIEWS, OC_KEYBOARD, OC_LAYOUTS, OC_INTEGRATION, OC_ADVANCED, OC_COUNT }; // Options pages
 static void options_open_page(int cat);
 typedef struct {
     char name[64];
@@ -9514,6 +9517,7 @@ static void window_close_requested(void) {
 }
 
 #include "term.c"
+#include "integration.c"
 #include "ui_tools.c"
 #include "picker.c"
 
@@ -10149,6 +10153,8 @@ int main(int argc, char **argv) {
     if (!any_selftest && !A.screenshot && !picker_active()) tray_update();
     if (select_tab >= 0) tab_select(select_tab);
     settings_snapshot(); // started: from here on, saves write only what this process changes (settings_merge)
+    if (A.ig_fm1 && !any_selftest && !A.screenshot) ig_fm1_start(); // "Show in folder" (integration.c)
+    if (!any_selftest && !A.screenshot && !g_bg_start) ig_first_run();
     SDL_StartTextInput(A.win);
     if (selftest) return run_selftest();
     if (selftest_ops) return run_selftest_ops();

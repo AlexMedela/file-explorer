@@ -4781,9 +4781,22 @@ static void st_setup_grep(void) {
                  fe_apps[i][0], fe_apps[i][1]);
         st_write_text(p, t);
     }
-    st_write_text(GREP_BASE "/data2/applications/mimeapps.list",
-                  "[Default Applications]\napplication/x-fe-test=fe-a.desktop\n[Removed Associations]\napplication/x-fe-test=fe-removed.desktop;\n");
     st_write_text(GREP_BASE "/data2/applications/fetestdesk-mimeapps.list", "[Default Applications]\napplication/x-fe-test=fe-b.desktop\n");
+    // integration: us and another file manager for folders (the other one is the system's default)
+    st_write_text(GREP_BASE "/data2/applications/dev.fileexplorer.desktop",
+                  "[Desktop Entry]\nType=Application\nName=File Explorer\nExec=/bin/true %F\nMimeType=inode/directory;\n");
+    st_write_text(GREP_BASE "/data2/applications/fake-files.desktop",
+                  "[Desktop Entry]\nType=Application\nName=Fake Files\nExec=/bin/true %U\nMimeType=inode/directory;\n");
+    st_write_text(GREP_BASE "/data2/applications/mimeapps.list",
+                  "[Default Applications]\napplication/x-fe-test=fe-a.desktop\ninode/directory=fake-files.desktop\n"
+                  "[Removed Associations]\napplication/x-fe-test=fe-removed.desktop;\n");
+    mkdir_p("/tmp/fe-selftest-config/xdg-desktop-portal", 0755);
+    st_write_text("/tmp/fe-selftest-config/xdg-desktop-portal/fetestdesk-portals.conf",
+                  "[preferred]\ndefault=gtk\norg.freedesktop.impl.portal.FileChooser=gtk\n");
+    unlink("/tmp/fe-selftest-config/xdg-desktop-portal/fetestdesk-portals.conf.fe-backup");
+    unlink("/tmp/fe-selftest-config/xdg-desktop-portal-termfilechooser/config");
+    unlink("/tmp/fe-selftest-config/xdg-desktop-portal-termfilechooser/config.fe-backup");
+    setenv("FE_TEST_TERMFILECHOOSER", "1", 1);
     setenv("XDG_CURRENT_DESKTOP", "FETestDesk", 1);
     setenv("XDG_DATA_HOME", GREP_BASE "/data", 1);
     setenv("XDG_DATA_DIRS", GREP_BASE "/data2", 1);
@@ -5089,6 +5102,55 @@ static int run_selftest_grep(void) {
         st_write_text(GREP_BASE "/rn-b", "b");
         ST_CHECK(rename_noreplace(AT_FDCWD, GREP_BASE "/rn-a", AT_FDCWD, GREP_BASE "/rn-b") != 0 && errno == EEXIST);
         ST_CHECK(rename_noreplace(AT_FDCWD, GREP_BASE "/rn-a", AT_FDCWD, GREP_BASE "/rn-c") == 0);
+    }
+    { // --- integration (Options > Integration): every role is opt-in and turning it off puts back what was there
+        char mp[PATH_MAX], text[8192];
+        snprintf(mp, sizeof mp, "/tmp/fe-selftest-config/mimeapps.list");
+        ST_CHECK(!ig_default_fm_on() && !strcmp(ig_folder_app(), "fake-files.desktop"));
+        const OptDef *od = NULL;
+        for (int i = 0; i < OPT_COUNT; i++) if (g_opts[i].id == OPT_IG_DEFAULT_FM) od = &g_opts[i];
+        ST_CHECK(od && strstr(opt_desc(od), "Fake Files")); // the page says who has it now
+        st_key(SDLK_COMMA, SDL_KMOD_CTRL); // the Options page itself
+        g_opt.cat = OC_INTEGRATION;
+        st_frames(2);
+        st_shot("options-integration");
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        st_write_text(mp, "[Added Associations]\nx-test/keep=keep.desktop;\n"); // someone's file already there
+        ig_default_fm_set(true);
+        st_read_text(mp, text, sizeof text);
+        ST_CHECK(ig_default_fm_on() && strstr(text, "inode/directory=dev.fileexplorer.desktop;") && !strcmp(A.ig_prev_fm, "fake-files.desktop"));
+        ST_CHECK(strstr(text, "[Added Associations]\nx-test/keep=keep.desktop;\n") && strstr(text, "\n[Default Applications]\n")); // the rest kept
+        ig_default_fm_set(false);
+        st_read_text(mp, text, sizeof text);
+        ST_CHECK(!ig_default_fm_on() && strstr(text, "inode/directory=fake-files.desktop;") && !strstr(text, "dev.fileexplorer"));
+        // the file chooser: wrapper + termfilechooser config + the desktop's portals.conf; off puts the old one back
+        char w[PATH_MAX + 64], t[PATH_MAX + 64], pc[PATH_MAX + 64];
+        ig_picker_paths(w, t, pc, PATH_MAX + 64);
+        ST_CHECK(strstr(pc, "/xdg-desktop-portal/fetestdesk-portals.conf") && !ig_picker_on());
+        A.last_opened[0] = 0;
+        ig_picker_set(true);
+        st_read_text(pc, text, sizeof text);
+        ST_CHECK(ig_picker_on() && strstr(text, "default=gtk\n") && strstr(text, "FileChooser=termfilechooser") && !strstr(text, "FileChooser=gtk"));
+        ST_CHECK(access(w, X_OK) == 0 && st_file_has(w, "--pick") && st_file_has(t, w));
+        ST_CHECK(!strncmp(A.last_opened, "run:systemctl", 13)); // the portal restarted to read it (recorded in tests)
+        ig_picker_set(false);
+        st_read_text(pc, text, sizeof text);
+        ST_CHECK(!ig_picker_on() && strstr(text, "FileChooser=gtk") && access(w, F_OK) != 0 && access(t, F_OK) != 0);
+        // "Show in folder": the activation file only while it's on; requests open folders / select items
+        char svc[PATH_MAX + 64];
+        ig_fm1_service_path(svc, sizeof svc);
+        ig_fm1_set(true);
+        ST_CHECK(A.ig_fm1 && st_file_has(svc, "Name=org.freedesktop.FileManager1") && st_file_has(svc, "--background"));
+        ig_fm1_set(false);
+        ST_CHECK(!A.ig_fm1 && access(svc, F_OK) != 0);
+        int nt = A.ntabs;
+        IgShow *sh = xcalloc(1, sizeof *sh);
+        sh->paths = xmalloc(sizeof(char *));
+        sh->paths[sh->n++] = strdup(GREP_BASE "/tree/sub/b.txt");
+        ig_show_apply(sh);
+        st_wait();
+        Pane *ap = active_pane();
+        ST_CHECK(A.ntabs == nt + 1 && !strcmp(ap->path, GREP_BASE "/tree/sub"));
     }
     fprintf(stderr, "selftest-grep: %s (%d failures)\n", st_fail ? "FAIL" : "ok", st_fail);
     return st_fail ? 1 : 0;
