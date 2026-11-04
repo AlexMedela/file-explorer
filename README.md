@@ -37,11 +37,14 @@
 ## Install
 | Distro | Command | |
 |---|---|---|
-| Arch, CachyOS, Manjaro, EndeavourOS | `yay -S file-explorer` | ![soon](https://img.shields.io/badge/soon-AUR-lightgrey?style=flat-square) |
+| Arch, CachyOS, Manjaro, EndeavourOS | `makepkg -si` in `packaging/arch` of a clone | ![ready](https://img.shields.io/badge/ready-PKGBUILD-9ece6a?style=flat-square) |
 | Debian 13, Ubuntu 24.04+, Mint, Pop!_OS | `sudo apt install file-explorer` | ![soon](https://img.shields.io/badge/soon-apt%20repo-lightgrey?style=flat-square) |
 | Fedora, openSUSE | `sudo dnf install file-explorer` | ![soon](https://img.shields.io/badge/soon-rpm%20repo-lightgrey?style=flat-square) |
 | Any distro | AppImage from [Releases](https://github.com/AlexMedela/file-explorer/releases) | ![soon](https://img.shields.io/badge/soon-AppImage-lightgrey?style=flat-square) |
 | From source | see [Building](docs/building.md) | ![ready](https://img.shields.io/badge/ready-source-9ece6a?style=flat-square) |
+
+On Arch: `git clone https://github.com/AlexMedela/file-explorer && cd file-explorer/packaging/arch && makepkg -si`.
+An AUR package follows once the AUR reopens account registration (paused because of spam).
 
 Installing never replaces your current file manager or file picker: switch those on in **Options > Integration**
 (default file manager, "Show in folder", file chooser for other apps). See [Integration](docs/integration.md).

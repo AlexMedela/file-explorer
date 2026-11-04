@@ -1,12 +1,13 @@
 # Maintainer: amedela
-# Builds File Explorer from a local git checkout.
-#   cd packaging/arch && makepkg -si
+# File Explorer from git. Inside a checkout of the repo it builds that checkout (your changes included);
+# on its own (e.g. copied elsewhere) it clones GitHub. FE_SRC=<dir> builds another checkout.
+#   git clone https://github.com/AlexMedela/file-explorer && cd file-explorer/packaging/arch && makepkg -si
 pkgname=file-explorer-git
 pkgver=r0
 pkgrel=1
 pkgdesc="File Explorer - Just another file explorer: fast, keyboard-first, GPU-rendered (C, SDL3)"
-arch=('x86_64')
-url="file://$HOME/Projects/file-explorer"
+arch=('x86_64' 'aarch64')
+url="https://github.com/AlexMedela/file-explorer"
 license=('MIT')
 depends=('sdl3' 'freetype2' 'fontconfig' 'libarchive' 'glibc' 'libvterm' 'fuse3' 'openssl'
          'libdecor')  # title bar on GNOME Wayland (no server-side decorations there)
@@ -28,7 +29,10 @@ optdepends=('gtk3: GTK look for the libdecor title bar (GNOME)'
             'noto-fonts-emoji: colour emoji in file names')
 provides=('file-explorer')
 conflicts=('file-explorer')
-source=("file-explorer::git+file://${FE_SRC:-$HOME/Projects/file-explorer}")
+_src="$url.git"
+if [ -n "$FE_SRC" ]; then _src="file://$FE_SRC"
+elif [ -d "$startdir/../../.git" ]; then _src="file://$(cd "$startdir/../.." && pwd)"; fi
+source=("file-explorer::git+$_src")
 sha256sums=('SKIP')
 
 pkgver() {
