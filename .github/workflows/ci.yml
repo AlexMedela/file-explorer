@@ -33,7 +33,9 @@ jobs:
   # Debug build (ASan/UBSan) + the headless self-tests.
   selftest:
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    container:
+      image: archlinux:latest
+      options: --shm-size=1g # the cross-device copy tests use /dev/shm (64 MB by default in containers)
     steps:
       - name: Install dependencies
         run: pacman -Syu --noconfirm --needed base-devel git pkgconf sdl3 freetype2 fontconfig libarchive libvterm fuse3 openssl ttf-dejavu
