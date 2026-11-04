@@ -716,6 +716,9 @@ static int run_selftest_ops(void) {
     st_wait();
     f32 ay = st_row_y(p, "a.txt");
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, nx, ay, SDL_BUTTON_RIGHT, 1, 0);
+    if (!(A.menu.open && A.menu.items[0].act == ACT_OPEN && !strcmp(st_cursor_name(p), "a.txt")))
+        fprintf(stderr, "menu check: open=%d act0=%d cursor=%s dialog=%d sheet=%d ops=%d row_y=%.0f\n", A.menu.open,
+                A.menu.n ? A.menu.items[0].act : -1, st_cursor_name(p), A.dlg.open, sheet_open(), A.nops, ay);
     ST_CHECK(A.menu.open && A.menu.items[0].act == ACT_OPEN && !strcmp(st_cursor_name(p), "a.txt"));
     st_shot("menu");
     st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
