@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-9ece6a?style=flat)](LICENSE)
 ![Linux](https://img.shields.io/badge/Linux-Wayland%20%7C%20X11-bb9af7?style=flat&logo=linux&logoColor=white)
 ![C11 + SDL3](https://img.shields.io/badge/C11-SDL3-e0af68?style=flat&logo=c&logoColor=white)
-![Made with AI](https://img.shields.io/badge/made_with-AI-bf3989?style=flat)
+![Made with Claude](https://img.shields.io/badge/made_with-Claude-D97757?style=flat&logo=claude&logoColor=white)
 
 <img src="docs/img/hero.png" alt="File Explorer: a Git repository and an image folder side by side" width="900">
 
@@ -68,6 +68,6 @@ All keys: [docs/keys.md](docs/keys.md)
 [Install](docs/install.md) · [Keys](docs/keys.md) · [Settings](docs/settings.md) · [Integration](docs/integration.md) · [Building](docs/building.md) · [Architecture](docs/architecture.md)
 
 ## Licence
-Made with AI: File Explorer is written with AI coding assistants, directed, tested and used daily by its author.
+Made with Claude: directed, tested and used daily by its author.
 
 [MIT](LICENSE). Bundled icon sets and libraries keep their own licences, listed in [Building](docs/building.md#tools-and-self-tests).

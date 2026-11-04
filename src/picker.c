@@ -4,7 +4,7 @@
 // dev.fileexplorer.picker, so the compositor can float it) with a bar at the bottom: what's being asked, the file
 // name for Save, Cancel and the main button. The chosen path(s) are written to FILE, one per line; cancelling
 // leaves it empty. xdg-desktop-portal-termfilechooser runs this for every app's Open / Save / Choose folder
-// dialog (see packaging/portal/). The picker never changes the user's settings or session.
+// dialog (set up by Options > Integration, integration.c). The picker never changes the user's settings or session.
 
 enum { PICK_NONE, PICK_FILE, PICK_FILES, PICK_DIR, PICK_SAVE };
 static int g_pick;              // PICK_*

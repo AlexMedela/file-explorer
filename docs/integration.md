@@ -23,11 +23,10 @@ xdg-mime default dev.fileexplorer.desktop inode/directory     # default file man
 ```
 
 ## The picker window
-System file chooser: `file-explorer --pick file|files|dir|save --out FILE [PATH]` opens a picker window (app id
-`dev.fileexplorer.picker`) with an Open / Save / Choose bar and writes the chosen path(s) to FILE. With
-[xdg-desktop-portal-termfilechooser](https://github.com/hunkyburrito/xdg-desktop-portal-termfilechooser) and the
-files in `packaging/portal/` (wrapper, config, `hyprland-portals.conf`), every app's Open/Save/Choose-folder dialog
-becomes this file manager - browsers, Electron apps, GTK apps (`GTK_USE_PORTAL=1`). The picker never changes your settings.
+`file-explorer --pick file|files|dir|save --out FILE [PATH]` opens a picker window (app id `dev.fileexplorer.picker`)
+with an Open / Save / Choose bar and writes the chosen path(s) to FILE, one per line (nothing when cancelled). The
+"File chooser for other apps" switch connects it to xdg-desktop-portal-termfilechooser, so browsers, Electron and GTK
+apps (`GTK_USE_PORTAL=1`) get it as their Open / Save dialog. The picker never changes your settings.
 
 ## Phones and cameras
 iPhones / iPads and Android phones / cameras on a cable use the built-in connector (no GVfs needed). The package
