@@ -314,6 +314,12 @@ static const char *st_cursor_name(Pane *p) {
     return (p->order && p->cursor >= 0) ? p->L->entries[p->order[p->cursor]].name : "";
 }
 
+static const void *st_img_clip_cb(void *ud, const char *mime, size_t *size) {
+    (void)ud;
+    *size = mime && !strcmp(mime, "image/png") ? 8 : 0;
+    return *size ? "\x89PNG\r\n\x1A\n" : NULL;
+}
+
 static f32 st_row_y(Pane *p, const char *name) {
     for (u32 i = 0; i < p->count; i++)
         if (!strcmp(p->L->entries[p->order[i]].name, name))
@@ -752,6 +758,26 @@ static int run_selftest_ops(void) {
     ST_CHECK(n == 2 && !cut && back && !strcmp(back[1], ST_BASE "/dst/a (2).txt"));
     strv_free(back, n);
     clip_clear();
+
+    // an image on the clipboard pastes as a new file
+    static const char *img_mimes[] = {"text/html", "image/jpeg", "image/png"};
+    SDL_SetClipboardData(st_img_clip_cb, NULL, NULL, img_mimes, ARRAY_COUNT(img_mimes));
+    ST_CHECK(!clip_has_files() && clip_image_type() == 0); // png preferred over jpeg
+    pane_navigate(p, ST_BASE "/dst", true);
+    st_wait();
+    st_key(SDLK_V, SDL_KMOD_CTRL);
+    st_wait_ops();
+    st_wait();
+    const char *pasted = st_cursor_name(p);
+    ST_CHECK(pasted && !strncmp(pasted, "Pasted image ", 13) && strstr(pasted, ".png"));
+    if (pasted) {
+        char pp[PATH_MAX];
+        path_join(pp, sizeof pp, ST_BASE "/dst", pasted);
+        ST_CHECK(st_size(pp) == 8);
+    }
+    SDL_ClearClipboardData();
+    char tidy[PATH_MAX];
+    clip_paste_tidy(tidy, sizeof tidy);
 
     st_rmrf(ST_BASE);
     st_rmrf(ST_XDEV);

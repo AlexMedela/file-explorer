@@ -27,7 +27,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Ctrl+N | New window |
 | Right-click a tab | Duplicate, close others/left/right, move to split, open in new window, reopen closed |
 | Tab / Shift+Tab | Next / previous panel |
-| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste (interoperates with Nautilus, Dolphin, Thunar…) |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste (interoperates with Nautilus, Dolphin, Thunar…); pasting a copied image (screenshot, browser "Copy image") saves it as a new file |
 | F2 | Rename inline (stem pre-selected) |
 | Del / Shift+Del | Move to Trash (freedesktop spec) / delete permanently (asks) |
 | Ctrl+Z | Undo rename, move, copy, trash, new folder/file |

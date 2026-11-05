@@ -3667,6 +3667,69 @@ static char **clip_get(int *n, bool *cut) {
     return v;
 }
 
+// An image on the clipboard (a screenshot, "Copy image" in a browser): the first type we know, in order of preference.
+static const struct { const char *mime, *ext; } g_clip_images[] = {
+    {"image/png", "png"}, {"image/jpeg", "jpg"}, {"image/webp", "webp"}, {"image/gif", "gif"}, {"image/avif", "avif"},
+    {"image/bmp", "bmp"}, {"image/tiff", "tiff"}, {"image/svg+xml", "svg"},
+};
+
+static int clip_image_type(void) {
+    size_t nm = 0;
+    char **mt = SDL_GetClipboardMimeTypes(&nm);
+    int best = -1;
+    for (size_t i = 0; mt && i < nm; i++)
+        for (int k = 0; k < (int)ARRAY_COUNT(g_clip_images); k++)
+            if (!strcmp(mt[i], g_clip_images[k].mime) && (best < 0 || k < best)) best = k;
+    SDL_free(mt);
+    return best;
+}
+
+static bool clip_has_files(void) {
+    return g_clip.n || SDL_HasClipboardData("x-special/gnome-copied-files") || SDL_HasClipboardData("text/uri-list");
+}
+
+static void start_transfer(char **paths, int n, const char *dst, bool move, bool from_cut);
+
+// Folder for pasted images; removes the folders of earlier pastes, emptied by their move (rmdir keeps any that aren't).
+static void clip_paste_tidy(char *dir, size_t cap) {
+    const char *rt = getenv("XDG_RUNTIME_DIR");
+    snprintf(dir, cap, "%s/file-explorer/paste", rt && rt[0] ? rt : "/tmp");
+    DIR *d = opendir(dir);
+    for (struct dirent *de; d && (de = readdir(d));)
+        if (de->d_name[0] != '.') { char q[PATH_MAX]; path_join(q, sizeof q, dir, de->d_name); rmdir(q); }
+    if (d) closedir(d);
+}
+
+// Pasting an image: its bytes go to a new file in a private folder, which is then moved into `dst` like any
+// other pasted file (conflicts, progress, undo, remote folders and phones all work the same).
+static bool clip_paste_image(const char *dst) {
+    int k = clip_image_type();
+    if (k < 0) return false;
+    size_t sz = 0;
+    void *d = SDL_GetClipboardData(g_clip_images[k].mime, &sz);
+    if (!d || !sz) { SDL_free(d); return false; }
+    char dir[PATH_MAX];
+    clip_paste_tidy(dir, sizeof dir);
+    mkdir_p(dir, 0700);
+    strncat(dir, "/XXXXXX", sizeof dir - strlen(dir) - 1);
+    if (!mkdtemp(dir)) { SDL_free(d); toast("Couldn't paste the image: %s", strerror(errno)); return true; }
+    char name[96], path[PATH_MAX];
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    size_t o = strftime(name, sizeof name, "Pasted image %Y-%m-%d %H-%M-%S", &tm);
+    snprintf(name + o, sizeof name - o, ".%s", g_clip_images[k].ext);
+    path_join(path, sizeof path, dir, name);
+    FILE *f = fopen(path, "wb");
+    bool ok = f && fwrite(d, 1, sz, f) == sz;
+    if (f && fclose(f)) ok = false;
+    SDL_free(d);
+    if (!ok) { unlink(path); rmdir(dir); toast("Couldn't paste the image"); return true; }
+    char *one[1] = {path};
+    start_transfer(one, 1, dst, true, false);
+    return true;
+}
+
 static bool clip_is_cut(const char *dir, const char *name) {
     if (!g_clip.cut || !g_clip.n) return false;
     char full[PATH_MAX];
@@ -4627,7 +4690,7 @@ static void do_action(Pane *p, int act) {
         bool cut;
         paths = clip_get(&n, &cut);
         if (n) start_transfer(paths, n, p->path, cut, cut);
-        else toast("Nothing to paste");
+        else if (!clip_paste_image(p->path)) toast("Nothing to paste");
         break;
     }
     case ACT_RENAME:
@@ -5046,7 +5109,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
     m->n = 0;
     m->hover = -1;
     m->pane = p;
-    bool has_clip = g_clip.n || SDL_HasClipboardData("x-special/gnome-copied-files") || SDL_HasClipboardData("text/uri-list");
+    bool has_clip = clip_has_files() || clip_image_type() >= 0;
     if (on_item && p->cursor >= 0) {
         Entry *e = &p->L->entries[p->order[p->cursor]];
         bool dir = e->flags & ENT_DIR;
