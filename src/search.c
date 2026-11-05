@@ -5,6 +5,7 @@
 #include <sys/inotify.h>
 #include <sys/resource.h>
 #include <sys/sysmacros.h>
+#include <sys/vfs.h>
 
 // Lower a background thread's CPU and I/O priority so it never competes with the UI.
 static void thread_background_priority(void) {
@@ -1067,6 +1068,31 @@ static u64 du_tree(int dfd, const char *name, dev_t dev, _Atomic int *cancel, ch
     return total;
 }
 
+// Kernel pseudo-filesystems: their files report made-up sizes (/proc/kcore is the whole kernel address space,
+// 128 TiB on x86_64), so a folder on one has no meaningful size.
+static bool fs_is_pseudo(const char *path) {
+    struct statfs sf;
+    if (statfs(path, &sf)) return false;
+    switch ((u32)sf.f_type) {
+    case 0x9fa0:     // proc
+    case 0x62656572: // sysfs
+    case 0x1cd1:     // devpts
+    case 0x27e0eb:   // cgroup
+    case 0x63677270: // cgroup2
+    case 0x64626720: // debugfs
+    case 0x74726163: // tracefs
+    case 0x73636673: // securityfs
+    case 0xcafe4a11: // bpf
+    case 0x6165676c: // pstore
+    case 0xde5e81e4: // efivarfs
+    case 0x62656570: // configfs
+    case 0x65735543: // fusectl
+    case 0x42494e4d: // binfmt_misc
+        return true;
+    }
+    return false;
+}
+
 typedef struct {
     Listing *L;
     u32 *dirs;
@@ -1089,6 +1115,11 @@ static void *dirsize_worker(void *arg) {
         Entry *e = &L->entries[c->dirs[i]];
         char full[PATH_MAX];
         path_join(full, sizeof full, L->path, e->name);
+        if (fs_is_pseudo(full)) {
+            __atomic_store_n(&e->size, 0, __ATOMIC_RELAXED);
+            __atomic_or_fetch(&e->mflags, (u8)(MF_DIRSIZE | MF_NOSIZE), __ATOMIC_RELEASE);
+            continue;
+        }
         u64 sz;
         if (!dscache_get(full, &sz)) {
             struct stat st;

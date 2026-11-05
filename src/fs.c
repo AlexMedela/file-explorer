@@ -20,7 +20,8 @@ typedef struct CQuery {
     bool re_ok;
     regex_t re;
 } CQuery;
-enum { MF_EXEC = 1, MF_DIRSIZE = 2 }; // MF_DIRSIZE: size holds the recursive folder size (atomic access)
+enum { MF_EXEC = 1, MF_DIRSIZE = 2, MF_NOSIZE = 4 }; // MF_DIRSIZE: size holds the recursive folder size (atomic access)
+// MF_NOSIZE (with MF_DIRSIZE, size 0): a kernel pseudo-filesystem (/proc, /sys, ...) whose file sizes mean nothing
 enum { META_PENDING, META_CLAIMED, META_READY };
 enum { SORT_NAME, SORT_DATE, SORT_TYPE, SORT_SIZE, SORT_CREATED, SORT_EXT, SORT_PERMS, SORT_OWNER, SORT_COUNT };
 enum { LST_SCANNING, LST_READY, LST_COMPLETE, LST_ERROR };

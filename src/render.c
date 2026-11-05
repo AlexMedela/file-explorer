@@ -2075,7 +2075,8 @@ static void draw_list(Pane *p, bool active) {
                     if (!have && L->dirsize_started && !(e->flags & ENT_LINK)) snprintf(buf, sizeof buf, "\xE2\x80\xA6");
                     tc = bright ? C(COL_SEL_DIM) : C(COL_TEXT_DIM);
                 }
-                if (have) {
+                if (have && (__atomic_load_n(&e->mflags, __ATOMIC_RELAXED) & MF_NOSIZE)) snprintf(buf, sizeof buf, "\xE2\x80\x94");
+                else if (have) {
                     fmt_size(buf, sizeof buf, sz);
                     if (A.size_bars && size_max > 0 && sz > 0) { // TreeSize-style bar
                         f32 bw = (f32)((f64)(cw + S(6)) * ((f64)sz / (f64)size_max));
@@ -3206,7 +3207,7 @@ static void draw_preview(void) {
         if (is_dir) {
             bool known;
             u64 ds = entry_dir_size(e, &known);
-            if (known) { fmt_size(b2, sizeof b2, ds); y = pv_row(fs, x, y, w, "Size", b2); }
+            if (known && !(__atomic_load_n(&e->mflags, __ATOMIC_RELAXED) & MF_NOSIZE)) { fmt_size(b2, sizeof b2, ds); y = pv_row(fs, x, y, w, "Size", b2); }
         } else if (meta) {
             char cnt[32];
             fmt_size(b2, sizeof b2, e->size);
