@@ -201,14 +201,14 @@ static const char *tool(const char *env, const char *def) { // tests swap in fak
 
 static void phones_scan(DevList *L);
 
-static void devices_scan(DevList *L) {
+// Drives only (lsblk, a few ms); phones_scan fills in the rest (`gio mount -li` can take half a second).
+static void drives_scan(DevList *L) {
     char *out = xmalloc(65536);
     char *argv[] = {(char *)tool("FE_LSBLK", "lsblk"), "-P", "-b", "-o",
                     "PATH,PKNAME,TYPE,RM,HOTPLUG,MAJ:MIN,LABEL,FSTYPE,SIZE,PARTTYPE,UUID", NULL};
     L->n = 0;
     if (run_capture(argv, out, 65536) == 0) devices_parse(out, L);
     free(out);
-    phones_scan(L);
 }
 
 // --- network mounts ------------------------------------------------------------

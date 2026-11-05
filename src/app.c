@@ -635,6 +635,7 @@ static struct {
     int nservers;
     bool devs_enabled;        // off in self-tests unless faked
     bool dev_scanning, dev_rescan;
+    bool devs_known;          // the first drive list has landed
     int dev_busy;             // mount/unmount jobs running
     bool dev_open_tab;        // the pending mount opens in a new tab
     char dev_connecting[32];  // our connector is connecting to this USB device (sysfs name)
@@ -1453,9 +1454,24 @@ static void dev_scan_done(void *arg) {
     if (A.dev_rescan) { A.dev_rescan = false; devices_refresh(); }
 }
 
+// The drives land first, so they don't wait for the slow phone scan (and are there in the first frame, see main).
+static void dev_drives_done(void *arg) {
+    DevList *L = arg;
+    memcpy(A.devs.d, L->d, sizeof L->d);
+    A.devs.n = L->n;
+    free(L);
+    A.devs_known = true;
+    A.nnets = network_mounts(A.nets, (int)ARRAY_COUNT(A.nets));
+    init_places();
+}
+
 static void dev_scan_job(void *arg) {
     DevList *L = arg;
-    devices_scan(L);
+    drives_scan(L);
+    DevList *D = xmalloc(sizeof *D);
+    *D = *L;
+    main_post(dev_drives_done, D);
+    phones_scan(L);
     main_post(dev_scan_done, L);
 }
 
@@ -10301,6 +10317,8 @@ int main(int argc, char **argv) {
     if (selftest_admin) return run_selftest_admin();
     if (A.demo) return run_demo(A.demo);
 
+    // lsblk takes a few ms: wait for it (bounded) so the drives are in the first frame instead of popping in after.
+    for (u64 t0 = now_ns(); A.devs_enabled && !A.devs_known && now_ns() - t0 < 150000000ull;) { SDL_Delay(2); main_drain(); }
     A.redraw = true;
     while (!A.quit) {
         bool loading = false;
