@@ -1692,6 +1692,11 @@ static int run_selftest_m7(void) {
     st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
     ST_CHECK(fabsf(A.colw[COL_DATE] - (w0 - 10)) < 2);
     layout();
+    { // the grabbed edge follows the cursor; the column's other edge stays put
+        f32 nx0 = 0, nx1 = 0;
+        col_span(ly, COL_DATE, &nx0, &nx1);
+        ST_CHECK(fabsf(nx1 - (dx1 - S(10))) < 2 && fabsf(nx0 - dx0) < 2);
+    }
     if (!col_span(ly, COL_EXT, &x0, &x1)) { fprintf(stderr, "SELFTEST: Extension column not visible\n"); st_fail++; goto m7_done; }
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, (x0 + x1) * 0.5f, hy, SDL_BUTTON_LEFT, 1, 0);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);

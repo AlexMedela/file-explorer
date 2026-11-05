@@ -769,7 +769,7 @@ static void draw_header(Pane *p) {
             draw_chevron(ax, h.y + h.h * 0.5f, S(7), p->sort_desc ? 3 : 2, MAX(1.f, S(1.3f)), C(COL_ACCENT));
         }
         if (i > 0) {
-            bool eh = (A.drag == DRAG_COL_RESIZE && A.drag_pane == p && ly->cid[i - 1] == A.drag_col) ||
+            bool eh = (A.drag == DRAG_COL_RESIZE && A.drag_pane == p && ly->cid[i - 1] == A.drag_edge_col) ||
                       (A.mouse_in && A.drag == DRAG_NONE && in_rect(h, A.mx, A.my) && header_edge_at(ly, A.mx) == i - 1);
             draw_rect(x0, h.y + S(eh ? 5 : 9), 1, h.h - S(eh ? 10 : 18), eh ? C(COL_ACCENT) : C(COL_BORDER));
         }

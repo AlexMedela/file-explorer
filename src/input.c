@@ -472,15 +472,20 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
     }
     if (in_rect(ly->header, x, y)) {
         int edge = header_edge_at(ly, x);
-        if (edge >= 0) { // resize: the column left of the edge (Name's edge resizes the next column)
-            int c = ly->cid[edge];
-            if (c == COL_NAME) c = ly->cid[edge + 1];
+        if (edge >= 0) { // resize so that exactly the grabbed edge follows the cursor
+            // Name stretches to fill the row: next to Name, resizing the other column alone moves only this edge
+            // (Name absorbs it); anywhere else the two neighbours trade width, or the change would shift the whole
+            // column and move its far edge instead.
+            int l = ly->cid[edge], r = ly->cid[edge + 1];
             A.drag = DRAG_COL_RESIZE;
             A.drag_pane = p;
-            A.drag_col = c;
-            A.drag_col_w0 = A.colw[c];
+            A.drag_edge_col = l;
+            A.drag_col = l == COL_NAME ? r : l;
+            A.drag_col_w0 = A.colw[A.drag_col];
+            A.drag_col2 = l == COL_NAME || r == COL_NAME ? -1 : r;
+            A.drag_col2_w0 = A.drag_col2 >= 0 ? A.colw[A.drag_col2] : 0;
             A.band_mx0 = x;
-            A.drag_off = ly->cid[edge] == COL_NAME ? -1.f : 1.f; // direction
+            A.drag_off = l == COL_NAME ? -1.f : 1.f; // direction
             return;
         }
         int ci = header_col_at(ly, x);
@@ -902,7 +907,12 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
         A.preview_w = CLAMP(((f32)A.W - m->x) / A.scale, 220.f, MIN(1200.f, max_w));
         A.settings_dirty = true;
     } else if (A.drag == DRAG_COL_RESIZE) {
-        A.colw[A.drag_col] = CLAMP(A.drag_col_w0 + A.drag_off * (m->x - A.band_mx0) / A.scale, 40.f, 600.f);
+        f32 d = A.drag_off * (m->x - A.band_mx0) / A.scale;
+        if (A.drag_col2 >= 0) { // both neighbours stay within 40..600
+            d = CLAMP(d, MAX(40.f - A.drag_col_w0, A.drag_col2_w0 - 600.f), MIN(600.f - A.drag_col_w0, A.drag_col2_w0 - 40.f));
+            A.colw[A.drag_col2] = A.drag_col2_w0 - d;
+        }
+        A.colw[A.drag_col] = CLAMP(A.drag_col_w0 + d, 40.f, 600.f);
         A.settings_dirty = true;
     } else if (A.drag == DRAG_COL_PENDING || A.drag == DRAG_COL) {
         if (A.drag == DRAG_COL_PENDING && fabsf(m->x - A.band_mx0) > S(8)) A.drag = DRAG_COL;

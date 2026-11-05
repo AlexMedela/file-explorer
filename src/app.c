@@ -516,6 +516,9 @@ static struct {
     bool load_times;      // "listed in ... ms" in the status bar
     int drag_col;         // column being resized / moved
     f32 drag_col_w0;
+    int drag_col2;        // resize: neighbour that trades width with drag_col (-1: Name absorbs the change)
+    f32 drag_col2_w0;
+    int drag_edge_col;    // resize: column left of the dragged edge (for the highlight)
     int col_insert;       // reorder target (index in A.cols), -1 none
     // settings / M5
     f32 dpi_scale, zoom;
