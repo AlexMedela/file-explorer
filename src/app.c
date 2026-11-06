@@ -1445,6 +1445,22 @@ static void dev_phones_follow(const DevList *old, const DevList *now) {
     }
 }
 
+static void ssh_master_close_job(void *arg) { ssh_master_close(arg); free(arg); }
+
+// Re-read the network mounts; SFTP folders that went away (disconnected here or by another app) take their shared
+// ssh connection with them.
+static void nets_reload(void) {
+    char gone[ARRAY_COUNT(A.nets)][PATH_MAX];
+    int ng = 0;
+    for (int i = 0; i < A.nnets; i++) snprintf(gone[ng++], PATH_MAX, "%s", A.nets[i].path);
+    A.nnets = network_mounts(A.nets, (int)ARRAY_COUNT(A.nets));
+    for (int i = 0; i < ng; i++) {
+        bool still = !strstr(gone[i], "/sftp:");
+        for (int k = 0; k < A.nnets && !still; k++) still = !strcmp(A.nets[k].path, gone[i]);
+        if (!still) pool_submit(ssh_master_close_job, strdup(gone[i]));
+    }
+}
+
 static void dev_scan_done(void *arg) {
     DevList *L = arg;
     DevList *old = xmalloc(sizeof *old);
@@ -1454,7 +1470,7 @@ static void dev_scan_done(void *arg) {
     dev_phones_follow(old, &A.devs);
     free(old);
     A.dev_scanning = false;
-    A.nnets = network_mounts(A.nets, (int)ARRAY_COUNT(A.nets));
+    nets_reload();
     init_places();
     if (A.dev_rescan) { A.dev_rescan = false; devices_refresh(); }
 }
@@ -1466,7 +1482,7 @@ static void dev_drives_done(void *arg) {
     A.devs.n = L->n;
     free(L);
     A.devs_known = true;
-    A.nnets = network_mounts(A.nets, (int)ARRAY_COUNT(A.nets));
+    nets_reload();
     init_places();
 }
 
@@ -1862,6 +1878,16 @@ static bool net_parse(const char *uri, NetAddr *a) {
     if (colon) snprintf(a->port, sizeof a->port, "%.*s", (int)MIN(6, end - colon - 1), colon + 1);
     if (slash && slash[1]) url_dec(a->path, sizeof a->path, slash + 1, strlen(slash + 1));
     return a->host[0] != 0;
+}
+
+static bool ssh_target_uri(const char *uri, SshTarget *t) {
+    NetAddr a;
+    memset(t, 0, sizeof *t);
+    if (!net_parse(uri, &a) || strcmp(g_net_protos[a.proto].scheme, "sftp")) return false;
+    snprintf(t->user, sizeof t->user, "%s", a.user);
+    snprintf(t->host, sizeof t->host, "%s", a.host);
+    snprintf(t->port, sizeof t->port, "%s", a.port);
+    return t->host[0] != 0;
 }
 
 // Is this mount (GVfs names them "sftp:host=box,user=me", "smb-share:server=nas,share=x") the saved server's?
@@ -4494,29 +4520,10 @@ static void new_item(Pane *p, bool folder) {
 
 // --- terminals: local, or SSH into the server an SFTP folder lives on ------------------------------------
 
-typedef struct { char user[128], host[256], port[8], path[PATH_MAX]; } SshTarget;
-
-// Is path inside an SFTP connection? GVfs: <runtime>/gvfs/sftp:host=H,user=U,port=P/<remote path>; sshfs mounts:
-// /proc/self/mounts source "user@host:/dir". Fills the server and the remote folder.
+// Is path inside an SFTP connection? GVfs (ssh_target_gvfs) or sshfs mounts: /proc/self/mounts source
+// "user@host:/dir". Fills the server and the remote folder.
 static bool ssh_target_for(const char *path, SshTarget *t) {
-    memset(t, 0, sizeof *t);
-    const char *c = strstr(path, "/sftp:");
-    if (c) {
-        const char *comp = c + 1, *end = strchr(comp, '/');
-        size_t cl = end ? (size_t)(end - comp) : strlen(comp);
-        char kv[512];
-        snprintf(kv, sizeof kv, "%.*s", (int)MIN(cl - 5, sizeof kv - 1), comp + 5);
-        for (char *tok = strtok(kv, ","); tok; tok = strtok(NULL, ",")) {
-            char *eq = strchr(tok, '=');
-            if (!eq) continue;
-            *eq = 0;
-            if (!strcmp(tok, "host")) snprintf(t->host, sizeof t->host, "%s", eq + 1);
-            else if (!strcmp(tok, "user")) snprintf(t->user, sizeof t->user, "%s", eq + 1);
-            else if (!strcmp(tok, "port")) snprintf(t->port, sizeof t->port, "%.6s", eq + 1);
-        }
-        snprintf(t->path, sizeof t->path, "%s", end ? end : "/");
-        return t->host[0] != 0;
-    }
+    if (ssh_target_gvfs(path, t)) return true;
     for (int k = 0; k < A.nnets; k++) { // sshfs: label is the source "user@host:/dir"
         const char *mp = A.nets[k].path, *src = A.nets[k].label, *colon = strchr(src, ':');
         size_t ml = strlen(mp);
@@ -10068,7 +10075,10 @@ static bool resolve_dir(const char *in, char *out) {
     return realpath(in, out) && stat(out, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+static bool app_selftest(void) { return A.selftest; }
+
 int main(int argc, char **argv) {
+    if (argc == 2 && getenv("FE_ASKPASS_FILE")) return askpass_main(argv[1]); // ssh wants a password (devices.c)
     if (argc == 4 && !strcmp(argv[1], "--admin-op") && !strcmp(argv[2], "versions")) return snap_admin_main(argv[3]); // (snapshots.c)
     if (argc == 5 && !strcmp(argv[1], "--admin-op") && !strcmp(argv[2], "snapper-allow")) return snap_allow_main(argv[3], argv[4]);
     if (argc > 1 && !strcmp(argv[1], "--admin-op")) return admin_main(argc, argv); // as root through pkexec (ops.c)

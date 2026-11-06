@@ -88,9 +88,10 @@ you've visited shows its badges immediately; it runs again when a folder reloads
 `.git` changes (checked every 2 s) and - so files saved by other apps in folders you aren't looking at show up too -
 every 2 s while a repository is on screen (about 2 ms of CPU for a typical project; big repositories are checked less
 often, 50x as long as git takes there, and nothing runs while the window is minimised). In SFTP folders (connected
-servers, `sftp://`, sshfs mounts) git runs on the server over `ssh`, so `~/.ssh/config` applies; that needs a login
-without prompts (a key without a passphrase, or one loaded in `ssh-agent`) and `git` on the server, and shares one
-connection that stays open a minute. It is skipped on other network locations, in archives and in the Trash. `core.fsmonitor` is turned off so a repository's config can't start programs.
+servers, `sftp://`, sshfs mounts) git runs on the server over `ssh` (needs `git` there; `~/.ssh/config` applies):
+connecting a server also opens one ssh connection with the password or passphrase you gave, which git reuses until
+you disconnect, so nothing is asked again. Folders connected some other way (sshfs, or before the app started) need a
+login without prompts (an `ssh-agent`, or a key without a passphrase); disconnecting and connecting again is enough. It is skipped on other network locations, in archives and in the Trash. `core.fsmonitor` is turned off so a repository's config can't start programs.
 `git_status=0` in settings (or Options → Behaviour) turns it off.
 
 Disk usage measures on its own threads (the map fills in while it runs) and stays on the drive it started on: other

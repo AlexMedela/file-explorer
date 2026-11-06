@@ -253,7 +253,8 @@ static void sh_quote(char *out, size_t cap, const char *in) {
 }
 
 // Like git_capture, but on host over ssh when host isn't "" (a repository in an SFTP folder: one round trip instead
-// of a stat per file through the mount). Never asks for a password; the connection is shared and kept for a minute.
+// of a stat per file through the mount). Never asks for a password: it rides on the connection opened at connect
+// time, else needs an agent or a key without a passphrase.
 static char *git_capture_at(const char *host, const char *port, char *const argv[], size_t *len) {
     if (!host || !host[0]) return git_capture(argv, len);
     char cmd[PATH_MAX * 2] = "", q[PATH_MAX + 64];
@@ -262,9 +263,8 @@ static char *git_capture_at(const char *host, const char *port, char *const argv
         size_t o = strlen(cmd);
         snprintf(cmd + o, sizeof cmd - o, "%s%s", o ? " " : "", q);
     }
-    const char *rt = getenv("XDG_RUNTIME_DIR");
     char ctl[PATH_MAX];
-    snprintf(ctl, sizeof ctl, "ControlPath=%s/fe-ssh-%%C", rt && rt[0] ? rt : "/tmp");
+    ssh_control_path(ctl, sizeof ctl); // the connection opened when the server was connected (devices.c), if any
     char *ssh[24] = {(char *)tool("FE_SSH", "ssh"), "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=5",
                      "-o", "ServerAliveCountMax=2", "-o", "ControlMaster=auto", "-o", ctl, "-o", "ControlPersist=60"};
     int n = 15;

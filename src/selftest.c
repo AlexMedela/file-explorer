@@ -3179,7 +3179,14 @@ static void st_setup_m10(void) {
     chmod(M10_BASE "/tools/secret-tool", 0755);
     setenv("FE_SECRET_TOOL", M10_BASE "/tools/secret-tool", 1);
     f = fopen(M10_BASE "/tools/ssh", "w");
-    fputs("#!/bin/sh\necho \"ssh-args: $*\"\nexec cat\n", f);
+    fputs("#!/bin/sh\n"
+          "case \" $* \" in\n" // the shared connection (devices.c): checked, opened with askpass, closed
+          "*\" -O \"*) echo \"$*\" >> " M10_BASE "/tools/ssh-mux; case \" $* \" in *\" check \"*) exit 1;; esac; exit 0;;\n"
+          "*ControlMaster=yes*) echo \"$*\" >> " M10_BASE "/tools/ssh-mux\n"
+          "  [ -n \"$SSH_ASKPASS\" ] && \"$SSH_ASKPASS\" \"me@host's password: \" > " M10_BASE "/tools/ssh-pw.tmp\n"
+          "  mv " M10_BASE "/tools/ssh-pw.tmp " M10_BASE "/tools/ssh-pw; exit 0;;\n"
+          "esac\n"
+          "echo \"ssh-args: $*\"\nexec cat\n", f);
     fclose(f);
     chmod(M10_BASE "/tools/ssh", 0755);
     setenv("FE_SSH", M10_BASE "/tools/ssh", 1);
@@ -3447,6 +3454,9 @@ static int run_selftest_m10(void) {
         menu_activate(dc);
         ST_CHECK(st_wait_cond(c_dev_idle, 5000));
         ST_CHECK(st_log_has("gio mount -u " M10_BASE "/gvfs/sftp:host=box,user=me") && !strcmp(A.toast, "Disconnected"));
+        char mux[4096] = "";
+        st_read_text(M10_BASE "/tools/ssh-mux", mux, sizeof mux);
+        ST_CHECK(strstr(mux, "-O check -- me@box") && strstr(mux, "-O exit -- me@box")); // its shared ssh connection too
     }
 
     // phones and cameras on a cable: what the volume monitors list, matched with their folders in the FUSE bridge
@@ -3850,6 +3860,46 @@ static int run_selftest_m10(void) {
         st_wait();
         ST_CHECK(st_exists(M10_BASE "/gvfs/sftp:host=secure.lan,user=me") && strstr(active_pane()->path, "host=secure.lan"));
         ST_CHECK(A.nservers == ns0 + 1 && !strcmp(A.servers[ns0].uri, "sftp://me@secure.lan/") && !strstr(A.servers[ns0].uri, "s3cret"));
+        // the shared ssh connection for git status: opened in the background with the same password through our
+        // askpass (never on the command line), the password file gone afterwards
+        {
+            char pw[64] = "", mux[4096] = "";
+            for (int k = 0; k < 600 && !st_exists(M10_BASE "/tools/ssh-pw"); k++) SDL_Delay(5);
+            SDL_Delay(50);
+            st_read_text(M10_BASE "/tools/ssh-pw", pw, sizeof pw);
+            st_read_text(M10_BASE "/tools/ssh-mux", mux, sizeof mux);
+            char *sl = strstr(mux, "-O check -- me@secure.lan"); // (earlier servers were connected without a password)
+            ST_CHECK(!strcmp(pw, "s3cret\n") && sl && strstr(sl, "-f -N -- me@secure.lan") && !strstr(mux, "s3cret"));
+            if (sl && (sl = strchr(sl, '\n'))) {
+                char *e = strchr(sl + 1, '\n');
+                if (e) *e = 0;
+                ST_CHECK(strstr(sl, "ControlMaster=yes") && strstr(sl, "ControlPersist=yes") && !strstr(sl, "BatchMode"));
+            }
+            char pat[PATH_MAX];
+            snprintf(pat, sizeof pat, "%s/fe-askpass-%d-", getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "/tmp", (int)getpid());
+            DIR *dd = opendir(getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "/tmp");
+            bool left = false;
+            for (struct dirent *de; dd && (de = readdir(dd));) {
+                char full[PATH_MAX + 256];
+                snprintf(full, sizeof full, "%s/%s", getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "/tmp", de->d_name);
+                if (!strncmp(full, pat, strlen(pat))) left = true;
+            }
+            if (dd) closedir(dd);
+            ST_CHECK(!left);
+            // disconnected by another app: the next scan closes the shared connection
+            ST_CHECK(!strstr(mux, "-O exit -- me@secure.lan"));
+            rmdir(M10_BASE "/gvfs/sftp:host=secure.lan,user=me");
+            devices_refresh();
+            for (int k = 0; k < 200 && A.dev_scanning; k++) { st_frames(1); SDL_Delay(5); }
+            for (int k = 0; k < 200 && !strstr(mux, "-O exit -- me@secure.lan"); k++) {
+                SDL_Delay(5);
+                st_read_text(M10_BASE "/tools/ssh-mux", mux, sizeof mux);
+            }
+            ST_CHECK(strstr(mux, "-O exit -- me@secure.lan") != NULL);
+            mkdir(M10_BASE "/gvfs/sftp:host=secure.lan,user=me", 0755); // connected again for what follows
+            devices_refresh();
+            for (int k = 0; k < 200 && A.dev_scanning; k++) { st_frames(1); SDL_Delay(5); }
+        }
         // wrong password: gio is told nothing more after asking again, the error is shown, nothing mounted
         connect_open(-1);
         g_sheet.cn_remember = true;

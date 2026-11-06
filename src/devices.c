@@ -774,6 +774,136 @@ static void secret_clear(const char *uri) {
     secret_cmd(argv, NULL, NULL, 0);
 }
 
+// --- shared ssh connection to SFTP servers (git status runs over it) --------------------------------------
+// Right after an SFTP connect worked, one ssh connection to the server is opened with the password / passphrase the
+// user just gave (or the keyring's) and kept as a ControlMaster while the folder is connected: later ssh runs
+// (git.c) reuse it and ask nothing.
+// The secret reaches ssh through our own binary as SSH_ASKPASS reading a private file in the runtime folder (never
+// the command line or ssh's environment); the file is gone once ssh has logged in.
+
+static bool app_selftest(void); // app.c
+
+static void ssh_control_path(char *out, size_t cap) { // "ControlPath=..." (%C: hash of host, port, user)
+    const char *rt = getenv("XDG_RUNTIME_DIR");
+    snprintf(out, cap, "ControlPath=%s/fe-ssh-%%C", rt && rt[0] ? rt : "/tmp");
+}
+
+typedef struct { char user[128], host[256], port[8], path[PATH_MAX]; } SshTarget;
+
+// GVfs's folder of an SFTP connection: <runtime>/gvfs/sftp:host=H,user=U,port=P/<remote path>.
+static bool ssh_target_gvfs(const char *path, SshTarget *t) {
+    memset(t, 0, sizeof *t);
+    const char *c = strstr(path, "/sftp:");
+    if (!c) return false;
+    const char *comp = c + 1, *end = strchr(comp, '/');
+    size_t cl = end ? (size_t)(end - comp) : strlen(comp);
+    char kv[512];
+    snprintf(kv, sizeof kv, "%.*s", (int)MIN(cl - 5, sizeof kv - 1), comp + 5);
+    char *save = NULL;
+    for (char *tok = strtok_r(kv, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        char *eq = strchr(tok, '=');
+        if (!eq) continue;
+        *eq = 0;
+        if (!strcmp(tok, "host")) snprintf(t->host, sizeof t->host, "%s", eq + 1);
+        else if (!strcmp(tok, "user")) snprintf(t->user, sizeof t->user, "%s", eq + 1);
+        else if (!strcmp(tok, "port")) snprintf(t->port, sizeof t->port, "%.6s", eq + 1);
+    }
+    snprintf(t->path, sizeof t->path, "%s", end ? end : "/");
+    return t->host[0] != 0;
+}
+
+static bool ssh_target_uri(const char *uri, SshTarget *t); // app.c: "sftp://user@host:port/dir" -> the server
+
+static void ssh_dest(const SshTarget *t, char *out, size_t cap) {
+    snprintf(out, cap, "%s%s%s", t->user, t->user[0] ? "@" : "", t->host);
+}
+
+// `file-explorer <prompt>` with FE_ASKPASS_FILE set: ssh asking for a password or passphrase (anything else, like
+// an unknown host key, is refused). Called from main() before anything else.
+static int askpass_main(const char *prompt) {
+    const char *file = getenv("FE_ASKPASS_FILE");
+    if (!str_has_ci(prompt, "password") && !str_has_ci(prompt, "passphrase")) return 1;
+    int fd = open(file, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return 1;
+    char buf[300];
+    ssize_t n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (n <= 0) return 1;
+    buf[n++] = '\n';
+    bool ok = write(1, buf, (size_t)n) == n;
+    explicit_bzero(buf, sizeof buf);
+    return ok ? 0 : 1;
+}
+
+typedef struct { SshTarget t; char secret[256]; } SshOpen;
+
+static void ssh_master_job(void *arg) {
+    SshOpen *o = arg;
+    char dest[400], ctl[PATH_MAX], out[512];
+    ssh_dest(&o->t, dest, sizeof dest);
+    ssh_control_path(ctl, sizeof ctl);
+    const char *sshb = tool("FE_SSH", "ssh");
+    char *check[] = {(char *)sshb, "-o", ctl, "-O", "check", "--", dest, NULL};
+    if (run_capture(check, out, sizeof out) == 0) goto done; // connected already (an earlier connect)
+    char file[PATH_MAX] = "", exe[PATH_MAX], ev_ask[PATH_MAX + 16], ev_file[PATH_MAX + 20];
+    ssize_t el = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (o->secret[0] && el > 0) {
+        static atomic_int seq;
+        exe[el] = 0;
+        const char *rt = getenv("XDG_RUNTIME_DIR");
+        snprintf(file, sizeof file, "%s/fe-askpass-%d-%d", rt && rt[0] ? rt : "/tmp", (int)getpid(), atomic_fetch_add(&seq, 1));
+        int fd = open(file, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+        size_t sl = strlen(o->secret);
+        if (fd < 0 || write(fd, o->secret, sl) != (ssize_t)sl) file[0] = 0;
+        if (fd >= 0) close(fd);
+    }
+    snprintf(ev_ask, sizeof ev_ask, "SSH_ASKPASS=%s", exe);
+    snprintf(ev_file, sizeof ev_file, "FE_ASKPASS_FILE=%s", file);
+    // -f: back to us once logged in; the connection stays in the background as long as the SFTP folder is
+    // connected (ssh_master_close when it goes away; it also ends with the server, ServerAlive)
+    char *av[32] = {"env", ev_ask, "SSH_ASKPASS_REQUIRE=force", ev_file, (char *)sshb, "-o", ctl, "-o", "ControlMaster=yes",
+                    "-o", "ControlPersist=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"};
+    int n = 17;
+    if (!file[0]) { av[n++] = "-o"; av[n++] = "BatchMode=yes"; } // nothing to answer with: an agent or key file only
+    if (o->t.port[0]) { av[n++] = "-p"; av[n++] = o->t.port; }
+    av[n++] = "-f";
+    av[n++] = "-N";
+    av[n++] = "--";
+    av[n++] = dest;
+    av[n] = NULL;
+    run_capture(av, out, sizeof out);
+    if (file[0]) unlink(file);
+done:
+    explicit_bzero(o->secret, sizeof o->secret);
+    free(o);
+}
+
+// After `uri` (sftp://...) connected with secret (may be ""): open the shared connection in the background.
+static void ssh_master_open(const char *uri, const char *secret) {
+    SshTarget t;
+    if (!ssh_target_uri(uri, &t) || (app_selftest() && !getenv("FE_SSH"))) return;
+    SshOpen *o = xcalloc(1, sizeof *o);
+    o->t = t;
+    snprintf(o->secret, sizeof o->secret, "%s", secret ? secret : "");
+    pool_submit(ssh_master_job, o);
+}
+
+// The SFTP folder (GVfs) was disconnected: close its shared connection too.
+static void ssh_master_close(const char *mount) {
+    SshTarget t;
+    if (!ssh_target_gvfs(mount, &t) || (app_selftest() && !getenv("FE_SSH"))) return;
+    char dest[400], ctl[PATH_MAX], out[256];
+    ssh_dest(&t, dest, sizeof dest);
+    ssh_control_path(ctl, sizeof ctl);
+    char *av[12] = {(char *)tool("FE_SSH", "ssh"), "-o", ctl, "-O", "exit"};
+    int n = 5;
+    if (t.port[0]) { av[n++] = "-p"; av[n++] = t.port; }
+    av[n++] = "--";
+    av[n++] = dest;
+    av[n] = NULL;
+    run_capture(av, out, sizeof out);
+}
+
 // Ask the user on the main thread (question or password); blocks until answered. Returns the answer.
 static int dev_net_ask(DevJob *j) {
     pthread_mutex_lock(&j->qmtx);
@@ -917,6 +1047,7 @@ static int net_mount_run(DevJob *j) {
     for (char *q = buf; (q = strstr(q, "\n@rc=")); q++) m = q;
     if (m) { status = atoi(m + 5); *m = 0; }
     if (status == 0 && j->store_secret && j->password[0] && !j->secret_used) secret_store(j->target, j->password);
+    if (status == 0 || str_has_ci(buf, "already mounted")) ssh_master_open(j->target, j->password); // SFTP: for git status
     explicit_bzero(j->password, sizeof j->password);
     if (!j->out[0]) { // the last meaningful line (gio's error), without our prompts
         char *best = NULL;
@@ -1055,6 +1186,7 @@ static void dev_job(void *arg) {
         if (gvfs) {
             char *argv[] = {(char *)tool("FE_GIO", "gio"), "mount", "-u", j->target, NULL};
             j->rc = run_capture(argv, j->out, sizeof j->out);
+            if (j->rc == 0) ssh_master_close(j->target);
         } else {
             char *argv[] = {"fusermount3", "-u", j->target, NULL};
             j->rc = run_capture(argv, j->out, sizeof j->out);
