@@ -4527,11 +4527,19 @@ static void st_setup_git(void) {
     fclose(f);
     chmod(GIT_BASE "/tools/git", 0755);
     setenv("FE_GIT", GIT_BASE "/tools/git", 1);
-    // a repository on a (pretend) sshfs mount, and a stand-in ssh that runs the command here
-    mkdir_p(GIT_BASE "/vm/proj/.git", 0755);
-    mkdir_p(GIT_BASE "/vm/proj/sub", 0755);
-    st_write_text(GIT_BASE "/vm/proj/.git/HEAD", "ref: refs/heads/main\n");
-    st_write(GIT_BASE "/vm/proj/sub/c.txt", 10);
+    // repositories in (pretend) GVfs network folders: SMB and SFTP; a stand-in ssh that runs the command here
+    static const char *const net[] = {GIT_BASE "/gvfs/smb-share:server=nas,share=x/proj", GIT_BASE "/gvfs/sftp:host=vm,user=me,port=2222/srv/it's/proj"};
+    for (int i = 0; i < 2; i++) {
+        char d[PATH_MAX];
+        snprintf(d, sizeof d, "%s/.git", net[i]);
+        mkdir_p(d, 0755);
+        snprintf(d, sizeof d, "%s/.git/HEAD", net[i]);
+        st_write_text(d, "ref: refs/heads/main\n");
+        snprintf(d, sizeof d, "%s/sub", net[i]);
+        mkdir_p(d, 0755);
+        snprintf(d, sizeof d, "%s/sub/c.txt", net[i]);
+        st_write(d, 10);
+    }
     f = fopen(GIT_BASE "/tools/ssh", "w");
     fputs("#!/bin/sh\necho \"ssh $*\" >> " GIT_BASE "/tools/log\nfor a; do last=$a; done\nexec sh -c \"$last\"\n", f);
     fclose(f);
@@ -4830,34 +4838,21 @@ static int run_selftest_git(void) {
     // opening: text files without a known type go to the text editor
     ST_CHECK(file_looks_text(GIT_BASE "/repo/.git/HEAD") && !file_looks_text(GIT_BASE "/repo/a.txt") && !file_looks_text(GIT_BASE "/repo"));
 
-    // --- sshfs: git runs on the server over ssh; other network folders are skipped
-    char host[256], rp[PATH_MAX];
-    setenv("FE_SSHFS", "/mnt/vm=me@vm:", 1);
-    ST_CHECK(path_sshfs("/mnt/vm/a/b", host, sizeof host, rp, sizeof rp) && !strcmp(host, "me@vm") && !strcmp(rp, "a/b"));
-    ST_CHECK(path_sshfs("/mnt/vm", host, sizeof host, rp, sizeof rp) && !rp[0] && !path_sshfs("/mnt/vmx", host, sizeof host, rp, sizeof rp));
-    setenv("FE_SSHFS", "/mnt/vm=[fe80::1]:/srv/", 1);
-    ST_CHECK(path_sshfs("/mnt/vm/a", host, sizeof host, rp, sizeof rp) && !strcmp(host, "[fe80::1]") && !strcmp(rp, "/srv/a"));
-    unsetenv("FE_SSHFS");
-    char ql[64] = "";
-    git_shell_quote(ql, sizeof ql, "a b");
-    git_shell_quote(ql, sizeof ql, "it's");
-    ST_CHECK(!strcmp(ql, "'a b' 'it'\\''s'"));
-    setenv("FE_GVFS_DIR", GIT_BASE "/vm", 1); // the mount counts as a network folder
+    // --- SFTP folders: git runs on the server over ssh; other network folders are skipped
+    setenv("FE_GVFS_DIR", GIT_BASE "/gvfs", 1);
+    st_git_settle();
     runs = st_git_status_runs();
-    pane_navigate(p, GIT_BASE "/vm/proj/sub", true);
+    pane_navigate(p, GIT_BASE "/gvfs/smb-share:server=nas,share=x/proj/sub", true);
     st_wait();
     st_git_settle();
     ST_CHECK(!git_view(p, &v) && st_git_status_runs() == runs && st_git_count("ssh ") == 0);
-    setenv("FE_SSHFS", GIT_BASE "/vm=me@vm:/srv/it's", 1);
-    st_key(SDLK_F5, 0);
+    pane_navigate(p, GIT_BASE "/gvfs/sftp:host=vm,user=me,port=2222/srv/it's/proj/sub", true);
     st_wait();
     ST_CHECK(st_git_wait(p, &v) && !strcmp(v.prefix, "sub/") && st_gs(v.g, v.prefix, "c.txt") == GS_ADDED);
-    // one run, logged twice: by the stand-in ssh and by git
-    ST_CHECK(st_git_status_runs() == runs + 2 && !strcmp(v.g->last_hash, "abc1234") && v.g->nremotes == 2);
+    ST_CHECK(st_git_status_runs() == runs + 1 && !strcmp(v.g->last_hash, "abc1234") && v.g->nremotes == 2);
     st_read_text(GIT_BASE "/tools/log", log, sizeof log);
-    ST_CHECK(strstr(log, "ssh -o BatchMode=yes ") && strstr(log, " -- me@vm '" GIT_BASE "/tools/git' '-c' 'core.fsmonitor=false'"));
+    ST_CHECK(strstr(log, "ssh -o BatchMode=yes ") && strstr(log, " -p 2222 -- me@vm '" GIT_BASE "/tools/git' '-c' 'core.fsmonitor=false'"));
     ST_CHECK(strstr(log, "-c core.fsmonitor=false --no-optional-locks -C /srv/it's/proj status --porcelain=v2") != NULL);
-    unsetenv("FE_SSHFS");
     unsetenv("FE_GVFS_DIR");
 
     fprintf(stderr, "selftest-git: %s (%d failures)\n", st_fail ? "FAIL" : "ok", st_fail);

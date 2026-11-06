@@ -1273,7 +1273,6 @@ static void toast(const char *fmt, ...);
 // Network filesystems (NFS, SMB, sshfs, GVfs...): a dead server makes stat() hang, so the main thread
 // never touches paths under these mount points (the list is read from /proc/self/mounts, no syscalls on them).
 static char **g_remote;
-static char **g_remote_ssh; // per mount: sshfs's "user@host:path" source, NULL for other filesystems
 static int g_nremote;
 
 // /proc/self/mounts writes spaces, tabs, newlines and backslashes as \ooo octal escapes (also used by rclone.c).
@@ -1290,9 +1289,7 @@ static void mount_unescape(const char *s, char *out, size_t cap) {
 
 static void remote_mounts_load(void) {
     strv_free(g_remote, g_nremote);
-    for (int i = 0; i < g_nremote; i++) free(g_remote_ssh[i]);
-    free(g_remote_ssh);
-    g_remote = g_remote_ssh = NULL;
+    g_remote = NULL;
     g_nremote = 0;
     FILE *f = fopen("/proc/self/mounts", "r");
     if (!f) return;
@@ -1307,14 +1304,7 @@ static void remote_mounts_load(void) {
         char clean[PATH_MAX];
         mount_unescape(mp, clean, sizeof clean);
         g_remote = xrealloc(g_remote, (size_t)(g_nremote + 1) * sizeof(char *));
-        g_remote_ssh = xrealloc(g_remote_ssh, (size_t)(g_nremote + 1) * sizeof(char *));
-        g_remote[g_nremote] = strdup(clean);
-        g_remote_ssh[g_nremote] = NULL;
-        if (!strcmp(type, "fuse.sshfs")) {
-            mount_unescape(src, clean, sizeof clean);
-            g_remote_ssh[g_nremote] = strdup(clean);
-        }
-        g_nremote++;
+        g_remote[g_nremote++] = strdup(clean);
     }
     fclose(f);
 }
@@ -1329,41 +1319,6 @@ static bool path_is_remote(const char *path) {
     }
     const char *gv = getenv("FE_GVFS_DIR"); // tests
     return gv && gv[0] && !strncmp(path, gv, strlen(gv));
-}
-
-// A path under an sshfs mount as the server sees it: host ("user@host", as sshfs was given it) and the path there
-// ("" = the remote home, else relative to it unless absolute). False for anything else.
-static bool path_sshfs(const char *path, char *host, size_t hcap, char *rpath, size_t rcap) {
-    const char *mount = NULL, *src = NULL;
-    size_t ml = 0;
-    for (int i = 0; i < g_nremote; i++) {
-        size_t l = strlen(g_remote[i]);
-        if (g_remote_ssh[i] && l >= ml && !strncmp(path, g_remote[i], l) && (path[l] == 0 || path[l] == '/' || !strcmp(g_remote[i], "/"))) {
-            mount = g_remote[i];
-            src = g_remote_ssh[i];
-            ml = l;
-        }
-    }
-    const char *fake = getenv("FE_SSHFS"); // tests: "<mount point>=<sshfs source>"
-    const char *eq = fake ? strchr(fake, '=') : NULL;
-    char fmount[PATH_MAX];
-    if (eq && (size_t)(eq - fake) < sizeof fmount) {
-        snprintf(fmount, sizeof fmount, "%.*s", (int)(eq - fake), fake);
-        size_t l = strlen(fmount);
-        if (l >= ml && !strncmp(path, fmount, l) && (path[l] == 0 || path[l] == '/')) { mount = fmount; src = eq + 1; ml = l; }
-    }
-    if (!mount) return false;
-    // "host:path", "user@host:path", "[v6addr]:path"
-    const char *colon = src[0] == '[' ? strstr(src, "]:") : NULL;
-    colon = colon ? colon + 1 : strchr(src, ':');
-    if (!colon || colon == src || (size_t)(colon - src) >= hcap) return false;
-    snprintf(host, hcap, "%.*s", (int)(colon - src), src);
-    const char *base = colon + 1, *rest = path + (strcmp(mount, "/") ? ml : 0);
-    while (*rest == '/') rest++;
-    size_t bl = strlen(base);
-    if (!bl) snprintf(rpath, rcap, "%s", rest);
-    else snprintf(rpath, rcap, "%s%s%s", base, rest[0] && base[bl - 1] != '/' ? "/" : "", rest);
-    return true;
 }
 
 // Inside a connected phone or camera (they have no trash).
@@ -4577,18 +4532,6 @@ static bool ssh_target_for(const char *path, SshTarget *t) {
     return false;
 }
 
-// 'text' for a POSIX shell (inner ' becomes '\'')
-static void sh_quote(char *out, size_t cap, const char *in) {
-    size_t o = 0;
-    if (o + 1 < cap) out[o++] = '\'';
-    for (const char *c = in; *c && o + 5 < cap; c++) {
-        if (*c == '\'') { memcpy(out + o, "'\\''", 4); o += 4; }
-        else out[o++] = *c;
-    }
-    if (o + 1 < cap) out[o++] = '\'';
-    out[o] = 0;
-}
-
 static bool find_terminal(char *exe, size_t cap, const char **name) {
     // $TERMINAL, then xdg-terminal-exec (the user's preferred terminal, where set up), then the desktops' own
     static const char *cands[] = {NULL, "xdg-terminal-exec", "ptyxis", "kgx", "gnome-terminal", "konsole", "cosmic-term",
@@ -6690,9 +6633,9 @@ typedef struct { // what a pane shows: its repository and its place in it
 
 static bool git_pane_eligible(Pane *p) {
     if (!A.git_status || !p->path[0] || pane_is_archive(p) || pane_is_trash(p)) return false;
-    char host[256], rp[PATH_MAX];
-    // other network folders: git would stat every file through the mount; on sshfs it runs on the server instead
-    if (path_is_remote(p->path) && !path_sshfs(p->path, host, sizeof host, rp, sizeof rp)) return false;
+    SshTarget st;
+    // other network folders: git would stat every file through the mount; on SFTP it runs on the server instead
+    if (path_is_remote(p->path) && !ssh_target_for(p->path, &st)) return false;
     Tab *t = tab_of(p);
     if (t && t->term) return false;
     return !A.selftest || getenv("FE_GIT"); // tests use a stand-in git, never the real one
@@ -6731,7 +6674,12 @@ static void git_request(struct GitRepo *r, bool force) {
     GitJob *j = xcalloc(1, sizeof *j);
     snprintf(j->root, sizeof j->root, "%s", r->root);
     snprintf(j->gitdir, sizeof j->gitdir, "%s", r->gitdir);
-    if (!path_sshfs(j->root, j->host, sizeof j->host, j->rroot, sizeof j->rroot)) j->host[0] = 0;
+    SshTarget st;
+    if (path_is_remote(r->root) && ssh_target_for(r->root, &st)) { // an SFTP folder (GVfs or sshfs): git runs on the server
+        snprintf(j->host, sizeof j->host, "%s%s%s", st.user, st.user[0] ? "@" : "", st.host);
+        snprintf(j->port, sizeof j->port, "%s", st.port);
+        snprintf(j->rroot, sizeof j->rroot, "%s", st.path);
+    }
     j->sig = r->res ? r->res->sig : 0;
     j->force = force || !r->res;
     if (j->force) r->full = r->checked;

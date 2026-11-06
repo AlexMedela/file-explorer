@@ -87,10 +87,10 @@ Git status runs `git status` (needs `git`) for the whole repository on its own t
 you've visited shows its badges immediately; it runs again when a folder reloads, when the window gets focus, when
 `.git` changes (checked every 2 s) and - so files saved by other apps in folders you aren't looking at show up too -
 every 2 s while a repository is on screen (about 2 ms of CPU for a typical project; big repositories are checked less
-often, 50x as long as git takes there, and nothing runs while the window is minimised). On sshfs mounts git runs on
-the server over `ssh` (the host sshfs was given, so `~/.ssh/config` applies; it needs key or agent login and `git`
-there, and shares one connection that stays open a minute); it is skipped on other network locations, in archives and
-in the Trash. `core.fsmonitor` is turned off so a repository's config can't start programs.
+often, 50x as long as git takes there, and nothing runs while the window is minimised). In SFTP folders (connected
+servers, `sftp://`, sshfs mounts) git runs on the server over `ssh`, so `~/.ssh/config` applies; that needs a login
+without prompts (a key without a passphrase, or one loaded in `ssh-agent`) and `git` on the server, and shares one
+connection that stays open a minute. It is skipped on other network locations, in archives and in the Trash. `core.fsmonitor` is turned off so a repository's config can't start programs.
 `git_status=0` in settings (or Options → Behaviour) turns it off.
 
 Disk usage measures on its own threads (the map fills in while it runs) and stays on the drive it started on: other
