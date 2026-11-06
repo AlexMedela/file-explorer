@@ -1,9 +1,9 @@
 // git.c - git status for the file list: finds the repository of a folder, runs `git status --porcelain=v2` for the
-// whole repository on git's own worker threads and parses it into per-path states (changed files + the folders
-// containing them), branch, ahead/behind, remotes, last commit and stashes. One result serves every folder of the
-// repository. Also which subfolders of a folder are repositories (branch + remote for the pills on folder rows, read
-// from their .git without running git). The main-thread side (cache, refresh, drawing, the path bar chip) is the
-// "git status" section of app.c.
+// whole repository on git's own worker threads (over ssh on the server for sshfs mounts) and parses it into per-path
+// states (changed files + the folders containing them), branch, ahead/behind, remotes, last commit and stashes. One
+// result serves every folder of the repository. Also which subfolders of a folder are repositories (branch + remote
+// for the pills on folder rows, read from their .git without running git). The main-thread side (cache, refresh,
+// drawing, the path bar chip) is the "git status" section of app.c.
 
 // States, in increasing priority (a folder shows the strongest state found inside it).
 enum { GS_NONE, GS_IGNORED, GS_UNTRACKED, GS_STAGED, GS_ADDED, GS_RENAMED, GS_MODIFIED, GS_DELETED, GS_CONFLICT };
@@ -240,6 +240,34 @@ static char *git_capture(char *const argv[], size_t *len) {
     return buf;
 }
 
+// Append arg to a remote shell command line, single-quoted.
+static void git_shell_quote(char *cmd, size_t cap, const char *arg) {
+    size_t o = strlen(cmd);
+    if (o && o + 1 < cap) cmd[o++] = ' ';
+    if (o + 1 < cap) cmd[o++] = '\'';
+    for (const char *c = arg; *c && o + 5 < cap; c++) {
+        if (*c == '\'') { memcpy(cmd + o, "'\\''", 4); o += 4; }
+        else cmd[o++] = *c;
+    }
+    if (o + 1 < cap) cmd[o++] = '\'';
+    cmd[o] = 0;
+}
+
+// Like git_capture, but on host over ssh when host isn't "" (a repository on an sshfs mount: one round trip instead
+// of a stat per file through the mount). Never asks for a password; the connection is shared and kept for a minute.
+static char *git_capture_at(const char *host, char *const argv[], size_t *len) {
+    if (!host || !host[0]) return git_capture(argv, len);
+    char cmd[PATH_MAX * 2] = "";
+    for (int i = 0; argv[i]; i++) git_shell_quote(cmd, sizeof cmd, argv[i]);
+    const char *rt = getenv("XDG_RUNTIME_DIR");
+    char ctl[PATH_MAX];
+    snprintf(ctl, sizeof ctl, "ControlPath=%s/fe-ssh-%%C", rt && rt[0] ? rt : "/tmp");
+    char *ssh[] = {(char *)tool("FE_SSH", "ssh"), "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=5",
+                   "-o", "ServerAliveCountMax=2", "-o", "ControlMaster=auto", "-o", ctl, "-o", "ControlPersist=60", "--",
+                   (char *)host, cmd, NULL};
+    return git_capture(ssh, len);
+}
+
 static void git_read_line(const char *path, char *out, size_t cap) {
     out[0] = 0;
     FILE *f = fopen(path, "r");
@@ -339,6 +367,7 @@ static void git_resolve_job(void *arg) {
 
 typedef struct GitJob {
     char root[PATH_MAX], gitdir[PATH_MAX];
+    char host[256], rroot[PATH_MAX]; // on an sshfs mount: the server and the root there (git runs over ssh)
     u64 sig;        // of the result the main thread has (0: none)
     bool force;     // run even if .git looks unchanged (a folder was reloaded, or the periodic re-check)
     GitResult *res; // NULL: nothing changed
@@ -346,13 +375,13 @@ typedef struct GitJob {
 
 static void git_job_done(void *arg); // app.c
 
-static void git_details(GitResult *g, const char *root, const char *gitdir) {
+static void git_details(GitResult *g, const char *host, const char *root, const char *gitdir) {
     const char *gitb = tool("FE_GIT", "git");
     size_t len;
     if (g->branch[0] || !g->detached) { // last commit (none before the first one)
         char *argv[] = {(char *)gitb, "-c", "core.fsmonitor=false", "--no-optional-locks", "-C", (char *)root, "log", "-1",
                         "--format=%h%x1f%ct%x1f%an%x1f%s", NULL};
-        char *out = git_capture(argv, &len);
+        char *out = git_capture_at(host, argv, &len);
         char *f[4] = {0};
         int nf = 0;
         for (char *s = out, *e; s && nf < 4; s = e ? e + 1 : NULL) {
@@ -371,7 +400,7 @@ static void git_details(GitResult *g, const char *root, const char *gitdir) {
     }
     { // remotes: "remote.origin.url git@host:me/x.git" lines
         char *argv[] = {(char *)gitb, "-C", (char *)root, "config", "--get-regexp", "^remote\\..*\\.url$", NULL};
-        char *out = git_capture(argv, &len);
+        char *out = git_capture_at(host, argv, &len);
         for (char *s = out, *e; s && *s && g->nremotes < GIT_MAX_REMOTES; s = e ? e + 1 : NULL) {
             e = strchr(s, '\n');
             if (e) *e = 0;
@@ -401,16 +430,16 @@ static void git_job_run(void *arg) {
     u64 sig = git_sig(j->gitdir);
     if (j->force || sig != j->sig) {
         // core.fsmonitor could name a program in an untrusted repo's config: never let `status` start it
-        char *argv[] = {(char *)tool("FE_GIT", "git"), "-c", "core.fsmonitor=false", "--no-optional-locks", "-C", j->root,
-                        "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal", "--ignored=matching", NULL};
+        char *argv[] = {(char *)tool("FE_GIT", "git"), "-c", "core.fsmonitor=false", "--no-optional-locks", "-C",
+                        j->host[0] ? j->rroot : j->root, "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=normal", "--ignored=matching", NULL};
         size_t len;
         u64 t0 = now_ns();
-        char *out = git_capture(argv, &len);
+        char *out = git_capture_at(j->host, argv, &len);
         g = out ? git_parse(out, len) : xcalloc(1, sizeof *g);
         g->dur_ns = now_ns() - t0;
         free(out);
         // commits, remotes and stashes only change with .git: a forced re-check of the files skips them
-        if (g->repo && (sig != j->sig || !j->sig)) { git_details(g, j->root, j->gitdir); g->has_details = true; }
+        if (g->repo && (sig != j->sig || !j->sig)) { git_details(g, j->host, j->host[0] ? j->rroot : j->root, j->gitdir); g->has_details = true; }
         g->sig = sig;
     }
     j->res = g;

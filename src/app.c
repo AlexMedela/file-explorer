@@ -1273,11 +1273,26 @@ static void toast(const char *fmt, ...);
 // Network filesystems (NFS, SMB, sshfs, GVfs...): a dead server makes stat() hang, so the main thread
 // never touches paths under these mount points (the list is read from /proc/self/mounts, no syscalls on them).
 static char **g_remote;
+static char **g_remote_ssh; // per mount: sshfs's "user@host:path" source, NULL for other filesystems
 static int g_nremote;
+
+// /proc/self/mounts writes spaces, tabs, newlines and backslashes as \ooo octal escapes (also used by rclone.c).
+static void mount_unescape(const char *s, char *out, size_t cap) {
+    size_t o = 0;
+    for (const char *c = s; *c && o + 1 < cap; c++) {
+        if (c[0] == '\\' && c[1] >= '0' && c[1] <= '3' && c[2] >= '0' && c[2] <= '7' && c[3] >= '0' && c[3] <= '7') {
+            out[o++] = (char)((c[1] - '0') * 64 + (c[2] - '0') * 8 + (c[3] - '0'));
+            c += 3;
+        } else out[o++] = *c;
+    }
+    out[o] = 0;
+}
 
 static void remote_mounts_load(void) {
     strv_free(g_remote, g_nremote);
-    g_remote = NULL;
+    for (int i = 0; i < g_nremote; i++) free(g_remote_ssh[i]);
+    free(g_remote_ssh);
+    g_remote = g_remote_ssh = NULL;
     g_nremote = 0;
     FILE *f = fopen("/proc/self/mounts", "r");
     if (!f) return;
@@ -1289,15 +1304,17 @@ static void remote_mounts_load(void) {
         bool remote = false;
         for (size_t i = 0; i < ARRAY_COUNT(types) && !remote; i++) remote = !strcmp(type, types[i]);
         if (!remote) continue;
-        size_t o = 0;
         char clean[PATH_MAX];
-        for (const char *c = mp; *c && o + 1 < sizeof clean; c++) {
-            if (c[0] == '\\' && c[1] == '0' && c[2] == '4' && c[3] == '0') { clean[o++] = ' '; c += 3; }
-            else clean[o++] = *c;
-        }
-        clean[o] = 0;
+        mount_unescape(mp, clean, sizeof clean);
         g_remote = xrealloc(g_remote, (size_t)(g_nremote + 1) * sizeof(char *));
-        g_remote[g_nremote++] = strdup(clean);
+        g_remote_ssh = xrealloc(g_remote_ssh, (size_t)(g_nremote + 1) * sizeof(char *));
+        g_remote[g_nremote] = strdup(clean);
+        g_remote_ssh[g_nremote] = NULL;
+        if (!strcmp(type, "fuse.sshfs")) {
+            mount_unescape(src, clean, sizeof clean);
+            g_remote_ssh[g_nremote] = strdup(clean);
+        }
+        g_nremote++;
     }
     fclose(f);
 }
@@ -1312,6 +1329,41 @@ static bool path_is_remote(const char *path) {
     }
     const char *gv = getenv("FE_GVFS_DIR"); // tests
     return gv && gv[0] && !strncmp(path, gv, strlen(gv));
+}
+
+// A path under an sshfs mount as the server sees it: host ("user@host", as sshfs was given it) and the path there
+// ("" = the remote home, else relative to it unless absolute). False for anything else.
+static bool path_sshfs(const char *path, char *host, size_t hcap, char *rpath, size_t rcap) {
+    const char *mount = NULL, *src = NULL;
+    size_t ml = 0;
+    for (int i = 0; i < g_nremote; i++) {
+        size_t l = strlen(g_remote[i]);
+        if (g_remote_ssh[i] && l >= ml && !strncmp(path, g_remote[i], l) && (path[l] == 0 || path[l] == '/' || !strcmp(g_remote[i], "/"))) {
+            mount = g_remote[i];
+            src = g_remote_ssh[i];
+            ml = l;
+        }
+    }
+    const char *fake = getenv("FE_SSHFS"); // tests: "<mount point>=<sshfs source>"
+    const char *eq = fake ? strchr(fake, '=') : NULL;
+    char fmount[PATH_MAX];
+    if (eq && (size_t)(eq - fake) < sizeof fmount) {
+        snprintf(fmount, sizeof fmount, "%.*s", (int)(eq - fake), fake);
+        size_t l = strlen(fmount);
+        if (l >= ml && !strncmp(path, fmount, l) && (path[l] == 0 || path[l] == '/')) { mount = fmount; src = eq + 1; ml = l; }
+    }
+    if (!mount) return false;
+    // "host:path", "user@host:path", "[v6addr]:path"
+    const char *colon = src[0] == '[' ? strstr(src, "]:") : NULL;
+    colon = colon ? colon + 1 : strchr(src, ':');
+    if (!colon || colon == src || (size_t)(colon - src) >= hcap) return false;
+    snprintf(host, hcap, "%.*s", (int)(colon - src), src);
+    const char *base = colon + 1, *rest = path + (strcmp(mount, "/") ? ml : 0);
+    while (*rest == '/') rest++;
+    size_t bl = strlen(base);
+    if (!bl) snprintf(rpath, rcap, "%s", rest);
+    else snprintf(rpath, rcap, "%s%s%s", base, rest[0] && base[bl - 1] != '/' ? "/" : "", rest);
+    return true;
 }
 
 // Inside a connected phone or camera (they have no trash).
@@ -6637,7 +6689,10 @@ typedef struct { // what a pane shows: its repository and its place in it
 } GitView;
 
 static bool git_pane_eligible(Pane *p) {
-    if (!A.git_status || !p->path[0] || pane_is_archive(p) || pane_is_trash(p) || path_is_remote(p->path)) return false;
+    if (!A.git_status || !p->path[0] || pane_is_archive(p) || pane_is_trash(p)) return false;
+    char host[256], rp[PATH_MAX];
+    // other network folders: git would stat every file through the mount; on sshfs it runs on the server instead
+    if (path_is_remote(p->path) && !path_sshfs(p->path, host, sizeof host, rp, sizeof rp)) return false;
     Tab *t = tab_of(p);
     if (t && t->term) return false;
     return !A.selftest || getenv("FE_GIT"); // tests use a stand-in git, never the real one
@@ -6676,6 +6731,7 @@ static void git_request(struct GitRepo *r, bool force) {
     GitJob *j = xcalloc(1, sizeof *j);
     snprintf(j->root, sizeof j->root, "%s", r->root);
     snprintf(j->gitdir, sizeof j->gitdir, "%s", r->gitdir);
+    if (!path_sshfs(j->root, j->host, sizeof j->host, j->rroot, sizeof j->rroot)) j->host[0] = 0;
     j->sig = r->res ? r->res->sig : 0;
     j->force = force || !r->res;
     if (j->force) r->full = r->checked;
