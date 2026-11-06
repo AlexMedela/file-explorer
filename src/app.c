@@ -1561,6 +1561,9 @@ static void open_folder(const char *path) {
 }
 
 // Mount / unmount / eject the drive (or disconnect the network place) of a sidebar row.
+static const char *place_open_path(const Place *p, char *buf, size_t cap); // remote servers
+static void net_server_folder(const char *uri, const char *mount, char *out, size_t cap); // remote servers
+
 static void place_dev_action(int row, int act) {
     if (row < 0 || row >= A.nplaces) return;
     Place *pl = &A.places[row];
@@ -1579,8 +1582,9 @@ static void place_dev_action(int row, int act) {
             dev_start(DEV_MOUNT, d->dev, NULL, true);
             if (act == ACT_DEV_OPEN_TAB) A.dev_open_tab = true;
         } else if (pl->path[0]) {
-            if (act == ACT_DEV_OPEN_TAB) tab_new(pl->path, A.cur + 1, true);
-            else open_folder(pl->path);
+            char op[PATH_MAX];
+            if (act == ACT_DEV_OPEN_TAB) tab_new(place_open_path(pl, op, sizeof op), A.cur + 1, true);
+            else open_folder(place_open_path(pl, op, sizeof op));
         }
         break;
     case ACT_DEV_UNMOUNT:
@@ -1731,8 +1735,11 @@ static void dev_job_done(void *arg) {
         }
         for (int k = 0; k < n && !open; k++)
             if (net_server_is_mount(j->target, now[k].path)) open = now[k].path; // already connected (or reconnected)
-        if (open) open_folder(open);
-        else if (!j->fuse_ok) toast("Connected, but GVfs's file bridge (gvfsd-fuse) isn't running, so its files can't be shown");
+        if (open) {
+            char dir[PATH_MAX];
+            net_server_folder(j->target, open, dir, sizeof dir); // the folder in the address, not the server's root
+            open_folder(dir);
+        } else if (!j->fuse_ok) toast("Connected, but GVfs's file bridge (gvfsd-fuse) isn't running, so its files can't be shown");
         else toast("Connected");
         devices_refresh(); // the Network section shows it
     }
@@ -1911,6 +1918,29 @@ static bool net_server_connected(const char *uri) {
     for (int k = 0; k < A.nnets; k++)
         if (net_server_is_mount(uri, A.nets[k].path)) return true;
     return false;
+}
+
+// The folder a server's address points at, inside its mount: sftp://box/srv/app -> <mount>/srv/app (GVfs mounts the
+// server's root). SMB mounts are the share itself, WebDAV ones ("prefix=") already start at the folder.
+static void net_server_folder(const char *uri, const char *mount, char *out, size_t cap) {
+    NetAddr a;
+    char rel[512] = "";
+    if (net_parse(uri, &a) && !strcasestr(path_basename(mount), "prefix=")) {
+        const char *r = a.path;
+        if (!strcmp(g_net_protos[a.proto].scheme, "smb")) r += strcspn(r, "/"); // past the share
+        while (*r == '/') r++;
+        snprintf(rel, sizeof rel, "%s", r);
+        for (size_t l = strlen(rel); l && rel[l - 1] == '/'; l--) rel[l - 1] = 0;
+    }
+    if (rel[0]) snprintf(out, cap, "%s/%s", mount, rel);
+    else snprintf(out, cap, "%s", mount);
+}
+
+// Where a sidebar row opens: its path, or for a connected saved server the folder in its address.
+static const char *place_open_path(const Place *p, char *buf, size_t cap) {
+    if (p->kind != PK_NETWORK || p->server < 0 || p->server >= A.nservers) return p->path;
+    net_server_folder(A.servers[p->server].uri, p->path, buf, cap);
+    return buf;
 }
 
 // icon: a network icon key (icons.c; "" = the default globe)
@@ -4863,7 +4893,10 @@ static void do_action(Pane *p, int act) {
         if (A.menu_place >= 0 && A.menu_place < A.nplaces) pin_toggle(A.places[A.menu_place].path);
         break;
     case ACT_PLACE_NEW_TAB:
-        if (A.menu_place >= 0 && A.menu_place < A.nplaces) tab_new(A.places[A.menu_place].path, A.cur + 1, true);
+        if (A.menu_place >= 0 && A.menu_place < A.nplaces) {
+            char op[PATH_MAX];
+            tab_new(place_open_path(&A.places[A.menu_place], op, sizeof op), A.cur + 1, true);
+        }
         break;
     case ACT_PREVIEW: preview_toggle(); break;
     case ACT_OPEN_WITH:

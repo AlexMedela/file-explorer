@@ -3956,6 +3956,19 @@ static int run_selftest_m10(void) {
         settings_save();
         settings_load();
         ST_CHECK(A.nservers == ns0 + 1 && !strcmp(A.servers[ns0].name, "secure.lan"));
+        { // a server's address with a folder opens that folder in its mount, not the server's root
+            char d[PATH_MAX];
+            net_server_folder("sftp://al@vm1.lan:2222/srv/my%20app/", "/g/sftp:host=vm1.lan,user=al,port=2222", d, sizeof d);
+            ST_CHECK(!strcmp(d, "/g/sftp:host=vm1.lan,user=al,port=2222/srv/my app"));
+            net_server_folder("sftp://al@vm1.lan/", "/g/sftp:host=vm1.lan,user=al", d, sizeof d);
+            ST_CHECK(!strcmp(d, "/g/sftp:host=vm1.lan,user=al"));
+            net_server_folder("smb://nas/media/films", "/g/smb-share:server=nas,share=media", d, sizeof d);
+            ST_CHECK(!strcmp(d, "/g/smb-share:server=nas,share=media/films"));
+            net_server_folder("davs://cloud/dav/files", "/g/dav:host=cloud,ssl=true,prefix=%2Fdav%2Ffiles", d, sizeof d);
+            ST_CHECK(!strcmp(d, "/g/dav:host=cloud,ssl=true,prefix=%2Fdav%2Ffiles"));
+            Place pl = {.kind = PK_NETWORK, .server = -1, .path = "/g/sftp:host=other"}; // not a saved server: its mount
+            ST_CHECK(place_open_path(&pl, d, sizeof d) == pl.path);
+        }
         { // SSH terminals for SFTP: F4 inside a connection opens ssh in the same remote folder (quoted safely)
             SshTarget t;
             ST_CHECK(ssh_target_for(M10_BASE "/gvfs/sftp:host=vm1.lan,user=al,port=2222/srv/my app's dir", &t) && !strcmp(t.host, "vm1.lan") &&

@@ -755,9 +755,10 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
             du_open_tab(pl->path); // the usage bar / free space: what takes the space
             return;
         }
-        if (b->button == SDL_BUTTON_MIDDLE) tab_new(pl->path, A.cur + 1, false);
+        char op[PATH_MAX];
+        if (b->button == SDL_BUTTON_MIDDLE) tab_new(place_open_path(pl, op, sizeof op), A.cur + 1, false);
         else if (b->button == SDL_BUTTON_LEFT) {
-            open_folder(pl->path);
+            open_folder(place_open_path(pl, op, sizeof op));
             if (pl->group >= 0) { // may become a drag to reorder
                 A.drag = DRAG_PLACE_PENDING;
                 A.qa_drag_row = idx;
