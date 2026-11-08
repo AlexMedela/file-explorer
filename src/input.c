@@ -524,7 +524,8 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
             f32 cx = ly->col_name + tree_indent(p->L, &p->L->entries[p->order[r]]);
             if (x >= cx - S(18) && x < cx - S(1)) { tree_set(p, r, -1); return; }
         }
-        bool on_name = r >= 0 && (p->view != VIEW_DETAILS || x < row_name_end(p, r));
+        // a row already in the selection drags from anywhere on it, so several selected items can be grabbed together
+        bool on_name = r >= 0 && (p->view != VIEW_DETAILS || x < row_name_end(p, r) || (p->sel[p->order[r]] && !ctrl && !shift));
         if (r >= 0 && b->clicks >= 2 && r == p->cursor && !ctrl && !shift && !A.single_click) {
             open_entry(p, r, false);
             return;

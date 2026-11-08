@@ -4711,6 +4711,21 @@ static void menu_terminal_items(Pane *p) {
     menu_add("Open in external terminal", "", ACT_TERMINAL_EXTERNAL, true);
 }
 
+// Where Ctrl+V puts things. Tree view: into the selected folder, or the subfolder a selected file sits in (rows are
+// relative paths); otherwise (and with nothing selected) the pane's own folder.
+static void paste_dir(Pane *p, char *out, size_t cap) {
+    snprintf(out, cap, "%s", p->path);
+    if (!pane_tree_on(p) || !p->L || !p->L->tree || !p->order || p->cursor < 0 || p->cursor >= (i64)p->count) return;
+    if (!p->sel_count || !p->sel[p->order[p->cursor]]) return;
+    const Entry *e = &p->L->entries[p->order[p->cursor]];
+    path_join(out, cap, p->path, e->name);
+    if (!(e->flags & ENT_DIR)) {
+        char *sl = strrchr(e->name, '/') ? strrchr(out, '/') : NULL;
+        if (sl) *sl = 0;
+        else snprintf(out, cap, "%s", p->path);
+    }
+}
+
 static void do_action(Pane *p, int act) {
     int n = 0;
     char **paths = NULL;
@@ -4737,9 +4752,13 @@ static void do_action(Pane *p, int act) {
         break;
     case ACT_PASTE: {
         bool cut;
+        char dst[PATH_MAX];
+        paste_dir(p, dst, sizeof dst);
         paths = clip_get(&n, &cut);
-        if (n) start_transfer(paths, n, p->path, cut, cut);
-        else if (!clip_paste_image(p->path)) toast("Nothing to paste");
+        for (int i = 0; i < n; i++) // the copied folder itself is selected: paste next to it, not into it
+            if (!strcmp(paths[i], dst) && strcmp(dst, p->path)) { *strrchr(dst, '/') = 0; break; }
+        if (n) start_transfer(paths, n, dst, cut, cut);
+        else if (!clip_paste_image(dst)) toast("Nothing to paste");
         break;
     }
     case ACT_RENAME:

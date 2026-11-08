@@ -2692,6 +2692,41 @@ static int run_selftest_m9(void) {
     commit_rename();
     ST_CHECK(st_exists(M9_BASE "/tree/renamed.txt") && !st_exists(M9_BASE "/tree/inner.txt"));
     st_wait();
+    // several selected items drag together: Ctrl+click two files, then drag one of them onto a folder
+    {
+        f32 tx = p->ly.col_name + S(60);
+        ST_CHECK(st_select(p, "file00.c"));
+        f32 y1 = st_row_y(p, "file01.png");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tx, y1, SDL_BUTTON_LEFT, 1, SDL_KMOD_CTRL);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tx, y1, SDL_BUTTON_LEFT, 1, SDL_KMOD_CTRL);
+        ST_CHECK(p->sel_count == 2);
+        f32 y0 = st_row_y(p, "file00.c"), ty = st_row_y(p, "sub");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tx, y0, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, tx + S(20), y0 + S(20), 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, tx, ty, 0, 0, 0);
+        ST_CHECK(A.drag == DRAG_ITEMS && p->sel_count == 2 && !strcmp(A.drop_dir, M9_BASE "/sub"));
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tx, ty, SDL_BUTTON_LEFT, 1, 0);
+        st_wait_ops();
+        ST_CHECK(st_exists(M9_BASE "/sub/file00.c") && st_exists(M9_BASE "/sub/file01.png"));
+        pane_refresh(p);
+        st_wait();
+    }
+    // Ctrl+V pastes into the selected folder, or the subfolder of a selected file
+    {
+        char *cp[1] = {M9_BASE "/file02.md"};
+        clip_set(cp, 1, false);
+        ST_CHECK(st_select(p, "tree/deep"));
+        st_key(SDLK_V, SDL_KMOD_CTRL);
+        st_wait_ops();
+        ST_CHECK(st_exists(M9_BASE "/tree/deep/file02.md"));
+        ST_CHECK(st_select(p, "tree/renamed.txt"));
+        st_key(SDLK_V, SDL_KMOD_CTRL);
+        st_wait_ops();
+        ST_CHECK(st_exists(M9_BASE "/tree/file02.md"));
+        clip_clear();
+        pane_refresh(p);
+        st_wait();
+    }
     // chevron click collapses
     {
         f32 ry2 = st_row_y(p, "tree");

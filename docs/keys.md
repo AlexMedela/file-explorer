@@ -37,7 +37,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Ctrl+Shift+C | Copy full path(s) as text |
 | F4 | Open terminal here (`$TERMINAL`, else `xdg-terminal-exec`, else the first one found: Ptyxis, GNOME Console, Konsole, COSMIC, Xfce, MATE, ... xterm) |
 | Right-click, Menu key, Shift+F10 | Context menu |
-| Drag a file by its name | Move onto a folder, pane, or sidebar place (Ctrl = copy, Shift = move; other drives copy by default) |
+| Drag a file by its name | Move onto a folder, pane, or sidebar place (Ctrl = copy, Shift = move; other drives copy by default); several selected items drag together, grabbed anywhere on a selected row |
 | Drag folders by their name | Onto a panel edge (top, bottom, left, right) = open them in a new split there (snap overlay); onto the empty part of a tab bar = open them as new tabs |
 | Drop files from other apps | Copy into the folder under the cursor |
 | Ctrl+P | Go to anything: fuzzy match over every folder and file under ~ and mounts (hidden ones skipped), recent folders, places, tabs. Enter on a file shows it in its folder, Ctrl+Enter opens it |
@@ -48,7 +48,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Space, Ctrl+I | Preview panel: images, text (line numbers), folders, video/PDF/etc. via installed thumbnailers; drag its edge to resize, double-click to open |
 | Ctrl+D | Pin/unpin the folder (under the cursor, or the current one) in Quick Access |
 | Sidebar | **Quick Access groups**: drag folders to reorder or onto a group header to pin; right-click to rename, move to another group, new/delete group; click a header to collapse, double-click to rename |
-| Ctrl+Shift+E, right-click empty space → Tree view | **Tree view** in Details: → expands a folder in place, ← collapses / jumps to the parent, click the chevron |
+| Ctrl+Shift+E, right-click empty space → Tree view | **Tree view** in Details: → expands a folder in place, ← collapses / jumps to the parent, click the chevron; Ctrl+V pastes into the selected folder (or the folder of the selected file) |
 | Ctrl+, | **Options**: theme (Dark, Light, Black, Monokai, Nord, your JSON schemes), accent colour, icons, font, size, row spacing, behaviour, defaults, **keyboard shortcuts** (any command, two-step sequences like `Ctrl+K Ctrl+T`), **saved layouts** |
 | Ctrl+P → "Layout: …" | Switch to a saved layout (panels, splits, tabs) |
 | Ctrl+Shift+A (or `@` in the palette) | **Search tabs**: every open tab in every panel + recently closed ones |
