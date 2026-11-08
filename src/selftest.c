@@ -2665,6 +2665,24 @@ static int run_selftest_m9(void) {
         for (u32 i = 0; p->order && i < p->count && !seen; i++) seen = !strcmp(p->L->entries[p->order[i]].name, "tree/new.txt");
     }
     ST_CHECK(seen);
+    // drag a file out of the expanded folder onto the pane's own folder (empty space below the rows) -> moved up
+    st_wait();
+    {
+        f32 fy = st_row_y(p, "tree/new.txt"), tx = p->ly.col_name + S(60), ty = st_row_y(p, "tree");
+        f32 ey = (f32)(p->ly.list.y + ((f64)p->count + 0.5) * p->ly.row_h - p->scroll);
+        ST_CHECK(fy > 0 && ey < p->ly.list.y + p->ly.list.h);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tx, fy, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, tx + S(20), fy + S(20), 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, tx, ty, 0, 0, 0); // onto the folder it's already in: no drop
+        ST_CHECK(A.drag == DRAG_ITEMS && !A.drop_dir[0]);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, tx, ey, 0, 0, 0);
+        ST_CHECK(A.drag == DRAG_ITEMS && A.drop_row < 0 && !strcmp(A.drop_dir, M9_BASE));
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tx, ey, SDL_BUTTON_LEFT, 1, 0);
+        st_wait_ops();
+        ST_CHECK(st_exists(M9_BASE "/new.txt") && !st_exists(M9_BASE "/tree/new.txt"));
+        pane_refresh(p);
+        st_wait();
+    }
     // rename inside the tree renames within the subfolder
     st_wait();
     ST_CHECK(st_select(p, "tree/inner.txt"));

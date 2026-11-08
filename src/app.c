@@ -6026,6 +6026,23 @@ static void open_dirs_at(Panel *pn, int zone, char **paths, int n) {
     layout();
 }
 
+// Is every item dragged out of src already directly inside dir? (Then dropping there would do nothing.) Tree
+// view rows are relative paths, so an item from an expanded subfolder can be dropped onto the pane's own folder.
+static bool drag_all_in(Pane *src, const char *dir) {
+    if (pane_du_on(src) || !src->order) return !strcmp(dir, src->path);
+    bool use_cursor = !src->sel_count && src->cursor >= 0;
+    char parent[PATH_MAX];
+    for (u32 i = 0; i < src->count; i++) {
+        if (use_cursor ? (i64)i != src->cursor : !src->sel[src->order[i]]) continue;
+        const char *name = src->L->entries[src->order[i]].name, *sl = strrchr(name, '/');
+        if (!sl) { if (strcmp(dir, src->path)) return false; continue; }
+        path_join(parent, sizeof parent, src->path, name);
+        *strrchr(parent, '/') = 0;
+        if (strcmp(dir, parent)) return false;
+    }
+    return true;
+}
+
 // Find the folder under (x,y) that items would be dropped into. src may be NULL (external drop).
 static void drop_target(Pane *src, f32 x, f32 y) {
     A.drop_dir[0] = 0;
@@ -6081,7 +6098,7 @@ static void drop_target(Pane *src, f32 x, f32 y) {
         A.drop_pane = NULL;
         A.drop_row = -1;
     }
-    if (src && A.drop_dir[0] && !strcmp(A.drop_dir, src->path)) {
+    if (src && A.drop_dir[0] && drag_all_in(src, A.drop_dir)) {
         A.drop_dir[0] = 0;
         A.drop_tab = NULL;
         A.drop_pane = NULL;
