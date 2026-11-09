@@ -645,7 +645,9 @@ static bool cloud_pending(void) {
 }
 
 static void cloud_tick(void) {
-    if (picker_active() || A.screenshot || atomic_load(&g_cloud_job) > 0) return;
+    // (the picker too: a file can be opened from / saved to a cloud folder; the mount outlives the picker, so the app
+    // that asked can still read or write the path it got)
+    if (A.screenshot || atomic_load(&g_cloud_job) > 0) return;
     if (A.selftest && !getenv("FE_RCLONE")) return; // tests only ever run a stand-in rclone
     u64 now = now_ns();
     u64 every = g_rclone == 0 ? 30000000000ull : now < g_cloud_fast_until || cloud_pending() ? 700000000ull : A.win_hidden ? 10000000000ull : 2500000000ull;

@@ -5653,7 +5653,7 @@ static void menu_open_place(int idx, f32 x, f32 y) {
             menu_add("Connect and open", "Click", ACT_CLOUD_CONNECT, g_units_systemd);
             menu_add("Connect and open in new tab", "Middle-click", ACT_CLOUD_CONNECT_TAB, g_units_systemd);
         }
-        menu_add_check("Connect at login", ACT_CLOUD_LOGIN, c->login, g_units_systemd);
+        menu_add_check("Connect at login", ACT_CLOUD_LOGIN, c->login, g_units_systemd && !picker_active()); // (the picker saves no settings)
         menu_sep();
         menu_add("Reconnect account\xE2\x80\xA6", "", ACT_CLOUD_RECONNECT, true);
         menu_add("Show log", "", ACT_CLOUD_LOG, g_units_systemd && c->unit);

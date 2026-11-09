@@ -27,6 +27,10 @@ xdg-mime default dev.fileexplorer.desktop inode/directory     # default file man
 with an Open / Save / Choose bar and writes the chosen path(s) to FILE, one per line (nothing when cancelled). The
 "File chooser for other apps" switch connects it to xdg-desktop-portal-termfilechooser, so browsers, Electron and GTK
 apps (`GTK_USE_PORTAL=1`) get it as their Open / Save dialog. The picker never changes your settings.
+Its sidebar has the Cloud section too: open a file straight from a cloud remote or save one into it. The remote stays
+mounted after the picker closes so the app can read or write the path it got; files pass through rclone's cache
+(`~/.cache/rclone/vfs`) and are dropped from it an hour after their last use (saved ones once uploaded), nothing is
+left in your folders.
 
 ## Phones and cameras
 iPhones / iPads and Android phones / cameras on a cable use the built-in connector (no GVfs needed). The package
