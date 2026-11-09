@@ -5522,12 +5522,13 @@ static int run_selftest_du(void) {
         DuScan t;
         memset(&t, 0, sizeof t);
         du_mounts_parse(&t, "21 1 0:31 /@ / rw,relatime shared:1 - btrfs /dev/nvme0n1p2 rw,ssd\n"
-                            "22 21 0:33 /@home /home rw,relatime shared:2 - btrfs /dev/nvme0n1p2 rw,ssd\n"
+                            "22 21 0:33 /@home /home rw,relatime shared:2 - btrfs /dev/nvme0n1p2 rw,ssd,compress=zstd:1\n"
                             "23 21 0:34 /@snapshots /.snapshots rw shared:3 - btrfs /dev/nvme0n1p2 rw\n"
                             "24 21 259:1 / /boot rw shared:4 - vfat /dev/nvme0n1p1 rw\n"
                             "25 21 0:22 / /proc rw,nosuid - proc proc rw\n"
                             "26 22 0:50 / /home/me/remote rw - fuse.sshfs me@host:/ rw\n");
         ST_CHECK(t.nmounts == 6 && !strcmp(t.mounts[1].mnt, "/home") && !strcmp(t.mounts[3].fstype, "vfat"));
+        ST_CHECK(t.mounts[1].compressed && !t.mounts[0].compressed && !t.mounts[5].compressed);
         t.dev = makedev(0, 31);
         t.fstype = "btrfs";
         t.src = "/dev/nvme0n1p2";

@@ -1493,6 +1493,12 @@ static void draw_du_header(Pane *p, DuView *v) {
         if (sec < 1) o += (size_t)snprintf(line + o, sizeof line - o, "  \xC2\xB7  measured in %d ms", (int)(sec * 1000));
         else o += (size_t)snprintf(line + o, sizeof line - o, "  \xC2\xB7  measured in %.1f s", sec);
     }
+    // Sizes are before compression (all a user can read): say what the drive really holds next to them.
+    if (!running && s->compressed && v->cur == &s->root && s->used < tot) {
+        char ud[32];
+        fmt_size(ud, sizeof ud, s->used);
+        o += (size_t)snprintf(line + o, sizeof line - o, "  \xC2\xB7  %s on disk (compressed)", ud);
+    }
     u32 ne = atomic_load(&s->nerr);
     if (ne) o += (size_t)snprintf(line + o, sizeof line - o, "  \xC2\xB7  %u folder%s couldn't be read", ne, ne == 1 ? "" : "s");
     if (s->stale) snprintf(line + o, sizeof line - o, "  \xC2\xB7  changed since: F5 measures again");

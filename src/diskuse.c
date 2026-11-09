@@ -57,7 +57,7 @@ typedef struct DuItem {
     bool removed;                // deleted or trashed since (main thread)
 } DuItem;
 
-typedef struct { u64 id, dev; char *root, *mnt, *fstype, *src; } DuMount;
+typedef struct { u64 id, dev; char *root, *mnt, *fstype, *src; bool compressed; } DuMount;
 
 typedef struct DuScan {
     DuItem root;
@@ -68,6 +68,7 @@ typedef struct DuScan {
     DuMount *mounts;
     int nmounts;
     u64 used;              // bytes used on the filesystem when the root is its mount point (progress), else 0
+    bool compressed;       // ... which compresses files (btrfs compress=): they take less than their sizes say
     pthread_mutex_t mtx;
     pthread_cond_t cv;
     DuItem **q;            // folders waiting to be read (FIFO: the top levels fill in first)
@@ -116,12 +117,13 @@ static void du_mounts_parse(DuScan *s, const char *text) {
             int nf = 0;
             for (char *tok = strtok(line, " "); tok && nf < 12; tok = strtok(NULL, " ")) {
                 if (!strcmp(tok, "-")) { // the fields after the separator
-                    char *fs = strtok(NULL, " "), *src = strtok(NULL, " ");
+                    char *fs = strtok(NULL, " "), *src = strtok(NULL, " "), *opt = strtok(NULL, " ");
                     unsigned ma, mi;
                     unsigned long long id;
                     if (nf >= 5 && fs && src && sscanf(f[0], "%llu", &id) == 1 && sscanf(f[2], "%u:%u", &ma, &mi) == 2) {
                         if (s->nmounts == cap) { cap = cap ? cap * 2 : 32; s->mounts = xrealloc(s->mounts, (size_t)cap * sizeof(DuMount)); }
-                        s->mounts[s->nmounts++] = (DuMount){id, makedev(ma, mi), strdup(f[3]), strdup(f[4]), strdup(fs), strdup(src)};
+                        s->mounts[s->nmounts++] = (DuMount){id, makedev(ma, mi), strdup(f[3]), strdup(f[4]), strdup(fs), strdup(src),
+                                                            opt && (strstr(opt, ",compress") || !strncmp(opt, "compress", 8))};
                     }
                     break;
                 }
@@ -402,7 +404,10 @@ static void du_setup(DuScan *s) {
         s->fstype = strdup(m->fstype);
         s->src = strdup(m->src);
         struct statvfs vs;
-        if (!strcmp(m->mnt, root) && statvfs(root, &vs) == 0) s->used = (u64)(vs.f_blocks - vs.f_bfree) * vs.f_frsize;
+        if (!strcmp(m->mnt, root) && statvfs(root, &vs) == 0) {
+            s->used = (u64)(vs.f_blocks - vs.f_bfree) * vs.f_frsize;
+            s->compressed = m->compressed;
+        }
     }
 }
 

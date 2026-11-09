@@ -96,7 +96,8 @@ login without prompts (an `ssh-agent`, or a key without a passphrase); disconnec
 
 Disk usage measures on its own threads (the map fills in while it runs) and stays on the drive it started on: other
 drives, network mounts, `/proc` and snapshots show in the list as "other drive" and aren't counted, while btrfs subvolumes
-of the same disk (`/home` on CachyOS) are. Sizes are space on disk (allocated blocks, hard links once). Going into a
+of the same disk (`/home` on CachyOS) are. Sizes are space on disk (allocated blocks, hard links once). On a compressed btrfs drive files take less than that (the
+sizes are before compression); measuring a whole drive then also shows what it really holds, "115 GB on disk (compressed)". Going into a
 folder reuses the measurement; after Move to Trash / Delete the map updates right away, and when files arrive it says
 so - F5 measures again. `disk_usage_style=treemap|sunburst` and `disk_usage_list=0|1` in settings remember the view.
 
