@@ -1068,7 +1068,7 @@ static void draw_status_term(Term *t) {
     // the gear (Options) stays where it always is
     f32 gs = roundf(S(22));
     A.r_gear = (Rect){roundf(s.x + s.w - gs - S(4)), roundf(s.y + (s.h - gs) * 0.5f), gs, gs};
-    if (A.mouse_in && in_rect(A.r_gear, A.mx, A.my)) draw_rrect(A.r_gear.x, A.r_gear.y, gs, gs, S(5), C(COL_CHIP));
+    if (hot(A.r_gear)) draw_rrect(A.r_gear.x, A.r_gear.y, gs, gs, S(5), C(COL_CHIP));
     draw_gear_icon(A.r_gear.x + gs * 0.5f, A.r_gear.y + gs * 0.5f, S(7), C(COL_TEXT_DIM), C(COL_TOOLBAR));
 }
 

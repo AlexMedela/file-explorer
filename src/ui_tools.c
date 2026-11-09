@@ -170,7 +170,7 @@ static void sheet_frame(Rect r, const char *title, const char *subtitle) {
 }
 
 static bool sheet_button(Rect r, const char *label, bool primary, bool enabled) {
-    bool hv = enabled && A.mouse_in && in_rect(r, A.mx, A.my);
+    bool hv = hand_if(enabled && A.mouse_in && in_rect(r, A.mx, A.my));
     Font *f = &A.font;
     u32 col = !enabled ? COL_CONTROL_OFF : primary ? (hv ? COL_ACCENT_HOVER : COL_ACCENT) : (hv ? COL_CONTROL_HOVER : COL_CONTROL);
     draw_rrect(r.x, r.y, r.w, r.h, S(7), C(col));
@@ -181,6 +181,7 @@ static bool sheet_button(Rect r, const char *label, bool primary, bool enabled) 
 }
 
 static void sheet_check(Rect r, const char *label, bool on) {
+    hot(r);
     Font *fs = &A.font_small;
     f32 cb = roundf(S(16)), cy = roundf(r.y + (r.h - cb) * 0.5f);
     draw_rrect(r.x, cy, cb, cb, S(4), on ? C(COL_ACCENT) : C(COL_CHIP));
@@ -193,6 +194,7 @@ static void sheet_check(Rect r, const char *label, bool on) {
 }
 
 static void sheet_field(Rect r, TextEdit *te, bool focused, const char *placeholder) {
+    if (A.mouse_in && in_rect(r, A.mx, A.my)) A.ptr_text = true;
     draw_rrect(r.x, r.y, r.w, r.h, S(6), C(focused ? COL_FIELD_HOVER : COL_FIELD));
     if (focused) draw_rrect_outline(r.x, r.y, r.w, r.h, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
     if (focused) te_draw(te, &A.font, r, roundf(S(8)), C(COL_TEXT));
@@ -298,7 +300,7 @@ static void openwith_draw(void) {
         DesktopApp *a = s->apps[i];
         Rect rr = {s->rlist.x, roundf(s->rlist.y + i * s->row_h - s->ow_scroll), s->rlist.w, s->row_h};
         if (rr.y > s->rlist.y + s->rlist.h) break;
-        bool sel = i == s->sel, hv = A.mouse_in && in_rect(rr, A.mx, A.my) && in_rect(s->rlist, A.mx, A.my);
+        bool sel = i == s->sel, hv = hand_if(A.mouse_in && in_rect(rr, A.mx, A.my) && in_rect(s->rlist, A.mx, A.my));
         if (sel) draw_rrect(rr.x, rr.y + 1, rr.w, rr.h - 2, S(6), C(COL_SEL_FOCUS));
         else if (hv) draw_rrect(rr.x, rr.y + 1, rr.w, rr.h - 2, S(6), C(COL_HOVER));
         f32 is = roundf(S(28)), ix = rr.x + S(10), iy = roundf(rr.y + (rr.h - is) * 0.5f);
@@ -1005,7 +1007,7 @@ static void rename_draw(void) {
     draw_text(fs, x, text_y(fs, y, bh), "Options", 7, C(COL_TEXT_DIM));
     for (int i = 0; i < 4; i++) {
         s->rcase[i] = (Rect){cx + i * (bw + S(4)), y, bw, bh};
-        bool on = s->case_mode == i, hv = A.mouse_in && in_rect(s->rcase[i], A.mx, A.my);
+        bool on = s->case_mode == i, hv = hot(s->rcase[i]);
         draw_rrect(s->rcase[i].x, y, bw, bh, S(6), on ? CA(COL_ACCENT, 0.3f) : C(hv ? COL_CONTROL_HOVER : COL_CONTROL));
         f32 tw = text_width(fs, cases[i], (int)strlen(cases[i]));
         draw_text(fs, s->rcase[i].x + (bw - tw) * 0.5f, text_y(fs, y, bh), cases[i], (int)strlen(cases[i]), on ? C(COL_ACCENT) : C(COL_TEXT));
@@ -1232,7 +1234,7 @@ static void connect_icon_picker_draw(void) {
             bool vis = c.y + c.h > body.y && c.y < body.y + body.h;
             if (vis && s->cn_ncell < (int)ARRAY_COUNT(s->cn_rcell)) { s->cn_rcell[s->cn_ncell] = c; s->cn_cell_idx[s->cn_ncell++] = i; }
             if (!vis) continue;
-            bool h = A.mouse_in && in_rect(body, A.mx, A.my) && in_rect(c, A.mx, A.my);
+            bool h = hand_if(A.mouse_in && in_rect(body, A.mx, A.my) && in_rect(c, A.mx, A.my));
             if (h) hov = i;
             f32 in = roundf(S(2));
             if (i == sel) {
@@ -1270,7 +1272,7 @@ static void sheet_icon_row(f32 x, f32 y, f32 cw, f32 rh, f32 lw0) {
     draw_text(fs, x + S(14), text_y(fs, y, rh), "Display icon", 12, C(COL_TEXT_DIM));
     Rect ib = {x + lw0, roundf(y + (rh - fh0) * 0.5f), cw - lw0 - S(10), fh0};
     s->cn_ricon = ib;
-    bool ih = s->cn_pick || (A.mouse_in && in_rect(ib, A.mx, A.my));
+    bool ih = hot(ib) || s->cn_pick;
     draw_rrect(ib.x, ib.y, ib.w, ib.h, S(6), C(ih ? COL_FIELD_HOVER : COL_FIELD));
     if (s->cn_pick) draw_rrect_outline(ib.x, ib.y, ib.w, ib.h, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
     f32 is0 = roundf(S(18));
@@ -1304,10 +1306,10 @@ static void connect_draw(void) {
         for (int k = 0; k < nsv; k++) {
             Rect rr = {x, y + k * srh, cw, srh};
             s->cn_rsaved[k] = rr;
-            if (A.mouse_in && in_rect(rr, A.mx, A.my)) draw_rrect(rr.x + S(3), rr.y + S(3), rr.w - S(6), rr.h - S(6), S(6), C(COL_HOVER));
+            if (hot(rr)) draw_rrect(rr.x + S(3), rr.y + S(3), rr.w - S(6), rr.h - S(6), S(6), C(COL_HOVER));
             Rect fx = {roundf(rr.x + rr.w - S(34)), roundf(rr.y + (srh - S(24)) * 0.5f), roundf(S(24)), roundf(S(24))};
             s->cn_rforget[k] = fx;
-            bool fh = A.mouse_in && in_rect(fx, A.mx, A.my);
+            bool fh = hot(fx);
             if (fh) draw_rrect(fx.x, fx.y, fx.w, fx.h, S(5), C(COL_CHIP));
             draw_cross(fx.x + fx.w * 0.5f, fx.y + fx.h * 0.5f, S(4.5f), MAX(1.f, S(1.3f)), C(fh ? COL_TEXT : COL_TEXT_FAINT));
             f32 nx = rr.x + S(14), nw = text_width(f, A.servers[k].name, (int)strlen(A.servers[k].name));
@@ -1349,6 +1351,7 @@ static void connect_draw(void) {
         Rect cr = {x + i * (chw + cgap), y, chw, chh};
         s->cn_rproto[i] = cr;
         bool on = s->cn_proto == i, hv = A.mouse_in && in_rect(cr, A.mx, A.my), ok = net_proto_available(i);
+        hand_if(hv && ok);
         draw_rrect(cr.x, cr.y, cr.w, cr.h, S(7), C(on ? COL_ACCENT : hv ? COL_CONTROL_HOVER : COL_CONTROL));
         const char *l = g_net_protos[i].label;
         f32 tw = text_width(fs, l, (int)strlen(l));

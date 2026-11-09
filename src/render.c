@@ -1,6 +1,25 @@
 // render.c - drawing every frame part: icons, panel/tab bars, toolbar, sidebar, list and grid (with the
 // thumbnail texture cache), status bar, progress cards, dialogs, menus, palette, preview panel (included from app.c)
 
+// --- pointer shape ---------------------------------------------------------
+// Whatever reacts to a click shows the hand pointer while hovered, text fields the I-beam: the draw code reports
+// what's under the mouse as it checks hover (hot / hand_if), frame_draw applies the result once (cursor_apply).
+
+static bool hand_if(bool h) {
+    if (h && A.drag == DRAG_NONE) A.ptr_hand = true;
+    return h;
+}
+
+static bool hot(Rect r) { return hand_if(A.mouse_in && in_rect(r, A.mx, A.my)); }
+
+static void cursor_apply(void) {
+    int want = A.cursor_ew ? A.cursor_ew : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_hand ? 3 : A.ptr_text ? 4 : 0;
+    if (want == A.cursor_shown) return;
+    A.cursor_shown = want;
+    SDL_Cursor *c[] = {A.cur_default, A.cur_ew, A.cur_ns, A.cur_hand, A.cur_text};
+    SDL_SetCursor(c[want]);
+}
+
 // --- rendering -------------------------------------------------------------
 
 static u32 file_color(const Entry *e) {
@@ -149,6 +168,7 @@ static void draw_xfer_icon(f32 cx, f32 cy, f32 s, Color c) {
 }
 
 static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
+    if (A.mouse_in && in_rect(r, A.mx, A.my)) A.ptr_text = true;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x + 1, (int)r.y, (int)r.w - 2, (int)r.h});
     int n = (int)strlen(t->buf);
     f32 cx = text_width(f, t->buf, t->caret);
@@ -227,7 +247,7 @@ static void draw_panel_bar(Panel *pn) {
         Rect r = t->r;
         Pane *p = &t->pane[0];
         bool cur = pn->cur == t;
-        bool hover = A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my);
+        bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my));
         bool dragging = A.drag == DRAG_TAB && A.drag_tab == t;
         if (prev && !cur && pn->cur != prev && !hover) draw_rect(r.x - 1, r.y + S(9), 1, r.h - S(18), C(COL_FIELD));
         prev = t;
@@ -264,10 +284,10 @@ static void draw_panel_bar(Panel *pn) {
         g_alpha = 1.f;
     }
     // + and split buttons (+'s highlight after the tab backgrounds: the active tab's flare can reach under it)
-    if (A.mouse_in && A.drag == DRAG_NONE && in_rect(pr, A.mx, A.my)) draw_rrect(pr.x, pr.y, pr.w, pr.h, pr.w * 0.5f, C(COL_TAB_HOVER));
+    if (A.drag == DRAG_NONE && hot(pr)) draw_rrect(pr.x, pr.y, pr.w, pr.h, pr.w * 0.5f, C(COL_TAB_HOVER));
     draw_plus(pr.x + pr.w * 0.5f, pr.y + pr.h * 0.5f, S(12), MAX(2.f, S(1.8f)), C(COL_TEXT_DIM));
     Rect sr = pn->splitbtn;
-    bool sh = A.mouse_in && in_rect(sr, A.mx, A.my);
+    bool sh = hot(sr);
     if (sh) draw_rrect(sr.x, sr.y, sr.w, sr.h, S(6), C(COL_HOVER));
     draw_split_icon(sr, sh && (SDL_GetModState() & SDL_KMOD_SHIFT), sh ? C(COL_TEXT) : C(COL_TEXT_DIM));
     // insertion caret while dragging a tab over this bar
@@ -341,7 +361,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
     bool enabled[3] = {p->hist_pos > 0, p->hist_pos < p->hist_n - 1, p->path[1] != 0};
     for (int i = 0; i < 3; i++) {
         Rect r = btn[i];
-        bool hover = A.mouse_in && in_rect(r, A.mx, A.my) && enabled[i];
+        bool hover = hand_if(A.mouse_in && in_rect(r, A.mx, A.my) && enabled[i]);
         if (hover) draw_rrect(r.x, r.y, r.w, r.h, S(6), C(COL_FIELD_HOVER));
         Color c = enabled[i] ? C(COL_TEXT) : C(COL_TEXT_FAINT);
         draw_chevron(r.x + r.w * 0.5f, r.y + r.h * 0.5f, S(11), i, MAX(1.5f, S(1.6f)), c);
@@ -349,7 +369,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
 
     {   // type filter (funnel)
         Rect fb = ly->filterbtn;
-        bool on = p->tf_mode || p->tf_exts[0], hv = A.mouse_in && in_rect(fb, A.mx, A.my);
+        bool on = p->tf_mode || p->tf_exts[0], hv = hot(fb);
         if (on || hv) draw_rrect(fb.x, fb.y, fb.w, fb.h, S(6), on ? CA(COL_ACCENT, 0.22f) : C(COL_FIELD_HOVER));
         Color fc = on ? C(COL_ACCENT) : C(COL_TEXT_DIM);
         f32 cx = fb.x + fb.w * 0.5f, cy = fb.y + fb.h * 0.5f, t = MAX(1.4f, S(1.5f));
@@ -362,6 +382,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
     Rect pb = ly->pathbar;
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);
+    if (hover) A.ptr_text = true; // a click outside the crumbs edits the path
     draw_rrect(pb.x, pb.y, pb.w, pb.h, S(7), C(editing ? COL_FIELD_HOVER : COL_FIELD));
     if (editing) draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
 
@@ -378,7 +399,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
     for (int i = 0; i < ly->ncrumbs; i++) {
         Crumb *c = &ly->crumbs[i];
         bool last = i == ly->ncrumbs - 1;
-        bool h = hover && in_rect(c->r, A.mx, A.my);
+        bool h = hand_if(hover && in_rect(c->r, A.mx, A.my));
         if (h) draw_rrect(c->r.x, c->r.y, c->r.w, c->r.h, S(5), C(COL_CHIP));
         if (i == 0 && ly->crumbs_trash) {
             f32 s = roundf(S(16)), ix = roundf(c->r.x + S(8));
@@ -415,7 +436,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         Rect c = {pb.x + pb.w - cw - roundf(S(3)), pb.y + roundf(S(3)), cw, pb.h - roundf(S(6))};
         ly->gitchip = c;
         ly->has_gitchip = true;
-        bool hv = hover && in_rect(c, A.mx, A.my), on = A.menu.open && A.menu.pane == p && A.menu.n && A.menu.items[0].info;
+        bool hv = hand_if(hover && in_rect(c, A.mx, A.my)), on = A.menu.open && A.menu.pane == p && A.menu.n && A.menu.items[0].info;
         draw_rrect(c.x, c.y, c.w, c.h, S(5), on ? CA(COL_ACCENT, 0.25f) : C(hv ? COL_CONTROL_HOVER : COL_CHIP));
         draw_branch_icon(c.x + S(6), c.y + c.h * 0.5f, C(COL_TEXT_DIM));
         f32 tx = c.x + S(22);
@@ -469,7 +490,7 @@ static void draw_window_controls(void) {
     f32 lt = MAX(1.f, roundf(S(1))), is = roundf(S(10));
     for (int i = 0; i < 3; i++) {
         Rect b = wctl_button(i);
-        bool hover = A.mouse_in && A.drag == DRAG_NONE && in_rect(b, A.mx, A.my);
+        bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(b, A.mx, A.my));
         if (hover) draw_rect(b.x, b.y, b.w, b.h, i == 2 ? (Color){0xC4 / 255.f, 0x2B / 255.f, 0x1C / 255.f, 1} : C(COL_TAB_HOVER));
         Color ic = hover ? (i == 2 ? (Color){1, 1, 1, 1} : C(COL_TEXT)) : C(COL_TEXT2);
         f32 cx = roundf(b.x + b.w * 0.5f), cy = roundf(b.y + b.h * 0.5f), x0 = cx - is * 0.5f, y0 = cy - is * 0.5f;
@@ -514,6 +535,7 @@ static void draw_sidebar(void) {
         if (r.y + r.h < sb.y || r.y > sb.y + sb.h) continue;
         bool hover = A.mouse_in && in_rect(r, A.mx, A.my) && (A.drag == DRAG_NONE || A.drag == DRAG_ITEMS);
         bool editing = place_editing(pl);
+        hand_if(hover && !editing);
         if (place_is_header(pl)) {
             if (A.drop_place == i) {
                 draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), CA(COL_ACCENT, 0.25f));
@@ -754,7 +776,7 @@ static void draw_header(Pane *p) {
         Rect r = {x0, h.y + S(4), x1 - x0, h.h - S(8)};
         bool moving = dragging_here && A.drag_col == c;
         if (moving) draw_rrect(r.x + S(2), r.y, r.w - S(4), r.h, S(5), CA(COL_ACCENT, 0.2f));
-        else if (A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my) && header_edge_at(ly, A.mx) < 0)
+        else if (hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my) && header_edge_at(ly, A.mx) < 0))
             draw_rrect(r.x + S(2), r.y, r.w - S(4), r.h, S(5), C(COL_HOVER));
         bool active = p->sort_key == g_coldef[c].sort;
         Color tc = active ? C(COL_TEXT) : C(COL_TEXT_DIM);
@@ -1431,7 +1453,7 @@ static void draw_du_header(Pane *p, DuView *v) {
     draw_rrect(v->b_tree.x, by, bw * 2, bh, S(6), C(COL_CHIP));
     for (int i = 0; i < 2; i++) {
         Rect b = i ? v->b_sun : v->b_tree;
-        bool on = A.du_style == i, hov = in_rect(b, A.mx, A.my);
+        bool on = A.du_style == i, hov = hot(b);
         if (on) draw_rrect(b.x + 2, b.y + 2, b.w - 4, b.h - 4, S(5), C(COL_ACCENT));
         else if (hov) draw_rrect(b.x + 2, b.y + 2, b.w - 4, b.h - 4, S(5), C(COL_CONTROL_HOVER));
         const char *lb = i ? "Sunburst" : "Treemap";
@@ -1440,7 +1462,7 @@ static void draw_du_header(Pane *p, DuView *v) {
     }
     { // list toggle: three lines
         Rect b = v->b_list;
-        bool hov = in_rect(b, A.mx, A.my);
+        bool hov = hot(b);
         if (A.du_list) draw_rrect(b.x, b.y, b.w, b.h, S(6), C(COL_CHIP));
         else if (hov) draw_rrect(b.x, b.y, b.w, b.h, S(6), C(COL_CONTROL_HOVER));
         Color ic = C(A.du_list ? COL_TEXT : COL_TEXT_DIM);
@@ -1449,7 +1471,7 @@ static void draw_du_header(Pane *p, DuView *v) {
     }
     {
         Rect b = v->b_close;
-        bool hov = in_rect(b, A.mx, A.my);
+        bool hov = hot(b);
         if (hov) draw_rrect(b.x, b.y, b.w, b.h, S(6), C(COL_CONTROL_HOVER));
         draw_cross(b.x + b.w * 0.5f, b.y + b.h * 0.5f, S(9), MAX(1.f, S(1.5f)), C(hov ? COL_TEXT : COL_TEXT_DIM));
     }
@@ -1595,7 +1617,7 @@ static void draw_diskuse(Pane *p, bool active) {
             int maxd = CLAMP((int)((R - v->hole) / S(34)), 2, 6);
             f32 ring = (R - v->hole) / (f32)maxd;
             du_sb_folder(v, v->cur, -M_PI * 0.5, M_PI * 1.5, 1, maxd, ring);
-            bool ch = hypotf(A.mx - v->cx, A.my - v->cy) < v->hole && A.drag == DRAG_NONE && !A.menu.open;
+            bool ch = hand_if(A.mouse_in && hypotf(A.mx - v->cx, A.my - v->cy) < v->hole && A.drag == DRAG_NONE && !A.menu.open);
             draw_arc_band(v->cx, v->cy, 0, v->hole - S(2), 0, 2 * (f32)M_PI, C(ch ? COL_CONTROL_HOVER : COL_CHIP));
             char sz[32];
             fmt_size(sz, sizeof sz, atomic_load(&v->cur->size));
@@ -1689,7 +1711,7 @@ static void draw_snapview(Pane *p, bool active) {
         f32 bh = roundf(S(28)), by = b.y + roundf((b.h - bh) * 0.5f), bx = b.x + b.w - roundf(S(8));
         bx -= bh;
         v->bback = (Rect){bx, by, bh, bh};
-        bool h = in_rect(v->bback, A.mx, A.my);
+        bool h = hot(v->bback);
         if (h) draw_rrect(bx, by, bh, bh, S(6), C(COL_CONTROL_HOVER));
         if (v->mode) draw_chevron(bx + bh * 0.5f, by + bh * 0.5f, S(10), 0, MAX(1.f, S(1.5f)), C(h ? COL_TEXT : COL_TEXT_DIM));
         else draw_cross(bx + bh * 0.5f, by + bh * 0.5f, S(9), MAX(1.f, S(1.5f)), C(h ? COL_TEXT : COL_TEXT_DIM));
@@ -1916,7 +1938,7 @@ static void draw_list(Pane *p, bool active) {
         if (p->nhdr && hi < p->nhdr && (i64)p->hdr[hi].row == row) { // group header row
             GroupHdr *gh = &p->hdr[hi++];
             i--;
-            bool hh = A.mouse_in && A.drag == DRAG_NONE && in_rect((Rect){lr.x, y, ly->track.x - lr.x, rh}, A.mx, A.my);
+            bool hh = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect((Rect){lr.x, y, ly->track.x - lr.x, rh}, A.mx, A.my));
             if (hh) draw_rrect(rx, y + 1, rw, rh - 2, S(5), C(COL_HOVER));
             f32 cxh = ly->col_name + S(6), cyh = y + rh * 0.5f;
             draw_chevron(cxh, cyh, S(7), gh->collapsed ? 1 : 3, MAX(1.f, S(1.4f)), C(COL_ACCENT));
@@ -2130,7 +2152,7 @@ static void draw_tree_icon(f32 x, f32 y, f32 s, Color c) {
 // A labelled on/off switch in the search bar: icon 0 = subfolders (tree), 1 = contents (text lines).
 static void draw_bar_switch(Rect t, const char *label, bool on, int icon) {
     Font *fs = &A.font_small;
-    bool th = A.mouse_in && in_rect(t, A.mx, A.my);
+    bool th = hot(t);
     if (th) draw_rrect(t.x, t.y, t.w, t.h, S(7), C(COL_FIELD));
     f32 is = roundf(S(14)), ix = t.x + S(8), iy = roundf(t.y + (t.h - is) * 0.5f);
     Color ic = on ? C(COL_ACCENT) : C(COL_TEXT_DIM);
@@ -2200,6 +2222,7 @@ static void draw_searchbar(Pane *p) {
     if (cnt[0]) draw_text(fs, field.x + field.w - cw, text_y(fs, field.y, field.h), cnt, (int)strlen(cnt), C(err ? COL_DANGER : COL_TEXT_FAINT));
     Rect tf = {field.x + S(28), field.y, field.w - S(28) - cw - S(4), field.h};
     const char *txt = focused ? A.search_te.buf : p->search_q;
+    if (A.mouse_in && in_rect(tf, A.mx, A.my)) A.ptr_text = true;
     if (focused) te_draw(&A.search_te, f, tf, roundf(S(4)), C(COL_TEXT));
     else draw_text_fit(f, tf.x + S(4), text_y(f, tf.y, tf.h), tf.w - S(8), txt, (int)strlen(txt), C(COL_TEXT), 0);
     if (!txt[0]) {
@@ -2219,7 +2242,7 @@ static void draw_searchbar(Pane *p) {
         bool on3[3] = {A.cs_case, A.cs_word, A.cs_regex};
         for (int i = 0; i < 3; i++) {
             Rect o = opt[i];
-            bool hv = A.mouse_in && in_rect(o, A.mx, A.my);
+            bool hv = hot(o);
             if (on3[i] || hv) draw_rrect(o.x, o.y, o.w, o.h, S(6), on3[i] ? CA(COL_ACCENT, 0.25f) : C(COL_FIELD));
             Color tc = on3[i] ? C(COL_ACCENT) : C(hv ? COL_TEXT : COL_TEXT_DIM);
             f32 lw = text_width(fs, lab[i], 2), lx2 = roundf(o.x + (o.w - lw) * 0.5f);
@@ -2232,7 +2255,7 @@ static void draw_searchbar(Pane *p) {
         }
     }
     // close
-    bool ch = A.mouse_in && in_rect(close, A.mx, A.my);
+    bool ch = hot(close);
     if (ch) draw_rrect(close.x, close.y, close.w, close.h, S(6), C(COL_CHIP));
     draw_cross(close.x + close.w * 0.5f, close.y + close.h * 0.5f, S(7), MAX(1.f, S(1.3f)), C(ch ? COL_TEXT : COL_TEXT_DIM));
 }
@@ -2272,7 +2295,7 @@ static void draw_cmpbar(Pane *p) {
     draw_text_fit(fs, tx, text_y(fs, b.y, b.h), sw.x - tx - S(8), msg, (int)strlen(msg), C(COL_TEXT2), 0);
     draw_bar_switch(sw, b.w < S(620) ? "Differences" : "Differences only", g_cmp.diff_only, 2);
     sheet_button(sync, "Sync\xE2\x80\xA6", false, cmp_ready());
-    bool ch = A.mouse_in && in_rect(close, A.mx, A.my);
+    bool ch = hot(close);
     if (ch) draw_rrect(close.x, close.y, close.w, close.h, S(6), C(COL_CONTROL_HOVER));
     draw_cross(close.x + close.w * 0.5f, close.y + close.h * 0.5f, S(9), MAX(1.f, S(1.5f)), C(ch ? COL_TEXT : COL_TEXT_DIM));
 }
@@ -2405,7 +2428,7 @@ static void draw_status(void) {
     {
         Rect r = {s.x + s.w - S(4) - bw + S(2), s.y + roundf(S(3)), bw - S(2), bh};
         A.r_gear = r;
-        bool hv = A.mouse_in && in_rect(r, A.mx, A.my), on = options_is_open();
+        bool hv = hot(r), on = options_is_open();
         if (hv || on) draw_rrect(r.x, r.y, r.w, r.h, S(5), on ? CA(COL_ACCENT, 0.25f) : C(COL_FIELD));
         draw_gear_icon(r.x + r.w * 0.5f, r.y + r.h * 0.5f, S(7), on ? C(COL_ACCENT) : hv ? C(COL_TEXT) : C(COL_TEXT_DIM),
                        C(hv || on ? (on ? rgb_mix(COL_TOOLBAR, COL_ACCENT, 0.25f) : COL_FIELD) : COL_TOOLBAR));
@@ -2413,7 +2436,7 @@ static void draw_status(void) {
     { // features (eye): view toggles that otherwise only have a key
         Rect r = {A.r_gear.x - bw, s.y + roundf(S(3)), bw - S(2), bh};
         A.r_feat = r;
-        bool hv = A.mouse_in && in_rect(r, A.mx, A.my), on = features_menu_open();
+        bool hv = hot(r), on = features_menu_open();
         if (hv || on) draw_rrect(r.x, r.y, r.w, r.h, S(5), on ? CA(COL_ACCENT, 0.25f) : C(COL_FIELD));
         Color ic = on ? C(COL_ACCENT) : hv ? C(COL_TEXT) : C(COL_TEXT_DIM);
         draw_eye_icon(r.x + r.w * 0.5f, r.y + r.h * 0.5f, S(7.5f), ic);
@@ -2425,7 +2448,7 @@ static void draw_status(void) {
     for (int i = 0; i < 3; i++) {
         Rect r = {bx + i * bw, s.y + roundf(S(3)), bw - S(2), bh};
         A.r_viewbtn[i] = r;
-        bool on = curv == i, hv = A.mouse_in && in_rect(r, A.mx, A.my);
+        bool on = curv == i, hv = hot(r);
         if (on || hv) draw_rrect(r.x, r.y, r.w, r.h, S(5), on ? CA(COL_ACCENT, 0.25f) : C(COL_FIELD));
         Color ic = on ? C(COL_ACCENT) : C(COL_TEXT_DIM);
         f32 cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f, t = MAX(1.f, roundf(S(1.4f)));
@@ -2449,7 +2472,7 @@ static void draw_status(void) {
     if (A.nops || A.q_open) {
         Rect r = {bx - bw - S(8), s.y + roundf(S(3)), bw - S(2), bh};
         A.r_xfer = r;
-        bool hv = A.mouse_in && in_rect(r, A.mx, A.my), on = A.q_open, busy = false;
+        bool hv = hot(r), on = A.q_open, busy = false;
         u64 wd = 0, wt = 0;
         for (int i = 0; i < A.nops; i++) {
             if (atomic_load(&A.ops[i]->phase) == OPS_DONE) continue;
@@ -2527,7 +2550,7 @@ static void op_bar_draw(Op *op, u64 now, f32 bx, f32 by, f32 bw) {
 // A small square icon button (hover chip); returns its rect. kind: 0 close, 1 pause/resume, 2 up, 3 down.
 static Rect op_icon_button(f32 x, f32 y, f32 cs, int kind, bool paused, bool enabled) {
     Rect r = {x, y, cs, cs};
-    bool hv = enabled && A.mouse_in && in_rect(r, A.mx, A.my);
+    bool hv = hand_if(enabled && A.mouse_in && in_rect(r, A.mx, A.my));
     if (hv) draw_rrect(r.x, r.y, r.w, r.h, S(5), C(COL_CHIP));
     Color c = C(!enabled ? COL_TEXT_FAINT : hv ? COL_TEXT : COL_TEXT_DIM);
     f32 cx = r.x + cs * 0.5f, cy = r.y + cs * 0.5f, t = MAX(1.f, S(1.3f));
@@ -2836,7 +2859,7 @@ static void draw_dialog(void) {
         for (int i = 0; i < d->nopts; i++) {
             Rect r = {cx + S(4), cy + i * orh, cw - S(8), orh};
             d->ropt[i] = r;
-            bool on = i == d->opt, hv = A.mouse_in && in_rect(r, A.mx, A.my);
+            bool on = i == d->opt, hv = hot(r);
             if (on || hv) draw_rrect(r.x, r.y, r.w, r.h, S(6), C(on ? COL_SEL_FOCUS : COL_CONTROL_HOVER));
             f32 rs = roundf(S(14)), rx = r.x + S(10), ry = roundf(r.y + (r.h - rs) * 0.5f);
             draw_rrect(rx, ry, rs, rs, rs * 0.5f, C(on ? COL_ACCENT : COL_CHIP));
@@ -2862,7 +2885,7 @@ static void draw_dialog(void) {
         bx -= bw;
         Rect r = {bx, y + h - pad - bh, bw, bh};
         d->rb[i] = r;
-        bool hover = A.mouse_in && in_rect(r, A.mx, A.my);
+        bool hover = hot(r);
         bool primary = i == d->focus;
         u32 pc = d->danger && i == d->def ? (hover ? rgb_mix(COL_DANGER_FILL, 0xFFFFFF, 0.12f) : COL_DANGER_FILL) : (hover ? COL_ACCENT_HOVER : COL_ACCENT);
         draw_rrect(r.x, r.y, r.w, r.h, S(7), C(primary ? pc : (hover ? COL_CONTROL_HOVER : COL_CONTROL)));
@@ -2892,6 +2915,7 @@ static void draw_menu(void) {
             draw_rect(r.x + S(10), roundf(yy + h * 0.5f), r.w - S(20), 1, C(COL_POPUP_BORDER));
         } else {
             if (i == m->hover && it->enabled) draw_rrect(r.x + S(5), yy, r.w - S(10), h, S(6), C(COL_SEL_FOCUS));
+            hand_if(it->enabled && A.mouse_in && menu_item_at(A.mx, A.my) == i);
             Color tc = it->enabled ? C(COL_TEXT) : C(COL_TEXT_FAINT);
             f32 lx = anycheck ? r.x + S(30) : r.x + S(16);
             if (it->checkable) {
@@ -2922,7 +2946,7 @@ static void draw_menu(void) {
             bool show = d < 0 ? m->scroll > 0 : m->scroll < m->content_h - r.h;
             if (!show) continue;
             f32 ay = d < 0 ? r.y : r.y + r.h - ah;
-            bool hv = A.mouse_in && in_rect(r, A.mx, A.my) && menu_arrow_at(A.my) == d;
+            bool hv = hand_if(A.mouse_in && in_rect(r, A.mx, A.my) && menu_arrow_at(A.my) == d);
             draw_rrect(r.x + 1, ay, r.w - 2, ah, S(8), C(hv ? COL_CONTROL_HOVER : COL_POPUP));
             draw_chevron(r.x + r.w * 0.5f, ay + ah * 0.5f, S(5), d < 0 ? 2 : 3, MAX(1.f, S(1.5f)), C(COL_TEXT_DIM));
         }
@@ -3047,6 +3071,7 @@ static void draw_palette(void) {
         PalItem *it = &g_pal_items[i];
         f32 ry = A.pal_list.y + vi * rh;
         bool sel = i == A.pal_sel;
+        hot((Rect){x + S(6), ry, w - S(12), rh});
         if (sel) draw_rrect(x + S(6), ry, w - S(12), rh, S(7), C(COL_SEL_FOCUS));
         f32 is = roundf(S(18)), ix = x + S(18), iy = roundf(ry + (rh - is) * 0.5f);
         if (it->kind == PI_CMD) {

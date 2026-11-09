@@ -949,10 +949,7 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     int want = col_edge ? 1 : hn ? (hn->kind == NODE_HSPLIT ? 1 : 2)
                   : (A.drag == DRAG_PREVIEW || A.drag == DRAG_SIDEBAR || (A.drag == DRAG_NONE && A.r_pdiv.w > 0 && in_rect(A.r_pdiv, m->x, m->y)) ||
                      (A.drag == DRAG_NONE && in_rect(A.r_sdiv, m->x, m->y))) ? 1 : 0;
-    if (want != A.cursor_ew) {
-        A.cursor_ew = want;
-        SDL_SetCursor(want == 1 ? A.cur_ew : want == 2 ? A.cur_ns : A.cur_default);
-    }
+    A.cursor_ew = want; // applied after the next frame's drawing (cursor_apply), which also knows what's clickable
 }
 
 static void on_wheel(SDL_MouseWheelEvent *w) {

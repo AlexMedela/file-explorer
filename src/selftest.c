@@ -1511,6 +1511,22 @@ static int run_selftest_m6(void) {
     while (A.npanels > 1) run_command(CMD_CLOSE_PANEL);
     ST_CHECK(A.npanels == 1 && A.root->kind == NODE_PANEL && !A.quit);
     st_frames(2);
+    {   // pointer shape: hand over buttons (the new-tab +), I-beam over the path bar, arrow over the file list
+        Panel *pn = A.ap;
+        PaneLayout *ly = &pn->cur->pane[0].ly;
+        st_mouse(SDL_EVENT_MOUSE_MOTION, pn->plus.x + pn->plus.w * 0.5f, pn->plus.y + pn->plus.h * 0.5f, 0, 0, 0);
+        ST_CHECK(A.cursor_shown == 3);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, ly->pathbar.x + ly->pathbar.w - S(4), ly->pathbar.y + ly->pathbar.h * 0.5f, 0, 0, 0);
+        ST_CHECK(A.cursor_shown == 4);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, ly->list.x + ly->list.w * 0.5f, ly->list.y + ly->list.h - S(4), 0, 0, 0);
+        ST_CHECK(A.cursor_shown == 0);
+        Pane *cp = &pn->cur->pane[0]; // file and folder rows keep the arrow, even when one click opens them
+        pane_navigate(cp, M6_BASE, true); st_wait();
+        A.single_click = true;
+        st_mouse(SDL_EVENT_MOUSE_MOTION, ly->list.x + S(60), st_row_y(cp, "b"), 0, 0, 0);
+        ST_CHECK(A.cursor_shown == 0);
+        A.single_click = false;
+    }
 
     st_rmrf(M6_BASE);
     if (st_fail) { fprintf(stderr, "SELFTEST-M6: %d failure(s)\n", st_fail); return 1; }

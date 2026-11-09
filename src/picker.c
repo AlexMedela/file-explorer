@@ -203,6 +203,7 @@ static void draw_picker_bar(Rect s) {
         f32 iw = MIN(text_width(fs, in, (int)strlen(in)), box.w * 0.4f);
         draw_rrect(box.x, box.y, box.w, box.h, S(7), C(foc ? COL_FIELD_HOVER : COL_FIELD));
         Rect tr = {box.x, box.y, box.w - iw - S(14), box.h};
+        if (A.mouse_in && in_rect(box, A.mx, A.my)) A.ptr_text = true;
         if (foc) {
             draw_rrect_outline(box.x, box.y, box.w, box.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
             te_draw(&g_pick_name, f, tr, roundf(S(10)), C(COL_TEXT));

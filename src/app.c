@@ -444,8 +444,10 @@ typedef struct {
 static struct {
     SDL_Window *win;
     SDL_Renderer *ren;
-    SDL_Cursor *cur_default, *cur_ew;
-    int cursor_ew; // 0 default, 1 ew-resize, 2 ns-resize
+    SDL_Cursor *cur_default, *cur_ew, *cur_hand, *cur_text;
+    int cursor_ew;    // resize pointer wanted (mouse motion): 0 none, 1 ew-resize, 2 ns-resize
+    int cursor_shown; // what SDL shows: those, 3 hand, 4 I-beam
+    bool ptr_hand, ptr_text; // this frame's drawing found something clickable / a text field under the mouse
     int W, H;
     f32 scale;
     char *font_path;
@@ -9768,6 +9770,7 @@ static void frame_draw(void) {
     g_alpha = 1.f;
     SDL_SetRenderDrawColor(A.ren, 0x1B, 0x1B, 0x20, 255);
     SDL_RenderClear(A.ren);
+    A.ptr_hand = A.ptr_text = false;
     // While a menu, the palette, a sheet or a dialog is open, nothing underneath reacts to the mouse.
     bool mouse_in = A.mouse_in;
     if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open) A.mouse_in = false;
@@ -9805,6 +9808,7 @@ static void frame_draw(void) {
     draw_preedit();
     if (A.show_overlay) draw_overlay();
     draw_flush();
+    cursor_apply();
 }
 
 static void window_icon_update(void) { // the logo in the accent colour (X11 / taskbars without the .desktop icon)
@@ -10290,6 +10294,8 @@ int main(int argc, char **argv) {
     A.cur_default = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
     A.cur_ew = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
     A.cur_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
+    A.cur_hand = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
+    A.cur_text = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT);
     SDL_GetWindowSizeInPixels(A.win, &A.W, &A.H);
     A.dpi_scale = SDL_GetWindowDisplayScale(A.win);
     if (A.dpi_scale <= 0) A.dpi_scale = 1;

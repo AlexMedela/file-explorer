@@ -464,7 +464,7 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
     draw_rrect(kx - kr, t.y + t.h * 0.5f - kr, kr * 2, kr * 2, kr, C(on ? COL_ON_ACCENT : COL_KNOB_OFF));
 }
 
-static bool opt_hover(Rect r) { return A.mouse_in && in_rect(r, A.mx, A.my); }
+static bool opt_hover(Rect r) { return hot(r); }
 
 // Control area of one row (right-aligned inside [x, x + w]).
 static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
