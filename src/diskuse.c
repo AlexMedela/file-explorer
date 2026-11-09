@@ -37,6 +37,9 @@ static int file_category(const char *name, bool exec) {
 // DK_SMALL: the files of a folder too small to keep one by one, summed. DK_MOUNT: a folder on another filesystem
 // (or a snapshot) that isn't measured.
 enum { DK_DIR, DK_FILE, DK_SMALL, DK_MOUNT };
+#ifndef STATX_MNT_ID
+#define STATX_MNT_ID 0x00001000U
+#endif
 #define DU_KEEP 24 // files kept by name per folder (the biggest, and only those >= 1% of the folder's files)
 
 typedef struct DuItem {
@@ -54,12 +57,13 @@ typedef struct DuItem {
     bool removed;                // deleted or trashed since (main thread)
 } DuItem;
 
-typedef struct { u64 dev; char *root, *mnt, *fstype, *src; } DuMount;
+typedef struct { u64 id, dev; char *root, *mnt, *fstype, *src; } DuMount;
 
 typedef struct DuScan {
     DuItem root;
     char *rootpath;
     u64 dev;               // the root's filesystem
+    u64 mnt_id;            // ... and its mount (0: the kernel doesn't say)
     char *fstype, *src;    // ... its type and source (btrfs subvolumes of the same source are measured too)
     DuMount *mounts;
     int nmounts;
@@ -114,9 +118,10 @@ static void du_mounts_parse(DuScan *s, const char *text) {
                 if (!strcmp(tok, "-")) { // the fields after the separator
                     char *fs = strtok(NULL, " "), *src = strtok(NULL, " ");
                     unsigned ma, mi;
-                    if (nf >= 5 && fs && src && sscanf(f[2], "%u:%u", &ma, &mi) == 2) {
+                    unsigned long long id;
+                    if (nf >= 5 && fs && src && sscanf(f[0], "%llu", &id) == 1 && sscanf(f[2], "%u:%u", &ma, &mi) == 2) {
                         if (s->nmounts == cap) { cap = cap ? cap * 2 : 32; s->mounts = xrealloc(s->mounts, (size_t)cap * sizeof(DuMount)); }
-                        s->mounts[s->nmounts++] = (DuMount){makedev(ma, mi), strdup(f[3]), strdup(f[4]), strdup(fs), strdup(src)};
+                        s->mounts[s->nmounts++] = (DuMount){id, makedev(ma, mi), strdup(f[3]), strdup(f[4]), strdup(fs), strdup(src)};
                     }
                     break;
                 }
@@ -127,19 +132,22 @@ static void du_mounts_parse(DuScan *s, const char *text) {
     }
 }
 
-static const DuMount *du_mount_of(const DuScan *s, u64 dev) {
+// mnt_id 0: by device. That one can mislead: on btrfs a file's device is its subvolume's (made up per subvolume)
+// while mountinfo lists the filesystem's for every mount, so they rarely match. The mount id always does.
+static const DuMount *du_mount_of(const DuScan *s, u64 dev, u64 mnt_id) {
     const DuMount *m = NULL;
     for (int i = 0; i < s->nmounts; i++)
-        if (s->mounts[i].dev == dev) m = &s->mounts[i]; // the last one wins (mounted over)
+        if (mnt_id ? s->mounts[i].id == mnt_id : s->mounts[i].dev == dev) m = &s->mounts[i]; // the last one wins (mounted over)
     return m;
 }
 
-// A subfolder on another device: measure it when it's the same filesystem (a btrfs subvolume of the same disk),
-// not when it's another drive, a virtual filesystem, a network mount or a snapshot (those share their data).
-static bool du_crosses(const DuScan *s, u64 dev, const char *name) {
+// A subfolder on another device or mount: measure it when it's the same filesystem (a btrfs subvolume of the same
+// disk), not when it's another drive, a virtual filesystem, a network mount or a snapshot (those share their data).
+static bool du_crosses(const DuScan *s, u64 dev, u64 mnt_id, const char *name) {
     if (du_mount_is_snapshot(name)) return false;
-    const DuMount *m = du_mount_of(s, dev);
-    if (!m) return s->fstype && !strcmp(s->fstype, "btrfs"); // a subvolume that isn't mounted on its own
+    bool nested = mnt_id && mnt_id == s->mnt_id; // another device on the same mount: a subvolume inside it
+    const DuMount *m = nested ? NULL : du_mount_of(s, dev, mnt_id);
+    if (!m) return (nested || !mnt_id) && s->fstype && !strcmp(s->fstype, "btrfs"); // a subvolume that isn't mounted on its own
     return s->src && s->fstype && !strcmp(m->src, s->src) && !strcmp(m->fstype, s->fstype) && !du_mount_is_snapshot(m->root);
 }
 
@@ -240,13 +248,15 @@ static void du_read(DuScan *s, DuItem *it, char *buf) {
             if (is_dot_or_dotdot(nm)) continue;
             struct statx sx;
             if (statx(fd, nm, AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC | AT_NO_AUTOMOUNT,
-                      STATX_TYPE | STATX_MODE | STATX_BLOCKS | STATX_INO | STATX_NLINK, &sx)) continue;
+                      STATX_TYPE | STATX_MODE | STATX_BLOCKS | STATX_INO | STATX_NLINK | STATX_MNT_ID, &sx)) continue;
             u64 bytes = (u64)sx.stx_blocks * 512;
             u32 l = (u32)strlen(nm) + 1;
             if (nlen + l > ncap) { ncap = MAX(ncap * 2, nlen + l + 1024); names = xrealloc(names, ncap); }
             if (S_ISDIR(sx.stx_mode)) {
                 u64 dev = makedev(sx.stx_dev_major, sx.stx_dev_minor);
-                u8 kind = dev == s->dev || du_crosses(s, dev, nm) ? DK_DIR : DK_MOUNT;
+                u64 mid = sx.stx_mask & STATX_MNT_ID ? sx.stx_mnt_id : 0;
+                bool same = dev == s->dev && (!mid || !s->mnt_id || mid == s->mnt_id);
+                u8 kind = same || du_crosses(s, dev, s->mnt_id ? mid : 0, nm) ? DK_DIR : DK_MOUNT;
                 if (nd == dcap) { dcap = dcap ? dcap * 2 : 16; dv = xrealloc(dv, dcap * sizeof(DuDir)); }
                 memcpy(names + nlen, nm, l);
                 dv[nd++] = (DuDir){nlen, kind == DK_DIR ? bytes : 0, dev, kind};
@@ -367,8 +377,9 @@ static void *du_worker(void *arg) {
 static void du_setup(DuScan *s) {
     const char *root = s->rootpath;
     struct statx sx;
-    if (statx(AT_FDCWD, root, AT_STATX_DONT_SYNC, STATX_BLOCKS, &sx) == 0) {
+    if (statx(AT_FDCWD, root, AT_STATX_DONT_SYNC, STATX_BLOCKS | STATX_MNT_ID, &sx) == 0) {
         s->dev = makedev(sx.stx_dev_major, sx.stx_dev_minor);
+        if (sx.stx_mask & STATX_MNT_ID) s->mnt_id = sx.stx_mnt_id;
         atomic_store(&s->root.size, (u64)sx.stx_blocks * 512);
     }
     const char *mi = getenv("FE_MOUNTINFO"); // tests: a made-up mount table
@@ -385,7 +396,8 @@ static void du_setup(DuScan *s) {
         du_mounts_parse(s, t);
         free(t);
     }
-    const DuMount *m = du_mount_of(s, s->dev);
+    const DuMount *m = du_mount_of(s, s->dev, s->mnt_id);
+    if (!m) s->mnt_id = 0; // (a made-up mount table, or one that changed since): go by device
     if (m) {
         s->fstype = strdup(m->fstype);
         s->src = strdup(m->src);

@@ -5531,13 +5531,20 @@ static int run_selftest_du(void) {
         t.dev = makedev(0, 31);
         t.fstype = "btrfs";
         t.src = "/dev/nvme0n1p2";
-        ST_CHECK(du_crosses(&t, makedev(0, 33), "home"));
-        ST_CHECK(!du_crosses(&t, makedev(0, 34), ".snapshots") && !du_crosses(&t, makedev(0, 77), ".snapshots"));
-        ST_CHECK(!du_crosses(&t, makedev(259, 1), "boot") && !du_crosses(&t, makedev(0, 22), "proc"));
-        ST_CHECK(!du_crosses(&t, makedev(0, 50), "remote"));
-        ST_CHECK(du_crosses(&t, makedev(0, 77), "docker-subvol")); // a btrfs subvolume that isn't mounted
+        ST_CHECK(du_crosses(&t, makedev(0, 33), 0, "home"));
+        ST_CHECK(!du_crosses(&t, makedev(0, 34), 0, ".snapshots") && !du_crosses(&t, makedev(0, 77), 0, ".snapshots"));
+        ST_CHECK(!du_crosses(&t, makedev(259, 1), 0, "boot") && !du_crosses(&t, makedev(0, 22), 0, "proc"));
+        ST_CHECK(!du_crosses(&t, makedev(0, 50), 0, "remote"));
+        ST_CHECK(du_crosses(&t, makedev(0, 77), 0, "docker-subvol")); // a btrfs subvolume that isn't mounted
+        // by mount id (what statx gives): btrfs devices are per subvolume and needn't match mountinfo's
+        t.mnt_id = 21;
+        ST_CHECK(du_crosses(&t, makedev(0, 90), 22, "home") && !du_crosses(&t, makedev(0, 90), 23, "snaps"));
+        ST_CHECK(!du_crosses(&t, makedev(0, 33), 24, "boot") && !du_crosses(&t, makedev(0, 33), 25, "proc"));
+        ST_CHECK(!du_crosses(&t, makedev(0, 33), 26, "remote") && !du_crosses(&t, makedev(0, 33), 99, "gone"));
+        ST_CHECK(du_crosses(&t, makedev(0, 91), 21, "docker-subvol") && !du_crosses(&t, makedev(0, 91), 21, ".snapshots"));
+        t.mnt_id = 0;
         t.fstype = "ext4";
-        ST_CHECK(!du_crosses(&t, makedev(0, 77), "other"));
+        ST_CHECK(!du_crosses(&t, makedev(0, 77), 0, "other"));
         for (int i = 0; i < t.nmounts; i++) { free(t.mounts[i].root); free(t.mounts[i].mnt); free(t.mounts[i].fstype); free(t.mounts[i].src); }
         free(t.mounts);
         ST_CHECK(file_category("a.MKV", false) == DC_VIDEO && file_category("x.tar.gz", false) == DC_ARCHIVE &&
