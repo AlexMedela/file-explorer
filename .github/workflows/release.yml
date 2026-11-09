@@ -1,7 +1,7 @@
 name: Release
 
-# Push a tag "v<version>" (matching APP_VERSION in src/app.c) to build the AppImages, publish the GitHub Release and
-# have OBS rebuild the distro packages. "Run workflow" (manual) only builds the AppImages, as downloadable artifacts.
+# Push a tag "v<version>" (matching APP_VERSION in src/app.c, with a "## <version>" section in CHANGELOG.md) to build the
+# AppImages, publish the GitHub Release and have OBS rebuild the distro packages. "Run workflow" (manual) only builds the AppImages, as downloadable artifacts.
 on:
   push:
     tags: ["v*"]
@@ -39,6 +39,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -47,8 +51,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The notes are this version's section of CHANGELOG.md (the generated compare link is appended)
+          awk -v h="## ${GITHUB_REF_NAME#v}" '$0 == h { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > notes.md
+          grep -q . notes.md || { echo "::error::CHANGELOG.md has no section for ${GITHUB_REF_NAME#v}"; exit 1; }
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "File Explorer ${GITHUB_REF_NAME#v}" \
-            --generate-notes --verify-tag
+            --notes-file notes.md --generate-notes --verify-tag
 
   obs:
     if: startsWith(github.ref, 'refs/tags/v')
