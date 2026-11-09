@@ -325,7 +325,6 @@ typedef struct { // one sidebar row
     bool removable;      // can be ejected / disconnected
     f32 y, h;            // content-space position (see places_layout)
     Rect eject;          // eject button (hover), set while drawing
-    Rect usage;          // drives: usage bar + free space (click: disk usage), set while drawing
 } Place;
 
 enum { DRAG_NONE, DRAG_SCROLL, DRAG_BAND_PENDING, DRAG_BAND, DRAG_SPLIT, DRAG_ITEMS_PENDING, DRAG_ITEMS, DRAG_PREVIEW, DRAG_SIDEBAR,
@@ -5708,7 +5707,7 @@ static void menu_open_place(int idx, f32 x, f32 y) {
         menu_add("Disconnect", "", ACT_NET_DISCONNECT, true);
     } else {
         menu_add("Open in new tab", "Middle-click", ACT_PLACE_NEW_TAB, true);
-        menu_add("Disk usage\xE2\x80\xA6", pl->kind == PK_DRIVE ? "Click the bar" : "", ACT_DU_PLACE, pl->kind != PK_TRASH);
+        menu_add("Disk usage\xE2\x80\xA6", "", ACT_DU_PLACE, pl->kind != PK_TRASH);
         if (pl->kind == PK_DRIVE) menu_add("Snapshots\xE2\x80\xA6", "", ACT_SNAP_PLACE, true);
         if (pl->group >= 0) {
             QaGroup *g = &A.qa[pl->group];

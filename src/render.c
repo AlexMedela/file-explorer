@@ -591,7 +591,6 @@ static void draw_sidebar(void) {
         if (lifted) g_alpha = 0.45f;
         f32 is = roundf(S(16)), ix = roundf(r.x + S(12)), iy = roundf(r.y + (r.h - is) * 0.5f);
         pl->eject = (Rect){0, 0, 0, 0};
-        pl->usage = (Rect){0, 0, 0, 0};
         bool show_eject = pl->removable && hover && A.drag == DRAG_NONE && pl->kind != PK_UNMOUNTED;
         bool phone_off = pl->kind == PK_PHONE && !pl->path[0]; // not connected yet: dim, "Connect" on hover
         Cloud *cl = pl->kind == PK_CLOUD && pl->item < g_ncloud ? &g_cloud[pl->item] : NULL;
@@ -680,10 +679,7 @@ static void draw_sidebar(void) {
                 if (!show_eject) draw_text(fs, r.x + r.w - S(8) - fw, text_y(fs, r.y - S(3), r.h), fr, (int)strlen(fr), C(COL_TEXT_FAINT));
                 lmax -= fw + S(8); // same room either way: the name doesn't jump when the button appears
                 f32 bw = MAX(S(10), bar_end - lx), by2 = r.y + r.h - roundf(S(7));
-                pl->usage = (Rect){lx - S(2), by2 - S(5), bw + S(4), S(12)};
-                bool uh = A.drag == DRAG_NONE && in_rect(pl->usage, A.mx, A.my); // click: disk usage
-                f32 bt = roundf(S(uh ? 5 : 3));
-                by2 -= uh ? roundf(S(1)) : 0;
+                f32 bt = roundf(S(3));
                 draw_rrect(lx, by2, bw, bt, S(1.5f), C(COL_TRACK));
                 draw_rrect(lx, by2, MAX(S(3), (f32)(bw * du[k].used)), bt, S(1.5f),
                            C(du[k].used > 0.9 ? COL_DANGER : du[k].used > 0.75 ? COL_WARN : COL_ACCENT));

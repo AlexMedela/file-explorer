@@ -752,10 +752,6 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
             place_dev_action(idx, pl->kind == PK_NETWORK || pl->kind == PK_PHONE ? ACT_NET_DISCONNECT : ACT_DEV_EJECT);
             return;
         }
-        if (b->button == SDL_BUTTON_LEFT && pl->kind == PK_DRIVE && pl->usage.w > 0 && in_rect(pl->usage, x, y)) {
-            du_open_tab(pl->path); // the usage bar / free space: what takes the space
-            return;
-        }
         char op[PATH_MAX];
         if (b->button == SDL_BUTTON_MIDDLE) tab_new(place_open_path(pl, op, sizeof op), A.cur + 1, false);
         else if (b->button == SDL_BUTTON_LEFT) {
