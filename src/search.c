@@ -1172,6 +1172,21 @@ static void dirsize_carry(Listing *L, Listing *old) {
     free(tab);
 }
 
+// Folder sizes still in the cache go straight into a completed listing L, before its workers start: going back to a
+// folder shows them in its first frame instead of filling them in a moment later.
+static void dirsize_prefill(Listing *L, bool visible, bool hidden) {
+    for (u32 i = 0; i < L->count; i++) {
+        Entry *e = &L->entries[i];
+        if (!(e->flags & ENT_DIR) || (e->flags & ENT_LINK) || !((e->flags & ENT_HIDDEN) ? hidden : visible)) continue;
+        char full[PATH_MAX];
+        u64 sz;
+        path_join(full, sizeof full, L->path, e->name);
+        if (!dscache_get(full, &sz)) continue;
+        __atomic_store_n(&e->size, sz, __ATOMIC_RELAXED);
+        __atomic_or_fetch(&e->mflags, (u8)MF_DIRSIZE, __ATOMIC_RELEASE);
+    }
+}
+
 // Compute recursive sizes for the folders of a completed listing (name order = screen order).
 // Hidden folders only when they are shown: in $HOME they (.cache, .local, ...) are most of the tree.
 static void dirsize_start(Listing *L, bool visible, bool hidden) {

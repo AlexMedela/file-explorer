@@ -1149,6 +1149,27 @@ static int run_selftest_m4(void) {
         st_wait();
         ST_CHECK(st_wait_cond(c_sizes_done, 5000) && !strcmp(p->L->entries[p->order[0]].name, "big"));
     }
+    // going into a folder and back up: the old frame is held until the new folder is listed and sorted (no blank
+    // list in between), and the folder sizes just measured are in its first frame
+    {
+        pane_navigate(p, M4_BASE "/big", true);
+        ST_CHECK(p->nav_t && nav_hold_ns() > 0);
+        st_wait();
+        ST_CHECK(nav_hold_ns() == 0 && !p->nav_t);
+        pane_navigate(p, M4_BASE, true);
+        bool seen = false, kept = false;
+        for (u64 t0 = now_ns(); !seen && now_ns() - t0 < 5000000000ull;) {
+            main_drain();
+            pane_poll(p);
+            if (atomic_load(&p->L->state) == LST_COMPLETE && p->order) {
+                seen = true;
+                kept = st_dir_size(p, "big") == 2u << 20 && st_dir_size(p, "small") == 1024;
+            } else SDL_Delay(1);
+        }
+        ST_CHECK(seen && kept);
+        st_wait();
+        ST_CHECK(nav_hold_ns() == 0 && !strcmp(p->L->entries[p->order[0]].name, "big"));
+    }
     pane_set_sort(p, SORT_NAME);
     st_wait();
 

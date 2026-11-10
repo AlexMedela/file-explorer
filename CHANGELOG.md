@@ -5,6 +5,9 @@
 **New**
 - Options > Updates: the version, how this copy updates, and "Check now". The AppImage updates itself: a card offers a new version once, "Update now" downloads and checks it, "Restart now" switches to it (or turn on downloading by itself).
 
+**Fixed**
+- No more blink when opening a folder or going back up through the address bar: the list switches once, with sizes and dates already filled in.
+
 ## 0.10.1
 
 **New**

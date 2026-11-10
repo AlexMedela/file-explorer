@@ -214,6 +214,7 @@ typedef struct Pane {
     Listing *L_next;       // background reload; swapped in when ready (no flicker)
     Listing *L_prev;       // the listing a reload replaced: its folder sizes carry over once L completes
     bool keep_scroll;      // the reload is a refresh: the view stays where it is, even if the cursor is off screen
+    u64 nav_t;             // when the folder shown before this one was left (0 = settled): see nav_hold_ns
     bool from_reload;
     char search_q[256];    // non-empty while showing recursive search results
     char search_next_q[256]; // query of a staged search (L_next) not yet shown
@@ -2355,6 +2356,8 @@ static void pane_drop_prev(Pane *p) {
     p->L_prev = NULL;
 }
 
+#define NAV_HOLD_NS 120000000ull // see nav_hold_ns; when "Loading..." would show anyway
+
 static void pane_load_ex(Pane *p, const char *path_in, bool scan) {
     char path[PATH_MAX]; // path_in may alias p->path
     snprintf(path, sizeof path, "%s", path_in);
@@ -2367,6 +2370,7 @@ static void pane_load_ex(Pane *p, const char *path_in, bool scan) {
     p->from_reload = false;
     p->reload_no_select = false;
     p->keep_scroll = false;
+    p->nav_t = 0;
     p->resort_on_complete = false;
     strv_free(p->select_names, p->nselect_names);
     p->select_names = NULL;
@@ -2550,7 +2554,10 @@ static void pane_navigate(Pane *p, const char *path_in, bool push) {
             p->select_name[k] = 0;
         }
     }
+    u64 now = now_ns(); // fast repeats keep the first time: the screen isn't held for longer than NAV_HOLD_NS
+    u64 nav_t = p->nav_t && now - p->nav_t < NAV_HOLD_NS ? p->nav_t : p->L && p->order ? now : 0;
     pane_load(p, path);
+    p->nav_t = nav_t;
     recent_push(path);
     if (push) {
         for (int i = p->hist_pos + 1; i < p->hist_n; i++) free(p->hist[i]);
@@ -3070,7 +3077,10 @@ static void pane_poll(Pane *p) {
         bool visible = !L->dirsize_started, hidden = A.show_hidden && !L->dirsize_hidden;
         L->dirsize_started = true;
         L->dirsize_hidden |= hidden;
-        if (!path_is_remote(L->path)) dirsize_start(L, visible, hidden); // walking a network share would be slow and costly
+        if (!path_is_remote(L->path)) { // walking a network share would be slow and costly
+            dirsize_prefill(L, visible, hidden); // sizes measured lately are there in the first frame (going back up)
+            dirsize_start(L, visible, hidden);
+        }
     }
     if (st == LST_COMPLETE && !p->complete_seen && p->order) {
         p->complete_seen = true;
@@ -10032,6 +10042,23 @@ static void frame(void) {
     }
 }
 
+// Opening a folder: the previous frame stays on screen until the new folder is listed with its details and sorted,
+// so the list doesn't blank out and fill in again (a blink) - unless that takes long (a slow drive, a huge folder).
+// Returns how much longer to hold (0 = draw now).
+static u64 nav_hold_ns(void) {
+    u64 hold = NAV_HOLD_NS, now = now_ns(), left = 0;
+    for (int i = 0; i < A.ntabs; i++)
+        for (int j = 0; j < A.tabs[i]->npanes; j++) {
+            Pane *p = &A.tabs[i]->pane[j];
+            if (!p->nav_t) continue;
+            int st = p->L ? atomic_load(&p->L->state) : LST_ERROR;
+            bool settled = st == LST_ERROR || (st == LST_COMPLETE && p->order && !p->sort_pending);
+            if (settled || now - p->nav_t >= hold) p->nav_t = 0;
+            else left = MAX(left, hold - (now - p->nav_t));
+        }
+    return left;
+}
+
 // --- benchmark (headless) --------------------------------------------------
 
 // Is this a Vulkan renderer on Mesa's software rasterizer (lavapipe)? It draws on the CPU and presents with plain
@@ -10499,6 +10526,7 @@ int main(int argc, char **argv) {
     // lsblk takes a few ms: wait for it (bounded) so the drives are in the first frame instead of popping in after.
     for (u64 t0 = now_ns(); A.devs_enabled && !A.devs_known && now_ns() - t0 < 150000000ull;) { SDL_Delay(2); main_drain(); }
     A.redraw = true;
+    int hold_ms = 0;
     while (!A.quit) {
         bool loading = false;
         for (int i = 0; i < A.ntabs; i++)
@@ -10508,7 +10536,8 @@ int main(int argc, char **argv) {
             }
         SDL_Event e;
         bool got;
-        if ((A.redraw || animating()) && !A.win_hidden) got = SDL_PollEvent(&e);
+        if (hold_ms) got = SDL_WaitEventTimeout(&e, hold_ms); // the listing's progress wakes us
+        else if ((A.redraw || animating()) && !A.win_hidden) got = SDL_PollEvent(&e);
         else if (loading || A.screenshot || ops_busy() || watch_pending() || A.search_due || A.pal_pending || sheet_busy())
             got = SDL_WaitEventTimeout(&e, (loading || watch_pending() || A.search_due) ? 30 : ops_moving() ? 16 : 100);
         else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0) { // add-on / cloud status, .git polls
@@ -10542,6 +10571,9 @@ int main(int argc, char **argv) {
         for (int i = 0; i < A.ntabs; i++)
             for (int j = 0; j < A.tabs[i]->npanes; j++) pane_poll(&A.tabs[i]->pane[j]);
         if (A.win_hidden) continue; // keeps A.redraw: the next visible frame catches up
+        u64 hold = nav_hold_ns();
+        hold_ms = hold ? (int)(hold / 1000000) + 1 : 0;
+        if (hold) continue; // keeps A.redraw too
         frame();
         A.redraw = false;
     }
