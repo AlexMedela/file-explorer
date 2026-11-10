@@ -1671,7 +1671,13 @@ static int run_selftest_m7(void) {
         if (f) { svg[fread(svg, 1, sizeof svg - 1, f)] = 0; fclose(f); }
         ST_CHECK(strstr(svg, "viewBox=\"0 -84 624 624\"") && !strstr(svg, "#2566DE") && strstr(svg, "#FFFFFF"));
         ST_CHECK(!app_icon_write(dh, 0x9D7CF4));                       // same colour: left alone
-        ST_CHECK(app_icon_write(dh, LOGO_BASE_ACCENT) && !access(ip, F_OK) == 0); // Blue: the packaged icon again
+        ST_CHECK(app_icon_write(dh, LOGO_BASE_ACCENT) && access(ip, F_OK) == 0); // Blue: the copy stays, in the packaged colours
+        f = fopen(ip, "r");
+        svg[0] = 0;
+        if (f) { svg[fread(svg, 1, sizeof svg - 1, f)] = 0; fclose(f); }
+        ST_CHECK(strstr(svg, "#2566DE") != NULL);
+        unlink(ip);
+        ST_CHECK(!app_icon_write(dh, LOGO_BASE_ACCENT) && access(ip, F_OK) != 0); // no copy yet: none made for Blue
         g_accent_custom = saved;
         theme_apply();
         icons_sync_theme();

@@ -2284,6 +2284,32 @@ static void sel_set(Pane *p, i64 pos, bool v) {
     }
 }
 
+// X11: SDL converts titles through Xlib's locale functions, which fail for anything non-ASCII while the process
+// runs in the "C" locale (ours does: switching it would change regex/fnmatch on the worker threads). Then
+// _NET_WM_NAME, the title panels show, keeps its old value. Set it directly with the libX11 SDL already loaded.
+static void x11_set_net_wm_name(const char *title) {
+    static int ok = -1;
+    static unsigned long (*intern)(void *, const char *, int);
+    static int (*change)(void *, unsigned long, unsigned long, unsigned long, int, int, const unsigned char *, int);
+    static int (*flush)(void *);
+    if (ok < 0) {
+        void *l = strcmp(SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "", "x11") ? NULL
+                                                                                                    : dlopen("libX11.so.6", RTLD_NOW | RTLD_NOLOAD);
+        *(void **)&intern = l ? dlsym(l, "XInternAtom") : NULL;
+        *(void **)&change = l ? dlsym(l, "XChangeProperty") : NULL;
+        *(void **)&flush = l ? dlsym(l, "XFlush") : NULL;
+        ok = intern && change && flush;
+    }
+    if (!ok) return;
+    SDL_PropertiesID pr = SDL_GetWindowProperties(A.win);
+    void *dpy = SDL_GetPointerProperty(pr, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL);
+    unsigned long w = (unsigned long)SDL_GetNumberProperty(pr, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
+    if (!dpy || !w) return;
+    change(dpy, w, intern(dpy, "_NET_WM_NAME", 0), intern(dpy, "UTF8_STRING", 0), 8, 0 /* PropModeReplace */,
+           (const unsigned char *)title, (int)strlen(title));
+    flush(dpy);
+}
+
 static void update_title(void) {
     if (!A.ntabs) return;
     Pane *p = active_pane();
@@ -2293,6 +2319,7 @@ static void update_title(void) {
     if (picker_active()) snprintf(t, sizeof t, "%s \xE2\x80\x94 %s", picker_title(), base);
     else snprintf(t, sizeof t, "%s \xE2\x80\x94 " APP_NAME, base);
     SDL_SetWindowTitle(A.win, t);
+    x11_set_net_wm_name(t);
 }
 
 static void drag_cancel(void) {
@@ -9843,14 +9870,17 @@ static void window_icon_update(void) { // the logo in the accent colour (X11 / t
 
 // The system icon (launchers, docks, the window list - anything that looks up Icon=dev.fileexplorer in the icon
 // theme) in the accent colour too: a recoloured copy in the user's icon folder, which wins over the packaged one.
-// Blue is the artwork as packaged, so then the copy goes away. dh: the data folder ($XDG_DATA_HOME).
+// Blue is the artwork as packaged: no copy is made for it, but one that exists is turned blue, never deleted -
+// panels keep using a theme icon they once found (LXQt's taskbar), and without a package (AppImage) a deleted
+// one leaves them with none: the next icon-theme change turned the button into the app's name.
+// dh: the data folder ($XDG_DATA_HOME).
 static bool app_icon_write(const char *dh, u32 accent) {
     char dir[PATH_MAX], path[PATH_MAX + 32];
     snprintf(dir, sizeof dir, "%s/icons/hicolor", dh);
     snprintf(path, sizeof path, "%s/scalable/apps/dev.fileexplorer.svg", dir);
     bool changed;
-    if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT) changed = unlink(path) == 0;
-    else {
+    if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(path, F_OK)) return false;
+    {
         static const char from[] = "width=\"624\" height=\"456\" viewBox=\"0 0 624 456\"";
         const char *at = strstr(g_logo_svg, from);
         if (!at) return false;
