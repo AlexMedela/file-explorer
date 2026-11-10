@@ -3240,6 +3240,100 @@ static int run_selftest_m11(void) {
         }
         tab_close(A.cur);
     }
+    { // --- F4: the terminal panel under the folder (like Dolphin's), following the folder both ways; Shift+F4: a tab
+        mkdir_p(M11_BASE "/a/b", 0755);
+        Tab *ft = cur_tab();
+        Pane *fp = &ft->pane[0];
+        int nt = A.ntabs;
+        pane_navigate(fp, M11_BASE, true);
+        st_wait();
+        f32 h0 = fp->ly.area.h;
+        st_key(SDLK_F4, SDL_KMOD_NONE);
+        layout();
+        ST_CHECK(!ft->term && ft->dock && ft->dock_on && active_term() == ft->dock && A.ntabs == nt);
+        ST_CHECK(fp->ly.area.h < h0 - S(100) && ft->dock_r.y >= fp->ly.area.y + fp->ly.area.h && ft->dock_r.h > S(100));
+        char cwd[PATH_MAX] = "";
+        for (int k = 0; k < 400 && !(ft->dock && term_cwd(ft->dock, cwd, sizeof cwd) && !strcmp(cwd, M11_BASE)); k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(!strcmp(cwd, M11_BASE));
+        // the pane goes somewhere: the shell follows (cd typed at its prompt)
+        pane_navigate(fp, M11_BASE "/a/b", true);
+        for (int k = 0; k < 400 && !(ft->dock && term_cwd(ft->dock, cwd, sizeof cwd) && !strcmp(cwd, M11_BASE "/a/b")); k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(!strcmp(cwd, M11_BASE "/a/b"));
+        st_frames(2);
+        st_shot("terminal-panel");
+        // a cd typed in the shell: the pane follows
+        if (ft->dock) term_send(ft->dock, "cd ..\r");
+        for (int k = 0; k < 400 && strcmp(fp->path, M11_BASE "/a"); k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(!strcmp(fp->path, M11_BASE "/a"));
+        st_frames(20); // and nothing bounces back
+        ST_CHECK(!strcmp(fp->path, M11_BASE "/a") && ft->dock && term_cwd(ft->dock, cwd, sizeof cwd) && !strcmp(cwd, M11_BASE "/a"));
+        // going back where the shell was before its own cd: typed again; a folder it can't enter: typed only once
+        pane_navigate(fp, M11_BASE "/a/b", true);
+        for (int k = 0; k < 400 && !(ft->dock && term_cwd(ft->dock, cwd, sizeof cwd) && !strcmp(cwd, M11_BASE "/a/b")); k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(!strcmp(cwd, M11_BASE "/a/b"));
+        if (getuid() != 0) {
+            mkdir(M11_BASE "/locked", 0);
+            pane_navigate(fp, M11_BASE "/locked", true);
+            ft->dock_want_t -= 3000000000ull; // (as if the 2 s had passed)
+            for (int k = 0; k < 60; k++) { st_frames(1); SDL_Delay(5); if (ft->dock_want[0]) ft->dock_want_t -= 3000000000ull; }
+            int tries = 0;
+            for (int r = -(ft->dock ? ft->dock->sb_n : 0); ft->dock && r < ft->dock->rows; r++) {
+                char row[512];
+                st_term_row(ft->dock, r, row, sizeof row);
+                tries += strstr(row, "cd '" M11_BASE "/locked'") != NULL;
+            }
+            ST_CHECK(tries == 1 && !strcmp(fp->path, M11_BASE "/locked"));
+            rmdir(M11_BASE "/locked");
+            pane_navigate(fp, M11_BASE "/a", true);
+            for (int k = 0; k < 400 && !(ft->dock && term_cwd(ft->dock, cwd, sizeof cwd) && !strcmp(cwd, M11_BASE "/a")); k++) { st_frames(1); SDL_Delay(5); }
+        }
+        // F4 from inside the terminal hides it (the shell keeps running); the folder has the keyboard again
+        Term *keep = ft->dock;
+        st_key(SDLK_F4, SDL_KMOD_NONE);
+        layout();
+        ST_CHECK(!ft->dock_on && ft->dock == keep && !active_term() && fabsf(fp->ly.area.h - h0) < 1);
+        // Ctrl+Shift+F4 shows it with the keyboard; again: back to the folder, the panel stays
+        st_key(SDLK_F4, SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
+        ST_CHECK(ft->dock_on && ft->dock == keep && active_term() == keep);
+        st_key(SDLK_F4, SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
+        ST_CHECK(ft->dock_on && !active_term());
+        // a click in it gives it the keyboard, a click in the folder takes it back
+        layout();
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, ft->dock_r.x + S(40), ft->dock_r.y + S(20), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, ft->dock_r.x + S(40), ft->dock_r.y + S(20), SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(active_term() == keep);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, fp->ly.list.x + S(300), fp->ly.list.y + fp->ly.list.h - S(10), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, fp->ly.list.x + S(300), fp->ly.list.y + fp->ly.list.h - S(10), SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!active_term() && ft->dock_on);
+        // drag the line above it: taller, remembered
+        f32 dh0 = ft->dock_r.h, ey = ft->dock_div.y + ft->dock_div.h * 0.5f;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, ft->dock_r.x + S(200), ey, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, ft->dock_r.x + S(200), ey - S(50), 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, ft->dock_r.x + S(200), ey - S(50), SDL_BUTTON_LEFT, 1, 0);
+        layout();
+        ST_CHECK(A.drag == DRAG_NONE && fabsf(ft->dock_r.h - (dh0 + S(50))) <= 2);
+        // the session remembers it (a new shell next time)
+        settings_save();
+        char cfgf[PATH_MAX], line[2048];
+        settings_file(cfgf, sizeof cfgf, false);
+        bool saved = false, height = false;
+        FILE *f = fopen(cfgf, "r");
+        while (f && fgets(line, sizeof line, f)) {
+            if (!strncmp(line, "ptab=", 5) && strstr(line, M11_BASE "/a\t") && strstr(line, ":1\n")) saved = true;
+            if (!strncmp(line, "terminal_panel_height=", 22) && fabsf((f32)atof(line + 22) - A.dock_h) < 1) height = true;
+        }
+        if (f) fclose(f);
+        ST_CHECK(saved && height);
+        // exit in the shell closes the panel
+        if (ft->dock) term_send(ft->dock, "exit\r");
+        for (int k = 0; k < 400 && ft->dock; k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(!ft->dock && !ft->dock_on && !active_term());
+        // Shift+F4: a terminal tab, as F4 used to open
+        st_key(SDLK_F4, SDL_KMOD_SHIFT);
+        ST_CHECK(A.ntabs == nt + 1 && A.ap->cur->term);
+        if (A.ap->cur->term) tab_close(A.cur);
+        A.dock_h = 240;
+    }
     { // the sidebar is resizable: drag its edge (kept within limits), double-click resets, remembered
         f32 w0 = A.r_sidebar.w;
         Rect e = A.r_sdiv;

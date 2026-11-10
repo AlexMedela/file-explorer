@@ -267,6 +267,15 @@ typedef struct Tab {
     Panel *panel; // the panel whose tab bar shows this tab
     Rect r;       // rect in the panel's tab bar
     Term *term;   // a terminal tab (its pane just tracks the start folder)
+    // the terminal panel under the folder (F4, like Dolphin): lives as long as the tab, shown or not
+    Term *dock;
+    bool dock_on, dock_focus; // shown / has the keyboard (else the folder has it)
+    Rect dock_r, dock_div;    // where it's drawn, the edge above it (drag to resize)
+    char dock_cwd[PATH_MAX];  // the shell's folder as last seen: when it changes (cd typed there), the pane follows
+    char dock_want[PATH_MAX]; // a cd we typed for the pane, until the shell gets there (or gives up)
+    u64 dock_want_t;
+    char dock_sent[PATH_MAX]; // the folder last typed (or followed): a cd that failed isn't typed again
+    char dock_seen[PATH_MAX], dock_real[PATH_MAX]; // the pane's folder as last compared, and that without symlinks
 } Tab;
 
 static void term_free(Term *t);
@@ -290,6 +299,10 @@ static bool term_has_sel(Term *t);
 static u32 term_bg_color(void);
 static u32 term_fg_color(void);
 static bool term_settled(Term *t);
+static bool term_pump(Term *t);
+static bool term_idle(Term *t);
+static bool term_cwd(Term *t, char *out, size_t cap);
+static void term_send(Term *t, const char *s);
 
 // The window is a tree of panels (File Pilot style): every panel has its own tab bar.
 struct Panel {
@@ -331,7 +344,7 @@ typedef struct { // one sidebar row
 } Place;
 
 enum { DRAG_NONE, DRAG_SCROLL, DRAG_BAND_PENDING, DRAG_BAND, DRAG_SPLIT, DRAG_ITEMS_PENDING, DRAG_ITEMS, DRAG_PREVIEW, DRAG_SIDEBAR,
-       DRAG_TAB_PENDING, DRAG_TAB, DRAG_COL_RESIZE, DRAG_COL_PENDING, DRAG_COL, DRAG_PLACE_PENDING, DRAG_PLACE };
+       DRAG_TAB_PENDING, DRAG_TAB, DRAG_COL_RESIZE, DRAG_COL_PENDING, DRAG_COL, DRAG_PLACE_PENDING, DRAG_PLACE, DRAG_DOCK };
 
 enum { U_RENAME, U_MOVE, U_COPY, U_TRASH, U_CREATE };
 typedef struct {
@@ -387,6 +400,7 @@ enum {
     ACT_SNAP_DELETE, ACT_SNAP_CREATE, ACT_SNAP_ALLOW, ACT_SNAP_RESTORE,
     ACT_NEW_FOLDER_IN, ACT_NEW_FILE_IN,
     ACT_DROP_MOVE, ACT_DROP_COPY, ACT_DROP_LINK, ACT_DROP_CANCEL, // the menu after a drop (A.drop_ask)
+    ACT_TERM_PANEL, ACT_TERM_FOCUS, // the terminal panel under the folder: show / hide, move the keyboard
     ACT_FIRST_FREE_, // (keep below 100: shortcuts share ids with CMD_*)
     ACT_COL_BASE = 200,  // + column id: toggle that column
     ACT_VIEW_BASE = 300, // + zoom level index
@@ -676,6 +690,8 @@ static struct {
     int rec_n;
     FILE *rec_log;
     // mouse
+    f32 dock_h;          // terminal panel height (unscaled px), the same for every tab
+    f32 dock_bottom;     // ... its bottom edge while its top is dragged
     bool single_click;   // open items with one click
     bool dblclick_up;    // double-click empty space = parent folder
     i64 click_open;      // row to open on mouse-up (single-click mode), -1 none
@@ -1013,7 +1029,16 @@ static void layout_panel(Panel *pn, Rect r) {
         if (t->panel != pn) continue;
         t->r = (Rect){x0 + k * tw, r.y + roundf(S(6)), tw, tb - roundf(S(6))};
         k++;
-        layout_pane(&t->pane[0], body);
+        Rect pb = body;
+        t->dock_r = t->dock_div = (Rect){0, 0, 0, 0};
+        if (t->dock_on && !t->term) { // the terminal panel takes the bottom (the folder keeps at least a little)
+            f32 dh = MIN(roundf(S(A.dock_h)), roundf(body.h * 0.8f));
+            dh = MAX(dh, MIN(roundf(S(60)), roundf(body.h * 0.5f)));
+            pb.h -= dh + 1;
+            t->dock_r = (Rect){body.x, pb.y + pb.h + 1, body.w, dh};
+            t->dock_div = (Rect){body.x, t->dock_r.y - roundf(S(3)), body.w, 1 + 2 * roundf(S(3))};
+        }
+        layout_pane(&t->pane[0], pb);
     }
     // + : a round button after the last tab, centred on the tab labels (clear of the active tab's flare)
     f32 ps = roundf(S(26)), pcy = r.y + roundf(S(6)) + (tb - roundf(S(6))) * 0.5f;
@@ -3270,6 +3295,8 @@ static void closed_push(const char *path) {
     A.closed[A.nclosed++] = strdup(path);
 }
 
+static void dock_free(Tab *t);
+
 static void tab_close(int i) {
     A.settings_dirty = true;
     if (i < 0 || i >= A.ntabs) return;
@@ -3281,6 +3308,7 @@ static void tab_close(int i) {
         term_free(t->term);
         t->term = NULL;
     } else closed_push(t->pane[0].path);
+    dock_free(t);
     Tab *nb = panel_neighbor(pn, t);
     if (A.menu_tab == t) { A.menu.open = false; A.menu_tab = NULL; }
     if (A.drag_tab == t || A.tdrop_before == t || A.drop_tab == t) drag_cancel();
@@ -4781,7 +4809,107 @@ static void open_terminal(const char *dir) {
     else term_tab_open(dir, NULL);
 }
 
-static Term *active_term(void) { return A.ap && A.ap->cur ? A.ap->cur->term : NULL; }
+// The terminal that has the keyboard: a terminal tab, or the current tab's terminal panel when it has focus.
+static Term *active_term(void) {
+    Tab *t = A.ap ? A.ap->cur : NULL;
+    if (!t) return NULL;
+    if (t->term) return t->term;
+    return t->dock && t->dock_on && t->dock_focus ? t->dock : NULL;
+}
+
+// --- terminal panel (F4: a shell under the folder, like Dolphin's) ---
+// Each tab can have one; it follows the folder both ways: going somewhere in the pane types "cd" into the shell,
+// and a cd typed in the shell takes the pane there. Only while the shell waits at its prompt: a program running in
+// it (an editor, a build) is never typed into, and its own cd's don't move the pane.
+
+static bool dock_local(const char *path) { return path[0] == '/' && !path_is_remote(path) && !strstr(path, "::"); }
+
+static void dock_start(Tab *t) {
+    const char *home = getenv("HOME") ? getenv("HOME") : "/";
+    const char *dir = dock_local(t->pane[0].path) ? t->pane[0].path : home;
+    t->dock = term_new(dir, NULL, 24, 80);
+    t->dock_cwd[0] = t->dock_want[0] = t->dock_seen[0] = t->dock_sent[0] = 0;
+    if (!t->dock) t->dock_on = t->dock_focus = false;
+}
+
+static void dock_free(Tab *t) {
+    if (!t->dock) return;
+    if (A.term_mouse == t->dock) A.term_mouse = NULL;
+    term_free(t->dock);
+    t->dock = NULL;
+}
+
+// F4: show the current tab's terminal panel (with the keyboard), or hide it (the shell keeps running).
+static void dock_toggle(void) {
+    Tab *t = A.ap ? A.ap->cur : NULL;
+    if (!t || t->term) return;
+    t->dock_on = !t->dock_on;
+    t->dock_focus = t->dock_on;
+    if (t->dock_on && !t->dock) dock_start(t);
+    A.settings_dirty = true; // (the session remembers it)
+    A.redraw = true;
+}
+
+// Ctrl+Shift+F4: the keyboard to the terminal panel (shown first if needed) and back to the folder.
+static void dock_focus_toggle(void) {
+    Tab *t = A.ap ? A.ap->cur : NULL;
+    if (!t || t->term) return;
+    if (!t->dock_on) { dock_toggle(); return; }
+    t->dock_focus = !t->dock_focus;
+    A.redraw = true;
+}
+
+// Keep the pane and the shell in the same folder (see above).
+static void dock_follow(Tab *t) {
+    Term *d = t->dock;
+    Pane *p = &t->pane[0];
+    if (!term_idle(d)) return;
+    char cwd[PATH_MAX];
+    if (!term_cwd(d, cwd, sizeof cwd)) return;
+    if (strcmp(p->path, t->dock_seen)) { // the pane went somewhere: compare without symlinks (the shell's are resolved)
+        snprintf(t->dock_seen, sizeof t->dock_seen, "%s", p->path);
+        if (!dock_local(p->path) || !realpath(p->path, t->dock_real)) t->dock_real[0] = 0;
+    }
+    if (!t->dock_cwd[0]) { snprintf(t->dock_cwd, sizeof t->dock_cwd, "%s", cwd); return; } // the shell's first folder
+    if (t->dock_want[0]) { // our cd hasn't landed yet: don't take the folder it's leaving for a cd typed there
+        if (strcmp(cwd, t->dock_want) && now_ns() - t->dock_want_t < 2000000000ull) return;
+        t->dock_want[0] = 0;
+        snprintf(t->dock_cwd, sizeof t->dock_cwd, "%s", cwd);
+    }
+    if (strcmp(cwd, t->dock_cwd)) { // a cd in the shell: the pane follows
+        snprintf(t->dock_cwd, sizeof t->dock_cwd, "%s", cwd);
+        snprintf(t->dock_sent, sizeof t->dock_sent, "%s", cwd);
+        if (strcmp(cwd, t->dock_real)) pane_navigate(p, cwd, true);
+        return;
+    }
+    if (t->dock_real[0] && strcmp(t->dock_real, cwd) && strcmp(t->dock_real, t->dock_sent)) { // the pane moved: cd there
+        char q[PATH_MAX + 64], cmd[PATH_MAX + 80];
+        sh_quote(q, sizeof q, p->path);
+        // Ctrl+E Ctrl+U clear what's typed at the prompt; the leading space keeps it out of the shell's history
+        snprintf(cmd, sizeof cmd, "\x05\x15 cd %s\r", q);
+        term_send(d, cmd);
+        snprintf(t->dock_want, sizeof t->dock_want, "%s", t->dock_real);
+        snprintf(t->dock_sent, sizeof t->dock_sent, "%s", t->dock_real);
+        t->dock_want_t = now_ns();
+    }
+}
+
+// Every loop (from term_tick): feed the panels, start the ones restored with the session once their tab shows,
+// close one whose shell exited (it starts fresh next time), keep the visible ones following their folder.
+static void dock_tick(void) {
+    for (int i = 0; i < A.ntabs; i++) {
+        Tab *t = A.tabs[i];
+        if (t->dock && !term_pump(t->dock)) {
+            dock_free(t);
+            t->dock_on = t->dock_focus = false;
+            A.settings_dirty = true;
+            continue;
+        }
+        bool shown = t->dock_on && t->panel && t->panel->cur == t;
+        if (shown && !t->dock) dock_start(t);
+        if (shown && t->dock) dock_follow(t);
+    }
+}
 
 static void arc_action(Pane *p, int act);
 static void qa_action(int act);
@@ -4790,9 +4918,11 @@ static void menu_add(const char *label, const char *shortcut, int act, bool enab
 static void menu_terminal_items(Pane *p) {
     SshTarget t;
     if (ssh_target_for(p->path, &t)) {
-        menu_add("Open SSH terminal here", "F4", ACT_TERMINAL, true);
+        menu_add("Open SSH terminal here", "Shift+F4", ACT_TERMINAL, true);
         menu_add("Open local terminal here", "", ACT_TERMINAL_LOCAL, true);
-    } else menu_add("Open terminal here", "F4", ACT_TERMINAL, true);
+    } else menu_add("Open terminal tab here", "Shift+F4", ACT_TERMINAL, true);
+    Tab *ct = A.ap ? A.ap->cur : NULL;
+    menu_add(ct && ct->dock_on ? "Hide terminal panel" : "Show terminal panel", "F4", ACT_TERM_PANEL, ct && !ct->term);
     menu_add("Open in external terminal", "", ACT_TERMINAL_EXTERNAL, true);
 }
 
@@ -4893,6 +5023,8 @@ static void do_action(Pane *p, int act) {
         break;
     }
     case ACT_TERMINAL: open_terminal(p->path); break;
+    case ACT_TERM_PANEL: dock_toggle(); break;
+    case ACT_TERM_FOCUS: dock_focus_toggle(); break;
     case ACT_TERMINAL_LOCAL: term_tab_open(p->path, NULL); break;
     case ACT_TERMINAL_EXTERNAL: ext_terminal(p->path); break;
     case ACT_TERM_COPY: if (active_term()) term_copy(active_term()); break;
@@ -8885,7 +9017,9 @@ static const CmdDef g_cmds[] = {
     {"Undo", "Ctrl+Z", ACT_UNDO},
     {"Select all", "Ctrl+A", ACT_SELECT_ALL},
     {"Copy path", "Ctrl+Shift+C", ACT_COPY_PATH},
-    {"Open terminal here", "F4", ACT_TERMINAL},
+    {"Open terminal tab here", "Shift+F4", ACT_TERMINAL},
+    {"Terminal panel: show / hide", "F4", ACT_TERM_PANEL},
+    {"Terminal panel: focus / back to the folder", "Ctrl+Shift+F4", ACT_TERM_FOCUS},
     {"Toggle hidden files", "Ctrl+H", ACT_HIDDEN},
     {"Tree view", "Ctrl+Shift+E", CMD_TREE_VIEW},
     {"Empty Trash", "", ACT_TRASH_EMPTY},
@@ -9954,8 +10088,14 @@ static void frame_draw(void) {
         Panel *pn = A.panels[i];
         if (!pn->cur) continue;
         Pane *p = &pn->cur->pane[0];
-        if (pn->cur->term) term_draw(pn->cur->term, p->ly.area, pn == A.ap);
-        else draw_pane(p, pn == A.ap, multi);
+        Tab *ct = pn->cur;
+        if (ct->term) term_draw(ct->term, p->ly.area, pn == A.ap);
+        else draw_pane(p, pn == A.ap && !(ct->dock_on && ct->dock_focus), multi);
+        if (ct->dock_on && ct->dock && ct->dock_r.h > 0) { // the terminal panel, under a line
+            bool dh = A.drag == DRAG_DOCK || (A.mouse_in && A.drag == DRAG_NONE && in_rect(ct->dock_div, A.mx, A.my));
+            term_draw(ct->dock, ct->dock_r, pn == A.ap && ct->dock_focus);
+            draw_rect(ct->dock_r.x, ct->dock_r.y - 1, ct->dock_r.w, 1, C(dh ? COL_ACCENT : COL_BORDER));
+        }
         draw_panel_bar(pn);
         if (multi && pn != A.ap && A.dim_inactive) {
             Rect a = p->ly.area;
@@ -10299,7 +10439,8 @@ static bool exe_link_replaced(char *link) {
 // transfers running, terminal sessions, the picker. Returns only if it didn't restart.
 static void restart_if_updated(const char *msg) {
     if (A.selftest || picker_active() || A.nops > 0) return;
-    for (int i = 0; i < A.ntabs; i++) if (A.tabs[i]->term) return;
+    for (int i = 0; i < A.ntabs; i++) // (an idle terminal panel comes back with the session)
+        if (A.tabs[i]->term || (A.tabs[i]->dock && !term_idle(A.tabs[i]->dock))) return;
     char exe[PATH_MAX];
     ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
     if (n <= 0) return;
@@ -10664,7 +10805,10 @@ int main(int argc, char **argv) {
     }
     ipc_shutdown();
     if (g_tray) { SDL_DestroyTray(g_tray); g_tray = NULL; }
-    for (int i = 0; i < A.ntabs; i++) if (A.tabs[i]->term) { term_free(A.tabs[i]->term); A.tabs[i]->term = NULL; }
+    for (int i = 0; i < A.ntabs; i++) {
+        if (A.tabs[i]->term) { term_free(A.tabs[i]->term); A.tabs[i]->term = NULL; }
+        dock_free(A.tabs[i]);
+    }
     if (A.trash_job) { atomic_store(&A.trash_job->cancel, 1); stats_release(A.trash_job); A.trash_job = NULL; }
     recent_save();
     if (!A.screenshot) settings_save();

@@ -740,6 +740,23 @@ static const char *term_label(Term *t) {
     return t->cwd_label[0] ? t->cwd_label : t->start_label;
 }
 
+// Is the shell waiting at its prompt? (Nothing else in the foreground, no full-screen program.)
+static bool term_idle(Term *t) {
+    if (t->dead || t->altscreen) return false;
+    pid_t pg = tcgetpgrp(t->fd);
+    return pg > 0 && pg == t->pid;
+}
+
+// The shell's current folder (symlinks resolved).
+static bool term_cwd(Term *t, char *out, size_t cap) {
+    char lp[64];
+    snprintf(lp, sizeof lp, "/proc/%d/cwd", (int)t->pid);
+    ssize_t k = readlink(lp, out, cap - 1);
+    if (k <= 0) return false;
+    out[k] = 0;
+    return true;
+}
+
 // --- drawing ----------------------------------------------------------------------------------------------
 
 static bool term_in_sel(Term *t, int r, int c) {
@@ -839,6 +856,12 @@ static void term_draw(Term *t, Rect area, bool focused) {
 // --- input ------------------------------------------------------------------------------------------------
 
 static void term_to_bottom(Term *t) { if (t->sb_off) { t->sb_off = 0; A.redraw = true; } }
+
+// Type s into the terminal as if from the keyboard (raw bytes, no bracketed paste).
+static void term_send(Term *t, const char *s) {
+    term_to_bottom(t);
+    term_output(s, strlen(s), t);
+}
 
 static VTermModifier term_mod(SDL_Keymod m) {
     int r = 0;
@@ -1038,10 +1061,12 @@ static void term_tick(void) {
     bool any = false;
     for (int i = 0; i < A.ntabs; i++) {
         Tab *tb = A.tabs[i];
+        any |= tb->dock != NULL;
         if (!tb->term) continue;
         any = true;
         if (!term_pump(tb->term)) { tab_close(i); i--; }
     }
+    dock_tick();
     if (!any || now_ns() - g_tc_checked < 1000000000ull) return;
     g_tc_checked = now_ns();
     if (!tc_changed()) return;
@@ -1052,6 +1077,8 @@ static void tc_reload_all(void) {
     tc_load();
     for (int i = 0; i < A.ntabs; i++)
         if (A.tabs[i]->term) term_apply_colors(A.tabs[i]->term);
+    for (int i = 0; i < A.ntabs; i++)
+        if (A.tabs[i]->dock) term_apply_colors(A.tabs[i]->dock);
     A.redraw = true;
 }
 

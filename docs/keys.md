@@ -35,7 +35,9 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Pasting onto existing items | **Conflicts** are asked about together before anything is copied: each name with whether yours is newer or older, then **Skip**, **Overwrite** (folders: Merge), **Rename existing** (what's there becomes `name (2)`), **Newer only** (folders merge file by file) or **Keep both** (the new one becomes `name (2)`) for all of them - or **One by one** (with "do this for the rest"). ↑ ↓ or 1-5 pick, Enter applies; the last answer is offered first next time. Moving a folder newer-only leaves the source in place when some of its files were older |
 | Ctrl+Shift+N / Ctrl+Alt+N | New folder / new file (then rename) |
 | Ctrl+Shift+C | Copy full path(s) as text |
-| F4 | Open terminal here (`$TERMINAL`, else `xdg-terminal-exec`, else the first one found: Ptyxis, GNOME Console, Konsole, COSMIC, Xfce, MATE, ... xterm) |
+| F4 | **Terminal panel** under the folder (like Dolphin's): show / hide. Each tab has its own; it follows the folder both ways (going somewhere types `cd` into the shell, a `cd` typed there moves the folder - only while the shell waits at its prompt); drag the line above it to resize, `exit` closes it |
+| Ctrl+Shift+F4 | Keyboard to the terminal panel and back to the folder (shows it if hidden); a click in either side does the same |
+| Shift+F4 | Open a terminal tab here (an SSH session in SFTP folders); right-click → "Open in external terminal" for your terminal app |
 | Right-click, Menu key, Shift+F10 | Context menu |
 | Drag a file by its name | Move onto a folder, pane, or sidebar place (Ctrl = copy, Shift = move, Ctrl+Shift = link; other drives copy by default); several selected items drag together, grabbed anywhere on a selected row. With Options > Behaviour > "Ask what to do when dropping", a drop without Ctrl/Shift opens Move / Copy / Link here |
 | Drag folders by their name | Onto a panel edge (top, bottom, left, right) = open them in a new split there (snap overlay); onto the empty part of a tab bar = open them as new tabs |

@@ -87,8 +87,10 @@ here as connected, at its own folder. Needs FUSE (`fuse3`).
 Options → Behaviour has "Start Explorer at login" (XDG autostart, starts in the background) and "Keep running in
 the tray when closed" (needs a tray in your panel).
 
-Terminal tabs: F4 opens a terminal tab in the current folder (an SSH session in the same remote folder for SFTP
-connections); right-click for a local or an external terminal. It runs your shell and looks like your default
+Terminal panel: F4 shows a shell under the folder, one per tab, that follows the folder both ways while it waits at
+its prompt (Ctrl+Shift+F4 moves the keyboard between the two). Tabs that had it open get it back after a restart, with
+a new shell; `terminal_panel_height` is its height. Terminal tabs: Shift+F4 opens a terminal tab in the current
+folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. It runs your shell and looks like your default
 terminal (xdg-terminal-exec's choice, else $TERMINAL): font, colours, padding, cursor and scrollback are read from
 foot, kitty, Alacritty or Ghostty config and followed live (Options > Appearance > Terminal appearance). Ctrl+Shift+C/V
 copy and paste, Shift+PageUp/PageDown scroll back, Ctrl+Shift+W closes, Ctrl+Tab switches tabs. Built on libvterm.

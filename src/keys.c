@@ -76,7 +76,9 @@ static KeyDef g_keys[] = {
     K(ACT_COPY_PATH, "file.copy_path", false, "Ctrl+Shift+C"),
     K(ACT_NEW_FOLDER, "file.new_folder", false, "Ctrl+Shift+N"),
     K(ACT_NEW_FILE, "file.new_file", false, "Ctrl+Alt+N"),
-    K(ACT_TERMINAL, "file.terminal", false, "F4"),
+    K(ACT_TERMINAL, "file.terminal", false, "Shift+F4"),
+    K(ACT_TERM_PANEL, "term.panel", false, "F4"),
+    K(ACT_TERM_FOCUS, "term.panel_focus", false, "Ctrl+Shift+F4"),
     K(ACT_PIN, "file.pin", false, "Ctrl+D"),
     K(ACT_TRASH_EMPTY, "trash.empty", false, ""),
     K(ACT_TF_RESET, "view.all_types", false, ""),
@@ -285,6 +287,15 @@ static const char *cmd_label(int id) {
 
 // Try the keymap. text_mode: a text field has focus (only global commands fire).
 // Returns true when the key was consumed (including the first half of a sequence).
+// Is k one of id's one-key shortcuts? (For keys the app takes back from a focused terminal.)
+static bool key_is(SDL_KeyboardEvent *k, int id) {
+    KeyDef *d = keydef_find(id);
+    Chord c = {key_normalize(k->key), km_from_sdl(k->mod)};
+    for (int s = 0; d && s < d->nseq; s++)
+        if (d->seq[s].n == 1 && chord_eq(d->seq[s].c[0], c)) return true;
+    return false;
+}
+
 static bool keys_dispatch(SDL_KeyboardEvent *k, bool text_mode) {
     if (chord_is_modifier(k->key)) return false;
     Chord c = {key_normalize(k->key), km_from_sdl(k->mod)};

@@ -21,7 +21,7 @@
 - **Instant on huge folders**: 200,000 files listed with sizes and dates in under 0.1 s; the UI never waits on the disk.
 - **Keyboard-first**: `Ctrl+P` jumps to any folder or file, typing finds one, and every shortcut can be rebound.
 - **Split panels and tabs**: split any way you like, each panel with its own tabs; save layouts and switch between them.
-- **Terminal tabs**: a built-in terminal next to your files, opened in the current folder with `F4`.
+- **Built-in terminal**: a panel under your files that follows the folder (`F4`), or a terminal tab (`Shift+F4`).
 - **Search**: filter as you type, search subfolders, or search inside files (ripgrep when installed).
 - **Disk usage map**: see what takes the space as a treemap or sunburst, and clean it up right there.
 - **Git status**: changed, new and ignored files marked in repositories, with the branch in the path bar.
@@ -54,7 +54,7 @@ Installing never replaces your current file manager or file picker: switch those
 | `Ctrl+\` | Split the panel (each has its own tabs) |
 | `Ctrl+T` / `Ctrl+W` | New tab / close tab |
 | `Space` | Preview panel |
-| `F4` | Terminal tab in this folder |
+| `F4` | Terminal panel under this folder (`Shift+F4`: a terminal tab) |
 | `Ctrl+Shift+U` | Disk usage map |
 | `Ctrl+,` | Options: themes, keys, views, title bar |
 

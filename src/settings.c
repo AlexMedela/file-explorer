@@ -27,6 +27,7 @@ static void settings_defaults(void) {
     A.preview_on = false;
     A.preview_w = 340;
     A.side_w = 216;
+    A.dock_h = 240;
     A.win_w = 1280;
     A.win_h = 800;
     A.maximized = false;
@@ -193,6 +194,7 @@ static void settings_load(void) {
         }
         else if (!strcmp(k, "restore_session")) A.restore_session = atoi(v);
         else if (!strcmp(k, "preview")) A.preview_on = atoi(v);
+        else if (!strcmp(k, "terminal_panel_height")) A.dock_h = CLAMP((f32)atof(v), 60.f, 2000.f);
         else if (!strcmp(k, "preview_width")) A.preview_w = CLAMP((f32)atof(v), 200.f, 1200.f);
         else if (!strcmp(k, "sidebar_width")) A.side_w = CLAMP((f32)atof(v), 150.f, 480.f);
         else if (!strcmp(k, "sort_desc")) A.def_sort_desc = atoi(v);
@@ -340,8 +342,8 @@ static void session_write(FILE *f) {
         Tab *t = A.tabs[i];
         if (t->term) continue; // terminals aren't restored
         if (strpbrk(t->pane[0].path, "\n\r\t")) continue; // can't be stored in a line-based file
-        fprintf(f, "ptab=%d\t%d\t%s\t%d:%d\n", panel_index(t->panel), t->panel->cur == t, t->pane[0].path, t->pane[0].view,
-                t->pane[0].icon_px);
+        fprintf(f, "ptab=%d\t%d\t%s\t%d:%d:%d\n", panel_index(t->panel), t->panel->cur == t, t->pane[0].path, t->pane[0].view,
+                t->pane[0].icon_px, t->dock_on); // (the terminal panel comes back with a new shell)
     }
     fprintf(f, "active_panel=%d\n", panel_index(A.ap));
 }
@@ -460,7 +462,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "git_status=%d\n", A.git_status);
     fprintf(f, "disk_usage_style=%s\ndisk_usage_list=%d\n", A.du_style ? "sunburst" : "treemap", A.du_list);
     fprintf(f, "search_contents=%d\nsearch_options=%d,%d,%d\n", A.search_contents, A.cs_case, A.cs_word, A.cs_regex);
-    fprintf(f, "sidebar_width=%.0f\n", A.side_w);
+    fprintf(f, "sidebar_width=%.0f\nterminal_panel_height=%.0f\n", A.side_w, A.dock_h);
     fprintf(f, "sort=%s\nsort_desc=%d\npreview=%d\npreview_width=%.0f\n", g_sort_names[A.def_sort_key], A.def_sort_desc,
             A.preview_on, A.preview_w);
     fprintf(f, "window=%dx%d\nmaximized=%d\nrestore_session=%d\nrenderer=%s\n", A.win_w, A.win_h, A.maximized,
@@ -630,10 +632,11 @@ static bool session_restore(void) {
         Tab *t = tab_new_in(pn, f[2], A.ntabs, false);
         if (t && atoi(f[1])) pn->cur = t;
         if (t && n == 4) {
-            int v = 0, px = 96;
-            if (sscanf(f[3], "%d:%d", &v, &px) == 2) {
+            int v = 0, px = 96, dock = 0;
+            if (sscanf(f[3], "%d:%d:%d", &v, &px, &dock) >= 2) {
                 t->pane[0].view = CLAMP(v, 0, 2);
                 t->pane[0].icon_px = CLAMP(px, 32, 256);
+                t->dock_on = dock == 1; // its shell starts when the tab is first shown
             }
         }
     }

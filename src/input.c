@@ -86,6 +86,10 @@ static void on_key(SDL_KeyboardEvent *k) {
     if (!A.ren_pane && A.qa_edit_g < 0 && picker_key(k->key, k->mod)) return;
     if (active_term()) { // the terminal has the keyboard; the app keeps tab switching, closing and its menus
         Term *tt = active_term();
+        if (tt == A.ap->cur->dock && (key_is(k, ACT_TERM_PANEL) || key_is(k, ACT_TERM_FOCUS))) {
+            run_command(key_is(k, ACT_TERM_PANEL) ? ACT_TERM_PANEL : ACT_TERM_FOCUS);
+            return;
+        }
         bool tabsw = ctrl && (k->key == SDLK_TAB || k->key == SDLK_PAGEUP || k->key == SDLK_PAGEDOWN);
         if (ctrl && shift && k->key == SDLK_W) { tab_close(A.cur); return; }
         if (ctrl && shift && k->key == SDLK_T) { term_tab_open(A.ap->cur->pane[0].path, NULL); return; }
@@ -644,9 +648,21 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
     }
     Panel *bpn = panel_at(x, y);
     if (bpn && in_rect(bpn->bar, x, y)) { on_mouse_down_tabbar(bpn, b, x, y); return; }
-    if (bpn && bpn->cur && bpn->cur->term && in_rect(bpn->cur->pane[0].ly.area, x, y)) { // a terminal
+    if (bpn && bpn->cur && bpn->cur->dock_on && b->button == SDL_BUTTON_LEFT && in_rect(bpn->cur->dock_div, x, y)) {
+        if (b->clicks >= 2) { A.dock_h = 240; A.settings_dirty = true; } // double-click: the default height
+        else {
+            A.drag = DRAG_DOCK;
+            A.dock_bottom = bpn->cur->dock_r.y + bpn->cur->dock_r.h;
+        }
+        return;
+    }
+    Tab *btab = bpn ? bpn->cur : NULL;
+    bool in_dock = btab && btab->dock_on && btab->dock && in_rect(btab->dock_r, x, y);
+    if (btab && !in_dock && in_rect(btab->pane[0].ly.area, x, y)) btab->dock_focus = false; // the folder takes the keyboard
+    if (in_dock || (btab && btab->term && in_rect(btab->pane[0].ly.area, x, y))) { // a terminal (tab or panel)
         if (bpn != A.ap) panel_activate(bpn);
-        Term *tt = bpn->cur->term;
+        if (in_dock) btab->dock_focus = true;
+        Term *tt = in_dock ? btab->dock : btab->term;
         if (b->button == SDL_BUTTON_RIGHT && !term_wants_mouse(tt, SDL_GetModState())) {
             Menu *m = &A.menu;
             m->keep_open = false;
@@ -903,6 +919,9 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
         A.side_w = CLAMP(m->x / A.scale, 150.f, MAX(150.f, MIN(480.f, ((f32)A.W / A.scale) - 520.f)));
         A.settings_dirty = true;
         layout();
+    } else if (A.drag == DRAG_DOCK) {
+        A.dock_h = CLAMP((A.dock_bottom - m->y) / A.scale, 60.f, 2000.f); // (layout keeps the folder visible)
+        A.settings_dirty = true;
     } else if (A.drag == DRAG_PREVIEW) {
         f32 max_w = MAX(220.f, ((f32)A.W - A.r_sidebar.w - S(380)) / A.scale);
         A.preview_w = CLAMP(((f32)A.W - m->x) / A.scale, 220.f, MIN(1200.f, max_w));
@@ -945,7 +964,9 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     Node *hn = A.drag == DRAG_SPLIT ? A.drag_node : (A.drag == DRAG_NONE ? node_div_at(A.root, m->x, m->y) : NULL);
     Pane *hp = A.drag == DRAG_NONE ? pane_at(m->x, m->y) : NULL;
     bool col_edge = A.drag == DRAG_COL_RESIZE || (hp && in_rect(hp->ly.header, m->x, m->y) && header_edge_at(&hp->ly, m->x) >= 0);
-    int want = col_edge ? 1 : hn ? (hn->kind == NODE_HSPLIT ? 1 : 2)
+    Panel *hpn = A.drag == DRAG_NONE ? panel_at(m->x, m->y) : NULL;
+    bool dock_edge = A.drag == DRAG_DOCK || (hpn && hpn->cur && hpn->cur->dock_on && in_rect(hpn->cur->dock_div, m->x, m->y));
+    int want = col_edge ? 1 : dock_edge ? 2 : hn ? (hn->kind == NODE_HSPLIT ? 1 : 2)
                   : (A.drag == DRAG_PREVIEW || A.drag == DRAG_SIDEBAR || (A.drag == DRAG_NONE && A.r_pdiv.w > 0 && in_rect(A.r_pdiv, m->x, m->y)) ||
                      (A.drag == DRAG_NONE && in_rect(A.r_sdiv, m->x, m->y))) ? 1 : 0;
     A.cursor_ew = want; // applied after the next frame's drawing (cursor_apply), which also knows what's clickable
@@ -961,6 +982,10 @@ static void on_wheel(SDL_MouseWheelEvent *w) {
         Panel *wp = panel_at(w->mouse_x, w->mouse_y);
         if (wp && wp->cur && wp->cur->term && in_rect(wp->cur->pane[0].ly.area, w->mouse_x, w->mouse_y)) {
             term_wheel(wp->cur->term, w->y);
+            return;
+        }
+        if (wp && wp->cur && wp->cur->dock_on && wp->cur->dock && in_rect(wp->cur->dock_r, w->mouse_x, w->mouse_y)) {
+            term_wheel(wp->cur->dock, w->y);
             return;
         }
     }
