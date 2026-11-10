@@ -1,6 +1,6 @@
 // options.c - Options window (Ctrl+,): every setting in one searchable sheet (included from ui_tools.c)
 
-static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Integration", "Advanced"};
+static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Integration", "Updates", "Advanced"};
 
 enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON };
 
@@ -10,6 +10,7 @@ enum {
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES,
+    OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
 };
 
 typedef struct {
@@ -57,7 +58,11 @@ static const OptDef g_opts[] = {
     {OC_INTEGRATION, OK_BOOL, OPT_IG_DEFAULT_FM, "Default file manager", "Folders from other apps open here"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_FM1, "\"Show in folder\" opens here", "From browsers and other apps"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_PICKER, "File chooser for other apps", "Their Open and Save dialogs open here"},
-    {OC_INTEGRATION, OK_BOOL, OPT_IG_UPDATES, "Look for new versions", "AppImage: once a day, on GitHub"},
+    {OC_UPDATES, OK_BUTTON, OPT_UPD_NOW, APP_LABEL " " APP_VERSION, "How this copy updates"},
+    {OC_UPDATES, OK_BUTTON, OPT_UPD_HOW, "How it updates", "Where new versions come from"},
+    {OC_UPDATES, OK_BUTTON, OPT_UPD_NOTES, "What's new", "Release notes of every version, on GitHub"},
+    {OC_UPDATES, OK_BOOL, OPT_IG_UPDATES, "Check for updates", "Once a day; a new version shows a card once"},
+    {OC_UPDATES, OK_BOOL, OPT_UPD_AUTO, "Download updates by themselves", "Then the card only asks you to restart"},
     {OC_ADVANCED, OK_CHOICE, OPT_RENDERER, "Renderer", "GPU backend (takes effect after a restart)"},
     {OC_ADVANCED, OK_BUTTON, OPT_SETTINGS_FILE, "Settings file", "Open settings.conf in your text editor"},
     {OC_ADVANCED, OK_BUTTON, OPT_REINDEX, "Re-index folders", "Rebuild the folder index used by Go to (Ctrl+P)"},
@@ -70,6 +75,7 @@ static const struct { int id; const char *title; } g_opt_sections[] = {
     {OPT_HIDDEN, "Files and folders"}, {OPT_RESTORE, "Startup"}, {OPT_SINGLE_CLICK, "Mouse"}, {OPT_TRANSFERS, "Copying and moving"},
     {OPT_KEYS_RESET, "Shortcuts"}, {OPT_DEF_VIEW, "New folders"}, {OPT_RENDERER, "Rendering"}, {OPT_SETTINGS_FILE, "Maintenance"},
     {OPT_IG_DEFAULT_FM, "Desktop roles (yours to give: installing never takes them)"},
+    {OPT_UPD_NOW, "Version"}, {OPT_IG_UPDATES, "Automatic updates"},
 };
 
 static const char *opt_section_title(int id) {
@@ -132,9 +138,8 @@ static const char *opt_desc(const OptDef *o) {
     case OPT_IG_PICKER:
         if (!ig_picker_portal_installed()) return "Needs the termfilechooser portal";
         break;
-    case OPT_IG_UPDATES:
-        if (!appimage_path()) return "Packages update with your system";
-        break;
+    case OPT_UPD_NOW: return upd_status();
+    case OPT_UPD_HOW: return upd_how();
     }
     return o->desc;
 }
@@ -287,6 +292,7 @@ static bool opt_bool_get(int id) {
     case OPT_IG_FM1: return A.ig_fm1;
     case OPT_IG_PICKER: return ig_picker_on();
     case OPT_IG_UPDATES: return A.ig_check_updates;
+    case OPT_UPD_AUTO: return A.upd_auto;
     }
     return false;
 }
@@ -322,6 +328,7 @@ static void opt_bool_toggle(int id) {
         break;
     case OPT_IG_PICKER: ig_picker_set(!ig_picker_on()); break;
     case OPT_IG_UPDATES: A.ig_check_updates = !A.ig_check_updates; break;
+    case OPT_UPD_AUTO: A.upd_auto = !A.upd_auto; break;
     case OPT_TRAY:
         A.close_to_tray = !A.close_to_tray;
         tray_update();
@@ -393,6 +400,11 @@ static void opt_button(int id) {
         break;
     case OPT_SETTINGS_FILE: run_command(CMD_OPEN_SETTINGS); break;
     case OPT_REINDEX: run_command(CMD_REINDEX); break;
+    case OPT_UPD_NOW: upd_button_press(); break;
+    case OPT_UPD_NOTES: upd_notes(); break;
+    case OPT_UPD_HOW:
+        if (upd_how_cmd()) { SDL_SetClipboardText(upd_how_cmd()); toast("Copied: %s", upd_how_cmd()); }
+        break;
     case OPT_KEYS_RESET:
         keys_defaults();
         A.settings_dirty = true;
@@ -401,7 +413,14 @@ static void opt_button(int id) {
     }
 }
 
+// Rows that don't apply to this copy (updating by itself: AppImage only).
+static bool opt_hidden(int id) {
+    if (id == OPT_UPD_HOW) return upd_can_install(); // (the AppImage's own rows say it)
+    return (id == OPT_IG_UPDATES || id == OPT_UPD_AUTO) && !upd_can_install();
+}
+
 static bool opt_matches(const OptDef *o, const char *q) {
+    if (opt_hidden(o->id)) return false;
     if (!q[0]) return true;
     if (strcasestr(o->label, q) || strcasestr(o->desc, q) || strcasestr(g_opt_cats[o->cat], q)) return true;
     if (o->kind == OK_CHOICE && o->id != OPT_FONT) // match choice values too ("light", "vulkan")
@@ -557,11 +576,14 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
         break;
     }
     case OK_BUTTON: {
-        const char *l = o->id == OPT_THEME_NEW ? "Create" : o->id == OPT_REINDEX ? "Re-index" : o->id == OPT_KEYS_RESET ? "Reset" : "Open";
+        bool primary = false, enabled = true;
+        const char *l = o->id == OPT_THEME_NEW ? "Create" : o->id == OPT_REINDEX ? "Re-index" : o->id == OPT_KEYS_RESET ? "Reset"
+                      : o->id == OPT_UPD_NOW ? upd_button(&primary, &enabled) : o->id == OPT_UPD_HOW ? (upd_how_cmd() ? "Copy" : NULL) : "Open";
+        if (!l) break; // (nothing to press)
         f32 bw = MAX(roundf(S(96)), text_width(f, l, (int)strlen(l)) + S(28));
         Rect r = {x + w - bw, y, bw, ch};
-        sheet_button(r, l, false, true);
-        opt_hit(r, HP_BUTTON, o->id, 0);
+        sheet_button(r, l, primary, enabled);
+        if (enabled) opt_hit(r, HP_BUTTON, o->id, 0);
         break;
     }
     }
@@ -845,7 +867,7 @@ static void options_draw(void) {
     // options: consecutive visible rows of one section share a card
     for (int i = 0; i < OPT_COUNT;) {
         const OptDef *o = &g_opts[i];
-        if (q[0] ? !opt_matches(o, q) : o->cat != g_opt.cat) { i++; continue; }
+        if (q[0] ? !opt_matches(o, q) : o->cat != g_opt.cat || opt_hidden(o->id)) { i++; continue; }
         // the section: from here until the next section start (or category change in search results)
         const char *title = q[0] ? g_opt_cats[o->cat] : opt_section_title(o->id);
         int n = 0, j = i;
@@ -853,18 +875,19 @@ static void options_draw(void) {
             const OptDef *oj = &g_opts[j];
             if (j > i && (q[0] ? oj->cat != o->cat : opt_section_title(oj->id) != NULL)) break;
             if (!q[0] && oj->cat != g_opt.cat) break;
-            n += q[0] ? opt_matches(oj, q) : 1;
+            n += q[0] ? opt_matches(oj, q) : !opt_hidden(oj->id);
         }
         if (title) y = props_heading(cx, y, title);
         props_card(cx, y, cwid, n, rh, 0);
         for (int k = i; k < j; k++) {
             const OptDef *ok = &g_opts[k];
-            if (q[0] && !opt_matches(ok, q)) continue;
+            if (q[0] ? !opt_matches(ok, q) : opt_hidden(ok->id)) continue;
             Rect rr = {cx, y, cwid, rh};
             if (y + rh > list.y && y < list.y + list.h) {
                 bool hv = opt_hover(rr) && opt_hover(list) && g_opt.drop_opt < 0;
                 if (hv) g_opt.hover_row = k; // (no highlight: rows are static, their controls react)
                 f32 tx = rr.x + S(16), ctlw = MIN(roundf(S(380)), rr.w * 0.55f), lw = rr.w - ctlw - S(44);
+                if (ok->kind == OK_BOOL || ok->kind == OK_BUTTON) lw = rr.w - roundf(S(200)); // (narrow controls: more room for text)
                 draw_text_fit(f, tx, roundf(y + rh * 0.5f - f->line_h + S(2)), lw, ok->label, (int)strlen(ok->label), C(COL_TEXT), 0);
                 const char *desc = opt_desc(ok);
                 draw_text_fit(fs, tx, roundf(y + rh * 0.5f + S(3)), lw, desc, (int)strlen(desc), C(COL_TEXT_DIM), 0);

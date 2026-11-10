@@ -1,5 +1,7 @@
 // input.c - keyboard, text and mouse handlers, and SDL event dispatch (handle_event) (included from app.c)
 
+static bool upd_card_click(f32 x, f32 y); // (integration.c)
+
 // --- input -----------------------------------------------------------------
 
 static void dialog_key(SDL_Keycode k, SDL_Keymod mod) {
@@ -617,6 +619,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         if (b->button != SDL_BUTTON_RIGHT) return; // a right-click elsewhere opens a new menu
     }
     if (b->button == SDL_BUTTON_LEFT) {
+        if (upd_card_click(x, y)) return;
         if (A.q_open && queue_mouse(x, y)) return;
         for (int i = 0; i < A.nops; i++) {
             if (A.op_retry[i].w > 0 && in_rect(A.op_retry[i], x, y)) { op_retry_admin(A.ops[i]); return; }

@@ -601,6 +601,8 @@ static struct {
     bool ig_asked;        // the first-run "use for folders?" question was shown
     bool ig_check_updates; // AppImage: look for a new release once a day
     i64 ig_update_checked; // when it last looked (unix time)
+    bool upd_auto;         // AppImage: download a new version by itself (the card then offers the restart)
+    char upd_seen[64];     // newest version the card was shown for (once per version)
     bool csd;      // we do right now: buttons top right, the tab strips drag the window
     SDL_Cursor *cur_ns;
     // global layout
@@ -3621,7 +3623,7 @@ static void options_open(void);
 static void ipc_handle(char *msg);
 static bool exe_link_replaced(char *link);
 static bool options_is_open(void);
-enum { OC_APPEARANCE, OC_BEHAVIOUR, OC_VIEWS, OC_KEYBOARD, OC_LAYOUTS, OC_INTEGRATION, OC_ADVANCED, OC_COUNT }; // Options pages
+enum { OC_APPEARANCE, OC_BEHAVIOUR, OC_VIEWS, OC_KEYBOARD, OC_LAYOUTS, OC_INTEGRATION, OC_UPDATES, OC_ADVANCED, OC_COUNT }; // Options pages
 static void options_open_page(int cat);
 typedef struct {
     char name[64];
@@ -9873,6 +9875,7 @@ static void frame_draw(void) {
     draw_status();
     draw_ops();
     draw_queue();
+    upd_card_draw();
     draw_toast();
     draw_drag_badge();
     draw_tab_drop();
@@ -10205,13 +10208,7 @@ static void restart_if_updated(const char *msg) {
         else if (!strcmp(line, "token")) setenv("XDG_ACTIVATION_TOKEN", tab + 1, 1);
     }
     argv[argc] = NULL;
-    settings_save();
-    ipc_shutdown();
-    SDL_DestroyRenderer(A.ren);
-    SDL_DestroyWindow(A.win);
-    SDL_Quit();
-    execv(exe, argv);
-    _exit(127); // (the window is gone: nothing sensible to go back to)
+    relaunch(argv);
 }
 
 static void ipc_handle(char *msg) {
@@ -10459,6 +10456,7 @@ int main(int argc, char **argv) {
     }
     A.settings_dirty = false;
     for (int i = 0; i < nextra; i++) open_target(extra_tabs[i], false, false);
+    if (A.screenshot && getenv("FE_SHOT_OPTIONS")) options_open_page(OC_UPDATES); // visual checks of the Updates page
     if (A.screenshot && getenv("FE_SHOT_TERMINAL")) open_terminal(active_pane()->path); // visual checks of terminal tabs
     if (A.screenshot && getenv("FE_SHOT_CONNECT")) { // visual checks: Edit server (first saved one), "pick" opens the icon picker
         connect_open(A.nservers ? 0 : -1);
@@ -10480,6 +10478,7 @@ int main(int argc, char **argv) {
     if (A.ig_fm1 && !any_selftest && !A.screenshot) ig_fm1_start(); // "Show in folder" (integration.c)
     if (!any_selftest && !A.screenshot && !g_bg_start) ig_first_run();
     ig_update_check(); // (AppImage only)
+    upd_shot();
     SDL_StartTextInput(A.win);
     if (selftest) return run_selftest();
     if (selftest_ops) return run_selftest_ops();

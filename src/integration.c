@@ -1,7 +1,7 @@
 // integration.c - desktop roles, all opt-in (Options > Integration): the default file manager (inode/directory),
 // "Show in folder" from browsers and other apps (org.freedesktop.FileManager1 on the session bus) and the file
 // chooser of other apps (xdg-desktop-portal-termfilechooser). Installing never takes any of them; turning one off
-// puts back what was there. Included from app.c before ui_tools.c (the Options page uses it).
+// puts back what was there. Also updates (Options > Updates). Included from app.c before ui_tools.c (the Options page uses it).
 
 static Tab *open_target(const char *in, bool split, bool activate);
 static void open_path(const char *full);
@@ -430,11 +430,35 @@ static void ig_first_run(void) {
                 b, 2, 0, 1, NULL, ig_ask_cb, NULL);
 }
 
-// --- new versions (AppImage only: packages update through the system) -----------------------------------------------
-// At most once a day, in the background, asks GitHub for the latest release (curl or wget, whichever is there) and
-// offers it when it's newer. Off in Options > Integration; never in self-tests.
+// --- updates (Options > Updates: the AppImage updates itself, packages come with the system's updates) -------------
+// At most once a day, in the background, asks GitHub for the latest release (curl or wget, whichever is there). A
+// newer one shows a card once (bottom right); "Update now" downloads the AppImage next to this one, checks it against
+// the release's SHA-256 and swaps it in, so the next start runs it ("Restart now" does that at once). Other installs
+// can check by hand and are told how they update. Never in self-tests.
 
 #define IG_RELEASES "https://github.com/AlexMedela/file-explorer/releases"
+#if defined(__x86_64__)
+#define UPD_ARCH "x86_64"
+#elif defined(__aarch64__)
+#define UPD_ARCH "aarch64"
+#else
+#define UPD_ARCH "unknown"
+#endif
+
+enum { UK_SOURCE, UK_APPIMAGE, UK_ARCH, UK_DEB, UK_RPM }; // how this copy was installed
+enum { UPD_IDLE, UPD_CHECKING, UPD_LATEST, UPD_AVAILABLE, UPD_DOWNLOADING, UPD_READY, UPD_FAILED };
+
+static struct {
+    int state;
+    bool manual;         // asked for in Options (no card then: the page shows how it goes)
+    bool card;           // the card is up (bottom right)
+    char tag[64];        // the newest release ("v1.2.3")
+    i64 size, got;       // its AppImage in bytes (0 = unknown), downloaded so far
+    char part[PATH_MAX]; // the download, next to the AppImage
+    atomic_bool cancel;
+    char err[200];
+    Rect r_card, r_main, r_alt, r_close; // card hit areas, from the last frame
+} g_upd;
 
 // "1.2.3" vs "1.10" -> <0 / 0 / >0 (a leading 'v' and anything after a '-' or '~' ignored)
 static int ig_vercmp(const char *a, const char *b) {
@@ -461,43 +485,462 @@ static void ig_tag_from_json(const char *json, char *tag, size_t cap) {
     if (e && (size_t)(e - k - 1) < cap) snprintf(tag, cap, "%.*s", (int)(e - k - 1), k + 1);
 }
 
-static char g_ig_new_tag[64];
-
-static void ig_update_cb(int choice, bool check, void *ud) {
-    (void)check;
-    (void)ud;
-    if (choice == 0) open_path(IG_RELEASES "/latest");
-    else if (choice == 2) { A.ig_check_updates = false; A.settings_dirty = true; }
+// The AppImage of a release for this machine, as the release workflow names it.
+static void upd_asset_name(const char *tag, char *out, size_t cap) {
+    snprintf(out, cap, "file-explorer-%s-" UPD_ARCH ".AppImage", tag[0] == 'v' ? tag + 1 : tag);
 }
 
-static void ig_update_found(void *arg) {
-    (void)arg;
-    char msg[256];
-    snprintf(msg, sizeof msg, "%s %s is out (you have %s). Download the new AppImage and replace this one; your settings "
-             "stay.", APP_NAME, g_ig_new_tag, APP_VERSION);
-    static const char *b[] = {"Download", "Later", "Don't check again"};
-    if (!A.dlg.open) dialog_open("New version", msg, b, 3, 0, 1, NULL, ig_update_cb, NULL);
+// Size of the asset called name in GitHub's answer (its "size" follows its "name"), or 0.
+static i64 upd_asset_size(const char *json, const char *name) {
+    char q[200];
+    snprintf(q, sizeof q, "\"%s\"", name);
+    const char *p = strstr(json, q);
+    if (!p || !(p = strstr(p, "\"size\"")) || !(p = strchr(p + 6, ':'))) return 0;
+    return strtoll(p + 1, NULL, 10);
 }
 
-static void *ig_update_thread(void *arg) {
-    (void)arg;
-    char out[65536];
-    char *curl[] = {"curl", "-fsSL", "--max-time", "15", "https://api.github.com/repos/AlexMedela/file-explorer/releases/latest", NULL};
-    char *wget[] = {"wget", "-qO-", "--timeout=15", "https://api.github.com/repos/AlexMedela/file-explorer/releases/latest", NULL};
-    int rc = in_path("curl") ? run_capture(curl, out, sizeof out) : in_path("wget") ? run_capture(wget, out, sizeof out) : -1;
-    if (rc == 0) {
-        ig_tag_from_json(out, g_ig_new_tag, sizeof g_ig_new_tag);
-        if (g_ig_new_tag[0] && ig_vercmp(g_ig_new_tag, APP_VERSION) > 0) main_post(ig_update_found, NULL);
+// The hash at the start of a sha256sum line ("<64 hex>  name") into out (lower case), else "".
+static void upd_sha_from_line(const char *s, char out[65]) {
+    out[0] = 0;
+    for (int i = 0; i < 64; i++) {
+        char c = (char)tolower((unsigned char)s[i]);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return;
+        out[i] = c;
     }
+    out[64] = 0;
+    if (s[64] && s[64] != ' ' && s[64] != '\t' && s[64] != '\n') out[0] = 0;
+}
+
+static bool upd_sha256_file(const char *path, char out[65]) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    Sha256 s;
+    sha256_init(&s);
+    u8 *buf = xmalloc(1 << 20);
+    ssize_t n;
+    while ((n = read(fd, buf, 1 << 20)) > 0) sha256_update(&s, buf, (size_t)n);
+    free(buf);
+    close(fd);
+    if (n < 0) return false;
+    sha256_final(&s, out);
+    return true;
+}
+
+// How this copy got here, so it can say how it updates. Packages are found by their database knowing about us.
+static int upd_kind(void) {
+    const char *k = getenv("FE_UPDATE_KIND"); // (tests, screenshots: appimage, arch, deb, rpm, source)
+    if (k) return !strcmp(k, "appimage") ? UK_APPIMAGE : !strcmp(k, "arch") ? UK_ARCH : !strcmp(k, "deb") ? UK_DEB
+                 : !strcmp(k, "rpm") ? UK_RPM : UK_SOURCE;
+    static int kind = -1;
+    if (kind >= 0) return kind;
+    kind = UK_SOURCE;
+    char exe[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    exe[n > 0 ? n : 0] = 0;
+    if (appimage_path()) kind = UK_APPIMAGE;
+    else if (!strncmp(exe, "/usr/bin/", 9)) {
+        if (access("/var/lib/dpkg/info/file-explorer.list", F_OK) == 0 || access("/var/lib/dpkg/info/file-explorer:amd64.list", F_OK) == 0 ||
+            access("/var/lib/dpkg/info/file-explorer:arm64.list", F_OK) == 0) kind = UK_DEB;
+        else if (access("/var/lib/pacman/local", F_OK) == 0) kind = UK_ARCH; // (built with makepkg: no Arch repository)
+        else if (access("/var/lib/rpm", F_OK) == 0 || access("/usr/lib/sysimage/rpm", F_OK) == 0) kind = UK_RPM;
+    }
+    return kind;
+}
+
+static bool upd_can_install(void) { return upd_kind() == UK_APPIMAGE; }
+
+// How this kind of install gets a new version (Options > Updates), and the command for it to copy (NULL: none).
+static const char *upd_how(void) {
+    switch (upd_kind()) {
+    case UK_APPIMAGE: return "AppImage: updates itself from GitHub";
+    case UK_ARCH: return "makepkg: copy the command, run it in packaging/arch";
+    case UK_DEB: return "With your system updates (apt)";
+    case UK_RPM: return "With your system updates (dnf / zypper)";
+    }
+    return "Built from source: copy the command, run it in the checkout";
+}
+
+static const char *upd_how_cmd(void) {
+    int k = upd_kind();
+    return k == UK_ARCH ? "git pull && makepkg -sif" : k == UK_SOURCE ? "git pull && ./build.sh" : NULL;
+}
+
+static int upd_fetch(const char *url, char *out, size_t cap) {
+    char *curl[] = {"curl", "-fsSL", "--max-time", "20", (char *)url, NULL};
+    char *wget[] = {"wget", "-qO-", "--timeout=20", (char *)url, NULL};
+    return in_path("curl") ? run_capture(curl, out, cap) : in_path("wget") ? run_capture(wget, out, cap) : -1;
+}
+
+typedef struct { char tag[64]; i64 size; bool ok; } UpdFound;
+
+static void upd_download(void);
+
+static void upd_check_done(void *arg) {
+    UpdFound *r = arg;
+    if (g_upd.state == UPD_CHECKING) {
+        if (!r->ok) {
+            g_upd.state = g_upd.manual ? UPD_FAILED : UPD_IDLE;
+            snprintf(g_upd.err, sizeof g_upd.err, "Couldn't reach GitHub (needs curl or wget, and the network)");
+        } else if (!r->tag[0] || ig_vercmp(r->tag, APP_VERSION) <= 0) g_upd.state = UPD_LATEST;
+        else {
+            snprintf(g_upd.tag, sizeof g_upd.tag, "%s", r->tag);
+            g_upd.size = r->size;
+            g_upd.state = UPD_AVAILABLE;
+            if (!g_upd.manual && strcmp(A.upd_seen, g_upd.tag)) { // once per version
+                snprintf(A.upd_seen, sizeof A.upd_seen, "%s", g_upd.tag);
+                A.settings_dirty = true;
+                if (A.upd_auto && upd_can_install()) upd_download(); // (the card comes when it's ready)
+                else g_upd.card = true;
+            }
+        }
+        A.ig_update_checked = (i64)time(NULL);
+        A.settings_dirty = true;
+    }
+    free(r);
+    A.redraw = true;
+}
+
+static void *upd_check_thread(void *arg) {
+    UpdFound *r = arg;
+    size_t cap = 256 << 10;
+    char *out = xmalloc(cap), name[160];
+    if (upd_fetch("https://api.github.com/repos/AlexMedela/file-explorer/releases/latest", out, cap) == 0) {
+        ig_tag_from_json(out, r->tag, sizeof r->tag);
+        upd_asset_name(r->tag, name, sizeof name);
+        r->size = upd_asset_size(out, name);
+        r->ok = true;
+    }
+    free(out);
+    main_post(upd_check_done, r);
     return NULL;
 }
 
+// Ask GitHub now. manual: from Options (shows the outcome there, not as a card).
+static void upd_check_now(bool manual) {
+    if (A.selftest || A.screenshot || g_upd.state == UPD_CHECKING || g_upd.state == UPD_DOWNLOADING || g_upd.state == UPD_READY) return;
+    g_upd.state = UPD_CHECKING;
+    g_upd.manual = manual;
+    pthread_t t;
+    if (pthread_create(&t, NULL, upd_check_thread, xcalloc(1, sizeof(UpdFound))) == 0) pthread_detach(t);
+    else g_upd.state = UPD_IDLE;
+}
+
+// At start: once a day, AppImage only (packages leave updating to the system).
 static void ig_update_check(void) {
     if (!appimage_path() || !A.ig_check_updates || A.selftest || A.screenshot) return;
-    i64 now = (i64)time(NULL);
-    if (now - A.ig_update_checked < 24 * 3600) return;
-    A.ig_update_checked = now;
-    A.settings_dirty = true;
+    if ((i64)time(NULL) - A.ig_update_checked < 24 * 3600) return;
+    upd_check_now(false);
+}
+
+typedef struct { char tag[64], part[PATH_MAX], target[PATH_MAX], err[200]; bool ok; } UpdJob;
+
+static void upd_tick(void *arg) { // (while downloading: how far it got)
+    (void)arg;
+    struct stat st;
+    if (g_upd.state == UPD_DOWNLOADING && stat(g_upd.part, &st) == 0) g_upd.got = st.st_size;
+    A.redraw = true;
+}
+
+static void upd_dl_done(void *arg) {
+    UpdJob *j = arg;
+    if (j->ok) {
+        g_upd.state = UPD_READY;
+        if (!g_upd.manual) g_upd.card = true;
+    } else if (atomic_load(&g_upd.cancel)) g_upd.state = UPD_AVAILABLE;
+    else {
+        g_upd.state = UPD_FAILED;
+        snprintf(g_upd.err, sizeof g_upd.err, "%s", j->err);
+    }
+    free(j);
+    A.redraw = true;
+}
+
+// Worker: the release's checksum, then the AppImage into j->part (curl / wget as a child we can stop), checked and
+// renamed over the running one (which keeps running from its open file until the restart).
+static void *upd_dl_thread(void *arg) {
+    UpdJob *j = arg;
+    char name[160], url[512], sums[1024], want[65], got[65];
+    upd_asset_name(j->tag, name, sizeof name);
+    snprintf(url, sizeof url, IG_RELEASES "/download/%s/%s.sha256", j->tag, name);
+    want[0] = 0;
+    if (upd_fetch(url, sums, sizeof sums) == 0) upd_sha_from_line(sums, want);
+    if (!want[0]) { snprintf(j->err, sizeof j->err, "No %s for this release on GitHub", name); goto out; }
+    snprintf(url, sizeof url, IG_RELEASES "/download/%s/%s", j->tag, name);
+    char *curl[] = {"curl", "-fsSL", "--max-time", "3600", "-o", j->part, url, NULL};
+    char *wget[] = {"wget", "-q", "--timeout=30", "-O", j->part, url, NULL};
+    bool c = in_path("curl");
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    for (int fd = 0; fd < 3; fd++) posix_spawn_file_actions_addopen(&fa, fd, "/dev/null", fd ? O_WRONLY : O_RDONLY, 0);
+    pid_t pid;
+    int rc = posix_spawnp(&pid, c ? "curl" : "wget", &fa, spawn_attr(), c ? curl : wget, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    if (rc) { snprintf(j->err, sizeof j->err, "Needs curl or wget to download"); goto out; }
+    // (children reap themselves here: the pid is gone once it exits; the checksum tells whether it worked)
+    while (kill(pid, 0) == 0) {
+        if (atomic_load(&g_upd.cancel)) kill(pid, SIGTERM);
+        usleep(250 * 1000);
+        main_post(upd_tick, NULL);
+    }
+    if (atomic_load(&g_upd.cancel)) { unlink(j->part); goto out; }
+    if (!upd_sha256_file(j->part, got) || strcmp(got, want)) {
+        unlink(j->part);
+        snprintf(j->err, sizeof j->err, "The download didn't arrive whole (checksum differs): try again later");
+        goto out;
+    }
+    chmod(j->part, 0755);
+    if (rename(j->part, j->target) != 0) {
+        snprintf(j->err, sizeof j->err, "Couldn't replace the AppImage: %s", strerror(errno));
+        unlink(j->part);
+        goto out;
+    }
+    j->ok = true;
+out:
+    main_post(upd_dl_done, j);
+    return NULL;
+}
+
+static void upd_fail(const char *fmt, const char *arg) {
+    g_upd.state = UPD_FAILED;
+    snprintf(g_upd.err, sizeof g_upd.err, fmt, arg);
+}
+
+// Download and install the new AppImage (from the card, or Options).
+static void upd_download(void) {
+    const char *ai = appimage_path();
+    if (A.selftest || A.screenshot || g_upd.state != UPD_AVAILABLE) return;
+    if (!ai) { upd_fail("%s", "Not running from an AppImage"); return; }
+    // next to the AppImage (a rename can't cross file systems), so its folder must be ours to write
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof dir, "%s", ai);
+    char *sl = strrchr(dir, '/');
+    if (sl) *sl = 0;
+    if (access(dir, W_OK) != 0) { upd_fail("Can't write to %s: download the new version from the releases page", dir); return; }
+    UpdJob *j = xcalloc(1, sizeof *j);
+    snprintf(j->tag, sizeof j->tag, "%s", g_upd.tag);
+    snprintf(j->target, sizeof j->target, "%s", ai);
+    snprintf(j->part, sizeof j->part, "%s/.file-explorer-update.part", dir);
+    snprintf(g_upd.part, sizeof g_upd.part, "%s", j->part);
+    g_upd.state = UPD_DOWNLOADING;
+    g_upd.got = 0;
+    atomic_store(&g_upd.cancel, false);
     pthread_t t;
-    if (pthread_create(&t, NULL, ig_update_thread, NULL) == 0) pthread_detach(t);
+    if (pthread_create(&t, NULL, upd_dl_thread, j) == 0) pthread_detach(t);
+    else { free(j); g_upd.state = UPD_AVAILABLE; }
+}
+
+static void upd_cancel(void) {
+    if (g_upd.state == UPD_DOWNLOADING) atomic_store(&g_upd.cancel, true);
+}
+
+// Save, then become another program (argv[0]) in this process: the new version after an update.
+static void relaunch(char **argv) {
+    settings_save();
+    ipc_shutdown();
+    SDL_DestroyRenderer(A.ren);
+    SDL_DestroyWindow(A.win);
+    SDL_Quit();
+    execv(argv[0], argv);
+    _exit(127); // (the window is gone: nothing sensible to go back to)
+}
+
+static void upd_relaunch(void) {
+    const char *ai = appimage_path();
+    if (!ai || A.selftest || A.screenshot) return;
+    char *argv[MAX_TABS + 2];
+    int argc = 0;
+    argv[argc++] = (char *)ai;
+    if (!A.restore_session) // the current tabs as arguments, the session won't bring them back
+        for (int i = 0; i < A.ntabs && argc < MAX_TABS + 1; i++) argv[argc++] = A.tabs[i]->pane[0].path;
+    argv[argc] = NULL;
+    relaunch(argv);
+}
+
+static void upd_restart_cb(int choice, bool check, void *ud) {
+    (void)check;
+    (void)ud;
+    if (choice == 0) upd_relaunch();
+}
+
+// "Restart now": not while it would lose something (transfers; terminal tabs only after asking).
+static void upd_restart(void) {
+    if (A.nops > 0) { toast("Transfers are running: restart once they're done (the new version also starts next time)"); return; }
+    int nterm = 0;
+    for (int i = 0; i < A.ntabs; i++) nterm += A.tabs[i]->term != NULL;
+    if (nterm) {
+        static const char *b[] = {"Restart", "Cancel"};
+        dialog_open("Restart " APP_LABEL "?", "Terminal tabs close and their programs stop. Folder tabs come back.", b, 2, 0, 1,
+                    NULL, upd_restart_cb, NULL);
+        return;
+    }
+    upd_relaunch();
+}
+
+static void upd_notes(void) { open_path(g_upd.tag[0] ? IG_RELEASES "/latest" : IG_RELEASES); }
+
+// "3 hours ago" for the Options page.
+static void upd_ago(i64 t, char *out, size_t cap) {
+    i64 d = (i64)time(NULL) - t;
+    if (d < 90) snprintf(out, cap, "just now");
+    else if (d < 5400) snprintf(out, cap, "%lld minutes ago", (long long)((d + 30) / 60));
+    else if (d < 36 * 3600) snprintf(out, cap, "%lld hours ago", (long long)((d + 1800) / 3600));
+    else snprintf(out, cap, "%lld days ago", (long long)((d + 43200) / 86400));
+}
+
+// The state in a line (Options > Updates: the version row).
+static const char *upd_status(void) {
+    static char buf[320];
+    char ago[48], sz[32] = "";
+    const char *v = g_upd.tag[0] == 'v' ? g_upd.tag + 1 : g_upd.tag;
+    if (g_upd.size > 0) fmt_size(sz, sizeof sz, (u64)g_upd.size);
+    switch (g_upd.state) {
+    case UPD_CHECKING: return "Asking GitHub for the newest version\xE2\x80\xA6";
+    case UPD_LATEST: return "You have the newest version";
+    case UPD_AVAILABLE:
+        if (upd_can_install()) snprintf(buf, sizeof buf, "%s is available%s%s%s", v, sz[0] ? " (" : "", sz, sz[0] ? ")" : "");
+        else snprintf(buf, sizeof buf, "%s is out: see How it updates", v);
+        return buf;
+    case UPD_DOWNLOADING:
+        if (g_upd.size > 0) snprintf(buf, sizeof buf, "Downloading %s\xE2\x80\xA6 %d%% of %s", v, (int)(g_upd.got * 100 / g_upd.size), sz);
+        else snprintf(buf, sizeof buf, "Downloading %s\xE2\x80\xA6", v);
+        return buf;
+    case UPD_READY: snprintf(buf, sizeof buf, "%s is installed: restart to use it", v); return buf;
+    case UPD_FAILED: return g_upd.err;
+    }
+    if (!A.ig_update_checked) return upd_can_install() ? upd_how() : "Not checked yet";
+    upd_ago(A.ig_update_checked, ago, sizeof ago);
+    snprintf(buf, sizeof buf, "Last checked %s", ago);
+    return buf;
+}
+
+// The version row's button: label, and whether it's the main one / can be pressed.
+static const char *upd_button(bool *primary, bool *enabled) {
+    *primary = false;
+    *enabled = true;
+    switch (g_upd.state) {
+    case UPD_CHECKING: *enabled = false; return "Checking\xE2\x80\xA6";
+    case UPD_AVAILABLE:
+        if (!upd_can_install()) return "Check again";
+        *primary = true;
+        return "Update now";
+    case UPD_DOWNLOADING: return "Cancel";
+    case UPD_READY: *primary = true; return "Restart now";
+    }
+    return "Check now";
+}
+
+static void upd_button_press(void) {
+    switch (g_upd.state) {
+    case UPD_AVAILABLE:
+        if (upd_can_install()) { g_upd.manual = true; upd_download(); }
+        else upd_check_now(true);
+        break;
+    case UPD_DOWNLOADING: upd_cancel(); break;
+    case UPD_READY: upd_restart(); break;
+    case UPD_CHECKING: break;
+    default: upd_check_now(true);
+    }
+}
+
+// The card (bottom right, above transfer cards / the queue): a new version, its download, then "Restart now".
+static void upd_card_draw(void) {
+    g_upd.r_card = g_upd.r_main = g_upd.r_alt = g_upd.r_close = (Rect){0, 0, 0, 0};
+    if (!g_upd.card || g_upd.state < UPD_AVAILABLE) return;
+    Font *f = &A.font, *fs = &A.font_small;
+    f32 w = roundf(S(380)), x = A.W - w - roundf(S(16)), bottom = A.r_status.y - roundf(S(10));
+    for (int i = 0; i < A.nops; i++) // above the transfer cards
+        if (A.op_card[i].w > 0) bottom = MIN(bottom, A.op_card[i].y - roundf(S(8)));
+    if (A.q_r.w > 0) bottom = MIN(bottom, A.q_r.y - roundf(S(8)));
+    bool dl = g_upd.state == UPD_DOWNLOADING;
+    f32 h = roundf(S(dl ? 74 : 108)), y = bottom - h, pad = roundf(S(14)), cs = roundf(S(20));
+    g_upd.r_card = (Rect){x, y, w, h};
+    draw_rrect(x + S(2), y + S(4), w, h, S(10), CA(0x000000, 0.35f));
+    draw_rrect(x, y, w, h, S(10), C(COL_POPUP));
+    draw_rrect_outline(x, y, w, h, S(10), 1, C(COL_CONTROL));
+    const char *v = g_upd.tag[0] == 'v' ? g_upd.tag + 1 : g_upd.tag;
+    char title[160], det[320], sz[32] = "", got[32];
+    if (g_upd.size > 0) fmt_size(sz, sizeof sz, (u64)g_upd.size);
+    switch (g_upd.state) {
+    case UPD_AVAILABLE:
+        snprintf(title, sizeof title, APP_LABEL " %s is available", v);
+        snprintf(det, sizeof det, "You have %s%s%s", APP_VERSION, sz[0] ? "  \xC2\xB7  " : "", sz);
+        break;
+    case UPD_DOWNLOADING:
+        snprintf(title, sizeof title, "Updating to %s", v);
+        fmt_size(got, sizeof got, (u64)g_upd.got);
+        if (g_upd.size > 0) snprintf(det, sizeof det, "%s of %s", got, sz);
+        else snprintf(det, sizeof det, "%s", got);
+        break;
+    case UPD_READY:
+        snprintf(title, sizeof title, APP_LABEL " %s is ready", v);
+        snprintf(det, sizeof det, "Restart to use it now (your tabs come back), or it starts next time.");
+        break;
+    default:
+        snprintf(title, sizeof title, "Couldn't update to %s", v);
+        snprintf(det, sizeof det, "%s", g_upd.err);
+    }
+    // logo, title, close (cancels a download)
+    f32 lh = roundf(S(14)), lw = roundf(lh * 624.f / 456.f), lx = x + pad, ty = y + S(10);
+    Glyph *g = icon_glyph(ICON_LOGO_SMALL, (int)lw);
+    if (g) draw_glyph(g, lx, roundf(ty + (f->line_h - lh) * 0.5f - (lw - lh) * 0.5f), (Color){1, 1, 1, 1});
+    f32 tx = lx + lw + roundf(S(8));
+    draw_text_fit(f, tx, ty, x + w - tx - cs - S(16), title, (int)strlen(title), C(COL_TEXT), 0);
+    g_upd.r_close = op_icon_button(x + w - cs - S(8), y + S(8), cs, 0, false, true);
+    if (dl) {
+        f32 bx = x + pad, bw = w - pad * 2, bh = roundf(S(5)), by = y + S(36);
+        draw_rrect(bx, by, bw, bh, bh * 0.5f, C(COL_CONTROL));
+        if (g_upd.size > 0 && g_upd.got > 0)
+            draw_rrect(bx, by, MAX(bh, bw * (f32)MIN(1.0, (f64)g_upd.got / (f64)g_upd.size)), bh, bh * 0.5f, C(COL_ACCENT));
+        draw_text_fit(fs, x + pad, y + S(48), w - pad * 2, det, (int)strlen(det), C(COL_TEXT_DIM), 0);
+        return;
+    }
+    int st[2], ln[2], nl = wrap_text(fs, det, x + w - pad - tx, st, ln, 2);
+    for (int k = 0; k < nl; k++)
+        draw_text_fit(fs, tx, y + S(32) + fs->line_h * (f32)k, x + w - pad - tx, det + st[k], k == nl - 1 ? (int)strlen(det + st[k]) : ln[k],
+                      C(g_upd.state == UPD_FAILED ? COL_DANGER_TEXT : COL_TEXT_DIM), 0);
+    // buttons, right-aligned: the main one, and beside it the release notes / later
+    const char *ml = g_upd.state == UPD_AVAILABLE ? "Update now" : g_upd.state == UPD_READY ? "Restart now" : "Releases page";
+    const char *al = g_upd.state == UPD_READY ? "Later" : g_upd.state == UPD_AVAILABLE ? "What's new" : NULL;
+    f32 bh = roundf(S(28)), by = y + h - pad - bh + S(2);
+    f32 mw = roundf(text_width(f, ml, (int)strlen(ml)) + S(28));
+    g_upd.r_main = (Rect){x + w - pad - mw, by, mw, bh};
+    sheet_button(g_upd.r_main, ml, g_upd.state != UPD_FAILED, true);
+    if (al) {
+        f32 aw = roundf(text_width(f, al, (int)strlen(al)) + S(28));
+        g_upd.r_alt = (Rect){g_upd.r_main.x - S(8) - aw, by, aw, bh};
+        sheet_button(g_upd.r_alt, al, false, true);
+    }
+}
+
+// A left click on the card; true when it took it.
+static bool upd_card_click(f32 x, f32 y) {
+    if (!g_upd.card || g_upd.r_card.w <= 0 || !in_rect(g_upd.r_card, x, y)) return false;
+    if (in_rect(g_upd.r_close, x, y)) {
+        upd_cancel();
+        g_upd.card = false;
+    } else if (in_rect(g_upd.r_main, x, y)) {
+        g_upd.manual = false;
+        if (g_upd.state == UPD_AVAILABLE) upd_download();
+        else if (g_upd.state == UPD_READY) upd_restart();
+        else { upd_notes(); g_upd.card = false; }
+    } else if (in_rect(g_upd.r_alt, x, y)) {
+        if (g_upd.state == UPD_READY) g_upd.card = false;
+        else upd_notes();
+    }
+    A.redraw = true;
+    return true;
+}
+
+// Visual checks (--screenshot): FE_SHOT_UPDATE=available|downloading|ready|failed puts up the card for 0.99.0.
+static void upd_shot(void) {
+    const char *s = getenv("FE_SHOT_UPDATE");
+    if (!A.screenshot || !s) return;
+    snprintf(g_upd.tag, sizeof g_upd.tag, "v0.99.0");
+    g_upd.size = 46 << 20;
+    g_upd.card = true;
+    g_upd.state = !strcmp(s, "downloading") ? UPD_DOWNLOADING : !strcmp(s, "ready") ? UPD_READY : !strcmp(s, "failed") ? UPD_FAILED
+                : !strcmp(s, "latest") ? UPD_LATEST : UPD_AVAILABLE;
+    g_upd.got = g_upd.size * 37 / 100;
+    snprintf(g_upd.err, sizeof g_upd.err, "Can't write to /opt/apps: download the new version from the releases page");
+    A.ig_update_checked = (i64)time(NULL) - 3 * 3600;
 }

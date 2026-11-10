@@ -20,6 +20,13 @@ the empty strip or the logo to move, double-click it to maximise, right-click fo
 `system` leaves the title bar to the desktop (on a tiling compositor: no buttons at all).
 `FE_TITLE_BAR=app|system` overrides it for one run.
 
+**Updates** (Options > Updates) shows the version and how this copy gets new ones. The AppImage asks GitHub for the
+newest release once a day (`check_updates=0` turns it off; nothing but that request is sent) and shows a card once per
+new version: "Update now" downloads it next to the AppImage, checks it against the release's SHA-256 and replaces the
+file, then "Restart now" switches to it (tabs come back; or it simply starts next time). `update_auto_install=1`
+downloads by itself, so the card only asks to restart. The AppImage's folder must be writable. Packages (apt, dnf,
+zypper) update with the system and makepkg / source builds are told the command to run; "Check now" works for all.
+
 Per-folder views live in `~/.config/file-explorer/folders.conf`, saved layouts in `layouts.conf`.
 
 Colour schemes: `~/.config/file-explorer/themes/*.json` (Options → "Create theme from current colours" writes a

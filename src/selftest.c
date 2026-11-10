@@ -5490,7 +5490,29 @@ static int run_selftest_grep(void) {
         ST_CHECK(!tag[0]);
         i64 chk0 = A.ig_update_checked;
         ig_update_check(); // (self-test, not an AppImage: nothing happens)
-        ST_CHECK(A.ig_update_checked == chk0);
+        upd_check_now(true);
+        ST_CHECK(A.ig_update_checked == chk0 && g_upd.state == UPD_IDLE);
+        // the release's AppImage: its size in GitHub's answer, the checksum file
+        char an[160];
+        upd_asset_name("v1.2.3", an, sizeof an);
+        ST_CHECK(!strcmp(an, "file-explorer-1.2.3-" UPD_ARCH ".AppImage"));
+        char rel[512];
+        snprintf(rel, sizeof rel, "{\"tag_name\":\"v1.2.3\",\"assets\":[{\"name\":\"%s.zsync\",\"size\":11},"
+                 "{\"name\":\"%s\",\"label\":\"\",\"uploader\":{\"login\":\"x\"},\"size\": 4567,\"browser_download_url\":\"u/%s\"}]}", an, an, an);
+        ST_CHECK(upd_asset_size(rel, an) == 4567 && upd_asset_size(rel, "file-explorer-9-x.AppImage") == 0);
+        char sha[65];
+        upd_sha_from_line("2FA9706CB1DF08B00019D9B90D2D4688EB70063B505212ABBD629B6113C03B48  file-explorer.AppImage\n", sha);
+        ST_CHECK(!strcmp(sha, "2fa9706cb1df08b00019d9b90d2d4688eb70063b505212abbd629b6113c03b48"));
+        upd_sha_from_line("<html>Not Found</html>", sha);
+        ST_CHECK(!sha[0]);
+        // how this copy updates: only the AppImage installs by itself; makepkg / source builds get a command to copy
+        setenv("FE_UPDATE_KIND", "appimage", 1);
+        ST_CHECK(upd_can_install() && !upd_how_cmd());
+        setenv("FE_UPDATE_KIND", "arch", 1);
+        ST_CHECK(!upd_can_install() && upd_how_cmd() && strstr(upd_how_cmd(), "makepkg"));
+        setenv("FE_UPDATE_KIND", "deb", 1);
+        ST_CHECK(!upd_can_install() && !upd_how_cmd());
+        unsetenv("FE_UPDATE_KIND");
         // "Show in folder": the activation file only while it's on; requests open folders / select items
         char svc[PATH_MAX + 64];
         ig_fm1_service_path(svc, sizeof svc);

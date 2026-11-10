@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+**New**
+- Options > Updates: the version, how this copy updates, and "Check now". The AppImage updates itself: a card offers a new version once, "Update now" downloads and checks it, "Restart now" switches to it (or turn on downloading by itself).
+
 ## 0.10.1
 
 **New**

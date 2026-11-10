@@ -40,8 +40,8 @@ Ubuntu 22.04 / 24.04 LTS, Debian 12 and anything newer (x86_64 and ARM64): downl
 ```sh
 chmod +x file-explorer-*.AppImage && ./file-explorer-*.AppImage
 ```
-It brings its own SDL 3 and libraries. It looks for a new version once a day and offers it (Options > Integration to
-turn that off); AppImageUpdate / Gear Lever can update it in place. For the menu entry, the phone udev rule and the
+It brings its own SDL 3 and libraries, and updates itself: once a day it looks for a new version and offers it in a
+card (Options > Updates to turn that off, or to let it download by itself); AppImageUpdate / Gear Lever work too. For the menu entry, the phone udev rule and the
 administrator prompt's own polkit message, install a package instead, or integrate it with Gear Lever / AppImageLauncher.
 
 ## Removing

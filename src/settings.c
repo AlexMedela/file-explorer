@@ -46,6 +46,8 @@ static void settings_defaults(void) {
     A.ig_fm1 = A.ig_asked = false;
     A.ig_check_updates = true;
     A.ig_update_checked = 0;
+    A.upd_auto = false;
+    A.upd_seen[0] = 0;
     for (int i = 0; i < A.ndev_names; i++) { free(A.dev_names[i].key); free(A.dev_names[i].name); }
     A.ndev_names = 0;
     A.devs_collapsed = A.nets_collapsed = false;
@@ -255,6 +257,8 @@ static void settings_load(void) {
         else if (!strcmp(k, "integration_asked")) A.ig_asked = atoi(v);
         else if (!strcmp(k, "check_updates")) A.ig_check_updates = atoi(v);
         else if (!strcmp(k, "update_checked")) A.ig_update_checked = atoll(v);
+        else if (!strcmp(k, "update_auto_install")) A.upd_auto = atoi(v);
+        else if (!strcmp(k, "update_seen")) snprintf(A.upd_seen, sizeof A.upd_seen, "%s", v);
         else if (!strcmp(k, "title_bar")) A.title_bar = !strcmp(v, "system") ? TITLEBAR_SYSTEM : !strcmp(v, "app") ? TITLEBAR_APP : TITLEBAR_AUTO;
         else if (!strcmp(k, "alt_rows")) A.alt_rows = atoi(v);
         else if (!strcmp(k, "load_times")) A.load_times = atoi(v);
@@ -486,7 +490,8 @@ static void settings_write(FILE *f) {
     fprintf(f, "verify_copies=%d\ntransfers_at_once=%d\n", A.verify_copies, A.transfers_at_once);
     fprintf(f, "integration_prev_folder_app=%s\nintegration_show_in_folder=%d\nintegration_asked=%d\n", A.ig_prev_fm, A.ig_fm1,
             A.ig_asked);
-    fprintf(f, "check_updates=%d\nupdate_checked=%lld\n", A.ig_check_updates, (long long)A.ig_update_checked);
+    fprintf(f, "check_updates=%d\nupdate_checked=%lld\nupdate_auto_install=%d\nupdate_seen=%s\n", A.ig_check_updates,
+            (long long)A.ig_update_checked, A.upd_auto, A.upd_seen);
     fprintf(f, "title_bar=%s\n", A.title_bar == TITLEBAR_SYSTEM ? "system" : A.title_bar == TITLEBAR_APP ? "app" : "auto");
     fprintf(f, "dim_inactive=%d\nalt_rows=%d\nsize_bars=%d\nload_times=%d\ncolumns=", A.dim_inactive, A.alt_rows, A.size_bars, A.load_times);
     for (int i = 0; i < A.ncols; i++) {
