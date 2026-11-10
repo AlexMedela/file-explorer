@@ -3,6 +3,7 @@
 ## Unreleased
 
 **New**
+- Dropping files can ask what to do: turn on Options > Behaviour > "Ask what to do when dropping files" for a Move / Copy / Link here menu after each drop. Ctrl+Shift while dropping makes links.
 - Options > Updates: the version, how this copy updates, and "Check now". The AppImage updates itself: a card offers a new version once, "Update now" downloads and checks it, "Restart now" switches to it (or turn on downloading by itself).
 
 **Fixed**

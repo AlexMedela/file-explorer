@@ -7,7 +7,7 @@ enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON };
 enum {
     OPT_THEME, OPT_ACCENT, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
-    OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
+    OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
@@ -47,6 +47,7 @@ static const OptDef g_opts[] = {
     {OC_BEHAVIOUR, OK_BOOL, OPT_TRAY, "Keep running in the tray when closed", "Closing the window hides it; quit from the tray icon or Ctrl+Q (needs a tray in your panel)"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_SINGLE_CLICK, "Single-click to open", "Open files and folders with one click"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_DBLCLICK_UP, "Double-click empty space to go up", "Like File Pilot: opens the parent folder"},
+    {OC_BEHAVIOUR, OK_BOOL, OPT_DROP_ASK, "Ask what to do when dropping files", "Move, copy or link: a menu after each drop (holding Ctrl, Shift or both still decides at once)"},
     {OC_BEHAVIOUR, OK_CHOICE, OPT_TRANSFERS, "Big transfers", "Copies and moves wait their turn in the transfer queue (Ctrl+J); small ones never wait"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_VERIFY, "Verify after copy", "Read each copied file back and compare checksums; a copy that differs is removed"},
     {OC_KEYBOARD, OK_BUTTON, OPT_KEYS_RESET, "Reset all shortcuts", "Click a key to change it, + to add one"},
@@ -284,6 +285,7 @@ static bool opt_bool_get(int id) {
     case OPT_VIEW_PER_FOLDER: return A.view_per_folder;
     case OPT_SINGLE_CLICK: return A.single_click;
     case OPT_DBLCLICK_UP: return A.dblclick_up;
+    case OPT_DROP_ASK: return A.drop_ask;
     case OPT_SINGLE_INSTANCE: return A.single_instance;
     case OPT_AUTOSTART: return autostart_enabled();
     case OPT_TRAY: return A.close_to_tray;
@@ -314,6 +316,7 @@ static void opt_bool_toggle(int id) {
     case OPT_VIEW_PER_FOLDER: A.view_per_folder = !A.view_per_folder; break;
     case OPT_SINGLE_CLICK: A.single_click = !A.single_click; break;
     case OPT_DBLCLICK_UP: A.dblclick_up = !A.dblclick_up; break;
+    case OPT_DROP_ASK: A.drop_ask = !A.drop_ask; break;
     case OPT_SINGLE_INSTANCE:
         A.single_instance = !A.single_instance;
         if (A.single_instance && g_ipc_fd < 0) ipc_listen(ipc_handle);

@@ -840,10 +840,10 @@ static void on_mouse_up(void) {
         char **paths = pane_selection_paths(p, &n);
         char dst[PATH_MAX];
         snprintf(dst, sizeof dst, "%s", A.drop_dir);
-        bool copy = A.drop_copy;
+        bool copy = A.drop_copy, link = A.drop_link;
+        Pane *dp = A.drop_pane && pane_exists(A.drop_pane) ? A.drop_pane : p;
         drag_cancel();
-        start_transfer(paths, n, dst, !copy, false);
-        strv_free(paths, n);
+        drop_items(dp, paths, n, dst, copy, link, A.mx, A.my);
         return;
     }
     if (A.drag == DRAG_ITEMS_PENDING && p && A.press_collapse >= 0 && pane_exists(p) && p->order &&
@@ -1114,7 +1114,12 @@ static void handle_event(SDL_Event *e) {
         } else if (A.next_drop) {
             char dst[PATH_MAX];
             snprintf(dst, sizeof dst, "%s", A.drop_dir[0] ? A.drop_dir : active_pane()->path);
-            start_transfer(A.ext_drop, A.next_drop, dst, SDL_GetModState() & SDL_KMOD_SHIFT, false);
+            SDL_Keymod mod = SDL_GetModState();
+            bool link = (mod & SDL_KMOD_CTRL) && (mod & SDL_KMOD_SHIFT);
+            Pane *dp = A.drop_pane && pane_exists(A.drop_pane) ? A.drop_pane : active_pane();
+            drop_items(dp, A.ext_drop, A.next_drop, dst, !(mod & SDL_KMOD_SHIFT) || link, link, A.ext_x, A.ext_y);
+            A.ext_drop = NULL; // (taken over)
+            A.next_drop = 0;
         }
         strv_free(A.ext_drop, A.next_drop);
         A.ext_drop = NULL;

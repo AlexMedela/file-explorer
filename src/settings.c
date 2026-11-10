@@ -76,6 +76,7 @@ static void settings_defaults(void) {
     A.row_spacing = 1;
     A.smooth_scroll = true;
     A.single_click = false;
+    A.drop_ask = false;
     A.dblclick_up = true;
     A.def_tree = false;
     A.single_instance = true;
@@ -283,6 +284,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "smooth_scroll")) A.smooth_scroll = atoi(v);
         else if (!strcmp(k, "single_click")) A.single_click = atoi(v);
         else if (!strcmp(k, "dblclick_up")) A.dblclick_up = atoi(v);
+        else if (!strcmp(k, "drop_ask")) A.drop_ask = atoi(v);
         else if (!strcmp(k, "tree_view")) A.def_tree = atoi(v);
         else if (!strcmp(k, "single_instance")) A.single_instance = atoi(v);
         else if (!strcmp(k, "key")) keys_load_line(v);
@@ -480,8 +482,8 @@ static void settings_write(FILE *f) {
     fprintf(f, "icon_theme=%s\n", icon_theme_name(g_icon_theme));
     fprintf(f, "theme=%s\nfont=%s\nfont_size=%d\nrow_spacing=%d\nsmooth_scroll=%d\n",
             g_nthemes ? g_themes[g_theme_cur].name : A.theme_name, A.ui_font, A.font_size, A.row_spacing, A.smooth_scroll);
-    fprintf(f, "single_click=%d\ndblclick_up=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click, A.dblclick_up,
-            A.def_tree, A.single_instance);
+    fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
+            A.dblclick_up, A.drop_ask, A.def_tree, A.single_instance);
     keys_save(f);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");

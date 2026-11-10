@@ -2977,7 +2977,9 @@ static void draw_drag_badge(void) {
                  A.drop_split_panel ? "panel" : n == 1 ? "tab" : "tabs");
     } else if (A.drop_dir[0]) {
         const char *to = A.drop_dir[1] ? path_basename(A.drop_dir) : "/";
-        snprintf(buf, sizeof buf, "%s %u item%s to %s", A.drop_copy ? "Copy" : "Move", n, n == 1 ? "" : "s", to);
+        if (drop_asks()) snprintf(buf, sizeof buf, "%u item%s to %s\xE2\x80\xA6", n, n == 1 ? "" : "s", to); // a menu asks on release
+        else snprintf(buf, sizeof buf, "%s %u item%s to %s", A.drop_link ? "Link" : A.drop_copy ? "Copy" : "Move", n,
+                      n == 1 ? "" : "s", to);
     } else {
         snprintf(buf, sizeof buf, "%u item%s", n, n == 1 ? "" : "s");
     }

@@ -386,6 +386,7 @@ enum {
     ACT_SNAP_TOGGLE, ACT_SNAP_PLACE, ACT_SNAP_REFRESH, ACT_SNAP_BACK, ACT_SNAP_OPEN, ACT_SNAP_COMPARE, ACT_SNAP_CHANGES,
     ACT_SNAP_DELETE, ACT_SNAP_CREATE, ACT_SNAP_ALLOW, ACT_SNAP_RESTORE,
     ACT_NEW_FOLDER_IN, ACT_NEW_FILE_IN,
+    ACT_DROP_MOVE, ACT_DROP_COPY, ACT_DROP_LINK, ACT_DROP_CANCEL, // the menu after a drop (A.drop_ask)
     ACT_FIRST_FREE_, // (keep below 100: shortcuts share ids with CMD_*)
     ACT_COL_BASE = 200,  // + column id: toggle that column
     ACT_VIEW_BASE = 300, // + zoom level index
@@ -494,7 +495,11 @@ static struct {
     Pane *drop_pane;
     i64 drop_row;
     int drop_place;
-    bool drop_copy;
+    bool drop_copy, drop_link; // what a drop would do now (drop_link: Ctrl+Shift)
+    bool drop_ask;           // setting: a drop without Ctrl/Shift asks (Move / Copy / Link here) instead of moving
+    char **dmenu_paths;      // ... the dropped items while that menu is open, and where they go
+    int dmenu_n;
+    char dmenu_dst[PATH_MAX];
     Panel *drop_split_panel; // dragged folders onto a panel edge: open them in a new split on side drop_split
     int drop_split;
     Panel *drop_newtab;      // ... onto the empty part of a tab bar: open them as new tabs there
@@ -4806,6 +4811,8 @@ static void paste_dir(Pane *p, char *out, size_t cap) {
     }
 }
 
+static void drop_menu_do(int act);
+
 static void do_action(Pane *p, int act) {
     int n = 0;
     char **paths = NULL;
@@ -4820,6 +4827,7 @@ static void do_action(Pane *p, int act) {
     }
     if (act >= ACT_ARC_BASE && act < ACT_ARC_BASE + 8) { arc_action(p, act); return; }
     switch (act) {
+    case ACT_DROP_MOVE: case ACT_DROP_COPY: case ACT_DROP_LINK: case ACT_DROP_CANCEL: drop_menu_do(act); break;
     case ACT_OPEN: open_entry(p, p->cursor, false); break;
     case ACT_OPEN_TAB: open_entry(p, p->cursor, true); break;
     case ACT_CUT:
@@ -6217,12 +6225,89 @@ static void drop_target(Pane *src, f32 x, f32 y) {
     }
     if (!A.drop_dir[0]) return;
     SDL_Keymod mod = SDL_GetModState();
+    A.drop_link = (mod & SDL_KMOD_CTRL) && (mod & SDL_KMOD_SHIFT);
     if (mod & SDL_KMOD_CTRL) A.drop_copy = true;
     else if (mod & SDL_KMOD_SHIFT) A.drop_copy = false;
     else {
         struct stat a, b;
         A.drop_copy = !(src && stat(src->path, &a) == 0 && stat(A.drop_dir, &b) == 0 && a.st_dev == b.st_dev);
     }
+}
+
+// Does a drop right now ask what to do? (The setting is on and no Ctrl / Shift says it.)
+static bool drop_asks(void) { return A.drop_ask && !(SDL_GetModState() & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT)); }
+
+// "Link here": a symbolic link in dst to each item (absolute target); a name already taken gets " (2)". Links are
+// tiny, so they're made right here like a new folder; undo moves them to the Trash.
+static void drop_link_items(char **paths, int n, const char *dst) {
+    int dfd = open(dst, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dfd < 0) { toast("Can't open \xE2\x80\x9C%s\xE2\x80\x9D: %s", path_basename(dst), strerror(errno)); return; }
+    char **in = xmalloc((size_t)MAX(n, 1) * sizeof(char *)), **out = xmalloc((size_t)MAX(n, 1) * sizeof(char *));
+    int nout = 0, err = 0;
+    for (int i = 0; i < n; i++) {
+        char base[NAME_MAX + 1], name[NAME_MAX + 1], full[PATH_MAX];
+        snprintf(base, sizeof base, "%s", path_basename(paths[i]));
+        snprintf(name, sizeof name, "%s", base);
+        struct stat st;
+        bool dir = stat(paths[i], &st) == 0 && S_ISDIR(st.st_mode);
+        if (exists_at(dfd, name)) unique_name(dfd, base, dir, false, name, sizeof name);
+        if (symlinkat(paths[i], dfd, name)) { err = errno; continue; }
+        path_join(full, sizeof full, dst, name);
+        in[nout] = strdup(paths[i]);
+        out[nout++] = strdup(full);
+    }
+    close(dfd);
+    if (err == EPERM) toast("This drive can't hold links");
+    else if (err) toast("Can't create a link: %s", strerror(err));
+    if (nout) {
+        char *dirs[1] = {(char *)dst};
+        undo_push(U_COPY, in, out, NULL, nout); // undo = the links go to the Trash
+        refresh_after(out, nout, dirs, 1);
+    }
+    strv_free(in, nout);
+    strv_free(out, nout);
+}
+
+static void drop_menu_clear(void) {
+    strv_free(A.dmenu_paths, A.dmenu_n);
+    A.dmenu_paths = NULL;
+    A.dmenu_n = 0;
+}
+
+// After a drop with A.drop_ask: Move / Copy / Link here. Takes over paths; what would have happened without the
+// setting (copy or move) is preselected, so Enter does that.
+static void drop_menu_open(Pane *p, char **paths, int n, const char *dst, bool copy, f32 x, f32 y) {
+    drop_menu_clear();
+    A.dmenu_paths = paths;
+    A.dmenu_n = n;
+    snprintf(A.dmenu_dst, sizeof A.dmenu_dst, "%s", dst);
+    Menu *m = &A.menu;
+    m->keep_open = false;
+    m->reopen = NULL;
+    m->n = 0;
+    m->pane = p;
+    menu_add("Move here", "Shift", ACT_DROP_MOVE, true);
+    menu_add("Copy here", "Ctrl", ACT_DROP_COPY, true);
+    menu_add("Link here", "Ctrl+Shift", ACT_DROP_LINK, true);
+    menu_sep();
+    menu_add("Cancel", "Esc", ACT_DROP_CANCEL, true);
+    menu_finish(x, y);
+    m->hover = copy ? 1 : 0;
+}
+
+// A menu choice: do it with the items held since the drop.
+static void drop_menu_do(int act) {
+    if (A.dmenu_n && act == ACT_DROP_LINK) drop_link_items(A.dmenu_paths, A.dmenu_n, A.dmenu_dst);
+    else if (A.dmenu_n && act != ACT_DROP_CANCEL) start_transfer(A.dmenu_paths, A.dmenu_n, A.dmenu_dst, act == ACT_DROP_MOVE, false);
+    drop_menu_clear();
+}
+
+// Dropped items (from a pane or another app) into dst: ask, link, or copy / move. Takes over paths.
+static void drop_items(Pane *p, char **paths, int n, const char *dst, bool copy, bool link, f32 x, f32 y) {
+    if (drop_asks()) { drop_menu_open(p, paths, n, dst, copy, x, y); return; }
+    if (link) drop_link_items(paths, n, dst);
+    else start_transfer(paths, n, dst, !copy, false);
+    strv_free(paths, n);
 }
 
 // --- streaming search results / folder sizes (main thread) -----------------

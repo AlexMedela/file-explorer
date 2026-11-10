@@ -700,6 +700,42 @@ static int run_selftest_ops(void) {
     st_wait_ops();
     ST_CHECK(st_exists(ST_BASE "/dst/a (copy).txt") && !st_exists(ST_BASE "/a (copy).txt"));
 
+    // "Ask what to do when dropping": the drop opens Move / Copy / Link here (move preselected); Esc keeps everything,
+    // Link here makes a symlink, undo takes it away
+    A.drop_ask = true;
+    mkdir(ST_BASE "/lnk", 0755);
+    pane_refresh(p);
+    st_wait();
+    for (int round = 0; round < 2; round++) {
+        sy = st_row_y(p, "a.txt"), dy = st_row_y(p, "lnk");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, nx, sy, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, nx + S(20), (sy + dy) * 0.5f, 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, nx, dy, 0, 0, 0);
+        ST_CHECK(A.drag == DRAG_ITEMS && !strcmp(A.drop_dir, ST_BASE "/lnk"));
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.menu.open && A.menu.n == 5 && A.menu.items[A.menu.hover].act == ACT_DROP_MOVE && A.dmenu_n == 1);
+        if (!round) {
+            st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+            st_wait_ops();
+            ST_CHECK(!A.menu.open && st_exists(ST_BASE "/a.txt") && !st_exists(ST_BASE "/lnk/a.txt"));
+        }
+    }
+    st_shot("dropmenu");
+    st_key(SDLK_DOWN, SDL_KMOD_NONE);
+    st_key(SDLK_DOWN, SDL_KMOD_NONE);
+    ST_CHECK(A.menu.items[A.menu.hover].act == ACT_DROP_LINK);
+    st_key(SDLK_RETURN, SDL_KMOD_NONE);
+    char lt[PATH_MAX] = "";
+    ssize_t ll = readlink(ST_BASE "/lnk/a.txt", lt, sizeof lt - 1);
+    if (ll > 0) lt[ll] = 0;
+    ST_CHECK(!A.menu.open && !A.dmenu_n && !strcmp(lt, ST_BASE "/a.txt") && st_exists(ST_BASE "/a.txt"));
+    st_key(SDLK_Z, SDL_KMOD_CTRL);
+    st_wait_ops();
+    struct stat lst;
+    ST_CHECK(lstat(ST_BASE "/lnk/a.txt", &lst) != 0 && st_exists(ST_BASE "/a.txt"));
+    rmdir(ST_BASE "/lnk");
+    A.drop_ask = false;
+
     // cancel a big copy: the partial file must be removed
     st_write(ST_BASE "/big.bin", 768u << 20);
     char *big[1] = {ST_BASE "/big.bin"};

@@ -37,9 +37,9 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Ctrl+Shift+C | Copy full path(s) as text |
 | F4 | Open terminal here (`$TERMINAL`, else `xdg-terminal-exec`, else the first one found: Ptyxis, GNOME Console, Konsole, COSMIC, Xfce, MATE, ... xterm) |
 | Right-click, Menu key, Shift+F10 | Context menu |
-| Drag a file by its name | Move onto a folder, pane, or sidebar place (Ctrl = copy, Shift = move; other drives copy by default); several selected items drag together, grabbed anywhere on a selected row |
+| Drag a file by its name | Move onto a folder, pane, or sidebar place (Ctrl = copy, Shift = move, Ctrl+Shift = link; other drives copy by default); several selected items drag together, grabbed anywhere on a selected row. With Options > Behaviour > "Ask what to do when dropping", a drop without Ctrl/Shift opens Move / Copy / Link here |
 | Drag folders by their name | Onto a panel edge (top, bottom, left, right) = open them in a new split there (snap overlay); onto the empty part of a tab bar = open them as new tabs |
-| Drop files from other apps | Copy into the folder under the cursor |
+| Drop files from other apps | Copy into the folder under the cursor (Shift = move, Ctrl+Shift = link; or the drop menu, see above) |
 | Ctrl+P | Go to anything: fuzzy match over every folder and file under ~ and mounts (hidden ones skipped), recent folders, places, tabs. Enter on a file shows it in its folder, Ctrl+Enter opens it |
 | Ctrl+Shift+P (or type `>`) | Command palette |
 | Ctrl+F | Search bar at the bottom of the pane (like File Pilot). Default: instant fuzzy **filter of this folder**; matched letters highlighted. Wildcards (`*.pdf`) work too. Enter = go to the list, Esc = clear |

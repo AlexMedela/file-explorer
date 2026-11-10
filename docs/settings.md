@@ -20,6 +20,11 @@ the empty strip or the logo to move, double-click it to maximise, right-click fo
 `system` leaves the title bar to the desktop (on a tiling compositor: no buttons at all).
 `FE_TITLE_BAR=app|system` overrides it for one run.
 
+**Dropping files** (Options > Behaviour > Mouse): a drop moves (copies onto another drive or from another app) unless
+Ctrl / Shift / Ctrl+Shift say copy / move / link. `drop_ask=1` ("Ask what to do when dropping files") opens a menu
+after each drop instead: Move here, Copy here, Link here (a symbolic link to each item), Cancel. Holding a modifier
+still decides at once.
+
 **Updates** (Options > Updates) shows the version and how this copy gets new ones. The AppImage asks GitHub for the
 newest release once a day (`check_updates=0` turns it off; nothing but that request is sent) and shows a card once per
 new version: "Update now" downloads it next to the AppImage, checks it against the release's SHA-256 and replaces the
