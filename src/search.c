@@ -1142,6 +1142,36 @@ static void *dirsize_worker(void *arg) {
     return NULL;
 }
 
+// A reloaded listing L starts with the folder sizes measured in the one it replaces (matched by name); measuring
+// L's folders then overwrites them. Both are complete, so only folder-size workers still write (atomically).
+static void dirsize_carry(Listing *L, Listing *old) {
+    u32 cap = 16;
+    while (cap < old->count * 2) cap <<= 1;
+    u32 *tab = xmalloc(cap * sizeof(u32)), n = 0;
+    memset(tab, 0xFF, cap * sizeof(u32));
+    for (u32 i = 0; i < old->count; i++) {
+        Entry *e = &old->entries[i];
+        if (!(e->flags & ENT_DIR) || !(__atomic_load_n(&e->mflags, __ATOMIC_ACQUIRE) & MF_DIRSIZE)) continue;
+        u32 h = str_hash(e->name) & (cap - 1);
+        while (tab[h] != 0xFFFFFFFFu) h = (h + 1) & (cap - 1);
+        tab[h] = i;
+        n++;
+    }
+    for (u32 i = 0; n && i < L->count; i++) {
+        Entry *e = &L->entries[i];
+        if (!(e->flags & ENT_DIR)) continue;
+        for (u32 h = str_hash(e->name) & (cap - 1); tab[h] != 0xFFFFFFFFu; h = (h + 1) & (cap - 1)) {
+            Entry *o = &old->entries[tab[h]];
+            if (strcmp(o->name, e->name)) continue;
+            u8 mf = __atomic_load_n(&o->mflags, __ATOMIC_ACQUIRE) & (MF_DIRSIZE | MF_NOSIZE);
+            __atomic_store_n(&e->size, __atomic_load_n(&o->size, __ATOMIC_RELAXED), __ATOMIC_RELAXED);
+            __atomic_or_fetch(&e->mflags, mf, __ATOMIC_RELEASE);
+            break;
+        }
+    }
+    free(tab);
+}
+
 // Compute recursive sizes for the folders of a completed listing (name order = screen order).
 // Hidden folders only when they are shown: in $HOME they (.cache, .local, ...) are most of the tree.
 static void dirsize_start(Listing *L, bool visible, bool hidden) {

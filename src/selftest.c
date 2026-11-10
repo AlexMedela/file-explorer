@@ -1131,6 +1131,24 @@ static int run_selftest_m4(void) {
     pane_set_sort(p, SORT_SIZE);
     st_wait();
     ST_CHECK(!strcmp(p->L->entries[p->order[0]].name, "big"));
+    // a reload (live refresh) keeps showing the folder sizes while they're measured again: no blank Size column
+    {
+        dirsize_cache_expire(); // measure for real, so only the carried-over sizes can fill the first frame
+        Listing *was = p->L;
+        pane_refresh(p);
+        bool seen = false, kept = true;
+        for (u64 t0 = now_ns(); !seen && now_ns() - t0 < 5000000000ull;) {
+            main_drain();
+            pane_poll(p);
+            if (p->L != was && atomic_load(&p->L->state) == LST_COMPLETE) {
+                seen = true;
+                kept = st_dir_size(p, "big") == 2u << 20 && st_dir_size(p, "small") == 1024;
+            } else SDL_Delay(1);
+        }
+        ST_CHECK(seen && kept && !p->L_prev);
+        st_wait();
+        ST_CHECK(st_wait_cond(c_sizes_done, 5000) && !strcmp(p->L->entries[p->order[0]].name, "big"));
+    }
     pane_set_sort(p, SORT_NAME);
     st_wait();
 

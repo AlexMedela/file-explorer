@@ -404,7 +404,9 @@ static void term_fonts(void) {
     free(bold);
     g_term_font_scale = A.scale;
     snprintf(g_term_font_family, sizeof g_term_font_family, "%s", g_tc.family);
-    atlas_reset();
+    // Free the old glyphs' space, but not now: this runs mid-frame and text queued before it would vanish for a
+    // frame (a blink). A "full" atlas makes frame() reset it and draw the frame again before presenting.
+    g_atlas_full = true;
 }
 
 static void term_apply_colors(Term *t) {

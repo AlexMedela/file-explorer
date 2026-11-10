@@ -212,6 +212,8 @@ typedef struct Pane {
     int nselect_names;
     bool reload_no_select; // reload: restore cursor without selecting it
     Listing *L_next;       // background reload; swapped in when ready (no flicker)
+    Listing *L_prev;       // the listing a reload replaced: its folder sizes carry over once L completes
+    bool keep_scroll;      // the reload is a refresh: the view stays where it is, even if the cursor is off screen
     bool from_reload;
     char search_q[256];    // non-empty while showing recursive search results
     char search_next_q[256]; // query of a staged search (L_next) not yet shown
@@ -2318,9 +2320,15 @@ static void drag_cancel(void) {
 
 static int cmp_strp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 
+static void pane_drop_prev(Pane *p) {
+    if (p->L_prev) listing_release(p->L_prev);
+    p->L_prev = NULL;
+}
+
 static void pane_load_ex(Pane *p, const char *path_in, bool scan) {
     char path[PATH_MAX]; // path_in may alias p->path
     snprintf(path, sizeof path, "%s", path_in);
+    pane_drop_prev(p);
     if (p->L_next) {
         atomic_store(&p->L_next->cancel, 1);
         listing_release(p->L_next);
@@ -2328,6 +2336,7 @@ static void pane_load_ex(Pane *p, const char *path_in, bool scan) {
     }
     p->from_reload = false;
     p->reload_no_select = false;
+    p->keep_scroll = false;
     p->resort_on_complete = false;
     strv_free(p->select_names, p->nselect_names);
     p->select_names = NULL;
@@ -2454,6 +2463,7 @@ static void search_refine(Pane *p, const char *q) {
 }
 
 static void pane_free(Pane *p) {
+    pane_drop_prev(p);
     if (p->L_next) {
         atomic_store(&p->L_next->cancel, 1);
         listing_release(p->L_next);
@@ -2673,6 +2683,7 @@ static void pane_refresh(Pane *p) {
     char curbuf[PATH_MAX];
     if (cur) snprintf(curbuf, sizeof curbuf, "%s", cur);
     pane_reload(p, names, n, cur ? curbuf : NULL);
+    p->keep_scroll = true;
     strv_free(names, n);
 }
 
@@ -2932,13 +2943,17 @@ static void pane_poll(Pane *p) {
         if (atomic_load(&p->L_next->state) == LST_COMPLETE || now_ns() - p->L_next->t_start > 400000000ull) search_swap(p);
     } else if (p->L_next) {
         int s2 = atomic_load(&p->L_next->state);
-        if (s2 == LST_COMPLETE || s2 == LST_ERROR || (s2 == LST_READY && now_ns() - p->L_next->t_start > 150000000ull)) {
+        // The old listing is complete and still on screen: wait for the new one's details too (sizes, dates, thumbnails
+        // would blank out for a moment otherwise), unless that takes long (a huge folder, a slow drive).
+        if (s2 == LST_COMPLETE || s2 == LST_ERROR || (s2 == LST_READY && now_ns() - p->L_next->t_start > 1500000000ull)) {
             Listing *old = p->L;
             p->L = p->L_next;
             p->L_next = NULL;
+            pane_drop_prev(p);
             if (old) {
                 atomic_store(&old->cancel, 1);
-                listing_release(old);
+                if (!old->is_search && !p->L->is_search && !strcmp(old->path, p->L->path)) p->L_prev = old; // a reload
+                else listing_release(old);
             }
             free(p->order);
             free(p->sel);
@@ -2984,7 +2999,8 @@ static void pane_poll(Pane *p) {
                 if (pending && ren_pos < 0 && !strcmp(nm, A.pending_rename)) ren_pos = i;
             }
         }
-        bool focus = pos >= 0 || first_sel >= 0 || ren_pos >= 0;
+        bool focus = ren_pos >= 0 || (!p->keep_scroll && (pos >= 0 || first_sel >= 0));
+        p->keep_scroll = false;
         if (ren_pos >= 0) pos = ren_pos;
         else if (pos < 0) pos = first_sel;
         if (pos >= 0 && !p->nselect_names && !p->reload_no_select) sel_set(p, pos, true);
@@ -3013,6 +3029,19 @@ static void pane_poll(Pane *p) {
             pane_resort(p);
         A.redraw = true;
     }
+    // Folder sizes first, so a sort by size right below already has the ones known. After a reload the old
+    // listing's sizes stand in until measured again: the Size column and bars don't blank out (blink) meanwhile.
+    if (st == LST_COMPLETE && p->L_prev) {
+        if (A.folder_sizes && !L->is_archive) dirsize_carry(L, p->L_prev);
+        pane_drop_prev(p);
+    } else if (st == LST_ERROR) pane_drop_prev(p);
+    if (st == LST_COMPLETE && A.folder_sizes && !L->is_search && !L->is_archive &&
+        (!L->dirsize_started || (A.show_hidden && !L->dirsize_hidden))) {
+        bool visible = !L->dirsize_started, hidden = A.show_hidden && !L->dirsize_hidden;
+        L->dirsize_started = true;
+        L->dirsize_hidden |= hidden;
+        if (!path_is_remote(L->path)) dirsize_start(L, visible, hidden); // walking a network share would be slow and costly
+    }
     if (st == LST_COMPLETE && !p->complete_seen && p->order) {
         p->complete_seen = true;
         if (L->is_search) {
@@ -3022,13 +3051,6 @@ static void pane_poll(Pane *p) {
             pane_resort(p);
         }
         A.redraw = true;
-    }
-    if (st == LST_COMPLETE && A.folder_sizes && !L->is_search && !L->is_archive &&
-        (!L->dirsize_started || (A.show_hidden && !L->dirsize_hidden))) {
-        bool visible = !L->dirsize_started, hidden = A.show_hidden && !L->dirsize_hidden;
-        L->dirsize_started = true;
-        L->dirsize_hidden |= hidden;
-        if (!path_is_remote(L->path)) dirsize_start(L, visible, hidden); // walking a network share would be slow and costly
     }
     // The folder vanished while we were looking at it: go to the nearest existing parent.
     if (st == LST_ERROR && p->from_reload && L->err == ENOENT) {
@@ -9682,8 +9704,9 @@ static void tray_sync(void) {
     if (!g_tray) return;
     char sig[sizeof g_tray_sig] = "";
     addon_tray_sig(sig, sizeof sig);
-    if (!strcmp(sig, g_tray_sig) && g_tray_sig[0]) return;
-    snprintf(g_tray_sig, sizeof g_tray_sig, "%s", sig[0] ? sig : "-");
+    const char *want = sig[0] ? sig : "-"; // never empty: "" in g_tray_sig means "not built yet"
+    if (!strcmp(want, g_tray_sig)) return;
+    snprintf(g_tray_sig, sizeof g_tray_sig, "%s", want);
     SDL_TrayMenu *m = SDL_GetTrayMenu(g_tray);
     if (!m) m = SDL_CreateTrayMenu(g_tray);
     if (!m) return;
@@ -9948,6 +9971,22 @@ static void frame(void) {
 }
 
 // --- benchmark (headless) --------------------------------------------------
+
+// Is this a Vulkan renderer on Mesa's software rasterizer (lavapipe)? It draws on the CPU and presents with plain
+// image copies on X11 (blinking, tearing). Asked without Vulkan headers: deviceType is the 5th u32 of
+// VkPhysicalDeviceProperties, 4 = VK_PHYSICAL_DEVICE_TYPE_CPU.
+static bool vulkan_on_cpu(SDL_Renderer *ren) {
+    SDL_PropertiesID pr = SDL_GetRendererProperties(ren);
+    void *inst = SDL_GetPointerProperty(pr, SDL_PROP_RENDERER_VULKAN_INSTANCE_POINTER, NULL);
+    void *dev = SDL_GetPointerProperty(pr, SDL_PROP_RENDERER_VULKAN_PHYSICAL_DEVICE_POINTER, NULL);
+    void *(*gipa)(void *, const char *) = (void *(*)(void *, const char *))SDL_Vulkan_GetVkGetInstanceProcAddr();
+    if (!inst || !dev || !gipa) return false;
+    void (*props)(void *, void *) = (void (*)(void *, void *))gipa(inst, "vkGetPhysicalDeviceProperties");
+    if (!props) return false;
+    static u32 buf[1024]; // the struct is ~830 bytes
+    props(dev, buf);
+    return buf[4] == 4;
+}
 
 static int run_bench(const char *path, const char *query) {
 #ifdef __GLIBC__
@@ -10262,6 +10301,9 @@ int main(int argc, char **argv) {
 
     SDL_SetAppMetadata(APP_NAME, APP_VERSION, picker_active() ? "dev.fileexplorer.picker" : "dev.fileexplorer"); // (picker: floated by the compositor)
     SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0"); // the close button is ours (window_close_requested)
+    // SDL asks X11 compositors (picom, KWin, xfwm4) to stop compositing its windows, which suits full-screen games:
+    // for a desktop app it makes the screen blink whenever the compositor switches between the two.
+    SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
     if (!SDL_Init(SDL_INIT_VIDEO)) { fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return 1; }
     g_wake_event = SDL_RegisterEvents(1);
     pool_init();
@@ -10283,6 +10325,10 @@ int main(int argc, char **argv) {
     else if (!getenv("SDL_RENDER_DRIVER")) {
         if (!strcmp(A.renderer, "auto")) A.ren = SDL_CreateRenderer(A.win, "vulkan");
         else A.ren = SDL_CreateRenderer(A.win, A.renderer);
+    }
+    if (A.ren && !strcmp(A.renderer, "auto") && !getenv("SDL_RENDER_DRIVER") && vulkan_on_cpu(A.ren)) {
+        SDL_DestroyRenderer(A.ren); // no Vulkan driver for the GPU (older Intel, nouveau, VMs): OpenGL usually has one
+        A.ren = SDL_CreateRenderer(A.win, "opengl");
     }
     if (!A.ren) A.ren = SDL_CreateRenderer(A.win, NULL);
     if (!A.ren) { fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError()); return 1; }
