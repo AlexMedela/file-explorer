@@ -2767,6 +2767,31 @@ static int run_selftest_m9(void) {
         pane_refresh(p);
         st_wait();
     }
+    // right-click a collapsed subfolder: "New folder inside" creates it there, expands the folder, starts the rename
+    {
+        ST_CHECK(tree_find(p, "tree/deep") < 0);
+        f32 ry = st_row_y(p, "tree/deep"), rx = p->ly.col_name + S(60);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, rx, ry, SDL_BUTTON_RIGHT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, rx, ry, SDL_BUTTON_RIGHT, 1, 0);
+        bool has_in = false;
+        for (int i = 0; i < A.menu.n; i++) has_in |= A.menu.items[i].act == ACT_NEW_FOLDER_IN;
+        ST_CHECK(A.menu.open && has_in && !strcmp(st_cursor_name(p), "tree/deep"));
+        A.menu.open = false;
+        do_action(p, ACT_NEW_FOLDER_IN);
+        st_wait();
+        ST_CHECK(st_exists(M9_BASE "/tree/deep/New folder") && tree_find(p, "tree/deep") >= 0);
+        ST_CHECK(A.ren_pane == p && !strcmp(A.ren_te.buf, "New folder") && !strcmp(st_cursor_name(p), "tree/deep/New folder"));
+        te_set(&A.ren_te, "made", 0, 0);
+        commit_rename();
+        ST_CHECK(st_exists(M9_BASE "/tree/deep/made"));
+        st_wait();
+        ST_CHECK(st_select(p, "tree/deep"));
+        do_action(p, ACT_NEW_FILE_IN);
+        st_wait();
+        ST_CHECK(st_exists(M9_BASE "/tree/deep/New file") && A.ren_pane == p);
+        A.ren_pane = NULL;
+        st_wait();
+    }
     // chevron click collapses
     {
         f32 ry2 = st_row_y(p, "tree");

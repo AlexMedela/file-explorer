@@ -384,6 +384,7 @@ enum {
     ACT_CMP_DIFF_ONLY, ACT_CMP_CONTENTS, ACT_CMP_AGAIN,
     ACT_SNAP_TOGGLE, ACT_SNAP_PLACE, ACT_SNAP_REFRESH, ACT_SNAP_BACK, ACT_SNAP_OPEN, ACT_SNAP_COMPARE, ACT_SNAP_CHANGES,
     ACT_SNAP_DELETE, ACT_SNAP_CREATE, ACT_SNAP_ALLOW, ACT_SNAP_RESTORE,
+    ACT_NEW_FOLDER_IN, ACT_NEW_FILE_IN,
     ACT_FIRST_FREE_, // (keep below 100: shortcuts share ids with CMD_*)
     ACT_COL_BASE = 200,  // + column id: toggle that column
     ACT_VIEW_BASE = 300, // + zoom level index
@@ -466,7 +467,7 @@ static struct {
     u32 ren_entry;
     TextEdit ren_te;
     Pane *pending_rename_pane;
-    char pending_rename[NAME_MAX + 1];
+    char pending_rename[PATH_MAX]; // (a relative path in the tree view)
     // file operations
     Op *ops[MAX_OPS];
     Rect op_close[MAX_OPS];
@@ -4566,8 +4567,13 @@ static void commit_rename(void) {
     refresh_after(b, 1, NULL, 0);
 }
 
-static void new_item(Pane *p, bool folder) {
-    int dfd = open(p->path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+// New folder / file in the pane's folder, or (tree view) inside the subfolder at relative path sub, which is
+// expanded so the new item shows up there, ready to rename.
+static void new_item(Pane *p, bool folder, const char *sub) {
+    char where[PATH_MAX];
+    if (sub) path_join(where, sizeof where, p->path, sub);
+    else snprintf(where, sizeof where, "%s", p->path);
+    int dfd = open(where, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dfd < 0) { toast("Can't open folder: %s", strerror(errno)); return; }
     const char *base = folder ? "New folder" : "New file";
     char name[NAME_MAX + 1];
@@ -4583,19 +4589,31 @@ static void new_item(Pane *p, bool folder) {
     close(dfd);
     if (r) {
         char full[PATH_MAX], what[64];
-        path_join(full, sizeof full, p->path, name);
+        path_join(full, sizeof full, where, name);
         snprintf(what, sizeof what, "Can't create a %s here", folder ? "folder" : "file");
         if (e == EACCES || e == EPERM) admin_offer(folder ? OP_MKDIR : OP_MKFILE, full, NULL, what, e);
         else toast("Can't create %s: %s", folder ? "folder" : "file", strerror(e));
         return;
     }
     char full[PATH_MAX];
-    path_join(full, sizeof full, p->path, name);
+    path_join(full, sizeof full, where, name);
     char *b[1] = {full};
     undo_push(U_CREATE, NULL, b, NULL, 1);
     A.pending_rename_pane = p;
-    snprintf(A.pending_rename, sizeof A.pending_rename, "%s", name);
-    refresh_after(b, 1, NULL, 0);
+    if (!sub) {
+        snprintf(A.pending_rename, sizeof A.pending_rename, "%s", name);
+        refresh_after(b, 1, NULL, 0);
+        return;
+    }
+    snprintf(A.pending_rename, sizeof A.pending_rename, "%s/%s", sub, name);
+    if (tree_find(p, sub) < 0) {
+        p->expanded = xrealloc(p->expanded, (size_t)(p->nexpanded + 1) * sizeof(char *));
+        p->expanded[p->nexpanded++] = strdup(sub);
+        qsort(p->expanded, (size_t)p->nexpanded, sizeof(char *), cmp_strp);
+    }
+    char *rel = A.pending_rename;
+    pane_reload(p, &rel, 1, rel);
+    refresh_after(b, 1, NULL, 0); // other panes showing that subfolder itself
 }
 
 // --- terminals: local, or SSH into the server an SFTP folder lives on ------------------------------------
@@ -4877,8 +4895,14 @@ static void do_action(Pane *p, int act) {
             }
         }
         break;
-    case ACT_NEW_FOLDER: new_item(p, true); break;
-    case ACT_NEW_FILE: new_item(p, false); break;
+    case ACT_NEW_FOLDER: new_item(p, true, NULL); break;
+    case ACT_NEW_FILE: new_item(p, false, NULL); break;
+    case ACT_NEW_FOLDER_IN:
+    case ACT_NEW_FILE_IN:
+        if (pane_tree_on(p) && p->L && p->L->tree && p->order && p->cursor >= 0 && p->cursor < (i64)p->count &&
+            (p->L->entries[p->order[p->cursor]].flags & ENT_DIR))
+            new_item(p, act == ACT_NEW_FOLDER_IN, p->L->entries[p->order[p->cursor]].name);
+        break;
     case ACT_REFRESH:
         dirsize_cache_expire();
         if (pane_du_on(p)) du_rescan(p);
@@ -5258,6 +5282,11 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
             menu_add("Open in new tab", "Ctrl+Enter", ACT_OPEN_TAB, true);
             menu_add("Open in right split", "", ACT_OPEN_SPLIT_RIGHT, true);
             menu_add("Open in bottom split", "", ACT_OPEN_SPLIT_DOWN, true);
+            if (pane_tree_on(p) && p->L->tree && !pane_is_trash(p)) { // create right inside this subfolder
+                menu_sep();
+                menu_add("New folder inside", "", ACT_NEW_FOLDER_IN, true);
+                menu_add("New file inside", "", ACT_NEW_FILE_IN, true);
+            }
         }
         menu_sep();
         menu_add("Cut", "Ctrl+X", ACT_CUT, true);

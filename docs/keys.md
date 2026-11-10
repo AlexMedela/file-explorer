@@ -48,7 +48,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Space, Ctrl+I | Preview panel: images, text (line numbers), folders, video/PDF/etc. via installed thumbnailers; drag its edge to resize, double-click to open |
 | Ctrl+D | Pin/unpin the folder (under the cursor, or the current one) in Quick Access |
 | Sidebar | **Quick Access groups**: drag folders to reorder or onto a group header to pin; right-click to rename, move to another group, new/delete group; click a header to collapse, double-click to rename |
-| Ctrl+Shift+E, right-click empty space → Tree view | **Tree view** in Details: → expands a folder in place, ← collapses / jumps to the parent, click the chevron; Ctrl+V pastes into the selected folder (or the folder of the selected file) |
+| Ctrl+Shift+E, right-click empty space → Tree view | **Tree view** in Details: → expands a folder in place, ← collapses / jumps to the parent, click the chevron; Ctrl+V pastes into the selected folder (or the folder of the selected file); right-click a folder → **New folder inside** / **New file inside** |
 | Ctrl+, | **Options**: theme (Dark, Light, Black, Monokai, Nord, your JSON schemes), accent colour, icons, font, size, row spacing, behaviour, defaults, **keyboard shortcuts** (any command, two-step sequences like `Ctrl+K Ctrl+T`), **saved layouts** |
 | Ctrl+P → "Layout: …" | Switch to a saved layout (panels, splits, tabs) |
 | Ctrl+Shift+A (or `@` in the palette) | **Search tabs**: every open tab in every panel + recently closed ones |
