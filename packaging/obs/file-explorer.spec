@@ -11,6 +11,7 @@ BuildRequires:  grep
 BuildRequires:  pkgconfig
 BuildRequires:  pkgconfig(sdl3)
 BuildRequires:  pkgconfig(freetype2)
+BuildRequires:  pkgconfig(harfbuzz)
 BuildRequires:  pkgconfig(fontconfig)
 BuildRequires:  pkgconfig(libarchive)
 BuildRequires:  pkgconfig(vterm) >= 0.3

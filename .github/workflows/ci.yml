@@ -17,11 +17,11 @@ jobs:
       - name: Install dependencies
         run: |
           case "${{ matrix.image }}" in
-            archlinux*) pacman -Syu --noconfirm --needed base-devel git pkgconf sdl3 freetype2 fontconfig libarchive libvterm fuse3 openssl ;;
-            fedora*)    dnf install -y gcc git pkgconf-pkg-config SDL3-devel freetype-devel fontconfig-devel libarchive-devel libvterm-devel fuse3-devel openssl-devel ;;
+            archlinux*) pacman -Syu --noconfirm --needed base-devel git pkgconf sdl3 freetype2 harfbuzz fontconfig libarchive libvterm fuse3 openssl ;;
+            fedora*)    dnf install -y gcc git pkgconf-pkg-config SDL3-devel freetype-devel harfbuzz-devel fontconfig-devel libarchive-devel libvterm-devel fuse3-devel openssl-devel ;;
             debian*|ubuntu*)
               apt-get update
-              DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential git pkg-config libsdl3-dev libfreetype-dev libfontconfig-dev libarchive-dev libvterm-dev libfuse3-dev libssl-dev ;;
+              DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential git pkg-config libsdl3-dev libfreetype-dev libharfbuzz-dev libfontconfig-dev libarchive-dev libvterm-dev libfuse3-dev libssl-dev ;;
           esac
       - uses: actions/checkout@v4
       - name: Build (package mode)
@@ -38,7 +38,7 @@ jobs:
       options: --shm-size=2g # the cross-device copy tests use /dev/shm (64 MB by default in containers)
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm --needed base-devel git pkgconf sdl3 freetype2 fontconfig libarchive libvterm fuse3 openssl ttf-dejavu shared-mime-info vim # (m8: file types, an app for text)
+        run: pacman -Syu --noconfirm --needed base-devel git pkgconf sdl3 freetype2 harfbuzz fontconfig libarchive libvterm fuse3 openssl ttf-dejavu shared-mime-info vim # (m8: file types, an app for text)
       - uses: actions/checkout@v4
       - name: Build (debug)
         run: ./build.sh debug

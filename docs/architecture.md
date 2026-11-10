@@ -6,6 +6,8 @@
   for size/date with on-screen rows prioritized. Sorting runs off the UI thread.
 - `src/draw.c`, `src/font.c` – all shapes and glyphs come from one atlas texture, so a frame is a few
   `SDL_RenderGeometry` calls. The app sleeps when idle (no redraw without events).
+- `src/shape.c` – text in right-to-left scripts (Persian, Arabic, Hebrew) or scripts that need shaping
+  (Indic, combining marks) is reordered (Unicode bidi) and shaped with HarfBuzz; other text skips both.
 - `src/ops.c` – copy/move/trash/delete/restore on dedicated threads: `copy_file_range` (read/write
   fallback), cross-device moves, atomic replace via temp file, conflicts found up front and asked about together,
   cancel removes partial files. Transfers wait for their turn after counting (the UI schedules them in queue order),

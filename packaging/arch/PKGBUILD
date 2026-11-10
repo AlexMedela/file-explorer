@@ -9,7 +9,7 @@ pkgdesc="File Explorer - Just another file explorer: fast, keyboard-first, GPU-r
 arch=('x86_64' 'aarch64')
 url="https://github.com/AlexMedela/file-explorer"
 license=('MIT')
-depends=('sdl3' 'freetype2' 'fontconfig' 'libarchive' 'glibc' 'libvterm' 'fuse3' 'openssl'
+depends=('sdl3' 'freetype2' 'harfbuzz' 'fontconfig' 'libarchive' 'glibc' 'libvterm' 'fuse3' 'openssl'
          'libdecor')  # title bar on GNOME Wayland (no server-side decorations there)
 makedepends=('git' 'gcc' 'pkgconf')
 optdepends=('gtk3: GTK look for the libdecor title bar (GNOME)'

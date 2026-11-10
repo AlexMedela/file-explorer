@@ -3787,14 +3787,15 @@ static int run_selftest_m10(void) {
     st_wait();
     ST_CHECK(strcmp(p->path, M10_BASE "/locked") != 0);
     chmod(M10_BASE "/locked", 0755);
-    // odd names: invalid UTF-8, newline, tab, spaces, 255 bytes, emoji
+    // odd names: invalid UTF-8, newline, tab, spaces, 255 bytes, emoji, right to left
     mkdir(M10_BASE "/odd", 0755);
     {
         char longname[256];
         memset(longname, 'x', 250);
         snprintf(longname + 250, 6, ".text");
         const char *names[] = {"bad\xff\xfe" "name.txt", "new\nline.txt", "tab\there", " lead and trail ", longname,
-                               "\xF0\x9F\x93\x81 folder \xE6\x96\x87\xE5\xAD\x97"};
+                               "\xF0\x9F\x93\x81 folder \xE6\x96\x87\xE5\xAD\x97",
+                               "\xD9\x81\xD8\xA7\xDB\x8C\xD9\x84 \xDB\xB1\xDB\xB2.txt"};
         for (size_t i = 0; i < ARRAY_COUNT(names); i++) {
             char full[PATH_MAX];
             path_join(full, sizeof full, M10_BASE "/odd", names[i]);
@@ -3812,6 +3813,33 @@ static int run_selftest_m10(void) {
         te_set(&A.ren_te, "fixed.txt", 0, 0);
         commit_rename();
         ST_CHECK(st_exists(M10_BASE "/odd/fixed.txt"));
+        // right-to-left names: Persian letters join and read right to left, digits and Latin parts left to right
+        {
+            const char *fa = "\xD9\x81\xD9\x88\xD9\x84\xD8\xAF\xD8\xB1"; // "folder" in Persian, 5 letters
+            ST_CHECK(!text_complex("plain caf\xC3\xA9 \xD0\x96 \xE6\x96\x87", 13) && text_complex(fa, 10));
+            f32 w;
+            int ng = text_shape(&A.font, fa, 10, &w);
+            bool rtl = ng >= 5 && w > 0;
+            for (int i = 1; i < ng; i++) rtl &= g_shaped[i].rtl && g_shaped[i].cl <= g_shaped[i - 1].cl; // visual = reversed
+            ST_CHECK(rtl && g_shaped[0].cl == 4 && g_shaped[ng - 1].cl == 0);
+            // the first letter is drawn differently in the word (initial form) than alone; compare all its glyphs,
+            // as fonts may build it from a shared base + a joining tail / dot
+            u32 joined = 0, alone = 0;
+            for (int i = 0; i < ng; i++)
+                if (!g_shaped[i].cl) joined = joined * 65599 + g_shaped[i].gid;
+            ng = text_shape(&A.font, fa, 2, &w);
+            for (int i = 0; i < ng; i++) alone = alone * 65599 + g_shaped[i].gid;
+            ST_CHECK(ng >= 1 && (!g_shaped[0].gid || alone != joined)); // (no Arabic font installed: notdef either way)
+            u8 cls[32], lv[32];
+            u32 cps[] = {'a', ' ', 0x0641, 0x0648, ' ', 0x06F1, 0x06F2, '.', 't'};
+            ST_CHECK(bidi_levels(cps, 9, cls, lv) == 0 && lv[0] == 0 && lv[2] == 1 && lv[3] == 1 && lv[5] == 2 && lv[8] == 0);
+            ST_CHECK(bidi_levels(cps + 2, 7, cls, lv) == 1 && lv[0] == 1 && lv[3] == 2 && lv[6] == 2);
+            const char *mixed = "Report (\xD9\x81\xD9\x88\xD9\x84\xD8\xAF\xD8\xB1).pdf"; // the Persian part reversed in place
+            int ml = (int)strlen(mixed);
+            ST_CHECK(text_caret_x(&A.font, mixed, ml, 8) > text_caret_x(&A.font, mixed, ml, 16) &&
+                     text_caret_x(&A.font, mixed, ml, 8) > text_caret_x(&A.font, mixed, ml, 7) &&
+                     text_caret_x(&A.font, mixed, ml, ml) >= text_width(&A.font, mixed, ml) - 0.5f);
+        }
         // a folder with a newline is browsable, but never written into the line-based session file
         pane_navigate(p, M10_BASE "/odd/dir\nwith newline", true);
         st_wait();

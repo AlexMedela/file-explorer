@@ -171,7 +171,7 @@ static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
     if (A.mouse_in && in_rect(r, A.mx, A.my)) A.ptr_text = true;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x + 1, (int)r.y, (int)r.w - 2, (int)r.h});
     int n = (int)strlen(t->buf);
-    f32 cx = text_width(f, t->buf, t->caret);
+    f32 cx = text_caret_x(f, t->buf, n, t->caret);
     f32 avail = r.w - pad * 2 - S(2);
     if (cx - t->scroll > avail) t->scroll = cx - avail;
     if (cx - t->scroll < 0) t->scroll = cx;
@@ -179,7 +179,16 @@ static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
     if (tw - t->scroll < avail) t->scroll = MAX(0.f, tw - avail);
     f32 x = r.x + pad - t->scroll, ty = text_y(f, r.y, r.h);
     int lo = MIN(t->anchor, t->caret), hi = MAX(t->anchor, t->caret);
-    if (lo != hi) {
+    if (lo != hi && text_complex(t->buf, n)) { // right-to-left parts: the selection can be several pieces
+        f32 w, x0, x1, px0 = -1, px1 = -1;
+        int ng = text_shape(f, t->buf, n, &w);
+        for (int k = utf8_index(t->buf, lo), ke = utf8_index(t->buf, hi); k < ke; k++) {
+            shaped_span(ng, k, &x0, &x1);
+            if (x0 == px0 && x1 == px1) continue; // same cluster as the character before
+            px0 = x0, px1 = x1;
+            draw_rect(roundf(x + x0), r.y + roundf(S(4)), roundf(x1 - x0), r.h - roundf(S(8)), C(COL_SEL_FOCUS));
+        }
+    } else if (lo != hi) {
         f32 a = text_width(f, t->buf, lo), b = text_width(f, t->buf, hi);
         draw_rect(roundf(x + a), r.y + roundf(S(4)), roundf(b - a), r.h - roundf(S(8)), C(COL_SEL_FOCUS));
     }
@@ -3010,6 +3019,11 @@ static void draw_toast(void) {
 // s starts at byte `base` of it. Elides with "..." past maxw. Returns the end x.
 static f32 draw_text_hl(Font *f, f32 x, f32 y, f32 maxw, const char *s, int len, int base, const u16 *pos, int npos,
                         Color c, Color hc) {
+    if (text_complex(s, len)) { // shaped text: no per-character highlight
+        f32 w = text_width(f, s, len);
+        draw_text_fit(f, x, y, maxw, s, len, c, 0);
+        return roundf(x) + MIN(w, maxw);
+    }
     f32 bl = roundf(y + f->ascent), pen = roundf(x), lim = x + maxw - text_width(f, ELLIPSIS, 3);
     bool over = text_width(f, s, len) > maxw;
     const char *p = s, *end = s + len;

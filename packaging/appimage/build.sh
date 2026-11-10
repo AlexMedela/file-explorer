@@ -14,7 +14,7 @@ echo "== packages"
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends build-essential cmake ninja-build pkg-config git curl ca-certificates file \
   libtool-bin desktop-file-utils \
-  libfreetype-dev libfontconfig1-dev libarchive-dev libfuse3-dev libssl-dev \
+  libfreetype-dev libharfbuzz-dev libfontconfig1-dev libarchive-dev libfuse3-dev libssl-dev \
   libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxtst-dev libxkbcommon-dev \
   libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libvulkan-dev libdrm-dev libgbm-dev \
   libdecor-0-dev libdbus-1-dev libudev-dev >/dev/null

@@ -17,6 +17,7 @@ typedef struct {
     FT_Face faces[FONT_MAX_FACES];
     char *paths[FONT_MAX_FACES];
     f32 fscale[FONT_MAX_FACES]; // bitmap-only faces (colour emoji): strike -> pixel size scale
+    hb_font_t *hb[FONT_MAX_FACES]; // HarfBuzz view of each face, made on first use by shape.c
     int nfaces;
     int px;
     f32 ascent, descent, line_h;
@@ -172,8 +173,10 @@ static bool font_init(Font *f, const char *path, int px) {
 static void font_set_px(Font *f, int px) {
     f->px = px;
     for (int i = 0; i < f->nfaces; i++) {
-        if (FT_IS_SCALABLE(f->faces[i])) FT_Set_Pixel_Sizes(f->faces[i], 0, (FT_UInt)px);
-        else f->fscale[i] = (f32)px * 1.15f / (f32)MAX(1, f->faces[i]->available_sizes[0].height);
+        if (FT_IS_SCALABLE(f->faces[i])) {
+            FT_Set_Pixel_Sizes(f->faces[i], 0, (FT_UInt)px);
+            if (f->hb[i]) hb_ft_font_changed(f->hb[i]);
+        } else f->fscale[i] = (f32)px * 1.15f / (f32)MAX(1, f->faces[i]->available_sizes[0].height);
     }
     font_update_metrics(f);
     font_clear_cache(f);
@@ -188,6 +191,8 @@ static bool font_replace(Font *f, const char *path) {
         return false;
     }
     for (int i = 0; i < f->nfaces; i++) {
+        if (f->hb[i]) hb_font_destroy(f->hb[i]); // drops its reference on the face first
+        f->hb[i] = NULL;
         FT_Done_Face(f->faces[i]);
         free(f->paths[i]);
     }
@@ -333,15 +338,28 @@ static void font_grow(Font *f) {
     free(old);
 }
 
-static Glyph *font_glyph(Font *f, u32 cp) {
-    if (cp < 0x20 || cp == 0x7F) cp = 0x2400 + (cp == 0x7F ? 0x21 : cp); // control chars in names: \u240A etc.
+// Cache keys: a codepoint, or GLYPH_ID | face << 16 | glyph index for glyphs chosen by the shaper (shape.c).
+#define GLYPH_ID 0x40000000u
+
+// Cache slot for key: the glyph if it's there, else NULL with *slot set to the free slot to fill.
+static Glyph *glyph_find(Font *f, u32 key, u32 *slot) {
     if ((f->tab_count + 1) * 10 >= f->tab_cap * 7) font_grow(f);
-    u32 h = (cp * 2654435761u) & (f->tab_cap - 1);
+    u32 h = (key * 2654435761u) & (f->tab_cap - 1);
     while (f->tab[h].cp != GLYPH_EMPTY) {
-        if (f->tab[h].cp == cp) return &f->tab[h];
+        if (f->tab[h].cp == key) return &f->tab[h];
         h = (h + 1) & (f->tab_cap - 1);
     }
+    *slot = h;
+    return NULL;
+}
 
+static Glyph *glyph_make(Font *f, u32 h, u32 key, int fi, FT_UInt gi);
+
+static Glyph *font_glyph(Font *f, u32 cp) {
+    if (cp < 0x20 || cp == 0x7F) cp = 0x2400 + (cp == 0x7F ? 0x21 : cp); // control chars in names: \u240A etc.
+    u32 h;
+    Glyph *hit = glyph_find(f, cp, &h);
+    if (hit) return hit;
     int fi = 0;
     FT_UInt gi = FT_Get_Char_Index(f->faces[0], cp);
     if (!gi && cp >= 32) {
@@ -351,9 +369,21 @@ static Glyph *font_glyph(Font *f, u32 cp) {
             gi = FT_Get_Char_Index(f->faces[k], cp);
         }
     }
+    return glyph_make(f, h, cp, fi, gi);
+}
+
+// Glyph gi of face fi, as picked by the shaper.
+static Glyph *font_glyph_id(Font *f, int fi, u32 gi) {
+    u32 key = GLYPH_ID | (u32)fi << 16 | (gi & 0xFFFF), h;
+    Glyph *hit = glyph_find(f, key, &h);
+    return hit ? hit : glyph_make(f, h, key, fi, gi);
+}
+
+// Rasterize glyph gi of face fi into the atlas and cache it under key in slot h.
+static Glyph *glyph_make(Font *f, u32 h, u32 key, int fi, FT_UInt gi) {
     FT_Face face = f->faces[fi];
     Glyph g = {0};
-    g.cp = cp;
+    g.cp = key;
     if (FT_HAS_COLOR(face) && FT_Load_Glyph(face, gi, FT_LOAD_COLOR | FT_LOAD_RENDER) == 0 &&
         face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) { // colour emoji: box-filter the strike down
         FT_GlyphSlot sl = face->glyph;
@@ -424,13 +454,6 @@ static Glyph *font_glyph(Font *f, u32 cp) {
     f->tab[h] = g;
     f->tab_count++;
     return &f->tab[h];
-}
-
-static f32 text_width(Font *f, const char *s, int len) {
-    const char *p = s, *end = s + len;
-    f32 w = 0;
-    while (p < end) w += font_glyph(f, utf8_decode(&p, end))->adv;
-    return w;
 }
 
 // One frame's text + icons didn't fit: double the atlas (once; 2048^2 is plenty even at 4K).

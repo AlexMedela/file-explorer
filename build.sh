@@ -10,7 +10,7 @@ mkdir -p "$(dirname "$out")"
 ADDON=""
 SRCS="src/*.c src/*.h"
 if [ -n "$FE_ADDON_SRC" ]; then ADDON="-DFE_ADDON -I$FE_ADDON_SRC"; SRCS="$SRCS $FE_ADDON_SRC/*.c"; fi
-PKGS="sdl3 freetype2 fontconfig libarchive vterm fuse3 openssl"
+PKGS="sdl3 freetype2 harfbuzz fontconfig libarchive vterm fuse3 openssl"
 CFLAGS="-std=gnu11 -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -Wno-format-truncation $(pkg-config --cflags $PKGS)"
 LIBS="$(pkg-config --libs $PKGS) -lpthread -lm -ldl"
 case "$mode" in

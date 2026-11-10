@@ -8,6 +8,8 @@
 #include FT_FREETYPE_H
 #include <fontconfig/fontconfig.h>
 #include <fontconfig/fcfreetype.h>
+#include <hb.h>
+#include <hb-ft.h>
 
 #if defined(__SANITIZE_ADDRESS__)
 // Debug (ASan) builds: SDL unloads the video/GPU libraries at exit, which makes memory they still own look
@@ -40,6 +42,7 @@ const char *__lsan_default_suppressions(void) { return "leak:libX11.so\nleak:lib
 #include "git.c"
 #include "apps.c"
 #include "font.c"
+#include "shape.c"
 #include "draw.c"
 #include "theme.c"
 #include "icons.c"

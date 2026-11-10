@@ -262,6 +262,16 @@ static void draw_glyph(const Glyph *g, f32 x, f32 y, Color c) {
 static f32 draw_text(Font *f, f32 x, f32 y, const char *s, int len, Color c) {
     f32 bl = roundf(y + f->ascent);
     f32 pen = roundf(x);
+    if (text_complex(s, len)) {
+        f32 w;
+        int n = text_shape(f, s, len, &w);
+        for (int i = 0; i < n; i++) {
+            ShapedGlyph *sg = &g_shaped[i];
+            Glyph *g = font_glyph_id(f, sg->fi, sg->gid);
+            if (g->w) draw_glyph(g, roundf(pen + sg->x) + g->bx, bl - g->by - roundf(sg->y), g->color ? (Color){1, 1, 1, c.a} : c);
+        }
+        return pen + w;
+    }
     const char *p = s, *end = s + len;
     while (p < end) {
         Glyph *g = font_glyph(f, utf8_decode(&p, end));
@@ -283,6 +293,27 @@ static void draw_text_fit(Font *f, f32 x, f32 y, f32 maxw, const char *s, int le
     }
     f32 ell = text_width(f, ELLIPSIS, 3), avail = maxw - ell, acc = 0;
     if (avail <= 0) return;
+    if (text_complex(s, len) && len < 4096) {
+        // Shaped widths don't add up per character: find the longest prefix that fits by bisection, and lay it
+        // out together with the ellipsis so it lands on the correct side of right-to-left text.
+        int lo = 0, hi = len;
+        while (lo < hi) {
+            int mid = (lo + hi + 1) / 2;
+            while (mid > lo && ((u8)s[mid] & 0xC0) == 0x80) mid--; // character boundary
+            if (mid == lo) { // no boundary in (lo, hi]: step to the next one
+                mid = lo + 1;
+                while (mid < hi && ((u8)s[mid] & 0xC0) == 0x80) mid++;
+            }
+            if (text_width(f, s, mid) <= avail) lo = mid;
+            else hi = mid - 1;
+        }
+        while (lo > 0 && ((u8)s[lo] & 0xC0) == 0x80) lo--;
+        char buf[4096 + 4];
+        memcpy(buf, s, (size_t)lo);
+        memcpy(buf + lo, ELLIPSIS, 3);
+        draw_text(f, x, y, buf, lo + 3, c);
+        return;
+    }
     const char *p = s, *end = s + len;
     while (p < end) {
         const char *q = p;
