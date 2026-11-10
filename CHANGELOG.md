@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.1
+
+**New**
+- The file chooser shows the Cloud section too: open from or save to an rclone remote directly.
+- Tree view: right-click a folder to create a new folder or file inside it.
+- Persian, Arabic and Hebrew names read right to left with joined letters; Indic scripts and combining marks are shaped properly.
+
+**Fixed**
+- Less blinking: refreshes keep folder sizes and scroll position, and X11 no longer bypasses the compositor.
+- The taskbar icon no longer turns into the app's name on LXQt, and window titles with non-ASCII characters reach X11 panels.
+
 ## 0.10.0
 
 **Changed**
