@@ -10491,12 +10491,9 @@ int main(int argc, char **argv) {
     // headless: self-tests on the software renderer (deterministic), screenshots on the GPU (what users see)
     if (headless && any_selftest && !getenv("SDL_RENDER_DRIVER")) A.ren = SDL_CreateRenderer(A.win, "software");
     else if (!getenv("SDL_RENDER_DRIVER")) {
-        if (!strcmp(A.renderer, "auto")) A.ren = SDL_CreateRenderer(A.win, "vulkan");
-        else A.ren = SDL_CreateRenderer(A.win, A.renderer);
-    }
-    if (A.ren && !strcmp(A.renderer, "auto") && !getenv("SDL_RENDER_DRIVER") && vulkan_on_cpu(A.ren)) {
-        SDL_DestroyRenderer(A.ren); // no Vulkan driver for the GPU (older Intel, nouveau, VMs): OpenGL usually has one
-        A.ren = SDL_CreateRenderer(A.win, "opengl");
+        // Automatic: OpenGL. SDL's Vulkan renderer rebuilds its swapchain at every size, which misses frames while
+        // the window is resized (it trails the pointer).
+        A.ren = SDL_CreateRenderer(A.win, strcmp(A.renderer, "auto") ? A.renderer : "opengl");
     }
     if (!A.ren) A.ren = SDL_CreateRenderer(A.win, NULL);
     if (!A.ren) { fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError()); return 1; }
