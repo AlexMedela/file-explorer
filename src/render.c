@@ -585,7 +585,9 @@ static void draw_window_controls(void) {
             draw_rrect_outline(x0, y0 + o, w2, w2, S(1.5f), lt, ic);
         } else draw_cross(cx, cy, is, lt, ic);
     }
-    if (!max) {
+    f32 cr = window_corner_radius();
+    if (cr > 0) draw_rrect_outline(0, 0, (f32)A.W, (f32)A.H, cr, 1, C(COL_BORDER)); // (the corners are cut after the frame)
+    else if (!max) {
         Color bc = C(COL_BORDER);
         f32 W = (f32)A.W, H = (f32)A.H;
         draw_rect(0, 0, W, 1, bc);

@@ -621,6 +621,11 @@ static struct {
     int nclosed;
     bool dim_inactive;
     int title_bar; // TITLEBAR_*: who draws the window's title bar (setting)
+    bool round_corners; // round the window's corners with our own title bar (setting)
+    bool win_alpha;     // the window was created with an alpha channel (needed for rounded corners)
+    bool win_shadow;    // ...and draws its own drop shadow in a margin round the window (Wayland)
+    int shadow_px;      // that margin now, in pixels (0: maximised, system title bar...); A.W / A.H exclude it
+    int shadow_req_w, shadow_req_h; // the window size we last asked for (to tell the compositor's sizes apart)
     char ig_prev_fm[256]; // integration.c: the folder handler before we became the default (put back when turned off)
     bool ig_fm1;          // answer "Show in folder" (org.freedesktop.FileManager1)
     bool ig_asked;        // the first-run "use for folders?" question was shown
@@ -1162,6 +1167,208 @@ static bool window_maximized(void) {
     return A.win && (SDL_GetWindowFlags(A.win) & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN));
 }
 
+// Rounded corners (like GTK / libadwaita windows): the window has an alpha channel and each frame ends by fading
+// the four corners out with a quarter-circle mask. Only with our own title bar, and square when maximised or full
+// screen. Radius in pixels, 0 = square.
+static f32 window_corner_radius(void) {
+    if (!A.win_alpha || !A.round_corners || !A.csd || window_maximized()) return 0;
+    return roundf(12.f * A.dpi_scale);
+}
+
+static SDL_Texture *g_corner_tex; // a circle, 2r x 2r: white with alpha = coverage
+static int g_corner_r;
+static bool g_corner_failed; // the renderer can't do the blend (software): corners stay square
+
+static void corners_mask(void) {
+    int r = (int)window_corner_radius();
+    if (r <= 0 || g_corner_failed) return;
+    if (!g_corner_tex || g_corner_r != r) {
+        if (g_corner_tex) SDL_DestroyTexture(g_corner_tex);
+        g_corner_tex = NULL;
+        int n = 2 * r;
+        u32 *px = xmalloc((size_t)n * (size_t)n * 4);
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++) { // 4x4 samples per pixel
+                int in = 0;
+                for (int sy = 0; sy < 4; sy++)
+                    for (int sx = 0; sx < 4; sx++) {
+                        f32 dx = (f32)x + ((f32)sx + 0.5f) / 4.f - (f32)r, dy = (f32)y + ((f32)sy + 0.5f) / 4.f - (f32)r;
+                        in += dx * dx + dy * dy <= (f32)(r * r);
+                    }
+                u8 a = (u8)((in * 255 + 8) / 16);
+                u8 *q = (u8 *)&px[y * n + x];
+                q[0] = q[1] = q[2] = 255;
+                q[3] = a;
+            }
+        g_corner_tex = SDL_CreateTexture(A.ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, n, n);
+        if (g_corner_tex) SDL_UpdateTexture(g_corner_tex, NULL, px, n * 4);
+        free(px);
+        // destination *= mask alpha (colour and alpha: the result stays premultiplied, as compositors want it)
+        SDL_BlendMode bm = SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_SRC_ALPHA, SDL_BLENDOPERATION_ADD,
+                                                      SDL_BLENDFACTOR_ZERO, SDL_BLENDFACTOR_SRC_ALPHA, SDL_BLENDOPERATION_ADD);
+        if (!g_corner_tex || !SDL_SetTextureBlendMode(g_corner_tex, bm)) {
+            if (g_corner_tex) SDL_DestroyTexture(g_corner_tex);
+            g_corner_tex = NULL;
+            g_corner_failed = true;
+            return;
+        }
+        SDL_SetTextureScaleMode(g_corner_tex, SDL_SCALEMODE_NEAREST);
+        g_corner_r = r;
+    }
+    f32 R = (f32)r, W = (f32)A.W, H = (f32)A.H;
+    SDL_SetRenderClipRect(A.ren, NULL);
+    for (int k = 0; k < 4; k++) {
+        f32 sx = (k & 1) ? R : 0, sy = (k & 2) ? R : 0;
+        SDL_FRect src = {sx, sy, R, R}, dst = {(k & 1) ? W - R : 0, (k & 2) ? H - R : 0, R, R};
+        SDL_RenderTexture(A.ren, g_corner_tex, &src, &dst);
+    }
+}
+
+// --- drop shadow (Wayland) -------------------------------------------------
+// Like GTK: the surface is larger than the window by a margin the shadow is painted in, and the compositor is told
+// which part is the window (xdg_surface.set_window_geometry), so snapping, maximising and placement ignore the
+// shadow. Everything else draws into a viewport inset by the margin (SDL maps mouse coordinates through it), so
+// A.W / A.H and all layout stay the window's own size. SDL sets the window geometry itself (to the whole surface):
+// ours is sent before every present, after SDL's, so it's the one each commit applies.
+
+static int shadow_margin_log(void) { // in window (logical) units
+    if (!A.win_shadow || !A.round_corners || !A.csd || window_maximized()) return 0;
+    return 24;
+}
+
+// A.W / A.H and the viewport from the window's size and whether it has a shadow now.
+static void window_size_update(void) {
+    int pw = 0, ph = 0;
+    SDL_GetWindowSizeInPixels(A.win, &pw, &ph);
+    int m = (int)roundf((f32)shadow_margin_log() * SDL_GetWindowPixelDensity(A.win));
+    if (pw - 2 * m < 200 || ph - 2 * m < 200) m = 0;
+    A.shadow_px = m;
+    A.W = pw - 2 * m;
+    A.H = ph - 2 * m;
+    if (A.ren) SDL_SetRenderViewport(A.ren, m ? &(SDL_Rect){m, m, A.W, A.H} : NULL);
+}
+
+// The compositor's sizes are for the window without its shadow; SDL makes the surface that size: add the margin.
+static void shadow_on_resized(int w, int h) {
+    int m = shadow_margin_log();
+    if (!m || (w == A.shadow_req_w && h == A.shadow_req_h)) return;
+    A.shadow_req_w = w + 2 * m;
+    A.shadow_req_h = h + 2 * m;
+    SDL_SetWindowSize(A.win, A.shadow_req_w, A.shadow_req_h);
+}
+
+static void *(*p_wl_proxy_marshal_flags)(void *, u32, const void *, u32, u32, ...);
+static u32 (*p_wl_proxy_get_version)(void *);
+
+static void shadow_geometry_apply(void) {
+    if (!A.win_shadow) return;
+    static bool tried;
+    if (!tried) { // (libwayland-client is already loaded by SDL: no build dependency)
+        tried = true;
+        void *h = dlopen("libwayland-client.so.0", RTLD_NOW | RTLD_NOLOAD);
+        if (h) {
+            *(void **)&p_wl_proxy_marshal_flags = dlsym(h, "wl_proxy_marshal_flags");
+            *(void **)&p_wl_proxy_get_version = dlsym(h, "wl_proxy_get_version");
+        }
+    }
+    if (!p_wl_proxy_marshal_flags || !p_wl_proxy_get_version) return;
+    void *xs = SDL_GetPointerProperty(SDL_GetWindowProperties(A.win), SDL_PROP_WINDOW_WAYLAND_XDG_SURFACE_POINTER, NULL);
+    if (!xs) return;
+    int w = 0, h = 0, m = A.shadow_px ? shadow_margin_log() : 0;
+    SDL_GetWindowSize(A.win, &w, &h);
+    if (w - 2 * m <= 0 || h - 2 * m <= 0) return;
+    p_wl_proxy_marshal_flags(xs, 3 /* xdg_surface.set_window_geometry */, NULL, p_wl_proxy_get_version(xs), 0, m, m, w - 2 * m, h - 2 * m);
+}
+
+// One channel of a separable Gaussian blur, in place (n x n).
+static void blur_pass(f32 *a, f32 *tmp, int n, f32 sigma, bool vert) {
+    int k = (int)ceilf(sigma * 3);
+    f32 wsum = 0, *wt = xmalloc((size_t)(2 * k + 1) * sizeof(f32));
+    for (int i = -k; i <= k; i++) wsum += wt[i + k] = expf(-(f32)(i * i) / (2 * sigma * sigma));
+    for (int y = 0; y < n; y++)
+        for (int x = 0; x < n; x++) {
+            f32 acc = 0;
+            for (int i = -k; i <= k; i++) {
+                int xx = vert ? x : x + i, yy = vert ? y + i : y;
+                if (xx >= 0 && yy >= 0 && xx < n && yy < n) acc += a[yy * n + xx] * wt[i + k];
+            }
+            tmp[y * n + x] = acc / wsum;
+        }
+    memcpy(a, tmp, (size_t)n * (size_t)n * sizeof(f32));
+    free(wt);
+}
+
+// A blurred rounded rectangle offset by dy (coverage 0..1), the window being [m, n - m] square with radius r.
+static void shadow_layer(f32 *out, int n, int m, int r, f32 dy, f32 sigma) {
+    f32 *tmp = xmalloc((size_t)n * (size_t)n * sizeof(f32));
+    f32 x0 = (f32)m, x1 = (f32)(n - m), y0 = (f32)m + dy, y1 = (f32)(n - m) + dy, R = (f32)r;
+    for (int y = 0; y < n; y++)
+        for (int x = 0; x < n; x++) {
+            int in = 0;
+            for (int sy = 0; sy < 4; sy++)
+                for (int sx = 0; sx < 4; sx++) {
+                    f32 px = (f32)x + ((f32)sx + 0.5f) / 4.f, py = (f32)y + ((f32)sy + 0.5f) / 4.f;
+                    if (px < x0 || px >= x1 || py < y0 || py >= y1) continue;
+                    f32 cx = CLAMP(px, x0 + R, x1 - R), cy = CLAMP(py, y0 + R, y1 - R);
+                    in += (px - cx) * (px - cx) + (py - cy) * (py - cy) <= R * R;
+                }
+            out[y * n + x] = (f32)in / 16.f;
+        }
+    blur_pass(out, tmp, n, sigma, false);
+    blur_pass(out, tmp, n, sigma, true);
+    free(tmp);
+}
+
+static SDL_Texture *g_shadow_tex; // nine-slice: corners (margin + radius) square, a 1 px middle
+static int g_shadow_m = -1, g_shadow_r = -1;
+
+static void shadow_draw(void) {
+    int m = A.shadow_px, r = (int)window_corner_radius();
+    if (!m) return;
+    if (!g_shadow_tex || g_shadow_m != m || g_shadow_r != r) {
+        if (g_shadow_tex) SDL_DestroyTexture(g_shadow_tex);
+        g_shadow_tex = NULL;
+        g_shadow_m = m;
+        g_shadow_r = r;
+        f32 d = SDL_GetWindowPixelDensity(A.win);
+        int n = 2 * (m + r) + 1;
+        size_t nn = (size_t)n * (size_t)n;
+        f32 *wide = xmalloc(nn * sizeof(f32)), *tight = xmalloc(nn * sizeof(f32));
+        // (close to libadwaita's: a wide soft shadow a little below the window, and a tight one hugging its edge)
+        shadow_layer(wide, n, m, r, 3.f * d, MIN(7.f * d, (f32)m / 3.4f));
+        shadow_layer(tight, n, m, r, 1.f * d, 1.5f * d);
+        u32 *px = xmalloc(nn * 4);
+        for (size_t i = 0; i < nn; i++) {
+            f32 a = 1.f - (1.f - wide[i] * 0.32f) * (1.f - tight[i] * 0.22f);
+            u8 *q = (u8 *)&px[i];
+            q[0] = q[1] = q[2] = 0;
+            q[3] = (u8)CLAMP(a * 255.f + 0.5f, 0.f, 255.f);
+        }
+        g_shadow_tex = SDL_CreateTexture(A.ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, n, n);
+        if (g_shadow_tex) {
+            SDL_UpdateTexture(g_shadow_tex, NULL, px, n * 4);
+            // "destination over": the shadow goes underneath what's drawn (the window, its faded corners)
+            SDL_BlendMode bm = SDL_ComposeCustomBlendMode(SDL_BLENDFACTOR_ONE_MINUS_DST_ALPHA, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD,
+                                                          SDL_BLENDFACTOR_ONE_MINUS_DST_ALPHA, SDL_BLENDFACTOR_ONE, SDL_BLENDOPERATION_ADD);
+            if (!SDL_SetTextureBlendMode(g_shadow_tex, bm)) {
+                SDL_DestroyTexture(g_shadow_tex);
+                g_shadow_tex = NULL;
+            }
+        }
+        free(px);
+        free(wide);
+        free(tight);
+    }
+    if (!g_shadow_tex) return;
+    f32 L = (f32)(m + r);
+    bool focused = SDL_GetWindowFlags(A.win) & SDL_WINDOW_INPUT_FOCUS;
+    SDL_SetTextureAlphaMod(g_shadow_tex, focused ? 255 : 150); // lighter behind inactive windows, as GNOME does
+    SDL_SetRenderClipRect(A.ren, NULL);
+    SDL_SetRenderViewport(A.ren, NULL);
+    SDL_RenderTexture9Grid(A.ren, g_shadow_tex, NULL, L, L, L, L, 1.f, &(SDL_FRect){0, 0, (f32)(A.W + 2 * m), (f32)(A.H + 2 * m)});
+    SDL_SetRenderViewport(A.ren, &(SDL_Rect){m, m, A.W, A.H});
+}
+
 // The parts of the title bar that move the window: the logo, the strip above the preview, and the tab strips
 // along the top edge outside their tabs and buttons.
 static bool titlebar_drag_at(f32 x, f32 y) {
@@ -1181,8 +1388,12 @@ static bool titlebar_drag_at(f32 x, f32 y) {
 static SDL_HitTestResult window_hit_test(SDL_Window *w, const SDL_Point *pt, void *ud) {
     (void)ud;
     if (!A.csd || A.drag != DRAG_NONE) return SDL_HITTEST_NORMAL;
-    f32 d = SDL_GetWindowPixelDensity(w);
-    f32 x = (f32)pt->x * d, y = (f32)pt->y * d, W = (f32)A.W, H = (f32)A.H;
+    f32 d = SDL_GetWindowPixelDensity(w), m = (f32)A.shadow_px;
+    f32 x = (f32)pt->x * d - m, y = (f32)pt->y * d - m, W = (f32)A.W, H = (f32)A.H; // (content coordinates)
+    if (m > 0) { // in the shadow: a resize band along the window, the rest does nothing
+        f32 o = MIN(m, roundf(10.f * d));
+        if (x < -o || y < -o || x >= W + o || y >= H + o) return SDL_HITTEST_NORMAL;
+    }
     if (!window_maximized()) {
         f32 e = MAX(3.f, roundf(S(5))), c = roundf(S(14)); // edge, and the corners' longer grab along it
         bool l = x < e, r = x >= W - e, t = y < e, b = y >= H - e;
@@ -1235,7 +1446,7 @@ static bool titlebar_mouse_down(SDL_MouseButtonEvent *b, f32 x, f32 y) {
     if (b->button == SDL_BUTTON_LEFT && b->clicks >= 2) { window_toggle_maximized(); return true; }
     if (b->button == SDL_BUTTON_RIGHT) {
         f32 d = SDL_GetWindowPixelDensity(A.win);
-        if (!A.selftest) SDL_ShowWindowSystemMenu(A.win, (int)(x / d), (int)(y / d));
+        if (!A.selftest) SDL_ShowWindowSystemMenu(A.win, (int)((x + (f32)A.shadow_px) / d), (int)((y + (f32)A.shadow_px) / d));
         return true;
     }
     return b->button == SDL_BUTTON_LEFT;
@@ -10193,8 +10404,15 @@ static bool animating(void) {
 static void frame_draw(void) {
     draw_clip(NULL);
     g_alpha = 1.f;
-    SDL_SetRenderDrawColor(A.ren, 0x1B, 0x1B, 0x20, 255);
-    SDL_RenderClear(A.ren);
+    if (A.shadow_px) { // transparent margin, opaque window (clearing ignores the viewport)
+        SDL_SetRenderDrawColor(A.ren, 0, 0, 0, 0);
+        SDL_RenderClear(A.ren);
+        SDL_SetRenderDrawColor(A.ren, 0x1B, 0x1B, 0x20, 255);
+        SDL_RenderFillRect(A.ren, &(SDL_FRect){0, 0, (f32)A.W, (f32)A.H});
+    } else {
+        SDL_SetRenderDrawColor(A.ren, 0x1B, 0x1B, 0x20, 255);
+        SDL_RenderClear(A.ren);
+    }
     A.ptr_hand = A.ptr_text = false;
     // While a menu, the palette, a sheet or a dialog is open, nothing underneath reacts to the mouse.
     bool mouse_in = A.mouse_in;
@@ -10240,6 +10458,8 @@ static void frame_draw(void) {
     draw_preedit();
     if (A.show_overlay) draw_overlay();
     draw_flush();
+    corners_mask();
+    shadow_draw();
     cursor_apply();
 }
 
@@ -10311,6 +10531,7 @@ static void frame(void) {
     ops_gc();
     ops_schedule();
     preview_update();
+    if (A.win_shadow) window_size_update(); // (maximised or not: the shadow comes and goes)
     u64 t0 = now_ns();
     f32 dt = A.last_frame ? (f32)((t0 - A.last_frame) / 1e9) : 0.016f;
     dt = MIN(dt, 0.05f);
@@ -10385,6 +10606,7 @@ static void frame(void) {
         A.shot_once[0] = 0;
     }
     rec_frame();
+    shadow_geometry_apply();
     SDL_RenderPresent(A.ren);
     if (g_atlas_full) {
         atlas_reset();
@@ -10738,9 +10960,13 @@ int main(int argc, char **argv) {
     pool_init();
 
     A.csd = titlebar_wanted(); // (borderless from the start: no system title bar flashing up first)
+    // rounded corners need an alpha channel, which only a new window can get (turning them on takes a restart)
+    A.win_alpha = A.csd && A.round_corners && !headless && !picker_active() && !getenv("FE_SQUARE_CORNERS");
+    const char *vdrv = SDL_GetCurrentVideoDriver();
+    A.win_shadow = A.win_alpha && vdrv && !strcmp(vdrv, "wayland") && !getenv("FE_NO_SHADOW");
     A.win = SDL_CreateWindow(APP_NAME, A.win_w, A.win_h,
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (A.maximized ? SDL_WINDOW_MAXIMIZED : 0) |
-                             (A.csd ? SDL_WINDOW_BORDERLESS : 0) |
+                             (A.csd ? SDL_WINDOW_BORDERLESS : 0) | (A.win_alpha ? SDL_WINDOW_TRANSPARENT : 0) |
                              (g_bg_start && !any_selftest && !A.screenshot ? SDL_WINDOW_HIDDEN : 0));
     if (g_bg_start) A.win_hidden = true;
     if (!A.win) { fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError()); return 1; }
@@ -10763,12 +10989,13 @@ int main(int argc, char **argv) {
     SDL_SetRenderVSync(A.ren, any_selftest || A.screenshot ? 0 : 1);
     g_ren = A.ren;
     dragout_init(); // (after the renderer: SDL may make the window again for it)
+    SDL_GetWindowSize(A.win, &A.shadow_req_w, &A.shadow_req_h);
     A.cur_default = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
     A.cur_ew = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
     A.cur_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
     A.cur_hand = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
     A.cur_text = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT);
-    SDL_GetWindowSizeInPixels(A.win, &A.W, &A.H);
+    window_size_update();
     A.dpi_scale = SDL_GetWindowDisplayScale(A.win);
     if (A.dpi_scale <= 0) A.dpi_scale = 1;
     A.cur_grab = cursor_grabbing(); // (after the scale: a sharp image on scaled screens)

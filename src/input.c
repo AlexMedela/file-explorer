@@ -1109,7 +1109,8 @@ static void ime_update_area(void) { // (every frame; tells the input method only
     if (!A.win || A.selftest) return;
     Rect r = ime_field();
     f32 d = SDL_GetWindowPixelDensity(A.win);
-    SDL_Rect a = {(int)(r.x / d), (int)(r.y / d), (int)(r.w / d), (int)(r.h / d)};
+    f32 m = (f32)A.shadow_px;
+    SDL_Rect a = {(int)((r.x + m) / d), (int)((r.y + m) / d), (int)(r.w / d), (int)(r.h / d)};
     if (!memcmp(&a, &g_ime_area, sizeof a)) return;
     g_ime_area = a;
     SDL_SetTextInputArea(A.win, &a, 0);
@@ -1122,8 +1123,16 @@ static void on_text_editing(const char *text) {
 
 static void window_close_requested(void);
 static void handle_event(SDL_Event *e) {
+    if (A.win_shadow) window_size_update(); // (the viewport the coordinates go through)
     SDL_ConvertEventToRenderCoordinates(A.ren, e);
     layout();
+    if (A.shadow_px) { // presses and wheel in the shadow round the window do nothing
+        f32 x = -1, y = -1;
+        if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) x = e->button.x, y = e->button.y;
+        else if (e->type == SDL_EVENT_MOUSE_WHEEL) x = e->wheel.mouse_x, y = e->wheel.mouse_y;
+        else x = y = 0;
+        if (x < 0 || y < 0 || x >= (f32)A.W || y >= (f32)A.H) return;
+    }
     switch (e->type) {
     case SDL_EVENT_QUIT: A.quit = true; break;
     case SDL_EVENT_WINDOW_CLOSE_REQUESTED: window_close_requested(); break;
@@ -1210,7 +1219,11 @@ static void handle_event(SDL_Event *e) {
         A.redraw = true;
         break;
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-        SDL_GetWindowSizeInPixels(A.win, &A.W, &A.H);
+        window_size_update();
+        A.redraw = true;
+        break;
+    case SDL_EVENT_WINDOW_RESIZED:
+        shadow_on_resized(e->window.data1, e->window.data2);
         A.redraw = true;
         break;
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: {
