@@ -779,6 +779,8 @@ static int run_selftest_ops(void) {
     }
 
     { // the card while dragging: the first 3 items as stacked in the list (icon + name), "+ N items" for the rest
+        st_wait_ops(); // (an undo above may still be trashing copies; its refresh would drop the selection mid-drag)
+        for (int k = 0; k < 3; k++) { st_frames(10); SDL_Delay(50); st_wait(); }
         do_action(p, ACT_SELECT_ALL);
         u32 total = p->sel_count;
         f32 ay3 = st_row_y(p, "a.txt");
