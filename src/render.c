@@ -12,11 +12,72 @@ static bool hand_if(bool h) {
 
 static bool hot(Rect r) { return hand_if(A.mouse_in && in_rect(r, A.mx, A.my)); }
 
+// The grabbing hand (what the system shows once a drag leaves the window) from the user's cursor theme: SDL has
+// no such system cursor. Read with libXcursor (theme files; no X server needed, so Wayland too), loaded at run time;
+// a sharper image for scaled screens. NULL if there's no library or theme cursor (the pointer just stays the arrow).
+static SDL_Surface *cursor_theme_image(const char *theme, int size) {
+    typedef struct { uint32_t version, size, width, height, xhot, yhot, delay; uint32_t *pixels; } XcImage;
+    static XcImage *(*load)(const char *, const char *, int);
+    static void (*destroy)(XcImage *);
+    static int tried;
+    if (!tried) {
+        tried = 1;
+        void *l = dlopen("libXcursor.so.1", RTLD_NOW);
+        if (l) {
+            *(void **)&load = dlsym(l, "XcursorLibraryLoadImage");
+            *(void **)&destroy = dlsym(l, "XcursorImageDestroy");
+        }
+    }
+    if (!load || !destroy) return NULL;
+    static const char *names[] = {"grabbing", "closedhand", "dnd-move"};
+    XcImage *im = NULL;
+    for (size_t i = 0; i < ARRAY_COUNT(names) && !im; i++) im = load(names[i], theme, size);
+    if (!im) return NULL;
+    SDL_Surface *s = SDL_CreateSurface((int)im->width, (int)im->height, SDL_PIXELFORMAT_ARGB8888);
+    if (s) {
+        for (u32 y = 0; y < im->height; y++) {
+            u32 *row = (u32 *)((u8 *)s->pixels + (size_t)y * (size_t)s->pitch);
+            for (u32 x = 0; x < im->width; x++) { // Xcursor's pixels are premultiplied, SDL's aren't
+                u32 p = im->pixels[y * im->width + x], a = p >> 24;
+                if (a && a < 255)
+                    p = (a << 24) | (MIN(255u, ((p >> 16) & 255) * 255 / a) << 16) | (MIN(255u, ((p >> 8) & 255) * 255 / a) << 8) |
+                        MIN(255u, (p & 255) * 255 / a);
+                row[x] = p;
+            }
+        }
+        SDL_SetNumberProperty(SDL_GetSurfaceProperties(s), "fe.xhot", im->xhot);
+        SDL_SetNumberProperty(SDL_GetSurfaceProperties(s), "fe.yhot", im->yhot);
+    }
+    destroy(im);
+    return s;
+}
+
+static SDL_Cursor *cursor_grabbing(void) {
+    const char *theme = getenv("XCURSOR_THEME"), *sz = getenv("XCURSOR_SIZE");
+    int size = sz && atoi(sz) > 0 ? atoi(sz) : 24;
+    if (!theme || !theme[0]) theme = "default";
+    SDL_Surface *s = cursor_theme_image(theme, size);
+    if (!s) return NULL;
+    int xhot = (int)SDL_GetNumberProperty(SDL_GetSurfaceProperties(s), "fe.xhot", 0);
+    int yhot = (int)SDL_GetNumberProperty(SDL_GetSurfaceProperties(s), "fe.yhot", 0);
+    f32 scale = A.dpi_scale > 0 ? A.dpi_scale : 1.f;
+    if (scale > 1.01f) { // (SDL picks the image that fits the screen's scale)
+        SDL_Surface *big = cursor_theme_image(theme, (int)roundf(size * scale));
+        if (big && big->w > s->w) SDL_AddSurfaceAlternateImage(s, big);
+        SDL_DestroySurface(big);
+    }
+    SDL_Cursor *c = SDL_CreateColorCursor(s, xhot, yhot);
+    SDL_DestroySurface(s);
+    return c;
+}
+
 static void cursor_apply(void) {
-    int want = A.cursor_ew ? A.cursor_ew : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_hand ? 3 : A.ptr_text ? 4 : 0;
+    // dragging items, a tab or a sidebar place: the grabbing hand from the start (not only once it leaves the window)
+    bool grab = A.cur_grab && (A.drag == DRAG_ITEMS || A.drag == DRAG_TAB || A.drag == DRAG_PLACE);
+    int want = A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_hand ? 3 : A.ptr_text ? 4 : 0;
     if (want == A.cursor_shown) return;
     A.cursor_shown = want;
-    SDL_Cursor *c[] = {A.cur_default, A.cur_ew, A.cur_ns, A.cur_hand, A.cur_text};
+    SDL_Cursor *c[] = {A.cur_default, A.cur_ew, A.cur_ns, A.cur_hand, A.cur_text, A.cur_grab};
     SDL_SetCursor(c[want]);
 }
 

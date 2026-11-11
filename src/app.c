@@ -463,7 +463,7 @@ typedef struct {
 static struct {
     SDL_Window *win;
     SDL_Renderer *ren;
-    SDL_Cursor *cur_default, *cur_ew, *cur_hand, *cur_text;
+    SDL_Cursor *cur_default, *cur_ew, *cur_hand, *cur_text, *cur_grab; // (cur_grab: NULL if the cursor theme has none)
     int cursor_ew;    // resize pointer wanted (mouse motion): 0 none, 1 ew-resize, 2 ns-resize
     int cursor_shown; // what SDL shows: those, 3 hand, 4 I-beam
     bool ptr_hand, ptr_text; // this frame's drawing found something clickable / a text field under the mouse
@@ -10666,6 +10666,7 @@ int main(int argc, char **argv) {
     SDL_GetWindowSizeInPixels(A.win, &A.W, &A.H);
     A.dpi_scale = SDL_GetWindowDisplayScale(A.win);
     if (A.dpi_scale <= 0) A.dpi_scale = 1;
+    A.cur_grab = cursor_grabbing(); // (after the scale: a sharp image on scaled screens)
     A.scale = A.dpi_scale * A.zoom;
 
     if (!atlas_init(A.ren)) { fprintf(stderr, "font atlas init failed\n"); return 1; }
