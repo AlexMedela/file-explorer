@@ -704,6 +704,7 @@ static int run_selftest_ops(void) {
     // Link here makes a symlink, undo takes it away
     A.drop_ask = true;
     mkdir(ST_BASE "/lnk", 0755);
+    for (int k = 0; k < 3; k++) { st_frames(10); SDL_Delay(50); st_wait(); } // (let the refreshes from the move above land)
     pane_refresh(p);
     st_wait();
     for (int round = 0; round < 2; round++) {
