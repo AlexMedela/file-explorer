@@ -9,6 +9,10 @@
 
 #include <sys/mman.h> // memfd_create, mmap (the drag icon)
 
+// FE_DEBUG_DND=1: what the drag-out protocols do, on stderr (for drags that misbehave on some desktop)
+static bool g_do_debug;
+#define DO_LOG(...) do { if (g_do_debug) { fprintf(stderr, "dnd: " __VA_ARGS__); fputc('\n', stderr); } } while (0)
+
 enum { DO_COPY = 1, DO_MOVE = 2, DO_ASK = 4, DO_LINK = 8 };
 enum { DOS_NONE, DOS_X11, DOS_WAYLAND };
 
@@ -257,11 +261,13 @@ static void x_motion(void) {
     int wx, wy;
     unsigned int mask;
     if (!g_xd.query(g_xd.dpy, g_xd.root, &r, &c, &g_xd.rx, &g_xd.ry, &wx, &wy, &mask)) return;
+    // the card first (to beside the pointer): where it was may be under the pointer now and hide the target
+    x_card_follow(!(A.mx >= 0 && A.my >= 0 && A.mx < A.W && A.my < A.H));
     int ver = 0;
     unsigned long t = x_find_target(g_xd.rx, g_xd.ry, &ver);
-    x_card_follow(t != g_xd.win && !(A.mx >= 0 && A.my >= 0 && A.mx < A.W && A.my < A.H));
     if (t == g_xd.win || ver < 3) t = 0;
     if (t != g_xd.target) {
+        DO_LOG("x11: target %#lx (xdnd %d) at %d,%d", t, ver, g_xd.rx, g_xd.ry);
         x_leave();
         g_xd.target = t;
         g_xd.target_ver = MIN(ver, 5);
@@ -288,6 +294,7 @@ static bool SDLCALL x_hook(void *ud, XEvent *xe) {
     DoXEvent *e = (DoXEvent *)xe;
     if (e->type == X_CLIENT_MESSAGE && e->cm.window == g_xd.win) {
         if (e->cm.message_type == g_xd.a_status && g_xd.target && (unsigned long)e->cm.data.l[0] == g_xd.target) {
+            if ((bool)(e->cm.data.l[1] & 1) != g_xd.accepted) DO_LOG("x11: status accept=%ld action=%ld", e->cm.data.l[1] & 1, e->cm.data.l[4]);
             g_xd.accepted = e->cm.data.l[1] & 1;
             g_xd.status_wait = false;
             if (g_xd.pos_pending && !g_xd.dropped) x_position();
@@ -295,6 +302,7 @@ static bool SDLCALL x_hook(void *ud, XEvent *xe) {
             return false;
         }
         if (e->cm.message_type == g_xd.a_finished) {
+            DO_LOG("x11: finished (success %ld)", e->cm.data.l[1] & 1);
             if (g_xd.dropped) x_end();
             return false;
         }
@@ -310,6 +318,7 @@ static bool SDLCALL x_hook(void *ud, XEvent *xe) {
         r.sn.target = e->sr.target;
         r.sn.time = e->sr.time;
         unsigned long prop = e->sr.property ? e->sr.property : e->sr.target;
+        DO_LOG("x11: data asked for (target atom %lu, property %lu)", e->sr.target, e->sr.property);
         r.sn.property = prop;
         pthread_mutex_lock(&g_do.mtx);
         if (e->sr.target == g_xd.a_targets) {
@@ -403,6 +412,7 @@ static void x_start(void) {
 // ends as usual, so this one just stops).
 static bool x_release(void) {
     x_card_free();
+    DO_LOG("x11: released over %#lx, accepted %d", g_xd.target, g_xd.accepted);
     if (g_xd.target && g_xd.accepted) {
         x_msg(g_xd.target, g_xd.a_drop, (long)g_xd.win, 0, 0, 0, 0);
         g_xd.dropped = true;
@@ -544,9 +554,10 @@ static void (*g_wl_dd_l[])(void) = {(void (*)(void))w_dd_offer, (void (*)(void))
                                    (void (*)(void))w_dd_motion, (void (*)(void))w_dd_drop, (void (*)(void))w_dd_selection};
 
 // the data source (our thread): hand out the data; dropped / cancelled -> the main thread
-static void w_src_target(void *d, void *s, const char *mime) { (void)d; (void)s; (void)mime; }
+static void w_src_target(void *d, void *s, const char *mime) { (void)d; (void)s; DO_LOG("wayland: target takes %s", mime ? mime : "nothing"); }
 static void w_src_send(void *d, void *s, const char *mime, int32_t fd) {
     (void)d; (void)s;
+    DO_LOG("wayland: data asked for as %s", mime);
     char *data;
     size_t len;
     if (!strcmp(mime, PFT_MIME)) { // the portal key, with its NUL like GTK sends it
@@ -571,12 +582,13 @@ static void w_src_send(void *d, void *s, const char *mime, int32_t fd) {
     free(data);
 }
 static void w_src_end(int how) {
+    DO_LOG("wayland: %s", how == 1 ? "dropped, finished" : "cancelled");
     atomic_store(&g_wl.result, how);
     main_wake();
 }
 static void w_src_cancelled(void *d, void *s) { (void)d; (void)s; w_src_end(2); }
 static void w_src_finished(void *d, void *s) { (void)d; (void)s; w_src_end(1); }
-static void w_src_action(void *d, void *s, uint32_t a) { (void)d; (void)s; (void)a; }
+static void w_src_action(void *d, void *s, uint32_t a) { (void)d; (void)s; DO_LOG("wayland: action %u", a); }
 static void (*g_wl_src_l[])(void) = {(void (*)(void))w_src_target, (void (*)(void))w_src_send, (void (*)(void))w_src_cancelled,
                                     (void (*)(void))w_noop_ptr, (void (*)(void))w_src_finished, (void (*)(void))w_src_action};
 
@@ -736,9 +748,11 @@ static void w_src_free(void) {
 // After the window exists: what this session can drag out with.
 static void dragout_init(void) {
     if (A.selftest || A.screenshot) return;
+    g_do_debug = getenv("FE_DEBUG_DND") && getenv("FE_DEBUG_DND")[0] == '1';
     if (w_init()) g_do.sys = DOS_WAYLAND;
     else if (x_init()) g_do.sys = DOS_X11;
     if (g_do.sys) pft_probe();
+    DO_LOG("drag out: %s", g_do.sys == DOS_WAYLAND ? "wayland" : g_do.sys == DOS_X11 ? "x11" : "not available");
 }
 
 static void dragout_shutdown(void) {
@@ -756,6 +770,7 @@ static bool dragout_start(Pane *p, char **paths, int n) {
     g_do.src = p;
     g_do.over_self = g_do.self_done = false;
     g_do.active = true;
+    DO_LOG("start: %d item(s), offer %#x, prefer %#x, portal %d", n, (unsigned)g_do.offer, (unsigned)g_do.pref, pft_available());
     if (g_do.sys == DOS_X11) x_start();
     else if (!w_start()) { g_do.active = false; return false; }
     return true;

@@ -32,6 +32,9 @@ At runtime:
 
 `file-explorer --version` prints the version and the SDL it runs on (include it in bug reports).
 
+
+`FE_DEBUG_DND=1` logs what dragging files out to other apps does (X11 / Wayland protocol steps) on stderr, for drags
+that misbehave on some desktop.
 ## Tools and self-tests
 - `./build/file-explorer --bench DIR [QUERY]` – headless listing benchmark; with QUERY also a recursive search (time, CPU, peak memory)
 Self-tests and screenshots run headless (SDL's offscreen video driver + software renderer): no window appears,
