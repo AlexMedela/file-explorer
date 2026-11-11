@@ -7315,7 +7315,7 @@ static const char *git_letter(u8 st) {
     return st < ARRAY_COUNT(l) ? l[st] : "";
 }
 
-// Status bar: branch ("main") and the rest (" up2 down1 . 3 changed"); false when the pane isn't in a repository.
+// Status bar: branch ("main") and the rest (" . 3 changed"; ahead/behind are drawn between them by git_sync_draw); false when the pane isn't in a repository.
 static bool git_status_label(Pane *p, char *branch, size_t bcap, char *rest, size_t rcap) {
     GitView v;
     if (!git_view(p, &v)) return false;
@@ -7323,21 +7323,49 @@ static bool git_status_label(Pane *p, char *branch, size_t bcap, char *rest, siz
     snprintf(branch, bcap, "%s%s", git_view_branch(&v), g && g->detached && g->branch[0] ? " (detached)" : "");
     rest[0] = 0;
     if (!g) return true;
-    int k = 0;
-    if (g->ahead) k += snprintf(rest + k, rcap - (size_t)k, " \xE2\x86\x91%d", g->ahead);
-    if (g->behind && k < (int)rcap) k += snprintf(rest + k, rcap - (size_t)k, " \xE2\x86\x93%d", g->behind);
     int n = git_view_count(&v);
-    if (k < (int)rcap) snprintf(rest + k, rcap - (size_t)k, n ? "   \xC2\xB7   %d changed" : "   \xC2\xB7   clean", n);
+    snprintf(rest, rcap, n ? "   \xC2\xB7   %d changed" : "   \xC2\xB7   clean", n);
     return true;
 }
 
-// Path bar chip: "main up2 down1" (ahead/behind only when there are some).
+// Commits to push / to pull (0 0 outside a repository or without an upstream).
+static void git_sync_counts(Pane *p, int *ahead, int *behind) {
+    GitView v;
+    bool ok = git_view(p, &v) && v.g;
+    *ahead = ok ? v.g->ahead : 0;
+    *behind = ok ? v.g->behind : 0;
+}
+
+// Ahead/behind as drawn arrows + counts, each a gap, an arrow as tall as the digits, the number: the font's arrows
+// are small and thin next to the digits. ty = text top (text_y); returns the width (draw false: only measure).
+static f32 git_sync_draw(Font *f, f32 x, f32 ty, int ahead, int behind, Color c, bool draw) {
+    f32 x0 = x, ch = roundf((f32)f->px * 0.7f), base = ty + roundf(f->ascent), top = base - ch;
+    f32 t = MAX(1.f, roundf(S(1.4f))), hw = roundf(ch * 0.36f); // stroke, head half-width
+    int n[2] = {ahead, behind};
+    for (int i = 0; i < 2; i++) {
+        if (!n[i]) continue;
+        x += roundf(S(7));
+        if (draw) {
+            f32 cx = x + hw + ((int)t % 2 ? 0.5f : 0.f); // odd strokes on a pixel centre stay sharp
+            f32 tip = i ? base - t * 0.5f : top + t * 0.5f, tail = i ? top : base, d = i ? -hw : hw; // the tip's stroke stays inside
+            draw_line(cx, tail, cx, tip, t, c);
+            draw_line(cx - hw, tip + d, cx, tip, t, c);
+            draw_line(cx, tip, cx + hw, tip + d, t, c);
+        }
+        x += hw * 2 + roundf(S(3));
+        char num[16];
+        int l = snprintf(num, sizeof num, "%d", n[i]);
+        if (draw) draw_text(f, x, ty, num, l, c);
+        x += text_width(f, num, l);
+    }
+    return x - x0;
+}
+
+// Path bar chip: the branch (ahead/behind are drawn after it by git_sync_draw).
 static bool git_chip_text(Pane *p, char *out, size_t cap, bool *dirty) {
     GitView v;
     if (A.edit_pane == p || !git_view(p, &v)) return false;
-    int k = snprintf(out, cap, "%s", git_view_branch(&v));
-    if (v.g && v.g->ahead && k < (int)cap) k += snprintf(out + k, cap - (size_t)k, " \xE2\x86\x91%d", v.g->ahead);
-    if (v.g && v.g->behind && k < (int)cap) snprintf(out + k, cap - (size_t)k, " \xE2\x86\x93%d", v.g->behind);
+    snprintf(out, cap, "%s", git_view_branch(&v));
     *dirty = v.g && (v.g->nstaged || v.g->nmodified || v.g->nuntracked || v.g->nconflicts);
     return true;
 }
@@ -7346,7 +7374,10 @@ static f32 git_chip_width(Pane *p) {
     char t[200];
     bool dirty;
     if (!git_chip_text(p, t, sizeof t, &dirty)) return 0;
-    return roundf(MIN(text_width(&A.font_small, t, (int)strlen(t)), S(180)) + S(42)); // icon + text + a gap + the status dot
+    int ah, bh;
+    git_sync_counts(p, &ah, &bh);
+    f32 sw = git_sync_draw(&A.font_small, 0, 0, ah, bh, (Color){0}, false);
+    return roundf(MIN(text_width(&A.font_small, t, (int)strlen(t)), S(180)) + sw + S(42)); // icon + text + a gap + the status dot
 }
 
 // "git@github.com:me/x.git", "ssh://git@host:22/me/x", "https://u@host/me/x.git" -> "host/me/x" (+ https web URL).

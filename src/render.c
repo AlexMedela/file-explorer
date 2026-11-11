@@ -509,8 +509,12 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         bool hv = hand_if(hover && in_rect(c, A.mx, A.my)), on = A.menu.open && A.menu.pane == p && A.menu.n && A.menu.items[0].info;
         draw_rrect(c.x, c.y, c.w, c.h, S(5), on ? CA(COL_ACCENT, 0.25f) : C(hv ? COL_CONTROL_HOVER : COL_CHIP));
         draw_branch_icon(c.x + S(6), c.y + c.h * 0.5f, C(COL_TEXT_DIM));
-        f32 tx = c.x + S(22);
-        draw_text_fit(fs, tx, text_y(fs, c.y, c.h), c.x + c.w - S(20) - tx, gt, (int)strlen(gt), C(COL_TEXT2), 0);
+        f32 tx = c.x + S(22), ty = text_y(fs, c.y, c.h);
+        int ah, bh;
+        git_sync_counts(p, &ah, &bh);
+        f32 sw = git_sync_draw(fs, 0, 0, ah, bh, (Color){0}, false), bw = c.x + c.w - S(20) - tx - sw;
+        draw_text_fit(fs, tx, ty, bw, gt, (int)strlen(gt), C(COL_TEXT2), 0);
+        git_sync_draw(fs, tx + MIN(text_width(fs, gt, (int)strlen(gt)), bw), ty, ah, bh, C(COL_TEXT2), true);
         f32 dr = roundf(S(2.5f)); // dot: changes in the repository (orange) or clean (green)
         draw_rrect(c.x + c.w - S(8) - dr, c.y + c.h * 0.5f - dr, dr * 2, dr * 2, dr, C(dirty ? COL_WARN : COL_OK));
     }
@@ -2576,6 +2580,10 @@ static void draw_status(void) {
             int bl = (int)strlen(gbranch);
             f32 ex = x + MIN(text_width(f, gbranch, bl), lim - x);
             draw_text_fit(f, x, ty, lim - x, gbranch, bl, C(COL_TEXT2), 0);
+            int ah, bh;
+            git_sync_counts(p, &ah, &bh);
+            f32 sw = git_sync_draw(f, 0, 0, ah, bh, (Color){0}, false);
+            if (ex + sw < lim - S(20)) ex += git_sync_draw(f, ex, ty, ah, bh, C(COL_TEXT_DIM), true);
             if (ex < lim - S(20)) draw_text_fit(f, ex, ty, lim - ex, grest, (int)strlen(grest), C(COL_TEXT_DIM), 0);
         }
     }

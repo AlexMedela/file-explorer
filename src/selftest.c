@@ -5124,7 +5124,7 @@ static int run_selftest_git(void) {
     ST_CHECK(v.g->nstash == 2 && !strcmp(v.repo->head, "main"));
     char br[160], rest[96];
     ST_CHECK(git_status_label(p, br, sizeof br, rest, sizeof rest) && !strcmp(br, "main"));
-    ST_CHECK(!strcmp(rest, " \xE2\x86\x91" "2 \xE2\x86\x93" "1   \xC2\xB7   8 changed"));
+    ST_CHECK(!strcmp(rest, "   \xC2\xB7   8 changed"));
     st_shot("git-details");
 
     // --- moving inside the repository: the badges are there in the very first frame (no wait for git)
@@ -5153,7 +5153,10 @@ static int run_selftest_git(void) {
     ST_CHECK(gc.x + gc.w <= p->ly.pathbar.x + p->ly.pathbar.w && gc.x > p->ly.crumbs[p->ly.ncrumbs - 1].r.x);
     char ct[200];
     bool dirty;
-    ST_CHECK(git_chip_text(p, ct, sizeof ct, &dirty) && dirty && !strcmp(ct, "main \xE2\x86\x91" "2 \xE2\x86\x93" "1"));
+    ST_CHECK(git_chip_text(p, ct, sizeof ct, &dirty) && dirty && !strcmp(ct, "main"));
+    int ah, bh;
+    git_sync_counts(p, &ah, &bh);
+    ST_CHECK(ah == 2 && bh == 1);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, gc.x + gc.w * 0.5f, gc.y + gc.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, gc.x + gc.w * 0.5f, gc.y + gc.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
     ST_CHECK(A.menu.open && A.menu.n && A.menu.items[0].info && !A.edit_pane);
