@@ -1258,7 +1258,8 @@ static void window_size_update(void) {
 }
 
 // The compositor's sizes are for the window without its shadow; SDL makes the surface that size: add the margin.
-// (Not while tiled: there the window has no shadow and takes the compositor's size as it is.)
+// (Not while tiled: there the window has no shadow and takes the compositor's size as it is.) Only until the
+// toplevel's configure events are hooked (toplevel_configure adds it from then on), or if they can't be.
 static void shadow_on_resized(int w, int h) {
     if (A.win_x11) return; // (X11 window managers size the window shadow included)
     int m = shadow_margin_log();
@@ -1341,14 +1342,22 @@ typedef void (*TopConfigureFn)(void *, void *, i32, i32, WlArray *);
 static void (*g_top_sdl[4])(void), (*g_top_ours[4])(void); // configure, close, configure_bounds, wm_capabilities
 static void *g_top_hooked;
 
+// The size the compositor gives is the window's without its shadow: the margin is added here, so SDL sizes the
+// surface once (adding it after, from the resize event, sized it twice for each step of a resize - every other
+// frame the wrong size, and the window trailing the pointer).
 static void toplevel_configure(void *data, void *top, i32 w, i32 h, WlArray *states) {
-    bool tiled = false;
+    bool tiled = false, full = false;
     for (size_t i = 0; states && i + sizeof(u32) <= states->size; i += sizeof(u32)) {
         u32 st = *(u32 *)((char *)states->data + i);
         if (st >= 5 && st <= 8) tiled = true; // XDG_TOPLEVEL_STATE_TILED_LEFT / RIGHT / TOP / BOTTOM
+        if (st == 1 || st == 2) full = true;  // MAXIMIZED, FULLSCREEN
     }
-    if (getenv("FE_SHADOW_DEBUG")) fprintf(stderr, "shadow: configure %dx%d%s\n", w, h, tiled ? " tiled" : "");
+    if (getenv("FE_SHADOW_DEBUG")) fprintf(stderr, "shadow: configure %dx%d%s\n", w, h, tiled ? " tiled" : full ? " maximized" : "");
     if (tiled != A.win_tiled) { A.win_tiled = tiled; A.redraw = true; }
+    if (w > 0 && h > 0 && A.win_shadow && A.round_corners && A.csd && !tiled && !full) {
+        w += 2 * SHADOW_MARGIN, h += 2 * SHADOW_MARGIN;
+        A.shadow_req_w = w, A.shadow_req_h = h; // (shadow_on_resized: already has it)
+    }
     ((TopConfigureFn)g_top_sdl[0])(data, top, w, h, states);
 }
 
