@@ -626,6 +626,7 @@ static struct {
     bool win_shadow;    // ...and draws its own drop shadow in a margin round the window (Wayland)
     int shadow_px;      // that margin now, in pixels (0: maximised, system title bar...); A.W / A.H exclude it
     int shadow_req_w, shadow_req_h; // the window size we last asked for (to tell the compositor's sizes apart)
+    bool win_x11;       // the shadow is done the X11 way (_GTK_FRAME_EXTENTS) instead of Wayland's
     bool win_tiled;     // snapped to a side (the compositor sizes it): square, no shadow, like tiled GTK windows
     char ig_prev_fm[256]; // integration.c: the folder handler before we became the default (put back when turned off)
     bool ig_fm1;          // answer "Show in folder" (org.freedesktop.FileManager1)
@@ -635,7 +636,7 @@ static struct {
     bool upd_auto;         // AppImage: download a new version by itself (the card then offers the restart)
     char upd_seen[64];     // newest version the card was shown for (once per version)
     bool csd;      // we do right now: buttons top right, the tab strips drag the window
-    SDL_Cursor *cur_ns;
+    SDL_Cursor *cur_ns, *cur_nwse, *cur_nesw;
     // global layout
     Rect r_sidebar, r_content, r_status;
     Rect r_brand; // logo + app name above the sidebar
@@ -1235,13 +1236,20 @@ static void corners_mask(void) {
 #define SHADOW_MARGIN 24 // window (logical) units
 
 static bool shadow_wanted(void) { return A.win_shadow && A.round_corners && A.csd && !window_maximized(); }
-static int shadow_margin_log(void) { return shadow_wanted() && !A.win_tiled ? SHADOW_MARGIN : 0; }
+// (X11: the margin stays when maximised or tiled - the window manager fits the window inside it to the screen, the
+// margin hangs off the edges, transparent and not taking clicks - so these don't resize the window twice, once into
+// the state and once more when the margin goes, with a frame of the wrong size in between)
+static bool shadow_shown(void) { return shadow_wanted() && !A.win_tiled; }
+static int shadow_margin_log(void) {
+    if (A.win_x11) return A.win_shadow && A.round_corners && A.csd ? SHADOW_MARGIN : 0;
+    return shadow_shown() ? SHADOW_MARGIN : 0;
+}
 
 // A.W / A.H and the viewport from the window's size and whether it has a shadow now.
 static void window_size_update(void) {
     int pw = 0, ph = 0;
     SDL_GetWindowSizeInPixels(A.win, &pw, &ph);
-    int m = (int)roundf((f32)shadow_margin_log() * SDL_GetWindowPixelDensity(A.win));
+    int m = (int)roundf((f32)shadow_margin_log() * (A.win_x11 ? A.dpi_scale : SDL_GetWindowPixelDensity(A.win)));
     if (pw - 2 * m < 200 || ph - 2 * m < 200) m = 0;
     A.shadow_px = m;
     A.W = pw - 2 * m;
@@ -1252,6 +1260,7 @@ static void window_size_update(void) {
 // The compositor's sizes are for the window without its shadow; SDL makes the surface that size: add the margin.
 // (Not while tiled: there the window has no shadow and takes the compositor's size as it is.)
 static void shadow_on_resized(int w, int h) {
+    if (A.win_x11) return; // (X11 window managers size the window shadow included)
     int m = shadow_margin_log();
     if (!m || (w == A.shadow_req_w && h == A.shadow_req_h)) return;
     A.shadow_req_w = w + 2 * m;
@@ -1359,7 +1368,9 @@ static void toplevel_hook(void) {
 
 // Before each present: the window geometry (the window without its shadow) and the input region (the window plus
 // the resize band: clicks further out in the shadow go to whatever is underneath).
+static void x11_shadow_apply(void);
 static void shadow_surface_apply(void) {
+    if (A.win_shadow && A.win_x11) { x11_shadow_apply(); return; }
     if (!A.win_shadow || !wl_load()) return;
     toplevel_hook();
     SDL_PropertiesID props = SDL_GetWindowProperties(A.win);
@@ -1381,6 +1392,278 @@ static void shadow_surface_apply(void) {
     g_wlwin.marshal(rg, 1 /* wl_region.add */, NULL, g_wlwin.version(rg), 0, in[0], in[1], in[2], in[3]);
     g_wlwin.marshal(surf, 5 /* wl_surface.set_input_region */, NULL, g_wlwin.version(surf), 0, rg);
     g_wlwin.marshal(rg, 0 /* wl_region.destroy */, NULL, g_wlwin.version(rg), 1 /* WL_MARSHAL_FLAG_DESTROY */);
+}
+
+// --- the shadow on X11 ------------------------------------------------------
+// The same, the X11 way (as GTK does it): _GTK_FRAME_EXTENTS tells the window manager how wide the shadow margin is
+// (mutter, KWin, xfwm4...: placement, snapping and maximising then go by the window inside it), an XShape input
+// region lets clicks on the outer shadow through, and mutter's _GTK_EDGE_CONSTRAINTS says when the window is tiled.
+// Only with a compositor (else transparent pixels are black) that supports the extents. Xlib is SDL's, looked up at
+// run time like libwayland.
+typedef unsigned long XID_;
+typedef struct { short x, y; unsigned short w, h; } XRect_;
+typedef struct { int type; unsigned long serial; int send_event; void *display; XID_ window, atom; } XPropEvent_; // XPropertyEvent's head
+typedef struct { int type; unsigned long serial; int send_event; void *display; XID_ window, message_type; int format; long l[5]; } XClientMsg_;
+typedef struct { int hi; unsigned int lo; } XSyncValue_;
+typedef struct { int type; unsigned long serial; int send_event; void *display; XID_ event, window; int x, y, width, height; } XConfigure_;
+static struct {
+    bool tried, ok;
+    void *(*open)(const char *);
+    int (*close)(void *);
+    XID_ (*intern)(void *, const char *, int);
+    int (*change)(void *, XID_, XID_, XID_, int, int, const unsigned char *, int);
+    XID_ (*sel_owner)(void *, XID_);
+    int (*get_prop)(void *, XID_, XID_, long, long, int, XID_, XID_ *, int *, unsigned long *, unsigned long *, unsigned char **);
+    int (*xfree)(void *);
+    int (*flush)(void *);
+    int (*def_screen)(void *);
+    XID_ (*root)(void *, int);
+    void (*shape_rects)(void *, XID_, int, int, int, XRect_ *, int, int, int);
+    int (*sync_query)(void *, int *, int *);
+    int (*sync_init)(void *, int *, int *);
+    XID_ (*sync_create)(void *, XSyncValue_);
+    int (*sync_set)(void *, XID_, XSyncValue_);
+    void *dpy;
+    XID_ a_protocols, a_sync_req, sync_counter; // _NET_WM_SYNC_REQUEST: the window manager shows a new size once drawn
+    XID_ ext_counter; // its extended form: odd while a frame is being drawn (the window manager shows none of it)
+    u64 ext_value;
+    i64 sync_pending; // the request's number, to report after the next frame (0: none)
+    bool sync_ext;    // it's for the extended counter
+    u64 sync_ns;      // when it came
+    bool sync_cfg;    // the resize it announced has come (ConfigureNotify, to cfg_w x cfg_h)
+    int cfg_w, cfg_h;
+    int cfg_frames;   // frames presented since the window last changed size
+    int vsync_saved;  // vsync while resizing is off (-2: on as usual), so the frame is shown before the ack
+    u64 vsync_ns;     // last frame acked
+    XID_ win, a_extents, a_edge, a_state, a_max_v, a_max_h;
+    long ext[4];    // extents last sent (-1: none yet)
+    int in[4];      // input shape last sent
+    bool edge_dirty; // the tiled state may have changed: read it again
+} g_x11 = {.ext = {-1, -1, -1, -1}, .in = {-1, -1, -1, -1}, .edge_dirty = true, .vsync_saved = -2};
+
+static bool x11_load(void) {
+    if (g_x11.tried) return g_x11.ok;
+    g_x11.tried = true;
+    void *h = dlopen("libX11.so.6", RTLD_NOW | RTLD_NOLOAD);
+    void *hx = dlopen("libXext.so.6", RTLD_NOW);
+    if (!h) return false;
+    *(void **)&g_x11.open = dlsym(h, "XOpenDisplay");
+    *(void **)&g_x11.close = dlsym(h, "XCloseDisplay");
+    *(void **)&g_x11.intern = dlsym(h, "XInternAtom");
+    *(void **)&g_x11.change = dlsym(h, "XChangeProperty");
+    *(void **)&g_x11.sel_owner = dlsym(h, "XGetSelectionOwner");
+    *(void **)&g_x11.get_prop = dlsym(h, "XGetWindowProperty");
+    *(void **)&g_x11.xfree = dlsym(h, "XFree");
+    *(void **)&g_x11.flush = dlsym(h, "XFlush");
+    *(void **)&g_x11.def_screen = dlsym(h, "XDefaultScreen");
+    *(void **)&g_x11.root = dlsym(h, "XRootWindow");
+    if (hx) { // (optional: click-through, and resizing without black frames)
+        *(void **)&g_x11.shape_rects = dlsym(hx, "XShapeCombineRectangles");
+        *(void **)&g_x11.sync_query = dlsym(hx, "XSyncQueryExtension");
+        *(void **)&g_x11.sync_init = dlsym(hx, "XSyncInitialize");
+        *(void **)&g_x11.sync_create = dlsym(hx, "XSyncCreateCounter");
+        *(void **)&g_x11.sync_set = dlsym(hx, "XSyncSetCounter");
+    }
+    g_x11.ok = g_x11.open && g_x11.close && g_x11.intern && g_x11.change && g_x11.sel_owner && g_x11.get_prop && g_x11.xfree &&
+               g_x11.flush && g_x11.def_screen && g_x11.root;
+    return g_x11.ok;
+}
+
+// Whether an atom is in a window's list-of-atoms property.
+static bool x11_atom_listed(void *dpy, XID_ w, XID_ prop, XID_ atom) {
+    XID_ type = 0, *v = NULL;
+    int fmt = 0;
+    unsigned long n = 0, after = 0;
+    bool found = false;
+    if (g_x11.get_prop(dpy, w, prop, 0, 4096, 0, 4 /* XA_ATOM */, &type, &fmt, &n, &after, (unsigned char **)&v) == 0 && v) {
+        for (unsigned long i = 0; fmt == 32 && i < n; i++) found |= v[i] == atom;
+        g_x11.xfree(v);
+    }
+    return found;
+}
+
+// Before the window exists: a compositor running (alpha shows through), and its window manager reading the extents.
+static void x11_capabilities(bool *composited, bool *extents) {
+    *composited = *extents = false;
+    if (!x11_load()) return;
+    void *dpy = g_x11.open(NULL);
+    if (!dpy) return;
+    int scr = g_x11.def_screen(dpy);
+    char sel[32];
+    snprintf(sel, sizeof sel, "_NET_WM_CM_S%d", scr);
+    *composited = g_x11.sel_owner(dpy, g_x11.intern(dpy, sel, 0)) != 0;
+    *extents = x11_atom_listed(dpy, g_x11.root(dpy, scr), g_x11.intern(dpy, "_NET_SUPPORTED", 0), g_x11.intern(dpy, "_GTK_FRAME_EXTENTS", 0));
+    g_x11.close(dpy);
+}
+
+// (SDL's X11 event loop) the window manager's resize sync requests, the window's size, and changes to its tiled or
+// maximised state
+static bool x11_event_hook(void *ud, XEvent *xe) {
+    (void)ud;
+    XClientMsg_ *cm = (XClientMsg_ *)xe;
+    if (cm->type == 33 /* ClientMessage */ && cm->window == g_x11.win && g_x11.sync_counter && cm->message_type == g_x11.a_protocols &&
+        (XID_)cm->l[0] == g_x11.a_sync_req) { // a resize is coming: say when a frame of the new size is drawn
+        g_x11.sync_pending = (i64)(((u64)(u32)cm->l[3] << 32) | (u32)cm->l[2]);
+        if (!g_x11.sync_pending) g_x11.sync_pending = -1; // (0 is "none" here)
+        g_x11.sync_ext = cm->l[4] != 0;
+        g_x11.sync_ns = now_ns();
+        g_x11.sync_cfg = false;
+        A.redraw = true;
+        main_wake(); // (the message itself isn't passed on, so nothing else wakes the loop)
+        return false;
+    }
+    XConfigure_ *ce = (XConfigure_ *)xe;
+    if (ce->type == 22 /* ConfigureNotify */ && ce->window == g_x11.win && g_x11.win) {
+        if (ce->width != g_x11.cfg_w || ce->height != g_x11.cfg_h) g_x11.cfg_frames = 0;
+        g_x11.cfg_w = ce->width, g_x11.cfg_h = ce->height;
+        if (g_x11.sync_pending) g_x11.sync_cfg = true;
+        return true;
+    }
+    XPropEvent_ *e = (XPropEvent_ *)xe;
+    if (e->type == 28 /* PropertyNotify */ && e->window == g_x11.win && g_x11.win && (e->atom == g_x11.a_edge || e->atom == g_x11.a_state)) {
+        g_x11.edge_dirty = true;
+        A.redraw = true;
+    }
+    return true;
+}
+
+// The window resized interactively shows only frames drawn at its new size (else mutter shows it unpainted: black)
+// - _NET_WM_SYNC_REQUEST, which SDL doesn't do: a counter the window manager waits on, set after each such frame.
+// With the extended counter as GTK has it (odd during each frame) the window manager also never shows a frame half
+// drawn, and holds the window at its old size until a frame of the new one is (the edges not dragged stay still).
+static void x11_sync_setup(void) {
+    int ev = 0, err = 0, maj = 0, min = 0;
+    if (!g_x11.sync_query || !g_x11.sync_init || !g_x11.sync_create || !g_x11.sync_set) return;
+    if (!g_x11.sync_query(g_x11.dpy, &ev, &err) || !g_x11.sync_init(g_x11.dpy, &maj, &min)) return;
+    g_x11.sync_counter = g_x11.sync_create(g_x11.dpy, (XSyncValue_){0, 0});
+    if (!g_x11.sync_counter) return;
+    g_x11.ext_counter = g_x11.sync_create(g_x11.dpy, (XSyncValue_){0, 0});
+    long c[2] = {(long)g_x11.sync_counter, (long)g_x11.ext_counter};
+    g_x11.change(g_x11.dpy, g_x11.win, g_x11.intern(g_x11.dpy, "_NET_WM_SYNC_REQUEST_COUNTER", 0), 6 /* XA_CARDINAL */, 32, 0,
+                 (const unsigned char *)c, g_x11.ext_counter ? 2 : 1);
+    // WM_PROTOCOLS + _NET_WM_SYNC_REQUEST (SDL's list kept; window managers read it again when it changes)
+    XID_ type = 0, *v = NULL, list[32];
+    int fmt = 0, n = 0;
+    unsigned long cnt = 0, after = 0;
+    if (g_x11.get_prop(g_x11.dpy, g_x11.win, g_x11.a_protocols, 0, 30, 0, 4 /* XA_ATOM */, &type, &fmt, &cnt, &after, (unsigned char **)&v) == 0 && v) {
+        for (unsigned long i = 0; fmt == 32 && i < cnt && n < 30; i++)
+            if (v[i] != g_x11.a_sync_req) list[n++] = v[i];
+        g_x11.xfree(v);
+    }
+    list[n++] = g_x11.a_sync_req;
+    g_x11.change(g_x11.dpy, g_x11.win, g_x11.a_protocols, 4 /* XA_ATOM */, 32, 0, (const unsigned char *)list, n);
+    g_x11.flush(g_x11.dpy);
+}
+
+static void x11_counter_set(XID_ c, u64 v) { g_x11.sync_set(g_x11.dpy, c, (XSyncValue_){(int)(v >> 32), (unsigned int)v}); }
+
+// Before a present: whether this frame answers the window manager's request - it's drawn at the size the request
+// announced (or that resize hasn't come in 100 ms: the size didn't change). Vsync is off while resizing, else the
+// frame would reach the screen only at the next vblank, after the window manager has shown the window without it.
+static bool x11_sync_ready(void) {
+    if (!g_x11.sync_pending || !g_x11.sync_counter) {
+        if (g_x11.vsync_saved != -2 && now_ns() - g_x11.vsync_ns > 300000000ull) { // (done resizing)
+            SDL_SetRenderVSync(A.ren, g_x11.vsync_saved);
+            g_x11.vsync_saved = -2;
+        }
+        return false;
+    }
+    int ow = 0, oh = 0;
+    SDL_GetCurrentRenderOutputSize(A.ren, &ow, &oh);
+    // (OpenGL drivers (Mesa) see the new size at a present: the first frame after it is drawn at the old size)
+    if (!(g_x11.sync_cfg && ow == g_x11.cfg_w && oh == g_x11.cfg_h && g_x11.cfg_frames >= 1) && now_ns() - g_x11.sync_ns < 100000000ull) {
+        return false; // (the resize is on its way, or a frame to come is drawn at its size: drawing goes on)
+    }
+    if (g_x11.vsync_saved == -2) {
+        int vs = 0;
+        if (SDL_GetRenderVSync(A.ren, &vs) && vs) {
+            g_x11.vsync_saved = vs;
+            SDL_SetRenderVSync(A.ren, 0);
+        }
+    }
+    return true;
+}
+
+// Each frame's present goes between these: the extended counter odd during it (from the request's number when the
+// frame answers one), even after; the basic counter set to the request's number after.
+static void x11_frame_begin(bool ack) {
+    if (!g_x11.ext_counter) return;
+    if (ack && g_x11.sync_ext && g_x11.sync_pending > 0) g_x11.ext_value = MAX(g_x11.ext_value, (u64)g_x11.sync_pending);
+    g_x11.ext_value += g_x11.ext_value % 2 ? 2 : 1;
+    x11_counter_set(g_x11.ext_counter, g_x11.ext_value);
+}
+
+static void x11_frame_end(bool ack) {
+    g_x11.cfg_frames++;
+    if (g_x11.ext_counter) x11_counter_set(g_x11.ext_counter, ++g_x11.ext_value);
+    if (ack) {
+        if (!g_x11.sync_ext) x11_counter_set(g_x11.sync_counter, g_x11.sync_pending < 0 ? 0 : (u64)g_x11.sync_pending);
+        g_x11.sync_pending = 0;
+        g_x11.vsync_ns = now_ns();
+    }
+    if (g_x11.sync_counter) g_x11.flush(g_x11.dpy);
+}
+
+// An X11 window with alpha (rounded corners): the event hook, resize sync, and the shadow's atoms when it has one.
+static void x11_window_init(void) {
+    SDL_PropertiesID props = SDL_GetWindowProperties(A.win);
+    g_x11.dpy = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL);
+    g_x11.win = (XID_)SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
+    if (!g_x11.dpy || !g_x11.win || !x11_load()) { g_x11.dpy = NULL; A.win_shadow = false; return; }
+    g_x11.a_extents = g_x11.intern(g_x11.dpy, "_GTK_FRAME_EXTENTS", 0);
+    g_x11.a_edge = g_x11.intern(g_x11.dpy, "_GTK_EDGE_CONSTRAINTS", 0);
+    g_x11.a_state = g_x11.intern(g_x11.dpy, "_NET_WM_STATE", 0);
+    g_x11.a_max_v = g_x11.intern(g_x11.dpy, "_NET_WM_STATE_MAXIMIZED_VERT", 0);
+    g_x11.a_max_h = g_x11.intern(g_x11.dpy, "_NET_WM_STATE_MAXIMIZED_HORZ", 0);
+    g_x11.a_protocols = g_x11.intern(g_x11.dpy, "WM_PROTOCOLS", 0);
+    g_x11.a_sync_req = g_x11.intern(g_x11.dpy, "_NET_WM_SYNC_REQUEST", 0);
+    SDL_SetX11EventHook(x11_event_hook, NULL);
+    x11_sync_setup();
+}
+
+// Tiled: an edge of mutter's _GTK_EDGE_CONSTRAINTS tiled (bits 0, 2, 4, 6), or maximised one way only (window
+// managers without edge constraints tile halves that way).
+static void x11_tiled_update(void) {
+    if (!g_x11.edge_dirty) return;
+    g_x11.edge_dirty = false;
+    bool tiled = false;
+    XID_ type = 0;
+    long *v = NULL;
+    int fmt = 0;
+    unsigned long n = 0, after = 0;
+    if (g_x11.get_prop(g_x11.dpy, g_x11.win, g_x11.a_edge, 0, 1, 0, 6 /* XA_CARDINAL */, &type, &fmt, &n, &after, (unsigned char **)&v) == 0 && v) {
+        if (fmt == 32 && n >= 1) tiled = (v[0] & 0x55) != 0;
+        g_x11.xfree(v);
+    }
+    bool mv = x11_atom_listed(g_x11.dpy, g_x11.win, g_x11.a_state, g_x11.a_max_v);
+    bool mh = x11_atom_listed(g_x11.dpy, g_x11.win, g_x11.a_state, g_x11.a_max_h);
+    if (mv != mh) tiled = true;
+    if (getenv("FE_SHADOW_DEBUG")) fprintf(stderr, "shadow: x11 edge constraints%s, max %d/%d -> %s\n", v ? "" : " (none)", mv, mh, tiled ? "tiled" : "floating");
+    if (tiled != A.win_tiled) { A.win_tiled = tiled; A.redraw = true; }
+}
+
+static void x11_shadow_apply(void) {
+    if (!g_x11.dpy) return;
+    int m = A.shadow_px, pw = A.W + 2 * m, ph = A.H + 2 * m;
+    long ext[4] = {m, m, m, m}; // left, right, top, bottom
+    bool sent = false;
+    if (memcmp(ext, g_x11.ext, sizeof ext)) {
+        memcpy(g_x11.ext, ext, sizeof ext);
+        g_x11.change(g_x11.dpy, g_x11.win, g_x11.a_extents, 6 /* XA_CARDINAL */, 32, 0 /* PropModeReplace */, (const unsigned char *)ext, 4);
+        sent = true;
+    }
+    if (g_x11.shape_rects) { // the window and its resize band take clicks; the rest of the shadow lets them through
+        int o = m && shadow_shown() ? MIN(m, (int)roundf(10.f * A.dpi_scale)) : 0; // (maximised: just the window)
+        int in[4] = {m - o, m - o, pw - 2 * (m - o), ph - 2 * (m - o)};
+        if (!m) in[0] = in[1] = 0, in[2] = in[3] = 65535; // (no shadow: all of it, whatever the size)
+        if (memcmp(in, g_x11.in, sizeof in)) {
+            memcpy(g_x11.in, in, sizeof in);
+            XRect_ r = {(short)in[0], (short)in[1], (unsigned short)MIN(in[2], 65535), (unsigned short)MIN(in[3], 65535)};
+            g_x11.shape_rects(g_x11.dpy, g_x11.win, 2 /* ShapeInput */, 0, 0, &r, 1, 0 /* ShapeSet */, 0 /* Unsorted */);
+            sent = true;
+        }
+    }
+    if (sent) g_x11.flush(g_x11.dpy);
 }
 
 // One channel of a separable Gaussian blur, in place (n x n).
@@ -1427,7 +1710,7 @@ static int g_shadow_m = -1, g_shadow_r = -1;
 
 static void shadow_draw(void) {
     int m = A.shadow_px, r = (int)window_corner_radius();
-    if (!m) return;
+    if (!m || !shadow_shown()) return;
     if (!g_shadow_tex || g_shadow_m != m || g_shadow_r != r) {
         if (g_shadow_tex) SDL_DestroyTexture(g_shadow_tex);
         g_shadow_tex = NULL;
@@ -1488,15 +1771,9 @@ static bool titlebar_drag_at(f32 x, f32 y) {
     return false;
 }
 
-static SDL_HitTestResult window_hit_test(SDL_Window *w, const SDL_Point *pt, void *ud) {
-    (void)ud;
-    if (!A.csd || A.drag != DRAG_NONE) return SDL_HITTEST_NORMAL;
-    f32 d = SDL_GetWindowPixelDensity(w), m = (f32)A.shadow_px;
-    f32 x = (f32)pt->x * d - m, y = (f32)pt->y * d - m, W = (f32)A.W, H = (f32)A.H; // (content coordinates)
-    if (m > 0) { // in the shadow: a resize band along the window, the rest does nothing
-        f32 o = MIN(m, roundf(10.f * d));
-        if (x < -o || y < -o || x >= W + o || y >= H + o) return SDL_HITTEST_NORMAL;
-    }
+// The window edge or corner a point in content coordinates resizes (SDL_HITTEST_NORMAL: none).
+static SDL_HitTestResult window_edge_at(f32 x, f32 y) {
+    f32 W = (f32)A.W, H = (f32)A.H;
     if (!window_maximized()) {
         f32 e = MAX(3.f, roundf(S(5))), c = roundf(S(14)); // edge, and the corners' longer grab along it
         bool l = x < e, r = x >= W - e, t = y < e, b = y >= H - e;
@@ -1509,6 +1786,20 @@ static SDL_HitTestResult window_hit_test(SDL_Window *w, const SDL_Point *pt, voi
         if (l) return SDL_HITTEST_RESIZE_LEFT;
         if (r) return SDL_HITTEST_RESIZE_RIGHT;
     }
+    return SDL_HITTEST_NORMAL;
+}
+
+static SDL_HitTestResult window_hit_test(SDL_Window *w, const SDL_Point *pt, void *ud) {
+    (void)ud;
+    if (!A.csd || A.drag != DRAG_NONE) return SDL_HITTEST_NORMAL;
+    f32 d = SDL_GetWindowPixelDensity(w), m = (f32)A.shadow_px;
+    f32 x = (f32)pt->x * d - m, y = (f32)pt->y * d - m, W = (f32)A.W, H = (f32)A.H; // (content coordinates)
+    if (m > 0) { // in the shadow: a resize band along the window, the rest does nothing
+        f32 o = MIN(m, roundf(10.f * d));
+        if (x < -o || y < -o || x >= W + o || y >= H + o) return SDL_HITTEST_NORMAL;
+    }
+    SDL_HitTestResult e = window_edge_at(x, y);
+    if (e != SDL_HITTEST_NORMAL) return e;
     return titlebar_drag_at(x, y) ? SDL_HITTEST_DRAGGABLE : SDL_HITTEST_NORMAL;
 }
 
@@ -10634,6 +10925,7 @@ static void frame(void) {
     ops_gc();
     ops_schedule();
     preview_update();
+    if (A.win_shadow && A.win_x11) x11_tiled_update();
     if (A.win_shadow) window_size_update(); // (maximised or not: the shadow comes and goes)
     u64 t0 = now_ns();
     f32 dt = A.last_frame ? (f32)((t0 - A.last_frame) / 1e9) : 0.016f;
@@ -10710,7 +11002,10 @@ static void frame(void) {
     }
     rec_frame();
     shadow_surface_apply();
+    bool sync_ack = A.win_x11 && x11_sync_ready();
+    if (A.win_x11) x11_frame_begin(sync_ack);
     SDL_RenderPresent(A.ren);
+    if (A.win_x11) x11_frame_end(sync_ack);
     if (g_atlas_full) {
         atlas_reset();
         A.redraw = true;
@@ -11066,11 +11361,18 @@ int main(int argc, char **argv) {
     // rounded corners need an alpha channel, which only a new window can get (turning them on takes a restart)
     A.win_alpha = A.csd && A.round_corners && !headless && !picker_active() && !getenv("FE_SQUARE_CORNERS");
     const char *vdrv = SDL_GetCurrentVideoDriver();
-    A.win_shadow = A.win_alpha && vdrv && !strcmp(vdrv, "wayland") && !getenv("FE_NO_SHADOW");
+    A.win_x11 = vdrv && !strcmp(vdrv, "x11");
+    bool x11_comp = false, x11_ext = false;
+    if (A.win_alpha && A.win_x11) x11_capabilities(&x11_comp, &x11_ext);
+    if (A.win_x11 && !x11_comp) A.win_alpha = false; // (no compositor: the corners would be black)
+    A.win_shadow = A.win_alpha && vdrv && (!strcmp(vdrv, "wayland") || (A.win_x11 && x11_ext)) && !getenv("FE_NO_SHADOW");
+    // X11 with alpha: shown only once the frame extents and the resize sync counter are set, as GTK does (the window
+    // manager reads them when it takes the window on: set later, it keeps the size without the shadow and grows it)
+    bool start_hidden = g_bg_start && !any_selftest && !A.screenshot, x11_late_show = A.win_x11 && A.win_alpha && !start_hidden;
     A.win = SDL_CreateWindow(APP_NAME, A.win_w, A.win_h,
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (A.maximized ? SDL_WINDOW_MAXIMIZED : 0) |
                              (A.csd ? SDL_WINDOW_BORDERLESS : 0) | (A.win_alpha ? SDL_WINDOW_TRANSPARENT : 0) |
-                             (g_bg_start && !any_selftest && !A.screenshot ? SDL_WINDOW_HIDDEN : 0));
+                             (start_hidden || x11_late_show ? SDL_WINDOW_HIDDEN : 0));
     if (g_bg_start) A.win_hidden = true;
     if (!A.win) { fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError()); return 1; }
     window_icon_update();
@@ -11082,7 +11384,8 @@ int main(int argc, char **argv) {
     if (headless && any_selftest && !getenv("SDL_RENDER_DRIVER")) A.ren = SDL_CreateRenderer(A.win, "software");
     else if (!getenv("SDL_RENDER_DRIVER")) {
         // Automatic: OpenGL. SDL's Vulkan renderer rebuilds its swapchain at every size, which misses frames while
-        // the window is resized (it trails the pointer).
+        // the window is resized (it trails the pointer); and on X11 only OpenGL windows get a visual with alpha from
+        // SDL, which the rounded corners and shadow need.
         A.ren = SDL_CreateRenderer(A.win, strcmp(A.renderer, "auto") ? A.renderer : "opengl");
     }
     if (!A.ren) A.ren = SDL_CreateRenderer(A.win, NULL);
@@ -11092,10 +11395,19 @@ int main(int argc, char **argv) {
     SDL_SetRenderVSync(A.ren, any_selftest || A.screenshot ? 0 : 1);
     g_ren = A.ren;
     dragout_init(); // (after the renderer: SDL may make the window again for it)
+    if (getenv("FE_SHADOW_DEBUG"))
+        fprintf(stderr, "shadow: driver %s, renderer %s, alpha %d, shadow %d\n", SDL_GetCurrentVideoDriver(), SDL_GetRendererName(A.ren), A.win_alpha, A.win_shadow);
+    if (A.win_x11 && A.win_alpha) { // (after the renderer: OpenGL recreates the X11 window)
+        const char *rn = SDL_GetRendererName(A.ren);
+        if (!rn || strncmp(rn, "opengl", 6)) A.win_alpha = A.win_shadow = false; // no alpha: square, no shadow
+        else x11_window_init();
+    }
     SDL_GetWindowSize(A.win, &A.shadow_req_w, &A.shadow_req_h);
     A.cur_default = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
     A.cur_ew = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
     A.cur_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
+    A.cur_nwse = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NWSE_RESIZE);
+    A.cur_nesw = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NESW_RESIZE);
     A.cur_hand = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
     A.cur_text = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT);
     window_size_update();
@@ -11103,6 +11415,11 @@ int main(int argc, char **argv) {
     if (A.dpi_scale <= 0) A.dpi_scale = 1;
     A.cur_grab = cursor_grabbing(); // (after the scale: a sharp image on scaled screens)
     A.scale = A.dpi_scale * A.zoom;
+    if (x11_late_show) {
+        window_size_update(); // (the margin on X11 goes by the display scale)
+        shadow_surface_apply();
+        SDL_ShowWindow(A.win);
+    }
 
     if (!atlas_init(A.ren)) { fprintf(stderr, "font atlas init failed\n"); return 1; }
     A.font_path = A.ui_font[0] ? font_family_file(A.ui_font) : NULL;
@@ -11254,7 +11571,7 @@ int main(int argc, char **argv) {
         hold_ms = hold ? (int)(hold / 1000000) + 1 : 0;
         if (hold) continue; // keeps A.redraw too
         frame();
-        A.redraw = false;
+        A.redraw = g_x11.sync_pending != 0; // (X11: the window manager waits for a frame at the new size)
     }
     ipc_shutdown();
     dragout_shutdown();

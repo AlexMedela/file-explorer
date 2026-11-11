@@ -20,8 +20,9 @@ the empty strip or the logo to move, double-click it to maximise, right-click fo
 `system` leaves the title bar to the desktop (on a tiling compositor: no buttons at all).
 `FE_TITLE_BAR=app|system` overrides it for one run.
 `round_corners=1` (Options -> Appearance -> Rounded corners) rounds the window's corners with Explorer's own title bar,
-and on Wayland draws a drop shadow round it the way GTK apps do (square and without shadow when maximised). Turning it
-on takes a restart. `FE_SQUARE_CORNERS=1` / `FE_NO_SHADOW=1` turn the corners / the shadow off for one run.
+and draws a drop shadow round it the way GTK apps do (square and without shadow when maximised or snapped). On X11 this
+needs a compositor (else the corners stay square) and the OpenGL renderer (Automatic picks it there); the shadow needs a
+window manager that reads `_GTK_FRAME_EXTENTS` (mutter, KWin, xfwm4 and others). Turning it on takes a restart. `FE_SQUARE_CORNERS=1` / `FE_NO_SHADOW=1` turn the corners / the shadow off for one run.
 
 **Dropping files** (Options > Behaviour > Mouse): a drop moves (copies onto another drive or from another app) unless
 Ctrl / Shift / Ctrl+Shift say copy / move / link. `drop_ask=1` ("Ask what to do when dropping files") opens a menu

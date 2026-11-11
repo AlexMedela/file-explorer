@@ -71,13 +71,27 @@ static SDL_Cursor *cursor_grabbing(void) {
     return c;
 }
 
+// Over the window's resize edges (our own title bar), their resize pointer: SDL shows it on X11 only when the edge
+// under the mouse changes, so ours would replace it.
+static int cursor_edge(void) {
+    if (!A.csd || !A.mouse_in || A.drag != DRAG_NONE || A.menu.open || A.dlg.open) return 0;
+    switch (window_edge_at(A.mx, A.my)) {
+    case SDL_HITTEST_RESIZE_TOPLEFT: case SDL_HITTEST_RESIZE_BOTTOMRIGHT: return 6;
+    case SDL_HITTEST_RESIZE_TOPRIGHT: case SDL_HITTEST_RESIZE_BOTTOMLEFT: return 7;
+    case SDL_HITTEST_RESIZE_LEFT: case SDL_HITTEST_RESIZE_RIGHT: return 1;
+    case SDL_HITTEST_RESIZE_TOP: case SDL_HITTEST_RESIZE_BOTTOM: return 2;
+    default: return 0;
+    }
+}
+
 static void cursor_apply(void) {
     // dragging items, a tab or a sidebar place: the grabbing hand from the start (not only once it leaves the window)
     bool grab = A.cur_grab && (A.drag == DRAG_ITEMS || A.drag == DRAG_TAB || A.drag == DRAG_PLACE);
-    int want = A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_hand ? 3 : A.ptr_text ? 4 : 0;
+    int edge = cursor_edge();
+    int want = edge ? edge : A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_hand ? 3 : A.ptr_text ? 4 : 0;
     if (want == A.cursor_shown) return;
     A.cursor_shown = want;
-    SDL_Cursor *c[] = {A.cur_default, A.cur_ew, A.cur_ns, A.cur_hand, A.cur_text, A.cur_grab};
+    SDL_Cursor *c[] = {A.cur_default, A.cur_ew, A.cur_ns, A.cur_hand, A.cur_text, A.cur_grab, A.cur_nwse, A.cur_nesw};
     SDL_SetCursor(c[want]);
 }
 
