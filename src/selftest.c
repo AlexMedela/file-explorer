@@ -736,6 +736,47 @@ static int run_selftest_ops(void) {
     rmdir(ST_BASE "/lnk");
     A.drop_ask = false;
 
+    // dragging out to other apps (dragout.c; no window system here): what's offered, which action - from the same
+    // keys and setting as a drop inside -, recognising our own drag dropped back onto this window
+    {
+        char *dp[2] = {ST_BASE "/a b.txt", ST_BASE "/c%d"};
+        dragout_data(dp, 2);
+        ST_CHECK(!strcmp(g_do.uri, "file://" ST_BASE "/a%20b.txt\r\nfile://" ST_BASE "/c%25d\r\n"));
+        ST_CHECK(!strcmp(g_do.plain, ST_BASE "/a b.txt\n" ST_BASE "/c%d"));
+        int offer, pref;
+        static const struct { SDL_Keymod mod; bool ask; int offer, pref; } want[] = {
+            {SDL_KMOD_NONE, false, DO_COPY | DO_MOVE, DO_MOVE}, {SDL_KMOD_NONE, true, DO_COPY | DO_MOVE | DO_LINK | DO_ASK, DO_ASK},
+            {SDL_KMOD_LCTRL, true, DO_COPY, DO_COPY}, {SDL_KMOD_LSHIFT, false, DO_MOVE, DO_MOVE},
+            {SDL_KMOD_LCTRL | SDL_KMOD_LSHIFT, false, DO_LINK | DO_COPY, DO_LINK},
+        };
+        for (size_t k = 0; k < ARRAY_COUNT(want); k++) {
+            SDL_SetModState(want[k].mod);
+            A.drop_ask = want[k].ask;
+            dragout_pick(&offer, &pref);
+            ST_CHECK(offer == want[k].offer && pref == want[k].pref);
+        }
+        SDL_SetModState(SDL_KMOD_NONE);
+        A.drop_ask = false;
+        g_do.sys = DOS_WAYLAND; // (pretend: only the bookkeeping is used)
+        g_do.active = true;
+        char *other[2] = {ST_BASE "/a b.txt", ST_BASE "/x"};
+        ST_CHECK(dragout_is_self(dp, 2) && !dragout_is_self(other, 2) && !dragout_is_self(dp, 1));
+        g_do.active = false;
+        g_do.t_end = now_ns() - 4000000000ull; // long over: a drop of the same files now comes from elsewhere
+        ST_CHECK(!dragout_is_self(dp, 2));
+        g_do.sys = DOS_NONE;
+        // no window system: an item dragged past the window's edge stays a drag inside
+        pane_refresh(p);
+        st_wait();
+        f32 ay2 = st_row_y(p, "a.txt");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, nx, ay2, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, nx + S(30), ay2, 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, -5, ay2, 0, 0, 0);
+        ST_CHECK(A.drag == DRAG_ITEMS && !g_do.active);
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        ST_CHECK(A.drag == DRAG_NONE && st_exists(ST_BASE "/a.txt"));
+    }
+
     // cancel a big copy: the partial file must be removed
     st_write(ST_BASE "/big.bin", 768u << 20);
     char *big[1] = {ST_BASE "/big.bin"};

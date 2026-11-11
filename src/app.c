@@ -6240,6 +6240,14 @@ static void menu_key(SDL_Keycode k) {
 
 // --- drag & drop -----------------------------------------------------------
 
+#include "dragout.c"
+
+// (dragout.c) a drag out to another app is over: so is the drag it came from
+static void dragout_ended(void) {
+    if (A.drag == DRAG_ITEMS) drag_cancel();
+    A.redraw = true;
+}
+
 static int place_at(f32 y) {
     for (int i = 0; i < A.nplaces; i++) {
         Rect r = place_rect(i);
@@ -10649,6 +10657,7 @@ int main(int argc, char **argv) {
     // (another workspace on Wayland) blocks in present forever.
     SDL_SetRenderVSync(A.ren, any_selftest || A.screenshot ? 0 : 1);
     g_ren = A.ren;
+    dragout_init(); // (after the renderer: SDL may make the window again for it)
     A.cur_default = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
     A.cur_ew = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
     A.cur_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
@@ -10790,6 +10799,7 @@ int main(int argc, char **argv) {
         if (g_recent_dirty && now_ns() - g_recent_saved > 5000000000ull) recent_save();
         if (A.settings_dirty && !A.screenshot && now_ns() - A.settings_saved > 3000000000ull) settings_save();
         term_tick();
+        dragout_tick();
         addon_tick();
         cloud_tick();
         git_tick();
@@ -10808,6 +10818,7 @@ int main(int argc, char **argv) {
         A.redraw = false;
     }
     ipc_shutdown();
+    dragout_shutdown();
     if (g_tray) { SDL_DestroyTray(g_tray); g_tray = NULL; }
     for (int i = 0; i < A.ntabs; i++) {
         if (A.tabs[i]->term) { term_free(A.tabs[i]->term); A.tabs[i]->term = NULL; }

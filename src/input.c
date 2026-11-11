@@ -82,7 +82,7 @@ static void on_key(SDL_KeyboardEvent *k) {
     if (A.pal_open) { pal_key(k->key, k->mod); return; }
     if (A.menu.open) { menu_key(k->key); return; }
     if (A.q_open && !A.ren_pane && !A.search_pane && !A.edit_pane && A.qa_edit_g < 0 && !active_term() && queue_key(k->key, k->mod)) return;
-    if (A.drag != DRAG_NONE && k->key == SDLK_ESCAPE) { drag_cancel(); return; }
+    if (A.drag != DRAG_NONE && k->key == SDLK_ESCAPE) { dragout_cancel(); drag_cancel(); return; }
     if (!A.ren_pane && A.qa_edit_g < 0 && picker_key(k->key, k->mod)) return;
     if (active_term()) { // the terminal has the keyboard; the app keeps tab switching, closing and its menus
         Term *tt = active_term();
@@ -789,6 +789,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
 }
 
 static void on_mouse_up(void) {
+    if (dragout_owns_pointer()) return; // (Wayland) SDL lets go of the buttons when the compositor takes the drag
     if (A.term_mouse) { term_mouse_up(A.term_mouse, A.term_mouse_btn); A.term_mouse = NULL; return; }
     if (A.drag == DRAG_TAB) { tab_drop_apply(); return; }
     if (A.drag == DRAG_PLACE || A.drag == DRAG_PLACE_PENDING) {
@@ -824,6 +825,7 @@ static void on_mouse_up(void) {
         return;
     }
     Pane *p = A.drag_pane;
+    if (A.drag == DRAG_ITEMS && dragout_release()) { drag_cancel(); return; } // (X11) dropped on another app
     if (A.drag == DRAG_ITEMS && p && pane_exists(p) && (A.drop_split_panel || A.drop_newtab)) { // folders: open them
         Panel *pn = A.drop_split_panel ? A.drop_split_panel : A.drop_newtab;
         int n, zone = A.drop_split_panel ? A.drop_split : -1;
@@ -912,6 +914,13 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
         }
     } else if (A.drag == DRAG_ITEMS && p) {
         drop_target(p, m->x, m->y);
+        if (g_do.active) dragout_motion();
+        else if ((m->x <= 0 || m->y <= 0 || m->x >= A.W - 1 || m->y >= A.H - 1) && !pane_is_archive(p)) { // out of the window: to other apps
+            int n;
+            char **paths = pane_selection_paths(p, &n);
+            dragout_start(p, paths, n);
+            strv_free(paths, n);
+        }
     } else if (A.drag == DRAG_PLACE_PENDING || A.drag == DRAG_PLACE) {
         if (A.drag == DRAG_PLACE_PENDING && fabsf(m->y - A.band_my0) > S(6)) A.drag = DRAG_PLACE;
         if (A.drag == DRAG_PLACE) qa_drop_point(m->y, &A.qa_ins_g, &A.qa_ins_i);
@@ -1131,8 +1140,33 @@ static void handle_event(SDL_Event *e) {
     case SDL_EVENT_DROP_POSITION:
         A.ext_x = e->drop.x;
         A.ext_y = e->drop.y;
+        if (dragout_owns_pointer() && A.drag == DRAG_ITEMS && A.drag_pane && pane_exists(A.drag_pane)) { // ours, back over us
+            g_do.over_self = true;
+            A.mx = e->drop.x;
+            A.my = e->drop.y;
+            drop_target(A.drag_pane, e->drop.x, e->drop.y);
+            A.redraw = true;
+        }
         break;
     case SDL_EVENT_DROP_COMPLETE:
+        g_do.over_self = false;
+        if (A.next_drop && dragout_is_self(A.ext_drop, A.next_drop)) { // our own drag dropped back here: a drop inside
+            Pane *sp = g_do.src && pane_exists(g_do.src) ? g_do.src : NULL;
+            dragout_forget();
+            strv_free(A.ext_drop, A.next_drop);
+            A.ext_drop = NULL;
+            A.next_drop = 0;
+            if (sp) {
+                A.drag = DRAG_ITEMS;
+                A.drag_pane = sp;
+                A.mx = A.ext_x;
+                A.my = A.ext_y;
+                drop_target(sp, A.ext_x, A.ext_y);
+                on_mouse_up();
+            }
+            A.redraw = true;
+            break;
+        }
         if (A.next_drop) drop_target(NULL, A.ext_x, A.ext_y);
         if (A.next_drop && A.drop_qa >= 0 && A.drop_qa < A.nqa) {
             qa_pin_paths(A.ext_drop, A.next_drop, A.drop_qa);

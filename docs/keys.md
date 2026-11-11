@@ -41,6 +41,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Right-click, Menu key, Shift+F10 | Context menu |
 | Drag a file by its name | Move onto a folder, pane, or sidebar place (Ctrl = copy, Shift = move, Ctrl+Shift = link; other drives copy by default); several selected items drag together, grabbed anywhere on a selected row. With Options > Behaviour > "Ask what to do when dropping", a drop without Ctrl/Shift opens Move / Copy / Link here |
 | Drag folders by their name | Onto a panel edge (top, bottom, left, right) = open them in a new split there (snap overlay); onto the empty part of a tab bar = open them as new tabs |
+| Drag files out of the window | Into other apps: a browser or chat upload, an editor, a terminal, another file manager (which moves or copies by the same keys and "Ask what to do when dropping" setting; Ctrl+Shift = link). Bring them back over the window and it's a drop inside again. X11 and Wayland |
 | Drop files from other apps | Copy into the folder under the cursor (Shift = move, Ctrl+Shift = link; or the drop menu, see above) |
 | Ctrl+P | Go to anything: fuzzy match over every folder and file under ~ and mounts (hidden ones skipped), recent folders, places, tabs. Enter on a file shows it in its folder, Ctrl+Enter opens it |
 | Ctrl+Shift+P (or type `>`) | Command palette |

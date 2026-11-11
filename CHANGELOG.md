@@ -3,6 +3,7 @@
 ## Unreleased
 
 **New**
+- Drag files out of the window into other apps: upload in a browser or chat app, open in an editor, drop into another file manager (move / copy / link by the same keys and drop setting). Works on Wayland and X11.
 - Terminal panel (F4), like Dolphin's: a shell under the folder, one per tab, that follows the folder both ways - open a folder and the shell goes there (quietly in bash, zsh and fish: the prompt just updates, nothing is typed), `cd` in the shell and the folder follows. Ctrl+Shift+F4 moves the keyboard between them; drag the line above it to resize; tabs that had it open get it back after a restart. Terminal tabs moved to Shift+F4.
 - Dropping files can ask what to do: turn on Options > Behaviour > "Ask what to do when dropping files" for a Move / Copy / Link here menu after each drop. Ctrl+Shift while dropping makes links.
 - Options > Updates: the version, how this copy updates, and "Check now". The AppImage updates itself: a card offers a new version once, "Update now" downloads and checks it, "Restart now" switches to it (or turn on downloading by itself).

@@ -2967,6 +2967,7 @@ static void draw_menu(void) {
 
 static void draw_drag_badge(void) {
     if (A.drag != DRAG_ITEMS || !A.drag_pane) return;
+    if (dragout_owns_pointer() && !g_do.over_self) return; // out in another app: the compositor shows the drag
     Pane *p = A.drag_pane;
     Font *f = &A.font_small;
     char buf[NAME_MAX + 96];
