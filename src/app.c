@@ -626,6 +626,7 @@ static struct {
     bool win_shadow;    // ...and draws its own drop shadow in a margin round the window (Wayland)
     int shadow_px;      // that margin now, in pixels (0: maximised, system title bar...); A.W / A.H exclude it
     int shadow_req_w, shadow_req_h; // the window size we last asked for (to tell the compositor's sizes apart)
+    bool win_tiled;     // snapped to a side (the compositor sizes it): square, no shadow, like tiled GTK windows
     char ig_prev_fm[256]; // integration.c: the folder handler before we became the default (put back when turned off)
     bool ig_fm1;          // answer "Show in folder" (org.freedesktop.FileManager1)
     bool ig_asked;        // the first-run "use for folders?" question was shown
@@ -1171,7 +1172,7 @@ static bool window_maximized(void) {
 // the four corners out with a quarter-circle mask. Only with our own title bar, and square when maximised or full
 // screen. Radius in pixels, 0 = square.
 static f32 window_corner_radius(void) {
-    if (!A.win_alpha || !A.round_corners || !A.csd || window_maximized()) return 0;
+    if (!A.win_alpha || !A.round_corners || !A.csd || A.win_tiled || window_maximized()) return 0;
     return roundf(12.f * A.dpi_scale);
 }
 
@@ -1231,10 +1232,10 @@ static void corners_mask(void) {
 // A.W / A.H and all layout stay the window's own size. SDL sets the window geometry itself (to the whole surface):
 // ours is sent before every present, after SDL's, so it's the one each commit applies.
 
-static int shadow_margin_log(void) { // in window (logical) units
-    if (!A.win_shadow || !A.round_corners || !A.csd || window_maximized()) return 0;
-    return 24;
-}
+#define SHADOW_MARGIN 24 // window (logical) units
+
+static bool shadow_wanted(void) { return A.win_shadow && A.round_corners && A.csd && !window_maximized(); }
+static int shadow_margin_log(void) { return shadow_wanted() && !A.win_tiled ? SHADOW_MARGIN : 0; }
 
 // A.W / A.H and the viewport from the window's size and whether it has a shadow now.
 static void window_size_update(void) {
@@ -1249,6 +1250,7 @@ static void window_size_update(void) {
 }
 
 // The compositor's sizes are for the window without its shadow; SDL makes the surface that size: add the margin.
+// (Not while tiled: there the window has no shadow and takes the compositor's size as it is.)
 static void shadow_on_resized(int w, int h) {
     int m = shadow_margin_log();
     if (!m || (w == A.shadow_req_w && h == A.shadow_req_h)) return;
@@ -1269,6 +1271,7 @@ static struct {
     void *(*create_queue)(void *);
     int (*roundtrip_queue)(void *, void *);
     void (*proxy_destroy)(void *);
+    const void *(*get_listener)(void *); // (optional: tiled detection)
     const void *compositor_if, *region_if, *registry_if;
     void *compositor; // our own wl_compositor (SDL doesn't share its): makes the input region
     u32 comp_name, comp_ver;
@@ -1295,6 +1298,7 @@ static bool wl_load(void) {
     *(void **)&g_wlwin.create_queue = dlsym(h, "wl_display_create_queue");
     *(void **)&g_wlwin.roundtrip_queue = dlsym(h, "wl_display_roundtrip_queue");
     *(void **)&g_wlwin.proxy_destroy = dlsym(h, "wl_proxy_destroy");
+    *(void **)&g_wlwin.get_listener = dlsym(h, "wl_proxy_get_listener");
     g_wlwin.compositor_if = dlsym(h, "wl_compositor_interface");
     g_wlwin.region_if = dlsym(h, "wl_region_interface");
     g_wlwin.registry_if = dlsym(h, "wl_registry_interface");
@@ -1318,10 +1322,46 @@ static bool wl_load(void) {
     return true;
 }
 
+// Snapped (tiled) windows: GTK squares them and drops the shadow, and so do we, but SDL reads the compositor's
+// tiled_* states without passing them on. So SDL's listener on the xdg_toplevel is swapped for a copy whose
+// configure notes the states and calls SDL's: every event still reaches SDL unchanged. libwayland has no call to
+// replace a listener; a proxy starts with its wl_object {interface, implementation, id}, so the slot is written
+// directly - only after checking it holds exactly what wl_proxy_get_listener returns (else: shadow while tiled).
+typedef struct { size_t size, alloc; void *data; } WlArray;
+typedef void (*TopConfigureFn)(void *, void *, i32, i32, WlArray *);
+static void (*g_top_sdl[4])(void), (*g_top_ours[4])(void); // configure, close, configure_bounds, wm_capabilities
+static void *g_top_hooked;
+
+static void toplevel_configure(void *data, void *top, i32 w, i32 h, WlArray *states) {
+    bool tiled = false;
+    for (size_t i = 0; states && i + sizeof(u32) <= states->size; i += sizeof(u32)) {
+        u32 st = *(u32 *)((char *)states->data + i);
+        if (st >= 5 && st <= 8) tiled = true; // XDG_TOPLEVEL_STATE_TILED_LEFT / RIGHT / TOP / BOTTOM
+    }
+    if (getenv("FE_SHADOW_DEBUG")) fprintf(stderr, "shadow: configure %dx%d%s\n", w, h, tiled ? " tiled" : "");
+    if (tiled != A.win_tiled) { A.win_tiled = tiled; A.redraw = true; }
+    ((TopConfigureFn)g_top_sdl[0])(data, top, w, h, states);
+}
+
+static void toplevel_hook(void) {
+    if (!g_wlwin.get_listener) return;
+    void *top = SDL_GetPointerProperty(SDL_GetWindowProperties(A.win), SDL_PROP_WINDOW_WAYLAND_XDG_TOPLEVEL_POINTER, NULL);
+    if (!top || top == g_top_hooked) return; // (SDL makes a new toplevel each time the window is shown again)
+    g_top_hooked = top;
+    const void *cur = g_wlwin.get_listener(top);
+    void **slot = (void **)((char *)top + sizeof(void *));
+    if (!cur || cur == (const void *)g_top_ours || *slot != cur) return;
+    memcpy(g_top_sdl, cur, sizeof g_top_sdl);
+    g_top_ours[0] = (void (*)(void))toplevel_configure;
+    for (int i = 1; i < 4; i++) g_top_ours[i] = g_top_sdl[i];
+    *slot = (void *)g_top_ours;
+}
+
 // Before each present: the window geometry (the window without its shadow) and the input region (the window plus
 // the resize band: clicks further out in the shadow go to whatever is underneath).
 static void shadow_surface_apply(void) {
     if (!A.win_shadow || !wl_load()) return;
+    toplevel_hook();
     SDL_PropertiesID props = SDL_GetWindowProperties(A.win);
     void *xs = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_XDG_SURFACE_POINTER, NULL);
     void *surf = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, NULL);
