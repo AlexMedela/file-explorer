@@ -7,6 +7,8 @@
 // An item drag becomes one when the pointer leaves the window. Offered: the files as text/uri-list and their paths
 // as plain text on X11 (terminals, text fields). Actions follow the drop settings (dragout_pick).
 
+#include <sys/mman.h> // memfd_create, mmap (the drag icon)
+
 enum { DO_COPY = 1, DO_MOVE = 2, DO_ASK = 4, DO_LINK = 8 };
 enum { DOS_NONE, DOS_X11, DOS_WAYLAND };
 
@@ -24,6 +26,7 @@ static struct {
 } g_do = {.mtx = PTHREAD_MUTEX_INITIALIZER};
 
 static void dragout_ended(void); // app side: the drag is over (dropped elsewhere or cancelled)
+static u32 *drag_badge_pixels(bool square, int *w, int *h); // render.c: the card shown next to the pointer
 
 // What the target may do, from the same keys and setting as a drop inside: Ctrl copy, Shift move, Ctrl+Shift link,
 // else the "ask" setting, else move (the target, which knows its own folder, may still pick copy - other drives).
@@ -78,7 +81,12 @@ typedef struct { int type; unsigned long serial; int send_event; void *display; 
 typedef struct { int type; unsigned long serial; int send_event; void *display; unsigned long owner, requestor, selection, target, property, time; } DoXSelReq;
 typedef struct { int type; unsigned long serial; int send_event; void *display; unsigned long requestor, selection, target, property, time; } DoXSelNotify;
 typedef union { int type; DoXClient cm; DoXSelReq sr; DoXSelNotify sn; long pad[24]; } DoXEvent;
-enum { X_SELECTION_REQUEST = 30, X_SELECTION_NOTIFY = 31, X_CLIENT_MESSAGE = 33, X_ATOM = 4, X_STRING = 31 };
+typedef struct { unsigned long background_pixmap, background_pixel, border_pixmap, border_pixel; int bit_gravity, win_gravity, backing_store;
+                 unsigned long backing_planes, backing_pixel; int save_under; long event_mask, do_not_propagate_mask; int override_redirect;
+                 unsigned long colormap, cursor; } DoXWinAttr; // XSetWindowAttributes
+enum { X_SELECTION_REQUEST = 30, X_SELECTION_NOTIFY = 31, X_CLIENT_MESSAGE = 33, X_EXPOSE = 12, X_ATOM = 4, X_STRING = 31 };
+enum { X_CW_BACKING_STORE = 1 << 6, X_CW_OVERRIDE_REDIRECT = 1 << 9, X_CW_SAVE_UNDER = 1 << 10, X_CW_EVENT_MASK = 1 << 11,
+       X_EXPOSURE_MASK = 1 << 15, X_ALWAYS = 2, X_ZPIXMAP = 2, X_INPUT_OUTPUT = 1 };
 
 static struct {
     void *dpy;
@@ -94,6 +102,24 @@ static struct {
     int (*flush)(void *);
     int (*query)(void *, unsigned long, unsigned long *, unsigned long *, int *, int *, int *, int *, unsigned int *);
     unsigned long (*root_of)(void *);
+    // the card following the pointer outside the window (X11 has no drag image: a window of ours, like GTK's)
+    unsigned long (*create_window)(void *, unsigned long, int, int, unsigned int, unsigned int, unsigned int, int, unsigned int, void *,
+                                   unsigned long, DoXWinAttr *);
+    void *(*create_image)(void *, void *, unsigned int, int, int, char *, unsigned int, unsigned int, int, int);
+    int (*put_image)(void *, unsigned long, void *, void *, int, int, int, int, unsigned int, unsigned int);
+    void *(*default_gc)(void *, int);
+    void *(*default_visual)(void *, int);
+    int (*default_depth)(void *, int);
+    int (*default_screen)(void *);
+    int (*map_raised)(void *, unsigned long);
+    int (*unmap)(void *, unsigned long);
+    int (*move)(void *, unsigned long, int, int);
+    int (*destroy_window)(void *, unsigned long);
+    unsigned long card;  // its window (0: none)
+    void *card_img;      // (XImage over card_px)
+    u32 *card_px;
+    int card_w, card_h;
+    bool card_shown;
     unsigned long a_aware, a_enter, a_position, a_status, a_leave, a_drop, a_finished, a_sel, a_typelist, a_actlist, a_actdesc;
     unsigned long a_copy, a_move, a_link, a_ask, a_uri, a_textutf8, a_utf8, a_text, a_targets;
     unsigned long target; // the XdndAware window under the pointer (0: none, or this window)
@@ -158,6 +184,57 @@ static void x_leave(void) {
     g_xd.accepted = g_xd.status_wait = g_xd.pos_pending = false;
 }
 
+static void x_card_paint(void) {
+    if (g_xd.card && g_xd.card_img) {
+        int scr = g_xd.default_screen(g_xd.dpy);
+        g_xd.put_image(g_xd.dpy, g_xd.card, g_xd.default_gc(g_xd.dpy, scr), g_xd.card_img, 0, 0, 0, 0, (unsigned)g_xd.card_w, (unsigned)g_xd.card_h);
+    }
+}
+
+static void x_card_make(void) {
+    if (!g_xd.create_window || g_xd.card) return;
+    g_xd.card_px = drag_badge_pixels(true, &g_xd.card_w, &g_xd.card_h);
+    if (!g_xd.card_px) return;
+    int scr = g_xd.default_screen(g_xd.dpy);
+    if (g_xd.default_depth(g_xd.dpy, scr) < 24) { free(g_xd.card_px); g_xd.card_px = NULL; return; } // (32-bit pixels only)
+    DoXWinAttr at;
+    memset(&at, 0, sizeof at);
+    at.override_redirect = 1; // no window manager: no frame, no focus, it just floats
+    at.save_under = 1;
+    at.backing_store = X_ALWAYS;
+    at.event_mask = X_EXPOSURE_MASK;
+    g_xd.card = g_xd.create_window(g_xd.dpy, g_xd.root, -10000, -10000, (unsigned)g_xd.card_w, (unsigned)g_xd.card_h, 0, 0, X_INPUT_OUTPUT, NULL,
+                                   X_CW_OVERRIDE_REDIRECT | X_CW_SAVE_UNDER | X_CW_BACKING_STORE | X_CW_EVENT_MASK, &at);
+    g_xd.card_img = g_xd.create_image(g_xd.dpy, g_xd.default_visual(g_xd.dpy, scr), (unsigned)g_xd.default_depth(g_xd.dpy, scr), X_ZPIXMAP, 0,
+                                      (char *)g_xd.card_px, (unsigned)g_xd.card_w, (unsigned)g_xd.card_h, 32, 0);
+    g_xd.card_shown = false;
+}
+
+static void x_card_free(void) {
+    if (g_xd.card) g_xd.destroy_window(g_xd.dpy, g_xd.card);
+    if (g_xd.card_img) g_xd.xfree(g_xd.card_img); // (the struct; its pixels are ours)
+    free(g_xd.card_px);
+    g_xd.card = 0;
+    g_xd.card_img = NULL;
+    g_xd.card_px = NULL;
+}
+
+// Show it next to the pointer outside the window (inside, the window draws its own).
+static void x_card_follow(bool outside) {
+    if (!g_xd.card) return;
+    if (!outside) {
+        if (g_xd.card_shown) g_xd.unmap(g_xd.dpy, g_xd.card);
+        g_xd.card_shown = false;
+        return;
+    }
+    g_xd.move(g_xd.dpy, g_xd.card, g_xd.rx + (int)roundf(S(18)), g_xd.ry + (int)roundf(S(20)));
+    if (!g_xd.card_shown) {
+        g_xd.map_raised(g_xd.dpy, g_xd.card);
+        x_card_paint();
+    }
+    g_xd.card_shown = true;
+}
+
 // Pointer moved during the drag: follow the window under it (this window itself: none - the drag inside goes on).
 static void x_motion(void) {
     unsigned long r = 0, c = 0;
@@ -166,6 +243,7 @@ static void x_motion(void) {
     if (!g_xd.query(g_xd.dpy, g_xd.root, &r, &c, &g_xd.rx, &g_xd.ry, &wx, &wy, &mask)) return;
     int ver = 0;
     unsigned long t = x_find_target(g_xd.rx, g_xd.ry, &ver);
+    x_card_follow(t != g_xd.win && !(A.mx >= 0 && A.my >= 0 && A.mx < A.W && A.my < A.H));
     if (t == g_xd.win || ver < 3) t = 0;
     if (t != g_xd.target) {
         x_leave();
@@ -181,6 +259,7 @@ static void x_motion(void) {
 }
 
 static void x_end(void) {
+    x_card_free();
     x_leave();
     g_xd.dropped = false;
     g_xd.flush(g_xd.dpy);
@@ -204,6 +283,7 @@ static bool SDLCALL x_hook(void *ud, XEvent *xe) {
             return false;
         }
     }
+    if (e->type == X_EXPOSE && g_xd.card && e->cm.window == g_xd.card) { x_card_paint(); return false; } // (window: same place)
     if (e->type == X_SELECTION_REQUEST && e->sr.selection == g_xd.a_sel && e->sr.owner == g_xd.win) {
         DoXEvent r;
         memset(&r, 0, sizeof r);
@@ -248,6 +328,20 @@ static bool x_init(void) {
     *(void **)&g_xd.flush = dlsym(l, "XFlush");
     *(void **)&g_xd.query = dlsym(l, "XQueryPointer");
     *(void **)&g_xd.root_of = dlsym(l, "XDefaultRootWindow");
+    *(void **)&g_xd.create_window = dlsym(l, "XCreateWindow");
+    *(void **)&g_xd.create_image = dlsym(l, "XCreateImage");
+    *(void **)&g_xd.put_image = dlsym(l, "XPutImage");
+    *(void **)&g_xd.default_gc = dlsym(l, "XDefaultGC");
+    *(void **)&g_xd.default_visual = dlsym(l, "XDefaultVisual");
+    *(void **)&g_xd.default_depth = dlsym(l, "XDefaultDepth");
+    *(void **)&g_xd.default_screen = dlsym(l, "XDefaultScreen");
+    *(void **)&g_xd.map_raised = dlsym(l, "XMapRaised");
+    *(void **)&g_xd.unmap = dlsym(l, "XUnmapWindow");
+    *(void **)&g_xd.move = dlsym(l, "XMoveWindow");
+    *(void **)&g_xd.destroy_window = dlsym(l, "XDestroyWindow");
+    if (!g_xd.create_image || !g_xd.put_image || !g_xd.default_gc || !g_xd.default_visual || !g_xd.default_depth || !g_xd.default_screen ||
+        !g_xd.map_raised || !g_xd.unmap || !g_xd.move || !g_xd.destroy_window)
+        g_xd.create_window = NULL; // (no card then)
     if (!g_xd.intern || !g_xd.change || !g_xd.set_owner || !g_xd.send || !g_xd.translate || !g_xd.getprop || !g_xd.xfree || !g_xd.flush ||
         !g_xd.query || !g_xd.root_of)
         return false;
@@ -280,12 +374,14 @@ static void x_start(void) {
     static const char desc[] = "Copy here\0Move here\0Link here";
     g_xd.change(g_xd.dpy, g_xd.win, g_xd.a_actlist, X_ATOM, 32, 0, (const unsigned char *)acts, 3);
     g_xd.change(g_xd.dpy, g_xd.win, g_xd.a_actdesc, X_STRING, 8, 0, (const unsigned char *)desc, (int)sizeof desc);
+    x_card_make();
     x_motion();
 }
 
 // Mouse button released: true if it was dropped on another app (else the drop is ours, or nothing: the drag inside
 // ends as usual, so this one just stops).
 static bool x_release(void) {
+    x_card_free();
     if (g_xd.target && g_xd.accepted) {
         x_msg(g_xd.target, g_xd.a_drop, (long)g_xd.win, 0, 0, 0, 0);
         g_xd.dropped = true;
@@ -307,6 +403,7 @@ static bool x_release(void) {
 
 static struct {
     void *dpy, *surface, *queue, *wrap, *registry, *seat, *ddm, *dd, *pointer, *src;
+    void *compositor, *shm, *icon, *icon_pool, *icon_buf; // the card the compositor shows next to the pointer
     _Atomic uint32_t press_serial;
     _Atomic int result; // (thread -> main) 1 dropped, 2 cancelled
     pthread_t thr;
@@ -326,6 +423,7 @@ static struct {
     int (*flush)(void *);
     int (*get_fd)(void *);
     const void *i_registry, *i_seat, *i_pointer, *i_ddm, *i_dd, *i_src, *i_offer;
+    const void *i_compositor, *i_shm, *i_pool, *i_buffer, *i_surface;
 } g_wl;
 
 #define W_DESTROY 1 // WL_MARSHAL_FLAG_DESTROY
@@ -366,6 +464,8 @@ static void w_global(void *d, void *reg, uint32_t name, const char *iface, uint3
         if (g_wl.seat) g_wl.add_listener(g_wl.seat, g_wl_seat_l, NULL); // (now: its capabilities come right away)
     }
     else if (!g_wl.ddm && !strcmp(iface, "wl_data_device_manager") && ver >= 3) g_wl.ddm = w_bind(name, g_wl.i_ddm, 3);
+    else if (!g_wl.compositor && !strcmp(iface, "wl_compositor") && g_wl.i_compositor) g_wl.compositor = w_bind(name, g_wl.i_compositor, MIN(ver, 4u));
+    else if (!g_wl.shm && !strcmp(iface, "wl_shm") && g_wl.i_shm) g_wl.shm = w_bind(name, g_wl.i_shm, 1);
 }
 static void w_global_remove(void *d, void *reg, uint32_t name) { (void)d; (void)reg; (void)name; }
 static void (*g_wl_registry_l[])(void) = {(void (*)(void))w_global, (void (*)(void))w_global_remove};
@@ -454,6 +554,12 @@ static bool w_init(void) {
     g_wl.i_dd = dlsym(l, "wl_data_device_interface");
     g_wl.i_src = dlsym(l, "wl_data_source_interface");
     g_wl.i_offer = dlsym(l, "wl_data_offer_interface");
+    g_wl.i_compositor = dlsym(l, "wl_compositor_interface"); // (the card: optional)
+    g_wl.i_shm = dlsym(l, "wl_shm_interface");
+    g_wl.i_pool = dlsym(l, "wl_shm_pool_interface");
+    g_wl.i_buffer = dlsym(l, "wl_buffer_interface");
+    g_wl.i_surface = dlsym(l, "wl_surface_interface");
+    if (!g_wl.i_pool || !g_wl.i_buffer || !g_wl.i_surface) g_wl.i_compositor = g_wl.i_shm = NULL;
     if (!g_wl.create_queue || !g_wl.create_wrapper || !g_wl.set_queue || !g_wl.marshal || !g_wl.add_listener || !g_wl.version ||
         !g_wl.destroy || !g_wl.roundtrip || !g_wl.dispatch_pending || !g_wl.prepare_read || !g_wl.read_events || !g_wl.cancel_read ||
         !g_wl.flush || !g_wl.get_fd || !g_wl.i_registry || !g_wl.i_seat || !g_wl.i_pointer || !g_wl.i_ddm || !g_wl.i_dd || !g_wl.i_src || !g_wl.i_offer)
@@ -480,6 +586,42 @@ static bool w_init(void) {
     return true;
 }
 
+// The card as the drag's icon: a surface of ours with the card's pixels in shared memory, a little below and right of
+// the pointer (where the window draws it inside). Whole pixels per logical one (buffer scale), so it's sharp.
+static void w_icon_make(void) {
+    if (!g_wl.compositor || !g_wl.shm || g_wl.icon) return;
+    int w, h;
+    u32 *px = drag_badge_pixels(false, &w, &h);
+    if (!px) return;
+    int bs = MAX(1, (int)floorf(A.dpi_scale + 0.01f));
+    size_t size = (size_t)w * (size_t)h * 4;
+    int fd = memfd_create("file-explorer-drag", MFD_CLOEXEC);
+    void *mem = fd >= 0 && ftruncate(fd, (off_t)size) == 0 ? mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) : MAP_FAILED;
+    if (mem != MAP_FAILED) {
+        memcpy(mem, px, size);
+        munmap(mem, size);
+        g_wl.icon_pool = g_wl.marshal(g_wl.shm, 0, g_wl.i_pool, g_wl.version(g_wl.shm), 0, NULL, fd, (int32_t)size); // create_pool
+        g_wl.icon_buf = g_wl.icon_pool ? g_wl.marshal(g_wl.icon_pool, 0, g_wl.i_buffer, g_wl.version(g_wl.icon_pool), 0, NULL, 0, w, h, w * 4,
+                                                      0 /* ARGB8888 */) : NULL;
+        g_wl.icon = g_wl.icon_buf ? g_wl.marshal(g_wl.compositor, 0, g_wl.i_surface, g_wl.version(g_wl.compositor), 0, NULL) : NULL;
+        if (g_wl.icon) {
+            uint32_t sv = g_wl.version(g_wl.icon);
+            if (sv >= 3) g_wl.marshal(g_wl.icon, 8, NULL, sv, 0, bs); // set_buffer_scale
+            g_wl.marshal(g_wl.icon, 1, NULL, sv, 0, g_wl.icon_buf, (int32_t)(roundf(S(18)) / bs), (int32_t)(roundf(S(20)) / bs)); // attach
+            g_wl.marshal(g_wl.icon, 2, NULL, sv, 0, 0, 0, w, h); // damage
+        }
+    }
+    if (fd >= 0) close(fd); // (the compositor has its own mapping)
+    free(px);
+}
+
+static void w_icon_free(void) {
+    if (g_wl.icon) g_wl.marshal(g_wl.icon, 0, NULL, g_wl.version(g_wl.icon), W_DESTROY);                     // wl_surface.destroy
+    if (g_wl.icon_buf) g_wl.marshal(g_wl.icon_buf, 0, NULL, g_wl.version(g_wl.icon_buf), W_DESTROY);         // wl_buffer.destroy
+    if (g_wl.icon_pool) g_wl.marshal(g_wl.icon_pool, 1, NULL, g_wl.version(g_wl.icon_pool), W_DESTROY);      // wl_shm_pool.destroy
+    g_wl.icon = g_wl.icon_buf = g_wl.icon_pool = NULL;
+}
+
 static bool w_start(void) {
     uint32_t serial = atomic_load(&g_wl.press_serial);
     void *surf = SDL_GetPointerProperty(SDL_GetWindowProperties(A.win), SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, NULL);
@@ -495,12 +637,15 @@ static bool w_start(void) {
     g_wl.marshal(g_wl.src, 0, NULL, v, 0, "text/uri-list");
     uint32_t acts = (g_do.offer & (DO_COPY | DO_LINK) ? 1u : 0u) | (g_do.offer & DO_MOVE ? 2u : 0u) | (g_do.offer & DO_ASK ? 4u : 0u);
     g_wl.marshal(g_wl.src, 2, NULL, v, 0, acts); // set_actions (there's no "link": a copy)
-    g_wl.marshal(g_wl.dd, 0, NULL, g_wl.version(g_wl.dd), 0, g_wl.src, g_wl.surface, NULL, serial); // start_drag
+    w_icon_make();
+    g_wl.marshal(g_wl.dd, 0, NULL, g_wl.version(g_wl.dd), 0, g_wl.src, g_wl.surface, g_wl.icon, serial); // start_drag
+    if (g_wl.icon) g_wl.marshal(g_wl.icon, 6, NULL, g_wl.version(g_wl.icon), 0); // commit (now that it's the drag's icon)
     g_wl.flush(g_wl.dpy);
     return true;
 }
 
 static void w_src_free(void) {
+    w_icon_free();
     if (!g_wl.src) return;
     g_wl.marshal(g_wl.src, 1, NULL, g_wl.version(g_wl.src), W_DESTROY); // wl_data_source.destroy
     g_wl.src = NULL;

@@ -2965,33 +2965,72 @@ static void draw_menu(void) {
     draw_clip_pop(cs);
 }
 
-static void draw_drag_badge(void) {
-    if (A.drag != DRAG_ITEMS || !A.drag_pane) return;
-    if (dragout_owns_pointer() && !g_do.over_self) return; // out in another app: the compositor shows the drag
-    Pane *p = A.drag_pane;
-    Font *f = &A.font_small;
-    char buf[NAME_MAX + 96];
-    u32 n = p->sel_count;
+// The card next to the pointer while dragging items: its text, and whether it's "strong" (there's a drop target).
+static bool drag_badge_text(char *buf, size_t cap) {
+    u32 n = A.drag_pane ? A.drag_pane->sel_count : 0;
     bool open = A.drop_split_panel || A.drop_newtab;
     if (open) {
-        snprintf(buf, sizeof buf, "Open %u folder%s in a new %s", n, n == 1 ? "" : "s",
-                 A.drop_split_panel ? "panel" : n == 1 ? "tab" : "tabs");
+        snprintf(buf, cap, "Open %u folder%s in a new %s", n, n == 1 ? "" : "s", A.drop_split_panel ? "panel" : n == 1 ? "tab" : "tabs");
     } else if (A.drop_dir[0]) {
         const char *to = A.drop_dir[1] ? path_basename(A.drop_dir) : "/";
-        if (drop_asks()) snprintf(buf, sizeof buf, "%u item%s to %s\xE2\x80\xA6", n, n == 1 ? "" : "s", to); // a menu asks on release
-        else snprintf(buf, sizeof buf, "%s %u item%s to %s", A.drop_link ? "Link" : A.drop_copy ? "Copy" : "Move", n,
-                      n == 1 ? "" : "s", to);
+        if (drop_asks()) snprintf(buf, cap, "%u item%s to %s\xE2\x80\xA6", n, n == 1 ? "" : "s", to); // a menu asks on release
+        else snprintf(buf, cap, "%s %u item%s to %s", A.drop_link ? "Link" : A.drop_copy ? "Copy" : "Move", n, n == 1 ? "" : "s", to);
     } else {
-        snprintf(buf, sizeof buf, "%u item%s", n, n == 1 ? "" : "s");
+        snprintf(buf, cap, "%u item%s", n, n == 1 ? "" : "s");
     }
+    return A.drop_dir[0] || open;
+}
+
+static f32 drag_badge_w(const char *buf) { return text_width(&A.font_small, buf, (int)strlen(buf)) + S(42); }
+
+// square: no rounded corners or shadow (X11's card outside the window is a plain window: no transparency)
+static void drag_badge_paint(f32 x, f32 y, const char *buf, bool strong, bool square) {
+    Font *f = &A.font_small;
     int len = (int)strlen(buf);
-    f32 w = text_width(f, buf, len) + S(42), h = roundf(S(28));
-    f32 x = roundf(A.mx + S(18)), y = roundf(A.my + S(20)); // clear of the row under the cursor
-    draw_rrect(x + S(1), y + S(3), w, h, S(7), CA(0x000000, 0.4f));
-    draw_rrect(x, y, w, h, S(7), C(A.drop_dir[0] || open ? COL_SEL_FOCUS : COL_CONTROL));
+    f32 w = drag_badge_w(buf), h = roundf(S(28)), r = square ? 0 : S(7);
+    if (!square) draw_rrect(x + S(1), y + S(3), w, h, r, CA(0x000000, 0.4f));
+    draw_rrect(x, y, w, h, r, C(strong ? COL_SEL_FOCUS : COL_CONTROL));
     f32 is = roundf(S(14));
     draw_file_icon(x + S(8), y + (h - is) * 0.5f, is, COL_ACCENT);
     draw_text(f, x + S(28), text_y(f, y, h), buf, len, C(COL_SEL_TEXT));
+}
+
+static void draw_drag_badge(void) {
+    if (A.drag != DRAG_ITEMS || !A.drag_pane) return;
+    if (dragout_owns_pointer()) return; // out with the compositor: it shows the card (dragout.c), over this window too
+    char buf[NAME_MAX + 96];
+    bool strong = drag_badge_text(buf, sizeof buf);
+    drag_badge_paint(roundf(A.mx + S(18)), roundf(A.my + S(20)), buf, strong, false); // clear of the row under the cursor
+}
+
+// The card as pixels (ARGB, premultiplied) for dragging out of the window: the compositor's drag icon (Wayland),
+// our own window following the pointer (X11, square). Drawn between frames into a texture and read back.
+static u32 *drag_badge_pixels(bool square, int *w, int *h) {
+    char buf[NAME_MAX + 96];
+    bool strong = drag_badge_text(buf, sizeof buf);
+    *w = (int)ceilf(drag_badge_w(buf) + (square ? 0 : S(2)));
+    *h = (int)ceilf(roundf(S(28)) + (square ? 0 : S(4)));
+    SDL_Texture *t = SDL_CreateTexture(A.ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, *w, *h);
+    if (!t) return NULL;
+    SDL_Texture *prev = SDL_GetRenderTarget(A.ren);
+    SDL_SetRenderTarget(A.ren, t);
+    SDL_SetRenderDrawColor(A.ren, 0, 0, 0, 0);
+    SDL_RenderClear(A.ren);
+    draw_clip(NULL);
+    g_alpha = 1.f;
+    drag_badge_paint(0, 0, buf, strong, square);
+    draw_flush();
+    SDL_Surface *s = SDL_RenderReadPixels(A.ren, NULL);
+    SDL_SetRenderTarget(A.ren, prev);
+    SDL_DestroyTexture(t);
+    SDL_Surface *c = s ? SDL_ConvertSurface(s, SDL_PIXELFORMAT_ARGB8888) : NULL;
+    SDL_DestroySurface(s);
+    if (!c) return NULL;
+    u32 *px = xmalloc((size_t)*w * (size_t)*h * 4);
+    for (int y = 0; y < *h && y < c->h; y++) memcpy(px + (size_t)y * (size_t)*w, (u8 *)c->pixels + (size_t)y * (size_t)c->pitch, (size_t)MIN(*w, c->w) * 4);
+    SDL_DestroySurface(c);
+    A.redraw = true;
+    return px;
 }
 
 static void draw_toast(void) {
