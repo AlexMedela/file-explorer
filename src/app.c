@@ -1257,27 +1257,90 @@ static void shadow_on_resized(int w, int h) {
     SDL_SetWindowSize(A.win, A.shadow_req_w, A.shadow_req_h);
 }
 
-static void *(*p_wl_proxy_marshal_flags)(void *, u32, const void *, u32, u32, ...);
-static u32 (*p_wl_proxy_get_version)(void *);
+// libwayland-client, already loaded by SDL (looked up at run time: no build dependency)
+static struct {
+    bool tried, ok;
+    void *(*marshal)(void *, u32, const void *, u32, u32, ...);
+    u32 (*version)(void *);
+    int (*add_listener)(void *, void (**)(void), void *);
+    void *(*create_wrapper)(void *);
+    void (*wrapper_destroy)(void *);
+    void (*set_queue)(void *, void *);
+    void *(*create_queue)(void *);
+    int (*roundtrip_queue)(void *, void *);
+    void (*proxy_destroy)(void *);
+    const void *compositor_if, *region_if, *registry_if;
+    void *compositor; // our own wl_compositor (SDL doesn't share its): makes the input region
+    u32 comp_name, comp_ver;
+    int in[4]; // input region last sent (x, y, w, h; w < 0: none = the whole surface)
+} g_wlwin = {.in = {0, 0, -1, -1}};
 
-static void shadow_geometry_apply(void) {
-    if (!A.win_shadow) return;
-    static bool tried;
-    if (!tried) { // (libwayland-client is already loaded by SDL: no build dependency)
-        tried = true;
-        void *h = dlopen("libwayland-client.so.0", RTLD_NOW | RTLD_NOLOAD);
-        if (h) {
-            *(void **)&p_wl_proxy_marshal_flags = dlsym(h, "wl_proxy_marshal_flags");
-            *(void **)&p_wl_proxy_get_version = dlsym(h, "wl_proxy_get_version");
-        }
-    }
-    if (!p_wl_proxy_marshal_flags || !p_wl_proxy_get_version) return;
-    void *xs = SDL_GetPointerProperty(SDL_GetWindowProperties(A.win), SDL_PROP_WINDOW_WAYLAND_XDG_SURFACE_POINTER, NULL);
-    if (!xs) return;
+static void wl_on_global(void *ud, void *reg, u32 name, const char *iface, u32 ver) {
+    (void)ud; (void)reg;
+    if (!strcmp(iface, "wl_compositor")) { g_wlwin.comp_name = name; g_wlwin.comp_ver = MIN(ver, 4u); }
+}
+static void wl_on_global_remove(void *ud, void *reg, u32 name) { (void)ud; (void)reg; (void)name; }
+
+static bool wl_load(void) {
+    if (g_wlwin.tried) return g_wlwin.ok;
+    g_wlwin.tried = true;
+    void *h = dlopen("libwayland-client.so.0", RTLD_NOW | RTLD_NOLOAD);
+    if (!h) return false;
+    *(void **)&g_wlwin.marshal = dlsym(h, "wl_proxy_marshal_flags");
+    *(void **)&g_wlwin.version = dlsym(h, "wl_proxy_get_version");
+    *(void **)&g_wlwin.add_listener = dlsym(h, "wl_proxy_add_listener");
+    *(void **)&g_wlwin.create_wrapper = dlsym(h, "wl_proxy_create_wrapper");
+    *(void **)&g_wlwin.wrapper_destroy = dlsym(h, "wl_proxy_wrapper_destroy");
+    *(void **)&g_wlwin.set_queue = dlsym(h, "wl_proxy_set_queue");
+    *(void **)&g_wlwin.create_queue = dlsym(h, "wl_display_create_queue");
+    *(void **)&g_wlwin.roundtrip_queue = dlsym(h, "wl_display_roundtrip_queue");
+    *(void **)&g_wlwin.proxy_destroy = dlsym(h, "wl_proxy_destroy");
+    g_wlwin.compositor_if = dlsym(h, "wl_compositor_interface");
+    g_wlwin.region_if = dlsym(h, "wl_region_interface");
+    g_wlwin.registry_if = dlsym(h, "wl_registry_interface");
+    g_wlwin.ok = g_wlwin.marshal && g_wlwin.version && g_wlwin.add_listener && g_wlwin.create_wrapper && g_wlwin.wrapper_destroy && g_wlwin.set_queue &&
+              g_wlwin.create_queue && g_wlwin.roundtrip_queue && g_wlwin.proxy_destroy && g_wlwin.compositor_if && g_wlwin.region_if && g_wlwin.registry_if;
+    if (!g_wlwin.ok) return false;
+    // a registry on a queue of our own (SDL never sees its events), one roundtrip to find the compositor
+    void *dpy = SDL_GetPointerProperty(SDL_GetWindowProperties(A.win), SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, NULL);
+    if (!dpy) return true;
+    void *q = g_wlwin.create_queue(dpy), *wrap = g_wlwin.create_wrapper(dpy);
+    if (!q || !wrap) return true;
+    g_wlwin.set_queue(wrap, q);
+    void *reg = g_wlwin.marshal(wrap, 1 /* wl_display.get_registry */, g_wlwin.registry_if, g_wlwin.version(wrap), 0, NULL);
+    g_wlwin.wrapper_destroy(wrap);
+    static void (*listener[2])(void) = {(void (*)(void))wl_on_global, (void (*)(void))wl_on_global_remove};
+    if (reg && !g_wlwin.add_listener(reg, listener, NULL) && g_wlwin.roundtrip_queue(dpy, q) >= 0 && g_wlwin.comp_name)
+        g_wlwin.compositor = g_wlwin.marshal(reg, 0 /* wl_registry.bind */, g_wlwin.compositor_if, g_wlwin.comp_ver, 0, g_wlwin.comp_name,
+                                       *(const char *const *)g_wlwin.compositor_if, g_wlwin.comp_ver, NULL);
+    if (reg) g_wlwin.proxy_destroy(reg);
+    // (the queue stays: the compositor lives on it, and has no events to dispatch)
+    return true;
+}
+
+// Before each present: the window geometry (the window without its shadow) and the input region (the window plus
+// the resize band: clicks further out in the shadow go to whatever is underneath).
+static void shadow_surface_apply(void) {
+    if (!A.win_shadow || !wl_load()) return;
+    SDL_PropertiesID props = SDL_GetWindowProperties(A.win);
+    void *xs = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_XDG_SURFACE_POINTER, NULL);
+    void *surf = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, NULL);
+    if (!xs || !surf) return;
     int w = 0, h = 0, m = A.shadow_px ? shadow_margin_log() : 0;
     SDL_GetWindowSize(A.win, &w, &h);
     if (w - 2 * m <= 0 || h - 2 * m <= 0) return;
-    p_wl_proxy_marshal_flags(xs, 3 /* xdg_surface.set_window_geometry */, NULL, p_wl_proxy_get_version(xs), 0, m, m, w - 2 * m, h - 2 * m);
+    g_wlwin.marshal(xs, 3 /* xdg_surface.set_window_geometry */, NULL, g_wlwin.version(xs), 0, m, m, w - 2 * m, h - 2 * m);
+    if (!g_wlwin.compositor) return;
+    int o = MIN(m, 10), in[4] = {m - o, m - o, w - 2 * (m - o), h - 2 * (m - o)}; // (o: the resize band, as in the hit test)
+    if (!m) in[0] = in[1] = 0, in[2] = in[3] = -1;
+    if (!memcmp(in, g_wlwin.in, sizeof in)) return;
+    memcpy(g_wlwin.in, in, sizeof in);
+    if (!m) { g_wlwin.marshal(surf, 5 /* wl_surface.set_input_region */, NULL, g_wlwin.version(surf), 0, NULL); return; }
+    void *rg = g_wlwin.marshal(g_wlwin.compositor, 1 /* wl_compositor.create_region */, g_wlwin.region_if, g_wlwin.version(g_wlwin.compositor), 0, NULL);
+    if (!rg) return;
+    g_wlwin.marshal(rg, 1 /* wl_region.add */, NULL, g_wlwin.version(rg), 0, in[0], in[1], in[2], in[3]);
+    g_wlwin.marshal(surf, 5 /* wl_surface.set_input_region */, NULL, g_wlwin.version(surf), 0, rg);
+    g_wlwin.marshal(rg, 0 /* wl_region.destroy */, NULL, g_wlwin.version(rg), 1 /* WL_MARSHAL_FLAG_DESTROY */);
 }
 
 // One channel of a separable Gaussian blur, in place (n x n).
@@ -10606,7 +10669,7 @@ static void frame(void) {
         A.shot_once[0] = 0;
     }
     rec_frame();
-    shadow_geometry_apply();
+    shadow_surface_apply();
     SDL_RenderPresent(A.ren);
     if (g_atlas_full) {
         atlas_reset();
