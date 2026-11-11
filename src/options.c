@@ -32,7 +32,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_LOAD_TIMES, "Load times", "How long the folder took to list, in the status bar"},
     {OC_APPEARANCE, OK_BOOL, OPT_SMOOTH, "Smooth scrolling", "Animate scrolling instead of jumping"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: Explorer's own on every desktop (Automatic), or the desktop's title bar (System)"},
-    {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners like other desktop apps, with Explorer's own title bar (turning on takes a restart)"},
+    {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Font, colours, padding and cursor of terminal tabs (F4)"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_NEW, "Create theme from current colours", "Writes a JSON scheme you can edit"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_FOLDER, "Themes folder", "Open the folder and reload theme files"},
