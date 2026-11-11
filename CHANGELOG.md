@@ -2,6 +2,9 @@
 
 ## 0.11.0
 
+**Changed**
+- The automatic renderer is OpenGL: resizing the window no longer lags behind the pointer, and fewer blinks. `renderer=vulkan` in the settings file brings Vulkan back (it can take less memory on Mesa).
+
 **New**
 - Starting File Explorer again from the app menu or a dock opens a new window instead of bringing the old one to the front (a window hidden in the tray still comes back). Folders opened from other apps still become tabs in the running window.
 - The card next to the pointer while dragging shows what you're dragging: up to three items with their icons and names, "+ N items" for the rest, and what the drop will do.

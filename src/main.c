@@ -4,7 +4,6 @@
 #include <regex.h>
 #include <dlfcn.h>
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <fontconfig/fontconfig.h>

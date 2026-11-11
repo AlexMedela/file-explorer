@@ -12,8 +12,8 @@ the previous file is kept as `settings.conf.bak` when that happens.
 palette). Remembers zoom, hidden files, folder sizes, search scope, sort order, preview panel, window size,
 pinned folders, columns, and your tabs/split panes (`restore_session=0` to start fresh). `transfers_at_once=1`
 (0 = all at once) and `verify_copies=0` are the transfer queue's settings. `renderer=auto` uses
-OpenGL (SDL's Vulkan renderer drops frames while the window is resized; it takes a little less memory on Mesa);
-`vulkan`/`opengl`/`software` force a backend.
+OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is resized; Vulkan can take less memory
+on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
 `title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling
 compositors included, so it looks the same everywhere: minimise / maximise / close at the end of the tab strip; drag
 the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.

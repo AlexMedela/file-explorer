@@ -10329,22 +10329,6 @@ static u64 nav_hold_ns(void) {
 
 // --- benchmark (headless) --------------------------------------------------
 
-// Is this a Vulkan renderer on Mesa's software rasterizer (lavapipe)? It draws on the CPU and presents with plain
-// image copies on X11 (blinking, tearing). Asked without Vulkan headers: deviceType is the 5th u32 of
-// VkPhysicalDeviceProperties, 4 = VK_PHYSICAL_DEVICE_TYPE_CPU.
-static bool vulkan_on_cpu(SDL_Renderer *ren) {
-    SDL_PropertiesID pr = SDL_GetRendererProperties(ren);
-    void *inst = SDL_GetPointerProperty(pr, SDL_PROP_RENDERER_VULKAN_INSTANCE_POINTER, NULL);
-    void *dev = SDL_GetPointerProperty(pr, SDL_PROP_RENDERER_VULKAN_PHYSICAL_DEVICE_POINTER, NULL);
-    void *(*gipa)(void *, const char *) = (void *(*)(void *, const char *))SDL_Vulkan_GetVkGetInstanceProcAddr();
-    if (!inst || !dev || !gipa) return false;
-    void (*props)(void *, void *) = (void (*)(void *, void *))gipa(inst, "vkGetPhysicalDeviceProperties");
-    if (!props) return false;
-    static u32 buf[1024]; // the struct is ~830 bytes
-    props(dev, buf);
-    return buf[4] == 4;
-}
-
 static int run_bench(const char *path, const char *query) {
 #ifdef __GLIBC__
     mallopt(M_ARENA_MAX, 2); // as in main()
