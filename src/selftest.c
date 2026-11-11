@@ -3639,6 +3639,8 @@ static int st_place_row(int kind, const char *label) {
     return -1;
 }
 static bool c_ipc_two(void) { return A.ipc_count >= 2; }
+static bool c_ipc_three(void) { return A.ipc_count >= 3; }
+static bool c_ipc_four(void) { return A.ipc_count >= 4; }
 
 static Tab *st_tab_at(const char *path) {
     for (int i = 0; i < A.ntabs; i++)
@@ -3683,6 +3685,17 @@ static int run_selftest_m10(void) {
     st_wait();
     ST_CHECK(A.npanels == 2 && !strcmp(active_pane()->path, M10_BASE "/a"));
     st_shot("m10-ipc");
+    // launched again without folders: a new window (in home), unless ours is hidden in the tray
+    A.last_opened[0] = 0;
+    ST_CHECK(ipc_send("raise\t1\n"));
+    ST_CHECK(st_wait_cond(c_ipc_three, 5000));
+    ST_CHECK(!strncmp(A.last_opened, "window:", 7));
+    A.last_opened[0] = 0;
+    SDL_HideWindow(A.win);
+    ST_CHECK(ipc_send("raise\t1\n"));
+    ST_CHECK(st_wait_cond(c_ipc_four, 5000));
+    ST_CHECK(!A.last_opened[0]);
+    SDL_ShowWindow(A.win);
     ipc_shutdown();
     ST_CHECK(!st_exists("/tmp/fe-m10-run/file-explorer.sock"));
     ST_CHECK(!ipc_send("raise\t1\n")); // nobody listening: a new launch would start its own window

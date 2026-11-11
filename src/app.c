@@ -10479,25 +10479,30 @@ static void restart_if_updated(const char *msg) {
 static void ipc_handle(char *msg) {
     if (getenv("FE_IPC_DEBUG")) fprintf(stderr, "IPC[%s]\n", msg);
     restart_if_updated(msg);
-    bool first = true;
+    bool first = true, paths = false;
     for (char *p = msg, *line; (line = strsep(&p, "\n"));) {
         char *tab = strchr(line, '\t');
         if (!tab) continue;
         *tab = 0;
         const char *arg = tab + 1;
-        if (!strcmp(line, "open")) { if (open_target(arg, false, first)) first = false; }
-        else if (!strcmp(line, "split")) open_target(arg, true, true);
+        if (!strcmp(line, "open")) { paths = true; if (open_target(arg, false, first)) first = false; }
+        else if (!strcmp(line, "split")) { paths = true; open_target(arg, true, true); }
         else if (!strcmp(line, "token")) setenv("XDG_ACTIVATION_TOKEN", arg, 1); // lets Wayland focus us
     }
     free(msg);
+    // Launched again without folders (launcher, dock): the user wants another window, like Ctrl+N in home. Unless ours
+    // is hidden (tray, started at login): then that one is what they're after. (The token goes along in environ.)
+    bool another = !paths && !(SDL_GetWindowFlags(A.win) & SDL_WINDOW_HIDDEN);
+    if (another) new_window(getenv("HOME") ? getenv("HOME") : "/");
     if (A.selftest) { A.ipc_count++; A.redraw = true; return; }
-    window_show(); // (also out of the tray)
+    if (!another) window_show(); // (also out of the tray)
 }
 
 static void usage(void) {
     printf("Usage: file-explorer [PATH|FILE|URI]... [--tab PATH]... [--split PATH] [--new-window] [--version]\n"
            "  Folders open as tabs, files open their folder with the file selected. If File Explorer is already\n"
-           "  running they open in that window (Options > Behaviour), unless --new-window / -n is given.\n"
+           "  running they open in that window (Options > Behaviour), unless --new-window / -n is given;\n"
+           "  launched again without paths, it opens a new window.\n"
            "       file-explorer --bench PATH            time listing a directory (headless)\n"
            "       file-explorer --screenshot OUT.bmp [PATH...]\n");
 }

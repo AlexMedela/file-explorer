@@ -16,6 +16,8 @@ On Arch, `cd packaging/arch && makepkg -si` builds a package from the checkout i
 ```
 Folders open as tabs; a file opens its folder with the file selected. If the app is already running, the
 paths open as tabs in that window (Options → Behaviour → "Open in the running window"), unless `--new-window`.
+Launching it again without paths (from the app menu or a dock) opens a new window, or brings back the one hidden in
+the tray.
 Build dependencies (pkg-config names): `sdl3` (3.2 or newer) `freetype2 harfbuzz fontconfig libarchive vterm` (libvterm 0.3+)
 `fuse3 openssl` (OpenSSL 3), plus gcc or clang. SDL 3.2 is the floor: Arch, Fedora 41+, Debian 13, Ubuntu 25.04+,
 openSUSE Tumbleweed; not Ubuntu 24.04 / Debian 12.

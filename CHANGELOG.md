@@ -3,6 +3,7 @@
 ## Unreleased
 
 **New**
+- Starting File Explorer again from the app menu or a dock opens a new window instead of bringing the old one to the front (a window hidden in the tray still comes back). Folders opened from other apps still become tabs in the running window.
 - The card next to the pointer while dragging shows what you're dragging: up to three items with their icons and names, "+ N items" for the rest, and what the drop will do.
 - The pointer turns into a grabbing hand as soon as you drag files, a tab or a sidebar place (from your cursor theme).
 - Drag files out of the window into other apps: upload in a browser or chat app, open in an editor, drop into another file manager (move / copy / link by the same keys and drop setting). Flatpak and Snap apps get the files through the desktop's document portal. The item card keeps following the pointer outside the window. Works on Wayland and X11.
@@ -16,6 +17,7 @@
 ## 0.10.1
 
 **New**
+- Starting File Explorer again from the app menu or a dock opens a new window instead of bringing the old one to the front (a window hidden in the tray still comes back). Folders opened from other apps still become tabs in the running window.
 - The file chooser shows the Cloud section too: open from or save to an rclone remote directly.
 - Tree view: right-click a folder to create a new folder or file inside it.
 - Persian, Arabic and Hebrew names read right to left with joined letters; Indic scripts and combining marks are shaped properly.
@@ -30,6 +32,7 @@
 - Views stay with the tab while browsing, and new tabs open in the default view. To get the old behaviour back (each folder keeps its own view), turn it on in Options.
 
 **New**
+- Starting File Explorer again from the app menu or a dock opens a new window instead of bringing the old one to the front (a window hidden in the tray still comes back). Folders opened from other apps still become tabs in the running window.
 - Paste a copied image (a screenshot, or "Copy image" in a browser) into the current folder as a new file.
 - Drag folders onto a panel edge to open them in a new split, or onto the empty part of a tab bar to open them as tabs.
 - Git status in SFTP folders and on sshfs mounts: git runs on the server over ssh. Connecting with a password or passphrase works without an ssh agent.
