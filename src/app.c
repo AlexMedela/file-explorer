@@ -7339,16 +7339,16 @@ static void git_sync_counts(Pane *p, int *ahead, int *behind) {
 // Ahead/behind as drawn arrows + counts, each a gap, an arrow as tall as the digits, the number: the font's arrows
 // are small and thin next to the digits. ty = text top (text_y); returns the width (draw false: only measure).
 static f32 git_sync_draw(Font *f, f32 x, f32 ty, int ahead, int behind, Color c, bool draw) {
-    f32 x0 = x, ch = roundf((f32)f->px * 0.7f), base = ty + roundf(f->ascent), top = base - ch;
+    f32 x0 = x, ch = ceilf((f32)f->px * 0.7f), base = ty + roundf(f->ascent), top = base - ch;
     f32 t = MAX(1.f, roundf(S(1.4f))), hw = roundf(ch * 0.36f); // stroke, head half-width
     int n[2] = {ahead, behind};
     for (int i = 0; i < 2; i++) {
         if (!n[i]) continue;
         x += roundf(S(7));
         if (draw) {
-            f32 cx = x + hw + ((int)t % 2 ? 0.5f : 0.f); // odd strokes on a pixel centre stay sharp
-            f32 tip = i ? base - t * 0.5f : top + t * 0.5f, tail = i ? top : base, d = i ? -hw : hw; // the tip's stroke stays inside
-            draw_line(cx, tail, cx, tip, t, c);
+            f32 cx = roundf(x + hw) + ((int)t % 2 ? 0.5f : 0.f); // odd strokes on a pixel centre stay sharp
+            f32 tip = i ? base - t * 0.5f : top + t * 0.5f, d = i ? -hw : hw; // the tip's stroke stays inside
+            draw_rect(cx - t * 0.5f, top, t, ch, c); // a rect, not a line: lines overshoot their ends, unevenly up and down
             draw_line(cx - hw, tip + d, cx, tip, t, c);
             draw_line(cx, tip, cx + hw, tip + d, t, c);
         }
