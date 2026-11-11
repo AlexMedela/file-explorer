@@ -23,10 +23,16 @@ static struct {
     char **paths;
     int n;
     u64 t_end;             // when the last one ended
+    bool pft_tried;        // the portal key for this drag (asked for the first time a target wants it)
+    char pft[256];
 } g_do = {.mtx = PTHREAD_MUTEX_INITIALIZER};
 
 static void dragout_ended(void); // app side: the drag is over (dropped elsewhere or cancelled)
 static u32 *drag_badge_pixels(bool square, int *w, int *h); // render.c: the card shown next to the pointer
+static void pft_probe(void);                                // integration.c: the documents portal's file transfer,
+static bool pft_available(void);                            // for sandboxed (Flatpak, Snap) targets
+static bool pft_key(char **paths, int n, char *key, size_t cap);
+#define PFT_MIME "application/vnd.portal.filetransfer"
 
 // What the target may do, from the same keys and setting as a drop inside: Ctrl copy, Shift move, Ctrl+Shift link,
 // else the "ask" setting, else move (the target, which knows its own folder, may still pick copy - other drives).
@@ -62,6 +68,19 @@ static void dragout_data(char **paths, int n) {
     strv_free(g_do.paths, g_do.n);
     g_do.paths = strv_dup(paths, n);
     g_do.n = n;
+    g_do.pft_tried = false;
+    g_do.pft[0] = 0;
+}
+
+// The portal key for this drag's files ("" if there's none), made the first time a target asks (any thread).
+static void dragout_pft(char *out, size_t cap) {
+    pthread_mutex_lock(&g_do.mtx);
+    if (!g_do.pft_tried) {
+        g_do.pft_tried = true;
+        if (!pft_key(g_do.paths, g_do.n, g_do.pft, sizeof g_do.pft)) g_do.pft[0] = 0;
+    }
+    snprintf(out, cap, "%s", g_do.pft);
+    pthread_mutex_unlock(&g_do.mtx);
 }
 
 static void dragout_finish(void) { // (main thread) the drag is over, whatever happened
@@ -121,7 +140,7 @@ static struct {
     int card_w, card_h;
     bool card_shown;
     unsigned long a_aware, a_enter, a_position, a_status, a_leave, a_drop, a_finished, a_sel, a_typelist, a_actlist, a_actdesc;
-    unsigned long a_copy, a_move, a_link, a_ask, a_uri, a_textutf8, a_utf8, a_text, a_targets;
+    unsigned long a_copy, a_move, a_link, a_ask, a_uri, a_textutf8, a_utf8, a_text, a_targets, a_pft;
     unsigned long target; // the XdndAware window under the pointer (0: none, or this window)
     int target_ver;
     bool status_wait, pos_pending, accepted, dropped;
@@ -297,10 +316,15 @@ static bool SDLCALL x_hook(void *ud, XEvent *xe) {
         r.sn.property = prop;
         pthread_mutex_lock(&g_do.mtx);
         if (e->sr.target == g_xd.a_targets) {
-            unsigned long t[5] = {g_xd.a_targets, g_xd.a_uri, g_xd.a_textutf8, g_xd.a_utf8, g_xd.a_text};
-            long tl[5];
-            for (int i = 0; i < 5; i++) tl[i] = (long)t[i];
-            g_xd.change(g_xd.dpy, e->sr.requestor, prop, X_ATOM, 32, 0, (const unsigned char *)tl, 5);
+            long tl[6] = {(long)g_xd.a_targets, (long)g_xd.a_uri, (long)g_xd.a_textutf8, (long)g_xd.a_utf8, (long)g_xd.a_text, (long)g_xd.a_pft};
+            g_xd.change(g_xd.dpy, e->sr.requestor, prop, X_ATOM, 32, 0, (const unsigned char *)tl, pft_available() ? 6 : 5);
+        } else if (e->sr.target == g_xd.a_pft && pft_available()) {
+            pthread_mutex_unlock(&g_do.mtx); // (dragout_pft takes it)
+            char key[256];
+            dragout_pft(key, sizeof key);
+            pthread_mutex_lock(&g_do.mtx);
+            if (key[0]) g_xd.change(g_xd.dpy, e->sr.requestor, prop, g_xd.a_pft, 8, 0, (const unsigned char *)key, (int)strlen(key) + 1);
+            else r.sn.property = 0;
         } else if (e->sr.target == g_xd.a_uri && g_do.uri) {
             g_xd.change(g_xd.dpy, e->sr.requestor, prop, g_xd.a_uri, 8, 0, (const unsigned char *)g_do.uri, (int)strlen(g_do.uri));
         } else if ((e->sr.target == g_xd.a_textutf8 || e->sr.target == g_xd.a_utf8 || e->sr.target == g_xd.a_text) && g_do.plain) {
@@ -356,7 +380,7 @@ static bool x_init(void) {
         {&g_xd.a_typelist, "XdndTypeList"}, {&g_xd.a_actlist, "XdndActionList"}, {&g_xd.a_actdesc, "XdndActionDescription"},
         {&g_xd.a_copy, "XdndActionCopy"}, {&g_xd.a_move, "XdndActionMove"}, {&g_xd.a_link, "XdndActionLink"},
         {&g_xd.a_ask, "XdndActionAsk"}, {&g_xd.a_uri, "text/uri-list"}, {&g_xd.a_textutf8, "text/plain;charset=utf-8"},
-        {&g_xd.a_utf8, "UTF8_STRING"}, {&g_xd.a_text, "text/plain"}, {&g_xd.a_targets, "TARGETS"},
+        {&g_xd.a_utf8, "UTF8_STRING"}, {&g_xd.a_text, "text/plain"}, {&g_xd.a_targets, "TARGETS"}, {&g_xd.a_pft, PFT_MIME},
     };
     for (size_t i = 0; i < ARRAY_COUNT(atoms); i++) *atoms[i].a = g_xd.intern(g_xd.dpy, atoms[i].name, 0);
     SDL_SetX11EventHook(x_hook, NULL);
@@ -368,8 +392,8 @@ static void x_start(void) {
     g_xd.target = 0;
     g_xd.dropped = g_xd.accepted = g_xd.status_wait = g_xd.pos_pending = false;
     g_xd.set_owner(g_xd.dpy, g_xd.a_sel, g_xd.win, 0);
-    long types[4] = {(long)g_xd.a_uri, (long)g_xd.a_textutf8, (long)g_xd.a_utf8, (long)g_xd.a_text};
-    g_xd.change(g_xd.dpy, g_xd.win, g_xd.a_typelist, X_ATOM, 32, 0, (const unsigned char *)types, 4);
+    long types[5] = {(long)g_xd.a_uri, (long)g_xd.a_textutf8, (long)g_xd.a_utf8, (long)g_xd.a_text, (long)g_xd.a_pft};
+    g_xd.change(g_xd.dpy, g_xd.win, g_xd.a_typelist, X_ATOM, 32, 0, (const unsigned char *)types, pft_available() ? 5 : 4);
     long acts[3] = {(long)g_xd.a_copy, (long)g_xd.a_move, (long)g_xd.a_link};
     static const char desc[] = "Copy here\0Move here\0Link here";
     g_xd.change(g_xd.dpy, g_xd.win, g_xd.a_actlist, X_ATOM, 32, 0, (const unsigned char *)acts, 3);
@@ -485,10 +509,20 @@ static void (*g_wl_dd_l[])(void) = {(void (*)(void))w_dd_offer, (void (*)(void))
 static void w_src_target(void *d, void *s, const char *mime) { (void)d; (void)s; (void)mime; }
 static void w_src_send(void *d, void *s, const char *mime, int32_t fd) {
     (void)d; (void)s;
-    pthread_mutex_lock(&g_do.mtx);
-    char *data = strdup(!strcmp(mime, "text/uri-list") ? (g_do.uri ? g_do.uri : "") : (g_do.plain ? g_do.plain : ""));
-    pthread_mutex_unlock(&g_do.mtx);
-    size_t len = strlen(data), o = 0;
+    char *data;
+    size_t len;
+    if (!strcmp(mime, PFT_MIME)) { // the portal key, with its NUL like GTK sends it
+        char key[256];
+        dragout_pft(key, sizeof key);
+        data = strdup(key);
+        len = key[0] ? strlen(key) + 1 : 0;
+    } else {
+        pthread_mutex_lock(&g_do.mtx);
+        data = strdup(!strcmp(mime, "text/uri-list") ? (g_do.uri ? g_do.uri : "") : (g_do.plain ? g_do.plain : ""));
+        pthread_mutex_unlock(&g_do.mtx);
+        len = strlen(data);
+    }
+    size_t o = 0;
     while (o < len) { // (SIGPIPE is blocked on this thread: a reader that went away is just EPIPE)
         ssize_t w = write(fd, data + o, len - o);
         if (w < 0 && errno == EINTR) continue;
@@ -635,6 +669,7 @@ static bool w_start(void) {
     // Only the file list: apps that take files (browsers, chat apps, editors, terminals) read it; and SDL (3.4), when
     // a drag also has text, reads the text yet parses it as URIs - a drop back onto this window would bring nothing.
     g_wl.marshal(g_wl.src, 0, NULL, v, 0, "text/uri-list");
+    if (pft_available()) g_wl.marshal(g_wl.src, 0, NULL, v, 0, PFT_MIME); // (sandboxed apps)
     uint32_t acts = (g_do.offer & (DO_COPY | DO_LINK) ? 1u : 0u) | (g_do.offer & DO_MOVE ? 2u : 0u) | (g_do.offer & DO_ASK ? 4u : 0u);
     g_wl.marshal(g_wl.src, 2, NULL, v, 0, acts); // set_actions (there's no "link": a copy)
     w_icon_make();
@@ -659,6 +694,7 @@ static void dragout_init(void) {
     if (A.selftest || A.screenshot) return;
     if (w_init()) g_do.sys = DOS_WAYLAND;
     else if (x_init()) g_do.sys = DOS_X11;
+    if (g_do.sys) pft_probe();
 }
 
 static void dragout_shutdown(void) {

@@ -1,7 +1,8 @@
 // integration.c - desktop roles, all opt-in (Options > Integration): the default file manager (inode/directory),
 // "Show in folder" from browsers and other apps (org.freedesktop.FileManager1 on the session bus) and the file
 // chooser of other apps (xdg-desktop-portal-termfilechooser). Installing never takes any of them; turning one off
-// puts back what was there. Also updates (Options > Updates). Included from app.c before ui_tools.c (the Options page uses it).
+// puts back what was there. Also updates (Options > Updates), and the documents portal's file transfer for dragging
+// files into sandboxed apps (dragout.c). Included from app.c before ui_tools.c (the Options page uses it).
 
 static Tab *open_target(const char *in, bool split, bool activate);
 static void open_path(const char *full);
@@ -281,6 +282,140 @@ static void ig_fm1_set(bool on) {
         unlink(svc);
         ig_fm1_stop();
     }
+}
+
+// --- dragging files into sandboxed apps (the documents portal's FileTransfer) ---------------------------------------
+// Flatpak and Snap apps mostly can't read a path from outside. So a drag out (dragout.c) also offers
+// "application/vnd.portal.filetransfer": a key for the files, handed to xdg-document-portal with their fds; the app
+// redeems it and gets exactly those files (GTK and Qt do the same). Apps outside a sandbox redeeming it get the real
+// paths back. A private connection of ours (any thread), only when the portal is there.
+
+static struct {
+    pthread_mutex_t mtx;
+    void *conn;
+    atomic_int ok; // the portal answers: -1 not known yet, 0 no, 1 yes
+    unsigned (*threads_init)(void);
+    void *(*new_call)(const char *, const char *, const char *, const char *);
+    void *(*call_block)(void *, void *, int, IgDBusError *);
+    void (*init_append)(void *, IgDBusIter *);
+    unsigned (*open_container)(IgDBusIter *, int, const char *, IgDBusIter *);
+    unsigned (*close_container)(IgDBusIter *, IgDBusIter *);
+    unsigned (*append_basic)(IgDBusIter *, int, const void *);
+    void (*set_exit)(void *, unsigned);
+} g_pft = {.mtx = PTHREAD_MUTEX_INITIALIZER, .ok = -1};
+
+#define PFT_DEST "org.freedesktop.portal.Documents"
+#define PFT_PATH "/org/freedesktop/portal/documents"
+#define PFT_IFACE "org.freedesktop.portal.FileTransfer"
+
+static bool pft_connect(void) { // (under mtx)
+    if (g_pft.conn) return true;
+    if (!ig_dbus_load()) return false;
+    void *l = g_fm1.lib;
+    *(void **)&g_pft.threads_init = dlsym(l, "dbus_threads_init_default");
+    *(void **)&g_pft.new_call = dlsym(l, "dbus_message_new_method_call");
+    *(void **)&g_pft.call_block = dlsym(l, "dbus_connection_send_with_reply_and_block");
+    *(void **)&g_pft.init_append = dlsym(l, "dbus_message_iter_init_append");
+    *(void **)&g_pft.open_container = dlsym(l, "dbus_message_iter_open_container");
+    *(void **)&g_pft.close_container = dlsym(l, "dbus_message_iter_close_container");
+    *(void **)&g_pft.append_basic = dlsym(l, "dbus_message_iter_append_basic");
+    *(void **)&g_pft.set_exit = dlsym(l, "dbus_connection_set_exit_on_disconnect");
+    if (!g_pft.threads_init || !g_pft.new_call || !g_pft.call_block || !g_pft.init_append || !g_pft.open_container ||
+        !g_pft.close_container || !g_pft.append_basic || !g_pft.set_exit)
+        return false;
+    g_pft.threads_init();
+    IgDBusError e;
+    g_fm1.error_init(&e);
+    g_pft.conn = g_fm1.bus_get_private(0 /* session */, &e);
+    g_fm1.error_free(&e);
+    if (g_pft.conn) g_pft.set_exit(g_pft.conn, 0); // (a bus that goes away must not take us with it)
+    return g_pft.conn != NULL;
+}
+
+// An empty a{sv} (options).
+static void pft_no_options(IgDBusIter *it) {
+    IgDBusIter d;
+    g_pft.open_container(it, 'a', "{sv}", &d);
+    g_pft.close_container(it, &d);
+}
+
+// Send msg (consumed), wait for the reply (NULL: failed). (under mtx)
+static void *pft_call(void *msg, int timeout_ms) {
+    IgDBusError e;
+    g_fm1.error_init(&e);
+    void *r = g_pft.call_block(g_pft.conn, msg, timeout_ms, &e);
+    g_fm1.error_free(&e);
+    g_fm1.message_unref(msg);
+    return r;
+}
+
+// Is the portal there (started on demand if it can be)? Asked once, off the main thread (dragout_init).
+static void *pft_probe_thread(void *arg) {
+    (void)arg;
+    pthread_mutex_lock(&g_pft.mtx);
+    bool ok = false;
+    if (pft_connect()) {
+        void *m = g_pft.new_call(PFT_DEST, PFT_PATH, "org.freedesktop.DBus.Peer", "Ping");
+        void *r = m ? pft_call(m, 3000) : NULL;
+        ok = r != NULL;
+        if (r) g_fm1.message_unref(r);
+    }
+    atomic_store(&g_pft.ok, ok);
+    pthread_mutex_unlock(&g_pft.mtx);
+    return NULL;
+}
+
+static void pft_probe(void) {
+    pthread_t t;
+    if (pthread_create(&t, NULL, pft_probe_thread, NULL) == 0) pthread_detach(t);
+}
+
+static bool pft_available(void) { return atomic_load(&g_pft.ok) == 1; }
+
+// A transfer key for these files (StartTransfer + AddFiles with their fds, 16 at a time like GTK); false if the
+// portal said no. Called when a target asks for it (any thread).
+static bool pft_key(char **paths, int n, char *key, size_t cap) {
+    if (!pft_available() || !n) return false;
+    pthread_mutex_lock(&g_pft.mtx);
+    bool ok = false;
+    key[0] = 0;
+    void *m = pft_connect() ? g_pft.new_call(PFT_DEST, PFT_PATH, PFT_IFACE, "StartTransfer") : NULL;
+    if (m) {
+        IgDBusIter it;
+        g_pft.init_append(m, &it);
+        pft_no_options(&it); // (autostop: the transfer ends once the files are taken)
+        void *r = pft_call(m, 3000);
+        IgDBusIter ri;
+        const char *k = NULL;
+        if (r && g_fm1.iter_init(r, &ri) && g_fm1.iter_get_arg_type(&ri) == 's') g_fm1.iter_get_basic(&ri, &k);
+        if (k) snprintf(key, cap, "%s", k);
+        if (r) g_fm1.message_unref(r);
+        ok = key[0] != 0;
+    }
+    for (int i = 0; ok && i < n; i += 16) {
+        void *am = g_pft.new_call(PFT_DEST, PFT_PATH, PFT_IFACE, "AddFiles");
+        if (!am) { ok = false; break; }
+        IgDBusIter it, arr;
+        g_pft.init_append(am, &it);
+        const char *kp = key;
+        g_pft.append_basic(&it, 's', &kp);
+        g_pft.open_container(&it, 'a', "h", &arr);
+        int fds[16], nf = 0;
+        for (int j = i; j < n && j < i + 16; j++) {
+            int fd = open(paths[j], O_PATH | O_CLOEXEC);
+            if (fd < 0) continue;
+            fds[nf++] = fd;
+            g_pft.append_basic(&arr, 'h', &fd); // (libdbus keeps its own copy)
+        }
+        g_pft.close_container(&it, &arr);
+        pft_no_options(&it);
+        void *r = pft_call(am, 3000);
+        ok = r != NULL;
+        if (r) g_fm1.message_unref(r);
+        for (int j = 0; j < nf; j++) close(fds[j]);
+    }
+    pthread_mutex_unlock(&g_pft.mtx);
+    return ok;
 }
 
 // --- file chooser of other apps (xdg-desktop-portal-termfilechooser) ----------------------------------------------
