@@ -43,7 +43,7 @@ static void settings_defaults(void) {
     A.sess_layout[0] = 0;
     A.dim_inactive = true;
     A.title_bar = TITLEBAR_AUTO;
-    A.round_corners = true;
+    A.round_corners = false;
     A.ig_prev_fm[0] = 0;
     A.ig_fm1 = A.ig_asked = false;
     A.ig_check_updates = true;
