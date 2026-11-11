@@ -1140,31 +1140,14 @@ static void handle_event(SDL_Event *e) {
     case SDL_EVENT_DROP_POSITION:
         A.ext_x = e->drop.x;
         A.ext_y = e->drop.y;
-        if (dragout_owns_pointer() && A.drag == DRAG_ITEMS && A.drag_pane && pane_exists(A.drag_pane)) { // ours, back over us
-            g_do.over_self = true;
-            A.mx = e->drop.x;
-            A.my = e->drop.y;
-            drop_target(A.drag_pane, e->drop.x, e->drop.y);
-            A.redraw = true;
-        }
+        if (dragout_owns_pointer()) dragout_self_at(W_SELF_OVER, e->drop.x, e->drop.y); // our own drag, back over us
         break;
     case SDL_EVENT_DROP_COMPLETE:
-        g_do.over_self = false;
-        if (A.next_drop && dragout_is_self(A.ext_drop, A.next_drop)) { // our own drag dropped back here: a drop inside
-            Pane *sp = g_do.src && pane_exists(g_do.src) ? g_do.src : NULL;
-            dragout_forget();
+        if (A.next_drop && dragout_is_self(A.ext_drop, A.next_drop)) { // our own drag dropped here: a drop inside (once)
+            dragout_self_at(W_SELF_DROP, A.ext_x, A.ext_y);
             strv_free(A.ext_drop, A.next_drop);
             A.ext_drop = NULL;
             A.next_drop = 0;
-            if (sp) {
-                A.drag = DRAG_ITEMS;
-                A.drag_pane = sp;
-                A.mx = A.ext_x;
-                A.my = A.ext_y;
-                drop_target(sp, A.ext_x, A.ext_y);
-                on_mouse_up();
-            }
-            A.redraw = true;
             break;
         }
         if (A.next_drop) drop_target(NULL, A.ext_x, A.ext_y);

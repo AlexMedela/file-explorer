@@ -20,14 +20,16 @@ static struct {
     char *uri, *plain;
     int offer, pref;       // DO_* offered / asked for
     Pane *src;             // where the items came from (a drop back onto this window is an internal one)
+    bool self_done;        // that drop happened (it's reported by our data device or SDL's, whichever the compositor
+                           // tells: only the first counts)
     char **paths;
     int n;
     u64 t_end;             // when the last one ended
-    bool pft_tried;        // the portal key for this drag (asked for the first time a target wants it)
-    char pft[256];
 } g_do = {.mtx = PTHREAD_MUTEX_INITIALIZER};
 
 static void dragout_ended(void); // app side: the drag is over (dropped elsewhere or cancelled)
+static void on_mouse_up(void);    // input.c (a drop back onto this window ends like a drag inside)
+static void drop_target(Pane *src, f32 x, f32 y); // (below, in app.c's "drag & drop")
 static u32 *drag_badge_pixels(bool square, int *w, int *h); // render.c: the card shown next to the pointer
 static void pft_probe(void);                                // integration.c: the documents portal's file transfer,
 static bool pft_available(void);                            // for sandboxed (Flatpak, Snap) targets
@@ -68,18 +70,13 @@ static void dragout_data(char **paths, int n) {
     strv_free(g_do.paths, g_do.n);
     g_do.paths = strv_dup(paths, n);
     g_do.n = n;
-    g_do.pft_tried = false;
-    g_do.pft[0] = 0;
 }
 
-// The portal key for this drag's files ("" if there's none), made the first time a target asks (any thread).
+// A portal key for this drag's files ("" if there's none), new for each request like GTK does: a transfer ends
+// once its files are taken, and targets take them more than once (GTK reads them while hovering, then on the drop).
 static void dragout_pft(char *out, size_t cap) {
     pthread_mutex_lock(&g_do.mtx);
-    if (!g_do.pft_tried) {
-        g_do.pft_tried = true;
-        if (!pft_key(g_do.paths, g_do.n, g_do.pft, sizeof g_do.pft)) g_do.pft[0] = 0;
-    }
-    snprintf(out, cap, "%s", g_do.pft);
+    if (!pft_key(g_do.paths, g_do.n, out, cap)) out[0] = 0;
     pthread_mutex_unlock(&g_do.mtx);
 }
 
@@ -428,6 +425,10 @@ static bool x_release(void) {
 static struct {
     void *dpy, *surface, *queue, *wrap, *registry, *seat, *ddm, *dd, *pointer, *src;
     void *compositor, *shm, *icon, *icon_pool, *icon_buf; // the card the compositor shows next to the pointer
+    void *offer;           // (our thread) the offer of our own drag while it's over this window
+    pthread_mutex_t self_mtx; // our own drag over this window, for the main thread:
+    int self_ev;           //   W_SELF_* since it last looked
+    double sx, sy;         //   where (surface coordinates)
     _Atomic uint32_t press_serial;
     _Atomic int result; // (thread -> main) 1 dropped, 2 cancelled
     pthread_t thr;
@@ -451,6 +452,7 @@ static struct {
 } g_wl;
 
 #define W_DESTROY 1 // WL_MARSHAL_FLAG_DESTROY
+enum { W_SELF_OVER = 1, W_SELF_LEAVE = 2, W_SELF_DROP = 4 };
 
 static const char *w_iface_name(const void *iface) { return *(const char *const *)iface; } // (struct wl_interface's first field)
 
@@ -494,16 +496,52 @@ static void w_global(void *d, void *reg, uint32_t name, const char *iface, uint3
 static void w_global_remove(void *d, void *reg, uint32_t name) { (void)d; (void)reg; (void)name; }
 static void (*g_wl_registry_l[])(void) = {(void (*)(void))w_global, (void (*)(void))w_global_remove};
 
-// Our data device also hears about drags over this window and the clipboard: SDL handles those; drop the offers.
+// Our data device exists only while a drag of ours is on (some compositors, GNOME's among them, tell only an app's
+// newest data device about drags and the clipboard: SDL's must get them back). Over this window the drag is ours:
+// we take it (so the compositor drops it here) and the main thread treats it as a drag inside (dragout_tick).
+static void w_self(int ev, double x, double y) {
+    pthread_mutex_lock(&g_wl.self_mtx);
+    g_wl.self_ev |= ev;
+    if (ev == W_SELF_OVER || ev == W_SELF_DROP) { g_wl.sx = x; g_wl.sy = y; }
+    pthread_mutex_unlock(&g_wl.self_mtx);
+    main_wake();
+}
+static void w_offer_drop(void) {
+    if (g_wl.offer) g_wl.marshal(g_wl.offer, 2, NULL, g_wl.version(g_wl.offer), W_DESTROY); // wl_data_offer.destroy
+    g_wl.offer = NULL;
+}
 static void w_dd_offer(void *d, void *dd, void *offer) {
     (void)d; (void)dd;
-    if (offer) g_wl.marshal(offer, 2, NULL, g_wl.version(offer), W_DESTROY); // wl_data_offer.destroy
+    w_offer_drop();
+    g_wl.offer = offer;
 }
-static void w_dd_enter(void *d, void *dd, uint32_t serial, void *surf, int32_t x, int32_t y, void *offer) { (void)d; (void)dd; (void)serial; (void)surf; (void)x; (void)y; (void)offer; }
-static void w_dd_motion(void *d, void *dd, uint32_t t, int32_t x, int32_t y) { (void)d; (void)dd; (void)t; (void)x; (void)y; }
-static void w_dd_selection(void *d, void *dd, void *offer) { (void)d; (void)dd; (void)offer; }
-static void (*g_wl_dd_l[])(void) = {(void (*)(void))w_dd_offer, (void (*)(void))w_dd_enter, (void (*)(void))w_noop_ptr,
-                                   (void (*)(void))w_dd_motion, (void (*)(void))w_noop_ptr, (void (*)(void))w_dd_selection};
+static void w_dd_enter(void *d, void *dd, uint32_t serial, void *surf, int32_t x, int32_t y, void *offer) {
+    (void)d; (void)dd;
+    if (!offer || surf != g_wl.surface) { w_offer_drop(); return; }
+    uint32_t v = g_wl.version(offer);
+    g_wl.marshal(offer, 0, NULL, v, 0, serial, "text/uri-list"); // accept
+    if (v >= 3) g_wl.marshal(offer, 4, NULL, v, 0, 3u, 2u);       // set_actions: copy | move, move (we decide ourselves)
+    w_self(W_SELF_OVER, x / 256.0, y / 256.0);
+}
+static void w_dd_leave(void *d, void *dd) { (void)d; (void)dd; w_offer_drop(); w_self(W_SELF_LEAVE, 0, 0); }
+static void w_dd_motion(void *d, void *dd, uint32_t t, int32_t x, int32_t y) { (void)d; (void)dd; (void)t; if (g_wl.offer) w_self(W_SELF_OVER, x / 256.0, y / 256.0); }
+static void w_dd_drop(void *d, void *dd) {
+    (void)d; (void)dd;
+    if (!g_wl.offer) return;
+    if (g_wl.version(g_wl.offer) >= 3) g_wl.marshal(g_wl.offer, 3, NULL, g_wl.version(g_wl.offer), 0); // finish
+    w_offer_drop();
+    pthread_mutex_lock(&g_wl.self_mtx);
+    double x = g_wl.sx, y = g_wl.sy;
+    pthread_mutex_unlock(&g_wl.self_mtx);
+    w_self(W_SELF_DROP, x, y);
+}
+static void w_dd_selection(void *d, void *dd, void *offer) {
+    (void)d; (void)dd;
+    if (offer && offer != g_wl.offer) g_wl.marshal(offer, 2, NULL, g_wl.version(offer), W_DESTROY); // (the clipboard: SDL's)
+    if (offer == g_wl.offer) g_wl.offer = NULL;
+}
+static void (*g_wl_dd_l[])(void) = {(void (*)(void))w_dd_offer, (void (*)(void))w_dd_enter, (void (*)(void))w_dd_leave,
+                                   (void (*)(void))w_dd_motion, (void (*)(void))w_dd_drop, (void (*)(void))w_dd_selection};
 
 // the data source (our thread): hand out the data; dropped / cancelled -> the main thread
 static void w_src_target(void *d, void *s, const char *mime) { (void)d; (void)s; (void)mime; }
@@ -612,9 +650,8 @@ static bool w_init(void) {
     g_wl.roundtrip(g_wl.dpy, g_wl.queue); // the globals
     if (!g_wl.seat || !g_wl.ddm) return false;
     g_wl.roundtrip(g_wl.dpy, g_wl.queue); // the seat's pointer
-    g_wl.dd = g_wl.marshal(g_wl.ddm, 1, g_wl.i_dd, g_wl.version(g_wl.ddm), 0, NULL, g_wl.seat); // get_data_device
-    if (!g_wl.dd || !g_wl.pointer) return false;
-    g_wl.add_listener(g_wl.dd, g_wl_dd_l, NULL);
+    if (!g_wl.pointer) return false;
+    pthread_mutex_init(&g_wl.self_mtx, NULL);
     if (pipe2(g_wl.stop, O_CLOEXEC)) return false;
     pthread_create(&g_wl.thr, NULL, w_thread, NULL);
     return true;
@@ -656,6 +693,8 @@ static void w_icon_free(void) {
     g_wl.icon = g_wl.icon_buf = g_wl.icon_pool = NULL;
 }
 
+static void w_src_free(void);
+
 static bool w_start(void) {
     uint32_t serial = atomic_load(&g_wl.press_serial);
     void *surf = SDL_GetPointerProperty(SDL_GetWindowProperties(A.win), SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, NULL);
@@ -673,6 +712,9 @@ static bool w_start(void) {
     uint32_t acts = (g_do.offer & (DO_COPY | DO_LINK) ? 1u : 0u) | (g_do.offer & DO_MOVE ? 2u : 0u) | (g_do.offer & DO_ASK ? 4u : 0u);
     g_wl.marshal(g_wl.src, 2, NULL, v, 0, acts); // set_actions (there's no "link": a copy)
     w_icon_make();
+    g_wl.dd = g_wl.marshal(g_wl.ddm, 1, g_wl.i_dd, v, 0, NULL, g_wl.seat); // get_data_device (until the drag ends)
+    if (!g_wl.dd) { w_src_free(); return false; }
+    g_wl.add_listener(g_wl.dd, g_wl_dd_l, NULL);
     g_wl.marshal(g_wl.dd, 0, NULL, g_wl.version(g_wl.dd), 0, g_wl.src, g_wl.surface, g_wl.icon, serial); // start_drag
     if (g_wl.icon) g_wl.marshal(g_wl.icon, 6, NULL, g_wl.version(g_wl.icon), 0); // commit (now that it's the drag's icon)
     g_wl.flush(g_wl.dpy);
@@ -681,6 +723,8 @@ static bool w_start(void) {
 
 static void w_src_free(void) {
     w_icon_free();
+    if (g_wl.dd) g_wl.marshal(g_wl.dd, 2, NULL, g_wl.version(g_wl.dd), W_DESTROY); // wl_data_device.release: SDL's again
+    g_wl.dd = NULL;
     if (!g_wl.src) return;
     g_wl.marshal(g_wl.src, 1, NULL, g_wl.version(g_wl.src), W_DESTROY); // wl_data_source.destroy
     g_wl.src = NULL;
@@ -710,11 +754,43 @@ static bool dragout_start(Pane *p, char **paths, int n) {
     dragout_pick(&g_do.offer, &g_do.pref);
     dragout_data(paths, n);
     g_do.src = p;
-    g_do.over_self = false;
+    g_do.over_self = g_do.self_done = false;
     g_do.active = true;
     if (g_do.sys == DOS_X11) x_start();
     else if (!w_start()) { g_do.active = false; return false; }
     return true;
+}
+
+// (Wayland) a drop back onto this window: it's handled as a drop inside; the source's end just cleans up.
+static void dragout_forget(void) {
+    if (!g_do.active) return;
+    g_do.active = g_do.over_self = false;
+    g_do.t_end = now_ns();
+}
+
+// (Wayland) our own drag is over this window at (x, y) (pixels) / left it / was dropped there: folders light up as
+// in a drag inside, and the drop is one (once: our data device and SDL's may both report it).
+static void dragout_self_at(int ev, f32 x, f32 y) {
+    if (g_do.sys != DOS_WAYLAND || g_do.self_done || !g_do.src || !pane_exists(g_do.src)) return;
+    if (ev != W_SELF_DROP && A.drag != DRAG_ITEMS) return; // (the drop may come after the source heard it's over)
+    A.mx = x;
+    A.my = y;
+    A.redraw = true;
+    if (ev == W_SELF_DROP) { // dropped here: the drag inside ends as if the button came up there
+        Pane *sp = g_do.src;
+        g_do.self_done = true;
+        dragout_forget();
+        A.drag = DRAG_ITEMS;
+        A.drag_pane = sp;
+        drop_target(sp, x, y);
+        on_mouse_up();
+    } else if (ev == W_SELF_OVER) {
+        g_do.over_self = true;
+        drop_target(g_do.src, x, y);
+    } else {
+        g_do.over_self = false;
+        drop_target(g_do.src, -1, -1);
+    }
 }
 
 // Every loop: Wayland's verdict from our thread; X11: a target that never says it's finished.
@@ -725,17 +801,18 @@ static void dragout_tick(void) {
         dragout_finish();
     }
     if (g_do.active && g_do.sys == DOS_X11 && g_xd.dropped && now_ns() - g_xd.t_drop > 5000000000ull) x_end();
+    if (g_do.sys != DOS_WAYLAND) return;
+    pthread_mutex_lock(&g_wl.self_mtx); // (Wayland) our own drag back over this window: what our data device saw
+    int ev = g_wl.self_ev;
+    f32 dens = SDL_GetWindowPixelDensity(A.win), x = (f32)g_wl.sx * dens, y = (f32)g_wl.sy * dens;
+    g_wl.self_ev = 0;
+    pthread_mutex_unlock(&g_wl.self_mtx);
+    if (ev) dragout_self_at(ev & W_SELF_DROP ? W_SELF_DROP : ev & W_SELF_OVER ? W_SELF_OVER : W_SELF_LEAVE, x, y);
 }
 
 // (X11) Esc: the target hears it's over.
 static void dragout_cancel(void) { if (g_do.active && g_do.sys == DOS_X11 && !g_xd.dropped) x_end(); }
 
-// (Wayland) a drop back onto this window: it's handled as a drop inside; the source's end just cleans up.
-static void dragout_forget(void) {
-    if (!g_do.active) return;
-    g_do.active = g_do.over_self = false;
-    g_do.t_end = now_ns();
-}
 
 // (X11) pointer motion while dragging out.
 static void dragout_motion(void) { if (g_do.active && g_do.sys == DOS_X11 && !g_xd.dropped) x_motion(); }
