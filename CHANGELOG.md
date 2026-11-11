@@ -3,6 +3,7 @@
 ## Unreleased
 
 **New**
+- The card next to the pointer while dragging shows what you're dragging: up to three items with their icons and names, "+ N items" for the rest, and what the drop will do.
 - The pointer turns into a grabbing hand as soon as you drag files, a tab or a sidebar place (from your cursor theme).
 - Drag files out of the window into other apps: upload in a browser or chat app, open in an editor, drop into another file manager (move / copy / link by the same keys and drop setting). The item card keeps following the pointer outside the window. Works on Wayland and X11.
 - Terminal panel (F4), like Dolphin's: a shell under the folder, one per tab, that follows the folder both ways - open a folder and the shell goes there (quietly in bash, zsh and fish: the prompt just updates, nothing is typed), `cd` in the shell and the folder follows. Ctrl+Shift+F4 moves the keyboard between them; drag the line above it to resize; tabs that had it open get it back after a restart. Terminal tabs moved to Shift+F4.

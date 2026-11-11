@@ -3026,51 +3026,96 @@ static void draw_menu(void) {
     draw_clip_pop(cs);
 }
 
-// The card next to the pointer while dragging items: its text, and whether it's "strong" (there's a drop target).
-static bool drag_badge_text(char *buf, size_t cap) {
-    u32 n = A.drag_pane ? A.drag_pane->sel_count : 0;
-    bool open = A.drop_split_panel || A.drop_newtab;
-    if (open) {
-        snprintf(buf, cap, "Open %u folder%s in a new %s", n, n == 1 ? "" : "s", A.drop_split_panel ? "panel" : n == 1 ? "tab" : "tabs");
+// The card next to the pointer while dragging items: the first few of them as they're stacked in the list (icon +
+// name), "+ N items" for the rest, and - over a drop target - what dropping does there.
+#define DRAG_CARD_ROWS 3
+
+typedef struct {
+    Entry *e[DRAG_CARD_ROWS];
+    int n;          // rows with an item
+    u32 more;       // items not shown
+    char act[NAME_MAX + 64];
+    bool strong;    // there's a drop target (the action line is shown)
+    f32 w, h, row_h, pad;
+} DragCard;
+
+static void drag_card_build(DragCard *c) {
+    memset(c, 0, sizeof *c);
+    Pane *p = A.drag_pane;
+    if (p && p->order && p->L)
+        for (u32 i = 0; i < p->count && c->n < DRAG_CARD_ROWS; i++)
+            if (p->sel[p->order[i]]) c->e[c->n++] = &p->L->entries[p->order[i]];
+    u32 total = p ? p->sel_count : 0;
+    c->more = total > (u32)c->n ? total - (u32)c->n : 0;
+    u32 n = total;
+    if (A.drop_split_panel || A.drop_newtab) {
+        snprintf(c->act, sizeof c->act, "Open in a new %s", A.drop_split_panel ? "panel" : n == 1 ? "tab" : "tabs");
     } else if (A.drop_dir[0]) {
         const char *to = A.drop_dir[1] ? path_basename(A.drop_dir) : "/";
-        if (drop_asks()) snprintf(buf, cap, "%u item%s to %s\xE2\x80\xA6", n, n == 1 ? "" : "s", to); // a menu asks on release
-        else snprintf(buf, cap, "%s %u item%s to %s", A.drop_link ? "Link" : A.drop_copy ? "Copy" : "Move", n, n == 1 ? "" : "s", to);
-    } else {
-        snprintf(buf, cap, "%u item%s", n, n == 1 ? "" : "s");
+        if (drop_asks()) snprintf(c->act, sizeof c->act, "To %s\xE2\x80\xA6", to); // a menu asks on release
+        else snprintf(c->act, sizeof c->act, "%s to %s", A.drop_link ? "Link" : A.drop_copy ? "Copy" : "Move", to);
     }
-    return A.drop_dir[0] || open;
+    c->strong = c->act[0] != 0;
+    Font *f = &A.font_small;
+    c->row_h = roundf(S(24));
+    c->pad = roundf(S(6));
+    f32 tw = 0;
+    for (int i = 0; i < c->n; i++) {
+        const char *nm = rel_base(c->e[i]->name);
+        tw = MAX(tw, text_width(f, nm, (int)strlen(nm)) + S(24));
+    }
+    if (c->act[0]) tw = MAX(tw, text_width(f, c->act, (int)strlen(c->act)));
+    c->w = roundf(CLAMP(tw + S(20), S(120), S(320)));
+    int rows = c->n + (c->more ? 1 : 0) + (c->act[0] ? 1 : 0);
+    c->h = roundf(c->pad * 2 + c->row_h * MAX(rows, 1) + (c->act[0] ? S(5) : 0));
 }
 
-static f32 drag_badge_w(const char *buf) { return text_width(&A.font_small, buf, (int)strlen(buf)) + S(42); }
-
 // square: no rounded corners or shadow (X11's card outside the window is a plain window: no transparency)
-static void drag_badge_paint(f32 x, f32 y, const char *buf, bool strong, bool square) {
+static void drag_card_paint(const DragCard *c, f32 x, f32 y, bool square) {
     Font *f = &A.font_small;
-    int len = (int)strlen(buf);
-    f32 w = drag_badge_w(buf), h = roundf(S(28)), r = square ? 0 : S(7);
-    if (!square) draw_rrect(x + S(1), y + S(3), w, h, r, CA(0x000000, 0.4f));
-    draw_rrect(x, y, w, h, r, C(strong ? COL_SEL_FOCUS : COL_CONTROL));
-    f32 is = roundf(S(14));
-    draw_file_icon(x + S(8), y + (h - is) * 0.5f, is, COL_ACCENT);
-    draw_text(f, x + S(28), text_y(f, y, h), buf, len, C(COL_SEL_TEXT));
+    f32 r = square ? 0 : S(8);
+    if (!square) draw_rrect(x + S(1), y + S(3), c->w, c->h, r, CA(0x000000, 0.35f));
+    draw_rrect(x, y, c->w, c->h, r, C(c->strong ? COL_SEL_FOCUS : COL_BORDER));
+    draw_rrect(x + 1, y + 1, c->w - 2, c->h - 2, MAX(0.f, r - 1), C(COL_POPUP));
+    f32 is = roundf(S(16)), lx = x + roundf(S(10)), ty = y + c->pad;
+    for (int i = 0; i < c->n; i++, ty += c->row_h) {
+        Entry *e = c->e[i];
+        const char *nm = rel_base(e->name);
+        f32 iy = roundf(ty + (c->row_h - is) * 0.5f);
+        if (e->flags & ENT_DIR) draw_dir_icon(lx, iy, is, nm, e->flags & ENT_HIDDEN);
+        else if (!draw_icon_for_name(lx, iy, is, nm, e->mflags & MF_EXEC)) draw_file_icon(lx, iy, is, file_color(e));
+        f32 nx = lx + is + roundf(S(8));
+        draw_text_fit(f, nx, text_y(f, ty, c->row_h), x + c->w - roundf(S(10)) - nx, nm, (int)strlen(nm), C(COL_TEXT), 0);
+    }
+    if (c->more) {
+        char m[48];
+        snprintf(m, sizeof m, "+ %u item%s", c->more, c->more == 1 ? "" : "s");
+        draw_text(f, lx, text_y(f, ty, c->row_h), m, (int)strlen(m), C(COL_TEXT_DIM));
+        ty += c->row_h;
+    }
+    if (c->act[0]) { // what the drop does, under a line
+        ty += S(2);
+        draw_rect(x + S(8), ty, c->w - S(16), 1, C(COL_BORDER));
+        ty += S(3);
+        draw_text_fit(f, lx, text_y(f, ty, c->row_h), c->w - S(20), c->act, (int)strlen(c->act), C(COL_ACCENT), 0);
+    }
 }
 
 static void draw_drag_badge(void) {
     if (A.drag != DRAG_ITEMS || !A.drag_pane) return;
     if (dragout_owns_pointer()) return; // out with the compositor: it shows the card (dragout.c), over this window too
-    char buf[NAME_MAX + 96];
-    bool strong = drag_badge_text(buf, sizeof buf);
-    drag_badge_paint(roundf(A.mx + S(18)), roundf(A.my + S(20)), buf, strong, false); // clear of the row under the cursor
+    DragCard c;
+    drag_card_build(&c);
+    drag_card_paint(&c, roundf(A.mx + S(18)), roundf(A.my + S(20)), false); // clear of the row under the cursor
 }
 
 // The card as pixels (ARGB, premultiplied) for dragging out of the window: the compositor's drag icon (Wayland),
 // our own window following the pointer (X11, square). Drawn between frames into a texture and read back.
 static u32 *drag_badge_pixels(bool square, int *w, int *h) {
-    char buf[NAME_MAX + 96];
-    bool strong = drag_badge_text(buf, sizeof buf);
-    *w = (int)ceilf(drag_badge_w(buf) + (square ? 0 : S(2)));
-    *h = (int)ceilf(roundf(S(28)) + (square ? 0 : S(4)));
+    DragCard dc;
+    drag_card_build(&dc);
+    *w = (int)ceilf(dc.w + (square ? 0 : S(2)));
+    *h = (int)ceilf(dc.h + (square ? 0 : S(4)));
     SDL_Texture *t = SDL_CreateTexture(A.ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, *w, *h);
     if (!t) return NULL;
     SDL_Texture *prev = SDL_GetRenderTarget(A.ren);
@@ -3079,7 +3124,7 @@ static u32 *drag_badge_pixels(bool square, int *w, int *h) {
     SDL_RenderClear(A.ren);
     draw_clip(NULL);
     g_alpha = 1.f;
-    drag_badge_paint(0, 0, buf, strong, square);
+    drag_card_paint(&dc, 0, 0, square);
     draw_flush();
     SDL_Surface *s = SDL_RenderReadPixels(A.ren, NULL);
     SDL_SetRenderTarget(A.ren, prev);

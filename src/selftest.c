@@ -778,6 +778,21 @@ static int run_selftest_ops(void) {
         ST_CHECK(A.drag == DRAG_NONE && st_exists(ST_BASE "/a.txt"));
     }
 
+    { // the card while dragging: the first 3 items as stacked in the list (icon + name), "+ N items" for the rest
+        do_action(p, ACT_SELECT_ALL);
+        u32 total = p->sel_count;
+        f32 ay3 = st_row_y(p, "a.txt");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, nx, ay3, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, nx + S(40), ay3 + S(40), 0, 0, 0);
+        DragCard dc;
+        drag_card_build(&dc);
+        ST_CHECK(A.drag == DRAG_ITEMS && total > 3 && dc.n == 3 && dc.more == total - 3);
+        ST_CHECK(dc.e[0] == &p->L->entries[p->order[0]]); // (in list order)
+        st_shot("drag-many");
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        sel_clear(p);
+    }
+
     // cancel a big copy: the partial file must be removed
     st_write(ST_BASE "/big.bin", 768u << 20);
     char *big[1] = {ST_BASE "/big.bin"};
