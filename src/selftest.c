@@ -3328,6 +3328,48 @@ static int run_selftest_m11(void) {
         if (ft->dock) term_send(ft->dock, "exit\r");
         for (int k = 0; k < 400 && ft->dock; k++) { st_frames(1); SDL_Delay(5); }
         ST_CHECK(!ft->dock && !ft->dock_on && !active_term());
+        // bash, zsh and fish (those installed) get the shell integration: the pane's folder changes without a cd typed
+        // at the prompt, what's typed there stays, a cd typed there still moves the pane (an empty HOME: no own config)
+        static const char *shells[] = {"bash", "zsh", "fish"};
+        char *home0 = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+        mkdir_p(M11_BASE "/home", 0755);
+        for (int si = 0; si < 3; si++) {
+            char sp[PATH_MAX];
+            if (!tool_abs(shells[si], sp, sizeof sp)) { printf("(%s not installed: its shell integration not tested)\n", shells[si]); continue; }
+            setenv("FE_TERM_SHELL", sp, 1);
+            setenv("HOME", M11_BASE "/home", 1);
+            pane_navigate(fp, M11_BASE, true);
+            st_wait();
+            dock_toggle();
+            setenv("HOME", home0 ? home0 : "/", 1);
+            Term *d = ft->dock;
+            ST_CHECK(d && d->shint == si + 1);
+            if (!d) continue;
+            char rp[PATH_MAX + 8];
+            snprintf(rp, sizeof rp, "%s.ready", d->cd_file);
+            struct stat rst;
+            for (int k = 0; k < 600 && stat(rp, &rst) != 0; k++) { st_frames(1); SDL_Delay(5); }
+            ST_CHECK(stat(rp, &rst) == 0);
+            for (int k = 0; k < 40; k++) { st_frames(1); SDL_Delay(5); } // (its first prompt)
+            term_send(d, "typed");
+            pane_navigate(fp, M11_BASE "/a/b", true);
+            for (int k = 0; k < 600 && !(term_cwd(d, cwd, sizeof cwd) && !strcmp(cwd, M11_BASE "/a/b")); k++) { st_frames(1); SDL_Delay(5); }
+            ST_CHECK(!strcmp(cwd, M11_BASE "/a/b"));
+            ST_CHECK(st_term_wait(d, "typed")); // still at the prompt
+            for (int k = 0; k < 20; k++) { st_frames(1); SDL_Delay(5); }
+            ST_CHECK(st_term_find(d, " cd '") < 0); // nothing typed for it
+            if (st_term_find(d, " cd '") >= 0) printf("%s: a cd was typed\n", shells[si]);
+            term_send(d, "\x15" "cd ..\r");
+            for (int k = 0; k < 600 && strcmp(fp->path, M11_BASE "/a"); k++) { st_frames(1); SDL_Delay(5); }
+            ST_CHECK(!strcmp(fp->path, M11_BASE "/a"));
+            char cdf[PATH_MAX];
+            snprintf(cdf, sizeof cdf, "%s", d->cd_file);
+            dock_free(ft);
+            ft->dock_on = ft->dock_focus = false;
+            ST_CHECK(stat(rp, &rst) != 0 && stat(cdf, &rst) != 0); // its files are removed with it
+        }
+        free(home0);
+        setenv("FE_TERM_SHELL", "/bin/sh", 1);
         // Shift+F4: a terminal tab, as F4 used to open
         st_key(SDLK_F4, SDL_KMOD_SHIFT);
         ST_CHECK(A.ntabs == nt + 1 && A.ap->cur->term);

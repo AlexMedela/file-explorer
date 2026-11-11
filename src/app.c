@@ -290,7 +290,8 @@ static void term_copy(Term *t);
 static void term_paste(Term *t);
 static void term_paste_text(Term *t, const char *s);
 static void term_draw(Term *t, Rect area, bool focused);
-static Term *term_new(const char *dir, char *const argv[], int rows, int cols);
+static Term *term_new(const char *dir, char *const argv[], int rows, int cols, bool follow);
+static int term_shint_cd(Term *t, const char *dir);
 static void term_tick(void);
 static int g_term_look_setting; // Options: 0 match the default terminal, 1 the app's own theme
 static void term_clear_scrollback(Term *t);
@@ -4779,7 +4780,7 @@ static Tab *term_tab_open(const char *dir, char *const argv[]) {
     const char *home = getenv("HOME") ? getenv("HOME") : "/";
     Tab *t = tab_new(dir && dir[0] == '/' && !path_is_remote(dir) ? dir : home, A.cur + 1, true);
     if (!t) return NULL;
-    t->term = term_new(dir && !path_is_remote(dir) ? dir : home, argv, 24, 80);
+    t->term = term_new(dir && !path_is_remote(dir) ? dir : home, argv, 24, 80, false);
     if (!t->term) { tab_close(tab_index(t)); return NULL; }
     A.redraw = true;
     return t;
@@ -4827,7 +4828,7 @@ static bool dock_local(const char *path) { return path[0] == '/' && !path_is_rem
 static void dock_start(Tab *t) {
     const char *home = getenv("HOME") ? getenv("HOME") : "/";
     const char *dir = dock_local(t->pane[0].path) ? t->pane[0].path : home;
-    t->dock = term_new(dir, NULL, 24, 80);
+    t->dock = term_new(dir, NULL, 24, 80, true);
     t->dock_cwd[0] = t->dock_want[0] = t->dock_seen[0] = t->dock_sent[0] = 0;
     if (!t->dock) t->dock_on = t->dock_focus = false;
 }
@@ -4883,11 +4884,14 @@ static void dock_follow(Tab *t) {
         return;
     }
     if (t->dock_real[0] && strcmp(t->dock_real, cwd) && strcmp(t->dock_real, t->dock_sent)) { // the pane moved: cd there
-        char q[PATH_MAX + 64], cmd[PATH_MAX + 80];
-        sh_quote(q, sizeof q, p->path);
-        // Ctrl+E Ctrl+U clear what's typed at the prompt; the leading space keeps it out of the shell's history
-        snprintf(cmd, sizeof cmd, "\x05\x15 cd %s\r", q);
-        term_send(d, cmd);
+        int quiet = term_shint_cd(d, p->path); // quietly through the shell integration (term.c)
+        if (quiet < 0) return;                 // (its shell is still starting)
+        if (!quiet) { // else typed: Ctrl+E Ctrl+U clear the prompt; the leading space keeps it out of the history
+            char q[PATH_MAX + 64], cmd[PATH_MAX + 80];
+            sh_quote(q, sizeof q, p->path);
+            snprintf(cmd, sizeof cmd, "\x05\x15 cd %s\r", q);
+            term_send(d, cmd);
+        }
         snprintf(t->dock_want, sizeof t->dock_want, "%s", t->dock_real);
         snprintf(t->dock_sent, sizeof t->dock_sent, "%s", t->dock_real);
         t->dock_want_t = now_ns();

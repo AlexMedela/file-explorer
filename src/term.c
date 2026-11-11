@@ -378,6 +378,10 @@ struct Term {
     bool eof;
     u32 skip_text; // a Ctrl/Alt key just sent this character: drop the matching text event
     u64 born, last_out; // started / last output (screenshots wait for a quiet moment)
+    // shell integration (terminal panel): cd's for the pane happen silently, see "shell integration" below
+    int shint;              // SHINT_*
+    bool shint_ready;       // the shell loaded our part (it made cd_file + ".ready")
+    char cd_file[PATH_MAX]; // the folder to go to is written here before the shell is poked
 };
 
 static Font g_term_font, g_term_bold;
@@ -579,8 +583,113 @@ static void term_winsize(Term *t) {
     ioctl(t->fd, TIOCSWINSZ, &ws);
 }
 
-// argv NULL: the user's shell. Starts in dir (local).
-static Term *term_new(const char *dir, char *const argv[], int rows, int cols) {
+// --- shell integration: the terminal panel follows the folder without a visible cd ------------------------------
+// The panel's shell loads a few lines of ours after the user's own startup files (bash: --rcfile that runs ~/.bashrc
+// first; zsh: ZDOTDIR pointing here, whose files run the user's; fish: -C after its config). To move it, the app
+// writes the folder to cd_file and pokes the shell: zsh and fish get SIGUSR1 (they cd and repaint the prompt, keeping
+// what's typed); bash runs signal handlers only after Enter, so it gets a private key sequence bound to "save the
+// typed line, cd, run an empty command (a fresh prompt), restore the line, remove the old prompt". Other shells, or
+// one whose startup files never got to ours, are typed a cd instead (dock_follow).
+
+enum { SHINT_NONE, SHINT_BASH, SHINT_ZSH, SHINT_FISH };
+
+static const char g_shint_bash[] =
+    "# File Explorer terminal panel: follows the folder without typing cd. Runs ~/.bashrc first.\n"
+    "[ -f ~/.bashrc ] && . ~/.bashrc\n"
+    "__fe_cd1() {\n"
+    "    __fe_line=$READLINE_LINE __fe_point=$READLINE_POINT\n"
+    "    READLINE_LINE= READLINE_POINT=0\n"
+    "    local p=${PS1@P}; p=${p//[^$'\\n']/}; __fe_k=$(( ${#p} + 1 ))\n"
+    "    builtin cd -- \"$(< \"$FE_CD_FILE\")\" 2>/dev/null\n"
+    "}\n"
+    "__fe_cd2() {\n"
+    "    local p=${PS1@P}; p=${p//[^$'\\n']/}\n"
+    "    printf '\\e[%dA\\e[%dM' $(( __fe_k + ${#p} )) \"$__fe_k\"; (( ${#p} )) && printf '\\e[%dB' \"${#p}\"\n"
+    "    READLINE_LINE=$__fe_line READLINE_POINT=$__fe_point\n"
+    "}\n"
+    "for __fe_m in emacs vi-insert vi-command; do\n"
+    "    bind -m $__fe_m -x '\"\\e[9872~\": __fe_cd1'\n"
+    "    bind -m $__fe_m -x '\"\\e[9873~\": __fe_cd2'\n"
+    "    bind -m $__fe_m '\"\\e[9871~\": \"\\e[9872~\\C-m\\e[9873~\"'\n"
+    "done\n"
+    "unset __fe_m\n"
+    ": > \"$FE_CD_FILE.ready\"\n";
+
+static const char g_shint_zshenv[] =
+    "# File Explorer terminal panel: the user's own zsh files run as usual (ours: .zshrc here, after theirs)\n"
+    "__fe_zdot=$ZDOTDIR\n"
+    "ZDOTDIR=${FE_USER_ZDOTDIR:-$HOME}\n"
+    "[[ -r $ZDOTDIR/.zshenv ]] && . $ZDOTDIR/.zshenv\n"
+    "FE_USER_ZDOTDIR=$ZDOTDIR\n"
+    "ZDOTDIR=$__fe_zdot\n"
+    "unset __fe_zdot\n";
+
+static const char g_shint_zshrc[] =
+    "ZDOTDIR=$FE_USER_ZDOTDIR\n"
+    "unset FE_USER_ZDOTDIR\n"
+    "[[ -r $ZDOTDIR/.zshrc ]] && . $ZDOTDIR/.zshrc\n"
+    "TRAPUSR1() {\n"
+    "    builtin cd -- \"$(<$FE_CD_FILE)\" 2>/dev/null || return 0\n"
+    "    local f; for f in precmd $precmd_functions; do (( $+functions[$f] )) && $f; done\n"
+    "    zle && zle reset-prompt\n"
+    "    return 0\n"
+    "}\n"
+    ": > \"$FE_CD_FILE.ready\"\n";
+
+static const char g_shint_fish[] =
+    "# File Explorer terminal panel: follows the folder without typing cd\n"
+    "function __fe_cd --on-signal SIGUSR1\n"
+    "    builtin cd -- (string collect < $FE_CD_FILE) 2>/dev/null; and commandline -f repaint\n"
+    "end\n"
+    "true > \"$FE_CD_FILE.ready\"\n";
+
+// Where the scripts and the per-terminal files live (written once per run; private to the user).
+static bool shint_dir(char *out, size_t cap) {
+    static int done = -1;
+    const char *rt = getenv("XDG_RUNTIME_DIR");
+    if (rt && rt[0]) snprintf(out, cap, "%s/file-explorer/shell", rt);
+    else snprintf(out, cap, "/tmp/file-explorer-%d/shell", (int)getuid());
+    if (done >= 0) return done;
+    char p[PATH_MAX];
+    mkdir_p(out, 0700);
+    snprintf(p, sizeof p, "%s/zsh", out);
+    mkdir_p(p, 0700);
+    bool ok = true;
+    snprintf(p, sizeof p, "%s/fe.bash", out);
+    ok &= write_file_atomic(p, g_shint_bash);
+    snprintf(p, sizeof p, "%s/fe.fish", out);
+    ok &= write_file_atomic(p, g_shint_fish);
+    snprintf(p, sizeof p, "%s/zsh/.zshenv", out);
+    ok &= write_file_atomic(p, g_shint_zshenv);
+    snprintf(p, sizeof p, "%s/zsh/.zshrc", out);
+    ok &= write_file_atomic(p, g_shint_zshrc);
+    done = ok;
+    return ok;
+}
+
+// Go to dir quietly. 1: done; 0: not possible (type a cd instead); -1: the shell hasn't loaded our part yet (ask again
+// later - it gets a few seconds before it's given up on).
+static int term_shint_cd(Term *t, const char *dir) {
+    if (!t->shint) return 0;
+    if (!t->shint_ready) {
+        char rp[PATH_MAX + 8];
+        snprintf(rp, sizeof rp, "%s.ready", t->cd_file);
+        struct stat st;
+        t->shint_ready = stat(rp, &st) == 0;
+        if (!t->shint_ready) {
+            if (now_ns() - t->born < 5000000000ull) return -1;
+            t->shint = SHINT_NONE;
+            return 0;
+        }
+    }
+    if (!write_file_atomic(t->cd_file, dir)) return 0;
+    if (t->shint == SHINT_BASH) term_output("\x1b[9871~", 7, t);
+    else kill(t->pid, SIGUSR1);
+    return 1;
+}
+
+// argv NULL: the user's shell (follow: with the integration above, for the terminal panel). Starts in dir (local).
+static Term *term_new(const char *dir, char *const argv[], int rows, int cols, bool follow) {
     if (!g_tc_loaded) tc_load();
     int fd = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
     if (fd < 0 || grantpt(fd) || unlockpt(fd)) { if (fd >= 0) close(fd); return NULL; }
@@ -597,15 +706,43 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols) {
     const char *shell = getenv("FE_TERM_SHELL");
     if (!shell || !shell[0]) shell = getenv("SHELL");
     if (!shell || !shell[0]) shell = "/bin/sh";
-    char *sh_argv[] = {(char *)shell, NULL};
+    char *sh_argv[4] = {(char *)shell, NULL};
     char *const *av = argv ? argv : sh_argv;
+    // the terminal panel's shell: with our integration (see above) where we know the shell
+    int shint = SHINT_NONE;
+    char sdir[PATH_MAX], a1[PATH_MAX + 16], cdf[PATH_MAX], e_cdf[PATH_MAX + 16], e_zdot[PATH_MAX + 16], e_uzdot[PATH_MAX + 32];
+    static unsigned shint_n;
+    if (follow && !argv && shint_dir(sdir, sizeof sdir)) {
+        const char *b = path_basename(shell);
+        shint = !strcmp(b, "bash") ? SHINT_BASH : !strcmp(b, "zsh") ? SHINT_ZSH : !strcmp(b, "fish") ? SHINT_FISH : SHINT_NONE;
+        snprintf(cdf, sizeof cdf, "%s/cd-%d-%u", sdir, (int)getpid(), ++shint_n);
+        snprintf(e_cdf, sizeof e_cdf, "FE_CD_FILE=%s", cdf);
+        if (shint == SHINT_BASH) {
+            snprintf(a1, sizeof a1, "%s/fe.bash", sdir);
+            sh_argv[1] = "--rcfile";
+            sh_argv[2] = a1;
+        } else if (shint == SHINT_FISH) {
+            char q[PATH_MAX + 8];
+            sh_quote(q, sizeof q, sdir);
+            snprintf(a1, sizeof a1, "source %s/fe.fish", q);
+            sh_argv[1] = "-C";
+            sh_argv[2] = a1;
+        } else if (shint == SHINT_ZSH) {
+            const char *uz = getenv("ZDOTDIR");
+            snprintf(e_zdot, sizeof e_zdot, "ZDOTDIR=%s/zsh", sdir);
+            snprintf(e_uzdot, sizeof e_uzdot, "FE_USER_ZDOTDIR=%s", uz ? uz : "");
+        }
+    }
     int nenv = 0;
     while (environ[nenv]) nenv++;
-    char **envp = xmalloc((size_t)(nenv + 8) * sizeof(char *));
+    char **envp = xmalloc((size_t)(nenv + 12) * sizeof(char *));
     int ne = 0;
     for (int i = 0; i < nenv; i++)
-        if (strncmp(environ[i], "TERM=", 5) && strncmp(environ[i], "COLORTERM=", 10) && strncmp(environ[i], "TERM_PROGRAM=", 13))
+        if (strncmp(environ[i], "TERM=", 5) && strncmp(environ[i], "COLORTERM=", 10) && strncmp(environ[i], "TERM_PROGRAM=", 13) &&
+            !(shint == SHINT_ZSH && !strncmp(environ[i], "ZDOTDIR=", 8)))
             envp[ne++] = environ[i];
+    if (shint) envp[ne++] = e_cdf;
+    if (shint == SHINT_ZSH) { envp[ne++] = e_zdot; envp[ne++] = e_uzdot; }
     char e_term[64], e_ct[] = "COLORTERM=truecolor", e_tp[] = "TERM_PROGRAM=file-explorer";
     snprintf(e_term, sizeof e_term, "TERM=%s", g_tc.term[0] ? g_tc.term : "xterm-256color");
     envp[ne++] = e_term;
@@ -632,6 +769,8 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols) {
     free(envp);
     if (rc) { close(fd); free(t); toast("Couldn't start %s: %s", av[0], strerror(rc)); return NULL; }
     snprintf(t->start_label, sizeof t->start_label, "%s", path_basename(av[0]));
+    t->shint = shint;
+    if (shint) snprintf(t->cd_file, sizeof t->cd_file, "%s", cdf);
     if (argv && !strcmp(path_basename(av[0]), "ssh")) // "ssh host"
         for (int i = 1; argv[i]; i++)
             if (argv[i][0] != '-' && (i == 1 || strcmp(argv[i - 1], "-p"))) { snprintf(t->start_label, sizeof t->start_label, "ssh %s", argv[i]); break; }
@@ -667,6 +806,12 @@ static void term_free(Term *t) {
     free(t->sb);
     free(t->in);
     pthread_mutex_destroy(&t->mtx);
+    if (t->cd_file[0]) {
+        char rp[PATH_MAX + 8];
+        snprintf(rp, sizeof rp, "%s.ready", t->cd_file);
+        unlink(t->cd_file);
+        unlink(rp);
+    }
     free(t);
 }
 
