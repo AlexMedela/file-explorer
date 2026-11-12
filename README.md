@@ -17,6 +17,8 @@
 
 </div>
 
+https://github.com/user-attachments/assets/fbfe88ff-015f-431b-87c6-2704839d9ee3
+
 ## Features
 - **Instant on huge folders**: 200,000 files listed with sizes and dates in under 0.1 s; the UI never waits on the disk.
 - **Keyboard-first**: `Ctrl+P` jumps to any folder or file, typing finds one, and every shortcut can be rebound.
