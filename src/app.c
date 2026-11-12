@@ -10224,6 +10224,11 @@ static void app_icon_sync(void) {
     app_icon_write(dh, done);
 }
 
+#ifdef FE_DEMO
+static const char *g_demo_out; // --demo OUT.mp4: the intro video (demo.c; only in builds made with ./build.sh demo)
+static void demo_capture(void);
+#endif
+
 static void frame(void) {
     trash_size_poll();
     icons_sync_theme();
@@ -10272,6 +10277,10 @@ static void frame(void) {
     }
     A.frame_ms = (f32)((now_ns() - t0) / 1e6);
 
+#ifdef FE_DEMO
+    if (g_demo_out) demo_capture(); // (runs as a screenshot that doesn't stop: every frame goes to the video)
+    else
+#endif
     if (A.screenshot) {
         bool ready = !g_atlas_full;
         for (int i = 0; i < A.npanels; i++) {
@@ -10405,6 +10414,9 @@ static int run_bench(const char *path, const char *query) {
 
 
 #include "selftest.c"
+#ifdef FE_DEMO
+#include "demo.c" // the intro video (./build.sh demo)
+#endif
 
 #ifdef FE_ADDON
 #include "addon.c" // compiled-in add-ons (addons.c)
@@ -10552,6 +10564,9 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--bench") && i + 1 < argc) return run_bench(argv[i + 1], i + 2 < argc ? argv[i + 2] : NULL);
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) A.screenshot = argv[++i];
+#ifdef FE_DEMO
+        else if (!strcmp(argv[i], "--demo") && i + 1 < argc) { A.screenshot = g_demo_out = argv[++i]; start = demo_setup(); }
+#endif
         else if (!strcmp(argv[i], "--tab") && i + 1 < argc) { if (nextra < MAX_TABS - 1) extra_tabs[nextra++] = argv[++i]; }
         else if (!strcmp(argv[i], "--split") && i + 1 < argc) split_path = argv[++i];
         else if (!strcmp(argv[i], "--selftest")) selftest = true;
@@ -10779,6 +10794,9 @@ int main(int argc, char **argv) {
     if (selftest_du) return run_selftest_du();
     if (selftest_cmp) return run_selftest_cmp();
     if (selftest_admin) return run_selftest_admin();
+#ifdef FE_DEMO
+    if (g_demo_out) return demo_run();
+#endif
 
     // lsblk takes a few ms: wait for it (bounded) so the drives are in the first frame instead of popping in after.
     for (u64 t0 = now_ns(); A.devs_enabled && !A.devs_known && now_ns() - t0 < 150000000ull;) { SDL_Delay(2); main_drain(); }

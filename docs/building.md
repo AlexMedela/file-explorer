@@ -43,6 +43,7 @@ Self-tests and screenshots run headless (SDL's offscreen video driver + software
 nothing touches your settings or recent list, and a running instance is left alone. Set `SDL_VIDEODRIVER=wayland`
 (or `x11`) to watch them in a real window.
 
+- `tools/demo.sh [OUT_DIR]` – records the intro video (default `build/demo/file-explorer-demo.mp4`, about 2 minutes in real time): builds `build/file-explorer-demo` (`./build.sh demo`; `--demo` isn't in normal builds), makes a made-up home with `tools/demo-home.sh` and plays the scenes in `src/demo.c` headless, in a private namespace where that home is `/home/alex`. Needs ffmpeg, ImageMagick, zip and `unshare`
 - `./build/file-explorer --screenshot out.bmp DIR [--tab DIR]... [--split DIR]` – render one frame to an image
 - `./build/file-explorer --selftest DIR` – drive tabs/split/selection/navigation through the real input
   handlers (use with `./build.sh debug`; DIR should have >1000 entries with folders first, e.g. from mkfiles.sh)

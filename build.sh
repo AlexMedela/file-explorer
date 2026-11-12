@@ -1,5 +1,6 @@
 #!/bin/sh
-# Build File Explorer. Usage: ./build.sh [release|debug|package]
+# Build File Explorer. Usage: ./build.sh [release|debug|package|demo]
+# demo: build/file-explorer-demo, which can record the intro video (--demo OUT.mp4, see tools/demo.sh).
 # FE_ADDON_SRC=<dir>: compile in the add-on code from <dir> (see src/addons.c); FE_OUT=<file>: where the binary goes.
 # Both absolute paths.
 set -e
@@ -16,6 +17,7 @@ LIBS="$(pkg-config --libs $PKGS) -lpthread -lm -ldl"
 case "$mode" in
   release) OPT="-O2 -march=native -DNDEBUG -flto=auto" ;;
   package) OPT="${CFLAGS_PKG:--O2} -DNDEBUG" ;;   # portable: no -march=native (distro packages)
+  demo)    OPT="-O2 -DNDEBUG -DFE_DEMO"; out="${FE_OUT:-build/file-explorer-demo}" ;;
   debug)   OPT="-O0 -g3 -fsanitize=address,undefined -fno-omit-frame-pointer" ;;
   *) echo "unknown mode: $mode"; exit 1 ;;
 esac
