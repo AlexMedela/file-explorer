@@ -302,7 +302,7 @@ static void draw_panel_bar(Panel *pn) {
         if (first && last) {
             f32 pad = roundf(S(6));
             draw_rrect(first->r.x - pad, tb.y + S(2), last->r.x + last->r.w - first->r.x + pad * 2,
-                       tb.h - S(4), S(NAV_CORNER_RADIUS + 2), C(tab_container_color()));
+                       tb.h - S(8), S(NAV_CORNER_RADIUS + 2), C(tab_container_color()));
         }
     }
     // As in the original renderer, paint inactive cards before the active one
@@ -342,7 +342,7 @@ static void draw_panel_bar(Panel *pn) {
         if (A.drop_tab == t) draw_rrect_outline(r.x + S(1), r.y + S(1), r.w - S(2), r.h - S(4), S(NAV_CORNER_RADIUS), MAX(1.f, S(1.3f)), C(COL_ACCENT));
         if (r.w < S(48)) continue; // keep icons inside compressed pills
         if (dragging) g_alpha = 0.45f;
-        f32 is = roundf(S(15)), ix = roundf(r.x + S(12)), iy = roundf(tb.y + (tb.h - is) * 0.5f);
+        f32 is = roundf(S(15)), ix = roundf(r.x + S(12)), iy = roundf(r.y + (r.h - is) * 0.5f);
         char dnb[NAME_MAX + 1];
         const char *label = t->term ? term_label(t->term) : disp_name(p->path, dnb, sizeof dnb);
         // Terminal and folder tabs share the same theme-aware pill palette.
@@ -359,9 +359,9 @@ static void draw_panel_bar(Panel *pn) {
         f32 tx = ix + is + roundf(S(8));
         f32 maxw = r.x + r.w - tx - (show_close ? csz + S(12) : S(10));
         Color tc = C(cur && (active_panel || !multi) ? foreground : muted);
-        draw_text_fit(f, tx, text_y(f, tb.y, tb.h), maxw, label, (int)strlen(label), tc, 0);
+        draw_text_fit(f, tx, text_y(f, r.y, r.h), maxw, label, (int)strlen(label), tc, 0);
         if (show_close) {
-            Rect c = {r.x + r.w - csz - roundf(S(8)), tb.y + (tb.h - csz) * 0.5f, csz, csz};
+            Rect c = {r.x + r.w - csz - roundf(S(8)), r.y + (r.h - csz) * 0.5f, csz, csz};
             bool ch = A.mouse_in && in_rect(c, A.mx, A.my);
             if (ch) draw_rrect(c.x, c.y, c.w, c.h, S(4), C(rgb_mix(surface, foreground, 0.14f)));
             Color xc = C(ch ? foreground : muted);

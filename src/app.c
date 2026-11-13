@@ -1501,7 +1501,7 @@ static void layout_panel(Panel *pn, Rect r) {
     if (t->panel != pn)
       continue;
     t->r = n > 1 ? (Rect){x0 + k * (tw + gap), pn->bar.y + roundf(S(6)), tw,
-                          tb - roundf(S(g_tab_style == TAB_PILLS ? 12 : 6))}
+                          tb - roundf(S(g_tab_style == TAB_PILLS ? 16 : 6))}
                  : (Rect){0};
     k++;
     Rect pb = body;
