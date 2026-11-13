@@ -147,6 +147,7 @@ static struct {
     bool status_wait, pos_pending, accepted, dropped;
     int rx, ry;
     u64 t_drop;
+    SDL_TimerID poll;     // wakes the main loop while the drag is out (dragout_tick follows the pointer)
 } g_xd;
 
 static void x_msg(unsigned long to, unsigned long type, long l0, long l1, long l2, long l3, long l4) {
@@ -256,11 +257,24 @@ static void x_card_follow(bool outside) {
 }
 
 // Pointer moved during the drag: follow the window under it (this window itself: none - the drag inside goes on).
-static void x_motion(void) {
+// (poll: only if it did move, and outside the window it's where the drag inside is too; *held: left button still down)
+static void x_motion_q(bool poll, bool *held) {
     unsigned long r = 0, c = 0;
-    int wx, wy;
+    int wx, wy, rx, ry;
     unsigned int mask;
-    if (!g_xd.query(g_xd.dpy, g_xd.root, &r, &c, &g_xd.rx, &g_xd.ry, &wx, &wy, &mask)) return;
+    if (!g_xd.query(g_xd.dpy, g_xd.root, &r, &c, &rx, &ry, &wx, &wy, &mask)) return;
+    if (held) *held = mask & (1u << 8); // (Button1Mask)
+    if (poll && rx == g_xd.rx && ry == g_xd.ry) return;
+    g_xd.rx = rx;
+    g_xd.ry = ry;
+    int lx = 0, ly = 0;
+    unsigned long child = 0;
+    if (poll && g_xd.translate(g_xd.dpy, g_xd.root, g_xd.win, rx, ry, &lx, &ly, &child) && (lx < 0 || ly < 0 || lx >= A.W || ly >= A.H)) {
+        A.mx = (f32)lx; // (SDL tells nothing out there now: no folder inside stays the drop target)
+        A.my = (f32)ly;
+        if (A.drag == DRAG_ITEMS && g_do.src && pane_exists(g_do.src)) drop_target(g_do.src, A.mx, A.my);
+        A.redraw = true;
+    }
     // the card first (to beside the pointer): where it was may be under the pointer now and hide the target
     x_card_follow(!(A.mx >= 0 && A.my >= 0 && A.mx < A.W && A.my < A.H));
     int ver = 0;
@@ -280,7 +294,26 @@ static void x_motion(void) {
     g_xd.flush(g_xd.dpy);
 }
 
+static void x_motion(void) { x_motion_q(false, NULL); }
+
+// SDL loses the press's grab when that press is the one that focused the window (its focus-in handling ungrabs the
+// pointer, implicit grab included), and then tells nothing once the drag is out: it stopped at the edge and was
+// dropped on whatever it last saw. So while it's out the main loop wakes every frame and we look ourselves; the
+// button coming up is noticed the same way.
+static Uint32 SDLCALL x_poll_cb(void *ud, SDL_TimerID id, Uint32 interval) {
+    (void)ud;
+    (void)id;
+    main_wake();
+    return interval;
+}
+
+static void x_poll_stop(void) {
+    if (g_xd.poll) SDL_RemoveTimer(g_xd.poll);
+    g_xd.poll = 0;
+}
+
 static void x_end(void) {
+    x_poll_stop();
     x_card_free();
     x_leave();
     g_xd.dropped = false;
@@ -406,11 +439,13 @@ static void x_start(void) {
     g_xd.change(g_xd.dpy, g_xd.win, g_xd.a_actdesc, X_STRING, 8, 0, (const unsigned char *)desc, (int)sizeof desc);
     x_card_make();
     x_motion();
+    if (!g_xd.poll) g_xd.poll = SDL_AddTimer(16, x_poll_cb, NULL);
 }
 
 // Mouse button released: true if it was dropped on another app (else the drop is ours, or nothing: the drag inside
 // ends as usual, so this one just stops).
 static bool x_release(void) {
+    x_poll_stop();
     x_card_free();
     DO_LOG("x11: released over %#lx, accepted %d", g_xd.target, g_xd.accepted);
     if (g_xd.target && g_xd.accepted) {
@@ -816,6 +851,15 @@ static void dragout_tick(void) {
         dragout_finish();
     }
     if (g_do.active && g_do.sys == DOS_X11 && g_xd.dropped && now_ns() - g_xd.t_drop > 5000000000ull) x_end();
+    if (g_do.active && g_do.sys == DOS_X11 && !g_xd.dropped) { // (see x_poll_cb)
+        bool held = true;
+        x_motion_q(true, &held);
+        if (!held) {
+            DO_LOG("x11: button up seen by polling");
+            if (A.drag == DRAG_ITEMS) on_mouse_up(); // (SDL's own button-up, if it comes too, then finds no drag)
+            else x_end();
+        }
+    }
     if (g_do.sys != DOS_WAYLAND) return;
     pthread_mutex_lock(&g_wl.self_mtx); // (Wayland) our own drag back over this window: what our data device saw
     int ev = g_wl.self_ev;
