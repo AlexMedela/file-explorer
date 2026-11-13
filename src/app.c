@@ -162,7 +162,7 @@ static const struct {
 };
 
 typedef struct {
-    Rect area, toolbar, back, fwd, up, pathbar, filterbtn, header, list, track, thumb, trashbar, rrestore, rempty;
+    Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, header, list, track, thumb, trashbar, rrestore, rempty;
     bool has_trashbar;
     f32 col_name;              // x of the icon inside the Name column
     f32 name_end;              // right edge of the Name column
@@ -454,6 +454,8 @@ typedef struct {
     f32 scroll, content_h;       // menus taller than the window scroll
     void (*reopen)(struct Pane *, f32, f32);
     f32 ox, oy;
+    bool folder;     // the folder's own menu (empty space, the ... button): its actions are about the folder,
+    bool act_folder; // not the selection or the cursor (set while one of them runs)
 } Menu;
 
 #define MAX_OPS 32
@@ -858,7 +860,8 @@ static void layout_pane(Pane *p, Rect area) {
     ly->fwd = (Rect){ly->back.x + bs + gap, by, bs, bs};
     ly->up = (Rect){ly->fwd.x + bs + gap, by, bs, bs};
     f32 px = ly->up.x + bs + roundf(S(8));
-    ly->filterbtn = (Rect){area.x + area.w - bs - roundf(S(8)), by, bs, bs};
+    ly->morebtn = (Rect){area.x + area.w - bs - roundf(S(8)), by, bs, bs};
+    ly->filterbtn = (Rect){ly->morebtn.x - bs - gap, by, bs, bs};
     ly->pathbar = (Rect){px, by, ly->filterbtn.x - px - roundf(S(4)), bs};
     f32 hh = p->view == VIEW_DETAILS && !pane_du_on(p) && !pane_snap_on(p) ? roundf(S(32)) : 0; // list/grid sort from the menu, no header
     ly->header = (Rect){area.x, area.y + tb, area.w, hh};
@@ -4938,7 +4941,7 @@ static void menu_terminal_items(Pane *p) {
 // relative paths); otherwise (and with nothing selected) the pane's own folder.
 static void paste_dir(Pane *p, char *out, size_t cap) {
     snprintf(out, cap, "%s", p->path);
-    if (!pane_tree_on(p) || !p->L || !p->L->tree || !p->order || p->cursor < 0 || p->cursor >= (i64)p->count) return;
+    if (A.menu.act_folder || !pane_tree_on(p) || !p->L || !p->L->tree || !p->order || p->cursor < 0 || p->cursor >= (i64)p->count) return;
     if (!p->sel_count || !p->sel[p->order[p->cursor]]) return;
     const Entry *e = &p->L->entries[p->order[p->cursor]];
     path_join(out, cap, p->path, e->name);
@@ -5016,7 +5019,7 @@ static void do_action(Pane *p, int act) {
         break;
     }
     case ACT_COPY_PATH: {
-        paths = pane_selection_paths(p, &n);
+        if (!A.menu.act_folder) paths = pane_selection_paths(p, &n);
         size_t cap = strlen(p->path) + 2;
         for (int i = 0; i < n; i++) cap += strlen(paths[i]) + 1;
         char *txt = xmalloc(cap);
@@ -5157,7 +5160,7 @@ static void do_action(Pane *p, int act) {
         if (n) openwith_open(paths, n);
         break;
     case ACT_PROPERTIES:
-        paths = pane_selection_paths(p, &n);
+        if (!A.menu.act_folder) paths = pane_selection_paths(p, &n);
         if (n) props_open(paths, n);
         else props_open((char *[]){p->path}, 1);
         break;
@@ -5540,6 +5543,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         menu_add("Properties", "Alt+Enter", ACT_PROPERTIES, true);
     }
     menu_finish(x, y);
+    m->folder = !on_item;
 }
 
 static void menu_add_check(const char *label, int act, bool checked, bool enabled) {
@@ -6158,6 +6162,7 @@ static void menu_finish(f32 x, f32 y) {
     m->r = (Rect){roundf(x), roundf(y), w, h};
     m->scroll = CLAMP(m->scroll, 0.f, MAX(0.f, m->content_h - m->r.h));
     m->open = true;
+    m->folder = false;
     A.redraw = true;
 }
 
@@ -6213,7 +6218,9 @@ static void menu_activate(int i) {
     void (*reopen)(struct Pane *, f32, f32) = m->reopen;
     f32 ox = m->ox, oy = m->oy;
     Pane *mp = m->pane;
+    m->act_folder = m->folder;
     if (mp && pane_exists(mp)) do_action(mp, m->items[i].act);
+    m->act_folder = false;
     if (keep && reopen && mp && pane_exists(mp)) {
         int hv = i;
         reopen(mp, ox, oy);
@@ -9887,7 +9894,7 @@ static void pin_toggle(const char *path) {
 // Folder an action like "Pin" applies to: the folder under the cursor, else the current one.
 static void pane_target_folder(Pane *p, char *out, size_t cap) {
     snprintf(out, cap, "%s", p->path);
-    if (p->order && p->cursor >= 0 && p->cursor < (i64)p->count) {
+    if (!A.menu.act_folder && p->order && p->cursor >= 0 && p->cursor < (i64)p->count) {
         Entry *e = &p->L->entries[p->order[p->cursor]];
         if (e->flags & ENT_DIR) path_join(out, cap, p->path, e->name);
     }

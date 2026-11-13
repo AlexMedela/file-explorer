@@ -449,6 +449,14 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         draw_line(cx - S(1.5f), cy + S(1), cx - S(1.5f), cy + S(6), t, fc);
         draw_line(cx + S(1.5f), cy + S(1), cx + S(1.5f), cy + S(4.5f), t, fc);
     }
+    {   // the folder's menu (three dots)
+        Rect mb = ly->morebtn;
+        bool on = A.menu.open && A.menu.pane == p && A.menu.folder && A.menu.ox == mb.x, hv = hot(mb);
+        if (on || hv) draw_rrect(mb.x, mb.y, mb.w, mb.h, S(6), C(COL_FIELD_HOVER));
+        f32 d = roundf(MAX(S(3.2f), 2.f)), cy = roundf(mb.y + (mb.h - d) * 0.5f);
+        for (int k = -1; k <= 1; k++)
+            draw_rrect(roundf(mb.x + (mb.w - d) * 0.5f + (f32)k * S(6)), cy, d, d, d * 0.5f, C(COL_TEXT_DIM));
+    }
     Rect pb = ly->pathbar;
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);

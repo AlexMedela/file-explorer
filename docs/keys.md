@@ -67,6 +67,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Alt+Enter, right-click → Properties | Size (live totals), dates, owner, editable permissions, opening app, MD5/SHA-256 |
 | F2 with several selected | Batch rename: `{name} {ext} {n} {n:3} {date} {time} {parent} {orig}`, find/replace, case, live preview + conflicts, undo |
 | Funnel button in the toolbar | Type filter: files/folders only, hide extensions (popup stays open) |
+| ⋯ button in the toolbar | The folder's menu, the same as right-clicking empty space (New folder, Paste, view, sort, Properties of the folder…), without losing the selection; for full folders with no empty space to right-click |
 | Sidebar → Trash | Trash view: original location + deletion date, Restore, Delete permanently, Empty Trash |
 | Enter on a zip/tar.*/7z/rar/iso… | Browse it like a (read-only) folder; drag items out or "Extract…" to extract; files open via a cache copy |
 | Right-click → Compress to ZIP / tar.gz, Extract here | Create / unpack archives (zip-slip safe) |

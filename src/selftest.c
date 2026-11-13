@@ -1908,6 +1908,22 @@ static int run_selftest_m7(void) {
     pane_set_sort(p, SORT_NAME);
     st_wait();
 
+    // the ... button: the folder's menu, the selection stays; its actions are about the folder, not the subfolder
+    // under the cursor
+    ST_CHECK(st_select(p, "sub") && p->sel_count == 1);
+    Rect mb = p->ly.morebtn;
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, mb.x + mb.w * 0.5f, mb.y + mb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, mb.x + mb.w * 0.5f, mb.y + mb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+    ST_CHECK(A.menu.open && A.menu.folder && A.menu.items[0].act == ACT_NEW_FOLDER && p->sel_count == 1);
+    int pin_i = -1;
+    for (int k = 0; k < A.menu.n; k++)
+        if (A.menu.items[k].act == ACT_PIN) pin_i = k;
+    ST_CHECK(pin_i >= 0 && pin_index(M7_BASE) < 0);
+    menu_activate(pin_i);
+    ST_CHECK(!A.menu.open && pin_index(M7_BASE) >= 0 && pin_index(M7_BASE "/sub") < 0);
+    pin_toggle(M7_BASE);
+    ST_CHECK(pin_index(M7_BASE) < 0);
+
     // grid view: geometry, 2D navigation, rubber band, thumbnails
     set_zoom_level(p, 4); // medium icons
     st_wait();
