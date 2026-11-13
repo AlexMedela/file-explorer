@@ -612,7 +612,9 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
         bool color = o->kind == OK_COLOR;
         TextEdit *edit = color ? &g_opt.scroll_color : &g_opt.header_text;
         bool focus = color ? g_opt.scroll_color_focus : g_opt.header_text_focus;
-        f32 bw = MIN(roundf(S(56)), w * 0.22f), gap = roundf(S(6));
+        f32 gap = roundf(S(6));
+        f32 bw = MIN(ceilf(MAX(text_width(f, "Apply", 5), text_width(f, color ? "Auto" : "Default", color ? 4 : 7)) + S(24)),
+                     MAX(0.f, (w - gap * 2) * 0.5f));
         f32 preview = color && w >= S(240) ? roundf(S(18)) : 0;
         f32 inset = preview > 0 ? preview + gap : 0;
         Rect reset = {x + w - bw, y, bw, ch};
@@ -623,8 +625,10 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
         u32 parsed;
         bool valid = color ? scrollbar_color_parse(edit->buf, &parsed) : header_text_valid(edit->buf);
         if (!valid && edit->buf[0]) draw_rrect_outline(field.x, field.y, field.w, field.h, S(6), 1, C(COL_DANGER));
+        ClipSave buttons_clip = draw_clip_push((SDL_Rect){(int)apply.x, (int)y, (int)(x + w - apply.x), (int)ch});
         sheet_button(apply, "Apply", false, valid);
         sheet_button(reset, color ? "Auto" : "Default", false, true);
+        draw_clip_pop(buttons_clip);
         opt_hit(field, HP_EDIT_FIELD, o->id, 0);
         if (valid) opt_hit(apply, HP_EDIT_APPLY, o->id, 0);
         opt_hit(reset, HP_EDIT_RESET, o->id, 0);
