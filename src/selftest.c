@@ -990,6 +990,8 @@ static bool c_hidden_size_known(void) {
     return known;
 }
 
+static ssize_t st_read_text(const char *path, char *out, size_t cap); // M10
+
 static int run_selftest_m4(void) {
     st_wait();
     Pane *p = active_pane();
@@ -1267,6 +1269,46 @@ static int run_selftest_m4(void) {
     }
     pane_set_sort(p, SORT_NAME);
     st_wait();
+    // network folders (pretend GVfs): an SFTP one asks du on the server (a stand-in ssh running it here), one whose
+    // server can't be reached and an SMB one are walked through the mount; none stays at "..." forever
+    {
+#define M4_SFTP M4_BASE "/gvfs/sftp:host=vm,user=me,port=2222"
+        mkdir_p(M4_SFTP "/srv/da'ta/a b", 0755);
+        mkdir_p(M4_SFTP "/srv/da'ta/empty", 0755);
+        st_write(M4_SFTP "/srv/da'ta/a b/x.bin", 3000);
+        mkdir_p(M4_BASE "/gvfs/sftp:host=down/srv/c", 0755);
+        st_write(M4_BASE "/gvfs/sftp:host=down/srv/c/y.bin", 400);
+        mkdir_p(M4_BASE "/gvfs/smb-share:server=nas,share=x/d", 0755);
+        st_write(M4_BASE "/gvfs/smb-share:server=nas,share=x/d/z.bin", 500);
+        FILE *f = fopen(M4_BASE "/ssh", "w");
+        fputs("#!/bin/sh\necho \"ssh $*\" >> " M4_BASE "/ssh.log\nfor a; do last=$a; case $a in down) exit 255;; esac; done\n"
+              "exec sh -c \"$(printf '%s' \"$last\" | sed \"s#sh '/srv/#sh '" M4_SFTP "/srv/#\")\"\n", f);
+        fclose(f);
+        chmod(M4_BASE "/ssh", 0755);
+        setenv("FE_SSH", M4_BASE "/ssh", 1);
+        setenv("FE_GVFS_DIR", M4_BASE "/gvfs", 1);
+        pane_navigate(p, M4_SFTP "/srv/da'ta", true);
+        st_wait();
+        ST_CHECK(st_wait_cond(c_sizes_done, 5000));
+        u64 ab = st_dir_size(p, "a b"), em = st_dir_size(p, "empty");
+        ST_CHECK(ab >= 3000 && ab < 3000 + 65536 && em < 65536); // (du counts the folders themselves too)
+        char log[4096];
+        st_read_text(M4_BASE "/ssh.log", log, sizeof log);
+        ST_CHECK(strstr(log, "ssh -o BatchMode=yes ") && strstr(log, " -p 2222 -- me@vm sh -c ") && strstr(log, " sh '/srv/da'\\''ta'"));
+        pane_navigate(p, M4_BASE "/gvfs/sftp:host=down/srv", true);
+        st_wait();
+        ST_CHECK(st_wait_cond(c_sizes_done, 5000) && st_dir_size(p, "c") == 400);
+        st_read_text(M4_BASE "/ssh.log", log, sizeof log);
+        ST_CHECK(strstr(log, "-- down sh -c ") != NULL);
+        pane_navigate(p, M4_BASE "/gvfs/smb-share:server=nas,share=x", true);
+        st_wait();
+        ST_CHECK(st_wait_cond(c_sizes_done, 5000) && st_dir_size(p, "d") == 500);
+        unsetenv("FE_GVFS_DIR");
+        unsetenv("FE_SSH");
+        pane_navigate(p, M4_BASE, true);
+        st_wait();
+#undef M4_SFTP
+    }
 
     st_rmrf(M4_BASE);
     if (st_fail) { fprintf(stderr, "SELFTEST-M4: %d failure(s)\n", st_fail); return 1; }

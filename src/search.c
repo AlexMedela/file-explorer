@@ -1099,6 +1099,7 @@ typedef struct {
     u32 n;
     _Atomic u32 cursor;
     _Atomic int alive;
+    char host[400], port[8], rpath[PATH_MAX]; // an SFTP folder: "user@host", port and the folder there (du runs there)
 } DirSizeCtx;
 
 static void dirsize_done_cb(void *arg); // app.c
@@ -1123,7 +1124,11 @@ static void *dirsize_worker(void *arg) {
         u64 sz;
         if (!dscache_get(full, &sz)) {
             struct stat st;
-            if (fstatat(L->dirfd, e->name, &st, AT_SYMLINK_NOFOLLOW)) continue;
+            if (fstatat(L->dirfd, e->name, &st, AT_SYMLINK_NOFOLLOW)) { // gone, or not ours to read: "-", not "..." forever
+                __atomic_store_n(&e->size, 0, __ATOMIC_RELAXED);
+                __atomic_or_fetch(&e->mflags, (u8)(MF_DIRSIZE | MF_NOSIZE), __ATOMIC_RELEASE);
+                continue;
+            }
             sz = du_tree(L->dirfd, e->name, st.st_dev, &L->cancel, buf);
             if (atomic_load(&L->cancel)) break;
             dscache_put(full, sz);
@@ -1140,6 +1145,105 @@ static void *dirsize_worker(void *arg) {
         main_post(dirsize_done_cb, L); // passes our reference on
     }
     return NULL;
+}
+
+static void ssh_argv(char **a, char *ctl, size_t ccap, const char *host, const char *port, char *cmd); // devices.c
+static void sh_quote(char *out, size_t cap, const char *in);                                          // git.c
+
+// Folder sizes in an SFTP folder: du runs on the server (it reads its own disk; walking the mount costs a round trip
+// per file). The folder names go to its stdin one per line, it answers one line each, in order, as it goes: the
+// size, or nothing when du failed. The first line is the unit: bytes with GNU du, KiB where -b is unknown (BSD).
+// Returns false when the server couldn't be reached (no answer at all): the mount gets walked instead.
+static bool dirsize_ssh(DirSizeCtx *c) {
+    static const char script[] =
+        "cd -- \"$1\" || exit 3; if du -sb /dev/null >/dev/null 2>&1; then f=-sbx m=1; else f=-skx m=1024; fi; echo $m; "
+        "while IFS= read -r n; do s=$(du $f -- \"$n\" 2>/dev/null); echo \"${s%%[!0-9]*}\"; done";
+    Listing *L = c->L;
+    char qs[sizeof script + 64], qp[PATH_MAX + 64], cmd[sizeof qs + sizeof qp + 16];
+    sh_quote(qs, sizeof qs, script);
+    sh_quote(qp, sizeof qp, c->rpath);
+    snprintf(cmd, sizeof cmd, "sh -c %s sh %s", qs, qp); // sh: the login shell there may not be one (fish)
+    char ctl[PATH_MAX], *argv[24];
+    ssh_argv(argv, ctl, sizeof ctl, c->host, c->port, cmd);
+    int in[2], out[2];
+    if (pipe2(in, O_CLOEXEC)) return false;
+    if (pipe2(out, O_CLOEXEC)) { close(in[0]); close(in[1]); return false; }
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, in[0], 0);
+    posix_spawn_file_actions_adddup2(&fa, out[1], 1);
+    posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0);
+    pid_t pid;
+    int rc = posix_spawnp(&pid, argv[0], &fa, spawn_attr(), argv, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    close(in[0]);
+    close(out[1]);
+    if (rc) { close(in[1]); close(out[0]); return false; }
+    // The names, written as the pipe takes them (poll), so a long list never deadlocks against unread answers.
+    size_t nl = 0, wo = 0;
+    u32 kept = 0;
+    for (u32 i = 0; i < c->n; i++) { // a name with a line break would shift every answer after it: no size for it
+        Entry *e = &L->entries[c->dirs[i]];
+        if (strchr(e->name, '\n')) { __atomic_or_fetch(&e->mflags, (u8)(MF_DIRSIZE | MF_NOSIZE), __ATOMIC_RELEASE); continue; }
+        c->dirs[kept++] = c->dirs[i];
+        nl += strlen(e->name) + 1;
+    }
+    c->n = kept;
+    char *names = xmalloc(nl + 1), *o = names;
+    for (u32 i = 0; i < c->n; i++) o += sprintf(o, "%s\n", L->entries[c->dirs[i]].name);
+    fcntl(in[1], F_SETFL, O_NONBLOCK);
+    char buf[4096], line[64];
+    size_t ll = 0;
+    u64 unit = 0, last_wake = now_ns();
+    bool answered = false;
+    u32 i = 0;
+    for (;;) {
+        if (atomic_load(&L->cancel)) { kill(pid, SIGTERM); break; }
+        struct pollfd pf[2] = {{out[0], POLLIN, 0}, {in[1], POLLOUT, 0}};
+        if (poll(pf, in[1] >= 0 ? 2 : 1, 200) < 0 && errno != EINTR) break;
+        if (in[1] >= 0 && (pf[1].revents & (POLLOUT | POLLERR | POLLHUP))) {
+            ssize_t w = write(in[1], names + wo, nl - wo);
+            if (w > 0) wo += (size_t)w;
+            if ((w < 0 && errno != EAGAIN && errno != EINTR) || wo == nl) { close(in[1]); in[1] = -1; }
+        }
+        if (!(pf[0].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+        ssize_t r = read(out[0], buf, sizeof buf);
+        if (r < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+        if (r <= 0) break;
+        for (ssize_t k = 0; k < r; k++) {
+            if (buf[k] != '\n') { if (ll + 1 < sizeof line) line[ll++] = buf[k]; continue; }
+            line[ll] = 0;
+            ll = 0;
+            answered = true;
+            if (!unit) { unit = strtoull(line, NULL, 10); if (!unit) unit = 1; continue; }
+            if (i >= c->n) continue;
+            Entry *e = &L->entries[c->dirs[i++]];
+            u64 sz = line[0] ? strtoull(line, NULL, 10) * unit : 0;
+            if (line[0]) {
+                char full[PATH_MAX];
+                path_join(full, sizeof full, L->path, e->name);
+                dscache_put(full, sz);
+            }
+            __atomic_store_n(&e->size, sz, __ATOMIC_RELAXED);
+            __atomic_or_fetch(&e->mflags, (u8)(line[0] ? MF_DIRSIZE : MF_DIRSIZE | MF_NOSIZE), __ATOMIC_RELEASE);
+        }
+        u64 t = now_ns();
+        if (t - last_wake > 100000000ull) { main_wake(); last_wake = t; }
+    }
+    if (in[1] >= 0) close(in[1]);
+    close(out[0]); // (SIGCHLD is ignored app-wide: ssh reaps itself)
+    free(names);
+    if (!answered || !unit) return false;
+    for (; i < c->n && !atomic_load(&L->cancel); i++) // the server stopped answering midway: no size, not "..." forever
+        __atomic_or_fetch(&L->entries[c->dirs[i]].mflags, (u8)(MF_DIRSIZE | MF_NOSIZE), __ATOMIC_RELEASE);
+    return true;
+}
+
+static void *dirsize_ssh_worker(void *arg) {
+    DirSizeCtx *c = arg;
+    thread_background_priority();
+    if (dirsize_ssh(c) || atomic_load(&c->L->cancel)) atomic_store(&c->cursor, c->n);
+    return dirsize_worker(c); // the walk through the mount when the server couldn't be asked (else it just finishes)
 }
 
 // A reloaded listing L starts with the folder sizes measured in the one it replaces (matched by name); measuring
@@ -1189,23 +1293,37 @@ static void dirsize_prefill(Listing *L, bool visible, bool hidden) {
 
 // Compute recursive sizes for the folders of a completed listing (name order = screen order).
 // Hidden folders only when they are shown: in $HOME they (.cache, .local, ...) are most of the tree.
-static void dirsize_start(Listing *L, bool visible, bool hidden) {
+// A network folder (remote) is measured by a single thread, gently: by du on the server for an SFTP folder
+// (host set: "user@host", port, rpath = the folder there), else by walking the mount.
+static void dirsize_start(Listing *L, bool visible, bool hidden, bool remote, const char *host, const char *port,
+                          const char *rpath) {
     DirSizeCtx *c = xcalloc(1, sizeof *c);
     c->dirs = xmalloc((size_t)MAX(L->count, 1u) * sizeof(u32));
     for (u32 i = 0; i < L->count; i++) {
         Entry *e = &L->entries[i];
-        if ((e->flags & ENT_DIR) && !(e->flags & ENT_LINK) && ((e->flags & ENT_HIDDEN) ? hidden : visible)) c->dirs[c->n++] = i;
+        if (!(e->flags & ENT_DIR) || (e->flags & ENT_LINK) || !((e->flags & ENT_HIDDEN) ? hidden : visible)) continue;
+        char full[PATH_MAX];
+        u64 sz;
+        path_join(full, sizeof full, L->path, e->name);
+        if (remote && dscache_get(full, &sz)) continue; // measured lately: prefilled already, don't ask the network again
+        c->dirs[c->n++] = i;
     }
     if (!c->n) { free(c->dirs); free(c); return; }
     SortCtx ctx = {L->entries, SORT_NAME, false, false, GROUP_NONE, 0};
     qsort_r(c->dirs, c->n, sizeof(u32), cmp_entries, &ctx);
     c->L = L;
     listing_retain(L);
-    int n = (int)MIN(c->n, 3u);
+    bool ssh = remote && host && host[0];
+    if (ssh) {
+        snprintf(c->host, sizeof c->host, "%s", host);
+        snprintf(c->port, sizeof c->port, "%s", port ? port : "");
+        snprintf(c->rpath, sizeof c->rpath, "%s", rpath);
+    }
+    int n = remote ? 1 : (int)MIN(c->n, 3u);
     atomic_store(&c->alive, n);
     for (int i = 0; i < n; i++) {
         pthread_t t;
-        pthread_create(&t, NULL, dirsize_worker, c);
+        pthread_create(&t, NULL, ssh ? dirsize_ssh_worker : dirsize_worker, c);
         pthread_setname_np(t, "fe-dirsize");
         pthread_detach(t);
     }

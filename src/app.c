@@ -3005,6 +3005,8 @@ static void pane_set_sort(Pane *p, int key) {
     pane_resort(p);
 }
 
+static bool ssh_target_for(const char *path, SshTarget *t); // terminals: "user@host" + the folder there, for an SFTP folder
+
 // Called every frame: adopt finished scans, kick off follow-up sorts.
 static void pane_poll(Pane *p) {
     if (p->L_next && p->L_next->is_search) {
@@ -3108,10 +3110,12 @@ static void pane_poll(Pane *p) {
         bool visible = !L->dirsize_started, hidden = A.show_hidden && !L->dirsize_hidden;
         L->dirsize_started = true;
         L->dirsize_hidden |= hidden;
-        if (!path_is_remote(L->path)) { // walking a network share would be slow and costly
-            dirsize_prefill(L, visible, hidden); // sizes measured lately are there in the first frame (going back up)
-            dirsize_start(L, visible, hidden);
-        }
+        dirsize_prefill(L, visible, hidden); // sizes measured lately are there in the first frame (going back up)
+        SshTarget st;
+        bool remote = path_is_remote(L->path), ssh = remote && ssh_target_for(L->path, &st);
+        char host[400] = "";
+        if (ssh) snprintf(host, sizeof host, "%s%s%s", st.user, st.user[0] ? "@" : "", st.host);
+        dirsize_start(L, visible, hidden, remote, host, ssh ? st.port : "", ssh ? st.path : "");
     }
     if (st == LST_COMPLETE && !p->complete_seen && p->order) {
         p->complete_seen = true;

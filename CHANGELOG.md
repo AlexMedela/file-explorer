@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+**Fixed**
+- Folders on network drives (SSH/SFTP, SMB, NFS, cloud) get their sizes too instead of showing "…" forever. In SSH folders the server measures them itself (one quick `du` over the connection); elsewhere they're counted in the background by one gentle thread. A folder that can't be measured shows "—".
+
 ## 0.11.0
 
 **Changed**

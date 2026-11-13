@@ -788,6 +788,21 @@ static void ssh_control_path(char *out, size_t cap) { // "ControlPath=..." (%C: 
     snprintf(out, cap, "ControlPath=%s/fe-ssh-%%C", rt && rt[0] ? rt : "/tmp");
 }
 
+// ssh running cmd on host (argv into a[24]; ctl holds the ControlPath option). Never asks for a password: it rides
+// on the connection opened at connect time, else needs an agent or a key without a passphrase.
+static void ssh_argv(char **a, char *ctl, size_t ccap, const char *host, const char *port, char *cmd) {
+    ssh_control_path(ctl, ccap);
+    char *opts[] = {(char *)tool("FE_SSH", "ssh"), "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=5",
+                    "-o", "ServerAliveCountMax=2", "-o", "ControlMaster=auto", "-o", ctl, "-o", "ControlPersist=60"};
+    int n = 0;
+    for (; n < (int)ARRAY_COUNT(opts); n++) a[n] = opts[n];
+    if (port && port[0]) { a[n++] = "-p"; a[n++] = (char *)port; }
+    a[n++] = "--";
+    a[n++] = (char *)host;
+    a[n++] = cmd;
+    a[n] = NULL;
+}
+
 typedef struct { char user[128], host[256], port[8], path[PATH_MAX]; } SshTarget;
 
 // GVfs's folder of an SFTP connection: <runtime>/gvfs/sftp:host=H,user=U,port=P/<remote path>.

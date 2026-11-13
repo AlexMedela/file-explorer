@@ -17,7 +17,8 @@
   (stays on one filesystem), search inside files (ripgrep when installed - it also skips what `.gitignore` excludes -
   otherwise a built-in parallel search that skips `.git`, binary files and files over 50 MB; at most 100 lines per file
   and 20,000 in all), recursive folder sizes (per-folder cache checked by mtime, so unchanged subtrees cost one statx per folder;
-  hidden folders only while shown), inotify thread.
+  hidden folders only while shown; in network folders one gentle thread: `du` on the server over the shared ssh
+  connection for SFTP, walking the mount for the rest), inotify thread.
   Background work runs at idle CPU/IO priority.
 - Folders refresh automatically when their contents change (inotify, debounced and throttled by scan cost);
   refreshes load in the background and swap in, so the list never flickers.
