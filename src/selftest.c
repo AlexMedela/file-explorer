@@ -3470,7 +3470,9 @@ static int run_selftest_m11(void) {
         bool saved = false, height = false;
         FILE *f = fopen(cfgf, "r");
         while (f && fgets(line, sizeof line, f)) {
-            if (!strncmp(line, "ptab=", 5) && strstr(line, M11_BASE "/a\t") && strstr(line, ":1\n")) saved = true;
+            const char *v = strstr(line, M11_BASE "/a\t");
+            int view, px, dock = 0; // view:icon_px:dock_on:...
+            if (!strncmp(line, "ptab=", 5) && v && sscanf(v + strlen(M11_BASE "/a\t"), "%d:%d:%d", &view, &px, &dock) == 3 && dock == 1) saved = true;
             if (!strncmp(line, "terminal_panel_height=", 22) && fabsf((f32)atof(line + 22) - A.dock_h) < 1) height = true;
         }
         if (f) fclose(f);
