@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.1
 
 **New**
 - Ctrl+wheel over the files makes them bigger or smaller and keeps the view, instead of switching between Details, List and icons. Details and List get bigger icons (with thumbnails from 32 px) and taller rows; the grid's icons grow in finer steps. A size slider in the status bar, next to the view buttons, does the same. Each view keeps the size you last picked for it (also in new tabs and after a restart) until you change it.
