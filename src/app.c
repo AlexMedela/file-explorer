@@ -14867,7 +14867,7 @@ static void tray_sync(void) {
 static void tray_update(void) {
   bool want = (A.close_to_tray || g_bg_start) && tray_host_available();
   if (want && !g_tray) {
-    u8 *px = icon_raster(ICON_LOGO_SMALL, 64, 64);
+    u8 *px = icon_raster(icon_find("folder"), 64, 64);
     SDL_Surface *ic =
         px ? SDL_CreateSurfaceFrom(64, 64, SDL_PIXELFORMAT_RGBA32, px, 64 * 4)
            : NULL;
@@ -15032,13 +15032,14 @@ static void frame_draw(void) {
 
 static void window_icon_update(void) { // the logo in the accent colour (X11 /
                                        // taskbars without the .desktop icon)
-  u8 *logo = icon_raster(ICON_LOGO, 128, 128);
+  u8 *logo = icon_raster(icon_find("folder"), 128, 128);
   if (!logo)
     return;
   SDL_Surface *ic =
       SDL_CreateSurfaceFrom(128, 128, SDL_PIXELFORMAT_RGBA32, logo, 128 * 4);
   if (ic) {
     SDL_SetWindowIcon(A.win, ic);
+    if (g_tray) SDL_SetTrayIcon(g_tray, ic);
     SDL_DestroySurface(ic);
   }
   free(logo);
@@ -15086,24 +15087,61 @@ static bool app_icon_write(const char *dh, u32 accent) {
   return changed;
 }
 
-// Once the accent has settled (not on every step of trying colours in
-// Settings), outside tests.
+// Export the same raster used by the window as SVG runs so desktop launchers
+// also support installed themes whose source artwork is PNG or XPM.
+static bool app_theme_icon_write(const char *dh) {
+    const int size = 128;
+    u8 *pixels = icon_raster(icon_find("folder"), size, size);
+    if (!pixels) return false;
+    char *svg = NULL;
+    size_t length = 0;
+    FILE *f = open_memstream(&svg, &length);
+    if (!f) { free(pixels); return false; }
+    fprintf(f, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"128\" height=\"128\" viewBox=\"0 0 128 128\">\n");
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size;) {
+            u8 *p = pixels + (y * size + x) * 4;
+            int end = x + 1;
+            while (end < size && !memcmp(p, pixels + (y * size + end) * 4, 4)) end++;
+            if (p[3]) fprintf(f, "<path fill=\"#%02x%02x%02x\" fill-opacity=\"%.6f\" d=\"M%d %dh%dv1H%dz\"/>\n",
+                              p[0], p[1], p[2], p[3] / 255.0, x, y, end - x, x);
+            x = end;
+        }
+    }
+    fputs("</svg>\n", f);
+    free(pixels);
+    if (fclose(f)) { free(svg); return false; }
+    char dir[PATH_MAX], apps[PATH_MAX + 32], path[PATH_MAX + 64];
+    snprintf(dir, sizeof dir, "%s/icons/hicolor", dh);
+    snprintf(apps, sizeof apps, "%s/scalable/apps", dir);
+    snprintf(path, sizeof path, "%s/dev.fileexplorer.svg", apps);
+    bool changed = !file_equals(path, svg);
+    if (changed) {
+        mkdir_p(apps, 0755);
+        changed = write_file_atomic(path, svg);
+        if (changed) utimensat(AT_FDCWD, dir, NULL, 0);
+    }
+    free(svg);
+    return changed;
+}
+
+// Wait for appearance changes to settle before updating the desktop icon.
 static void app_icon_sync(void) {
-  static u32 done = 0xFFFFFFFF, seen;
-  static u64 since;
-  if (A.selftest || A.screenshot || COL_ACCENT == done)
-    return;
-  if (COL_ACCENT != seen) {
-    seen = COL_ACCENT;
-    since = now_ns();
-    return;
-  }
-  if (now_ns() - since < 1500000000ull)
-    return;
-  done = COL_ACCENT;
-  char dh[PATH_MAX];
-  data_home(dh, sizeof dh);
-  app_icon_write(dh, done);
+    static int last_theme = -1;
+    static u32 last_main, last_bg;
+    static u64 since;
+    static bool pending;
+    if (A.selftest || A.screenshot) return;
+    if (last_theme != g_icon_theme || last_main != COL_TEXT2 || last_bg != COL_BG) {
+        last_theme = g_icon_theme; last_main = COL_TEXT2; last_bg = COL_BG;
+        window_icon_update();
+        since = now_ns(); pending = true;
+    }
+    if (!pending || now_ns() - since < 1500000000ull) return;
+    pending = false;
+    char dh[PATH_MAX];
+    data_home(dh, sizeof dh);
+    app_theme_icon_write(dh);
 }
 
 #ifdef FE_DEMO
