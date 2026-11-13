@@ -276,7 +276,7 @@ static void test_tab_preferences(void) {
                 assert(tab_preferences_read(line, eq));
             }
             free(text);
-            assert(g_tab_position == position && g_tab_style == style);
+            assert(g_tab_position == (style == TAB_CLASSIC ? TAB_ABOVE : TAB_BELOW) && g_tab_style == style);
             const float scales[] = {1.f, 1.25f, 2.f};
             for (size_t s = 0; s < ARRAY_COUNT(scales); s++) {
                 float scale = scales[s], y = 53.f, nav = roundf(46.f * scale);
@@ -284,7 +284,7 @@ static void test_tab_preferences(void) {
                 assert(single.tabs_height == 0 && single.navigation_y == y && single.content_y == y + nav);
                 assert(pair.content_y == y + nav + pair.tabs_height);
                 assert(pair.content_y - single.content_y == pair.tabs_height);
-                if (position == TAB_ABOVE) {
+                if (style == TAB_CLASSIC) {
                     assert(pair.tabs_y == y && pair.navigation_y == y + pair.tabs_height);
                     assert(pair.navigation_y + nav == pair.content_y);
                 } else {
@@ -295,7 +295,7 @@ static void test_tab_preferences(void) {
         }
     }
     assert(!tab_preferences_read("other_setting", "above"));
-    assert(tab_preferences_read("tab_position", "invalid") && g_tab_position == TAB_BELOW);
+    assert(tab_preferences_read("tab_position", "invalid") && g_tab_position == TAB_ABOVE);
     assert(tab_preferences_read("tab_style", "invalid") && g_tab_style == TAB_PILLS);
     tab_preferences_defaults();
 }
@@ -332,7 +332,7 @@ static void test_integrated_header(void) {
         float scale = scales[i], row = roundf(46.f * scale);
         float left = 216.f * scale, width = 1000.f * scale, controls = left + width - row * 3;
         for (int position = TAB_BELOW; position <= TAB_ABOVE; position++) {
-            g_tab_position = position;
+            g_tab_style = position == TAB_ABOVE ? TAB_CLASSIC : TAB_PILLS;
             for (int count = 1; count <= 2; count++) {
                 TabBands bands = tab_bands(0, scale, count);
                 assert(bands.content_y == row * count); // no separate title-row height

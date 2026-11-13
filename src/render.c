@@ -296,7 +296,7 @@ static void draw_panel_bar(Panel *pn) {
     ClipSave cs = draw_clip_push((SDL_Rect){(int)tb.x, (int)tb.y, (int)tb.w, (int)tb.h});
     Rect pr = pn->plus;
     bool pills = g_tab_style == TAB_PILLS;
-    draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TOOLBAR));
+    draw_rect(tb.x, tb.y, tb.w, tb.h, C(pills ? COL_TOOLBAR : COL_SIDEBAR));
     if (pills) {
         Tab *first = panel_tab(pn, 0), *last = panel_tab(pn, -1);
         if (first && last) {
@@ -304,8 +304,6 @@ static void draw_panel_bar(Panel *pn) {
             draw_rrect(first->r.x - pad, tb.y + S(2), last->r.x + last->r.w - first->r.x + pad * 2,
                        tb.h - S(4), S(NAV_CORNER_RADIUS + 2), C(tab_container_color()));
         }
-    } else if (g_show_separators) {
-        draw_rect(tb.x, tb.y + tb.h - 1, tb.w, 1, C(COL_BORDER));
     }
     // As in the original renderer, paint inactive cards before the active one
     // so its outward-curving bottom corners cover neighboring backgrounds.
@@ -326,10 +324,6 @@ static void draw_panel_bar(Panel *pn) {
                 draw_rrect(r.x, r.y, r.w, r.h + rad * 2, rad, fill);
                 draw_flare(r.x - rad, bottom - rad, rad, 0.f, r.x, bottom, fill);
                 draw_flare(r.x + r.w + rad, bottom - rad, rad, (f32)M_PI * 0.5f, r.x + r.w, bottom, fill);
-                if (cur) { // neutral contour keeps the original silhouette on a seamless header
-                    draw_rrect_outline(r.x, r.y, r.w, r.h + rad * 2, rad, MAX(1.f, S(1)),
-                                       C(rgb_mix(COL_TOOLBAR, COL_TEXT, 0.18f)));
-                }
             }
         }
     }
@@ -578,11 +572,11 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
 
 static bool sidebar_edge_hot(void) { return A.drag == DRAG_SIDEBAR || (A.drag == DRAG_NONE && A.mouse_in && in_rect(A.r_sdiv, A.mx, A.my)); }
 
-// The label shares the same surface and row as navigation/window controls.
+// The title continues the sidebar surface.
 static void draw_brand(void) {
     Rect r = A.r_brand;
     if (r.h <= 0) return;
-    draw_rect(r.x, r.y, r.w, r.h, C(COL_TOOLBAR));
+    draw_rect(r.x, r.y, r.w, r.h, C(COL_SIDEBAR));
     const char *label = header_label_text();
     draw_text_fit(&A.font, r.x + S(16), text_y(&A.font, r.y, r.h), MAX(0.f, r.w - S(32)),
                   label, (int)strlen(label), C(COL_TEXT), 0);

@@ -9,11 +9,13 @@ static void tab_preferences_defaults(void) {
 }
 static bool tab_preferences_read(const char *key, const char *value) {
     if (!strcmp(key, "tab_position")) {
-        g_tab_position = !strcmp(value, "above") ? TAB_ABOVE : TAB_BELOW;
+        // Accept legacy settings; placement now follows the tab style.
+        g_tab_position = g_tab_style == TAB_CLASSIC ? TAB_ABOVE : TAB_BELOW;
         return true;
     }
     if (!strcmp(key, "tab_style")) {
         g_tab_style = !strcmp(value, "classic") ? TAB_CLASSIC : TAB_PILLS;
+        g_tab_position = g_tab_style == TAB_CLASSIC ? TAB_ABOVE : TAB_BELOW;
         return true;
     }
     return false;
@@ -25,6 +27,7 @@ static void tab_preferences_write(FILE *f) {
 
 typedef struct { f32 navigation_y, tabs_y, content_y, tabs_height; } TabBands;
 static TabBands tab_bands(f32 y, f32 scale, int count) {
+    g_tab_position = g_tab_style == TAB_CLASSIC ? TAB_ABOVE : TAB_BELOW;
     f32 nav = roundf(46.f * scale), tabs = count > 1 ? roundf(46.f * scale) : 0;
     return (TabBands){y + (g_tab_position == TAB_ABOVE ? tabs : 0),
                       y + (g_tab_position == TAB_BELOW ? nav : 0), y + nav + tabs, tabs};

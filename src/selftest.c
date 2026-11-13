@@ -1555,14 +1555,14 @@ static int run_selftest_m6(void) {
     st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
     pane_navigate(active_pane(), M6_BASE "/d", true); st_wait();
     ST_CHECK(panel_ntabs(p0) == 2 && panel_ntabs(p1) == 1 && panel_ntabs(p2) == 1);
-    { // All four tab configurations retain content/drop bounds and click targets.
+    { // Both tab styles retain content/drop bounds and click targets.
         for (int position = TAB_BELOW; position <= TAB_ABOVE; position++) {
             for (int style = TAB_PILLS; style <= TAB_CLASSIC; style++) {
                 opt_choice_set(OPT_TAB_POSITION, position);
                 opt_choice_set(OPT_TAB_STYLE, style);
                 PaneLayout *ly = &p0->cur->pane[0].ly;
                 Rect first = panel_tab(p0, 0)->r, last = panel_tab(p0, 1)->r;
-                if (position == TAB_BELOW) ST_CHECK(p0->bar.y >= ly->toolbar.y + ly->toolbar.h);
+                if (style == TAB_PILLS) ST_CHECK(p0->bar.y >= ly->toolbar.y + ly->toolbar.h);
                 else ST_CHECK(ly->toolbar.y >= p0->bar.y + p0->bar.h);
                 Rect content = panel_content_rect(p0);
                 ST_CHECK(ly->header.y == content.y && content.y >= p0->bar.y + p0->bar.h);
@@ -3493,7 +3493,7 @@ static int run_selftest_m9(void) {
                     Panel *pn = A.panels[i];
                     if (pn->area.y > 0.5f || !pn->cur) continue;
                     PaneLayout *ly = &pn->cur->pane[0].ly;
-                    Rect first = position == TAB_ABOVE && pn->bar.h > 0 ? pn->bar : ly->toolbar;
+                    Rect first = style == TAB_CLASSIC && pn->bar.h > 0 ? pn->bar : ly->toolbar;
                     ST_CHECK(first.y == 0);
                     if (pn->area.x + pn->area.w > A.r_wctl.x)
                         ST_CHECK(first.x + first.w <= A.r_wctl.x || first.w == 0);

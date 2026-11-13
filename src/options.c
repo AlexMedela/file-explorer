@@ -52,8 +52,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_INT, OPT_HEADER_BRIGHTNESS, "Header brightness", "Label, navigation, tabs and window controls: -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_MAIN_BRIGHTNESS, "File area brightness", "Main central window: -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_STATUS_BRIGHTNESS, "Status bar brightness", "Lower status bar: -30% to +30%"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_TAB_POSITION, "Tab position", "Place tabs above or below the navigation/path bar"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Classic Explorer tabs or centered pills inside a darker enclosure"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Classic tabs above navigation, or centered pills below navigation"},
     {OC_APPEARANCE, OK_COLOR, OPT_SCROLL_COLOR, "Scrollbar colour", "Auto follows the desktop highlight, with theme fallback; enter #RRGGBB to override"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_HIDDEN, "Show hidden files", "Files and folders starting with a dot (Ctrl+H)"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_FOLDER_SIZES, "Calculate folder sizes", "Fill the Size column for folders in the background"},
@@ -91,7 +90,7 @@ static const OptDef g_opts[] = {
 
 // Section headings: each starts a card with the option it names and runs until the next one.
 static const struct { int id; const char *title; } g_opt_sections[] = {
-    {OPT_THEME, "Theme"}, {OPT_FONT, "Text"}, {OPT_DIM_INACTIVE, "Display"}, {OPT_TERM_LOOK, "Terminal"}, {OPT_THEME_NEW, "Custom themes"}, {OPT_UNIFIED_SURFACES, "Surfaces"}, {OPT_TAB_POSITION, "Tabs"}, {OPT_SCROLL_COLOR, "Scrollbars"},
+    {OPT_THEME, "Theme"}, {OPT_FONT, "Text"}, {OPT_DIM_INACTIVE, "Display"}, {OPT_TERM_LOOK, "Terminal"}, {OPT_THEME_NEW, "Custom themes"}, {OPT_UNIFIED_SURFACES, "Surfaces"}, {OPT_TAB_STYLE, "Tabs"}, {OPT_SCROLL_COLOR, "Scrollbars"},
     {OPT_HIDDEN, "Files and folders"}, {OPT_RESTORE, "Startup"}, {OPT_SINGLE_CLICK, "Mouse"}, {OPT_TRANSFERS, "Copying and moving"},
     {OPT_KEYS_RESET, "Shortcuts"}, {OPT_DEF_VIEW, "New folders"}, {OPT_RENDERER, "Rendering"}, {OPT_SETTINGS_FILE, "Maintenance"},
     {OPT_IG_DEFAULT_FM, "Desktop roles (yours to give: installing never takes them)"},
@@ -279,8 +278,8 @@ static bool apply_ui_font(const char *family) {
 
 static void opt_choice_set(int id, int i) {
     switch (id) {
-    case OPT_TAB_POSITION: g_tab_position = CLAMP(i, TAB_BELOW, TAB_ABOVE); layout(); break;
-    case OPT_TAB_STYLE: g_tab_style = CLAMP(i, TAB_PILLS, TAB_CLASSIC); layout(); break;
+    case OPT_TAB_POSITION: break; // Legacy option: position is determined by style.
+    case OPT_TAB_STYLE: g_tab_style = CLAMP(i, TAB_PILLS, TAB_CLASSIC); g_tab_position = g_tab_style == TAB_CLASSIC ? TAB_ABOVE : TAB_BELOW; layout(); break;
     case OPT_THEME: theme_select(i); system_accent_start(); theme_apply(); break;
     case OPT_ICON_THEME: icon_set_theme(i); system_accent_start(); break;
     case OPT_TERM_LOOK: g_term_look_setting = i; tc_reload_all(); break;
