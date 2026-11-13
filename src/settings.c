@@ -61,6 +61,7 @@ static void settings_defaults(void) {
     cols_default();
     A.def_view = VIEW_DETAILS;
     A.def_icon = 96;
+    A.def_list_icon = A.def_listv_icon = 16;
     A.view_per_folder = false;
     A.def_group = GROUP_NONE;
     snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "Material");
@@ -269,6 +270,8 @@ static void settings_load(void) {
         else if (!strcmp(k, "transfers_at_once")) A.transfers_at_once = CLAMP(atoi(v), 0, 8);
         else if (!strcmp(k, "view")) A.def_view = !strcmp(v, "grid") ? VIEW_GRID : !strcmp(v, "list") ? VIEW_LIST : VIEW_DETAILS;
         else if (!strcmp(k, "icon_size")) A.def_icon = CLAMP(atoi(v), 32, 256);
+        else if (!strcmp(k, "list_icon_size")) A.def_list_icon = CLAMP(atoi(v), 16, 64);
+        else if (!strcmp(k, "list_view_icon_size")) A.def_listv_icon = CLAMP(atoi(v), 16, 64);
         else if (!strcmp(k, "view_per_folder")) A.view_per_folder = atoi(v);
         else if (!strcmp(k, "group")) A.def_group = CLAMP(atoi(v), 0, GROUP_COUNT - 1);
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
@@ -342,8 +345,8 @@ static void session_write(FILE *f) {
         Tab *t = A.tabs[i];
         if (t->term) continue; // terminals aren't restored
         if (strpbrk(t->pane[0].path, "\n\r\t")) continue; // can't be stored in a line-based file
-        fprintf(f, "ptab=%d\t%d\t%s\t%d:%d:%d\n", panel_index(t->panel), t->panel->cur == t, t->pane[0].path, t->pane[0].view,
-                t->pane[0].icon_px, t->dock_on); // (the terminal panel comes back with a new shell)
+        fprintf(f, "ptab=%d\t%d\t%s\t%d:%d:%d:%d:%d\n", panel_index(t->panel), t->panel->cur == t, t->pane[0].path, t->pane[0].view,
+                t->pane[0].icon_px, t->dock_on, t->pane[0].list_px, t->pane[0].listv_px); // (the terminal panel comes back with a new shell)
     }
     fprintf(f, "active_panel=%d\n", panel_index(A.ap));
 }
@@ -489,8 +492,9 @@ static void settings_write(FILE *f) {
     keys_save(f);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
-    fprintf(f, "view=%s\nicon_size=%d\nview_per_folder=%d\ngroup=%d\n",
-            A.def_view == VIEW_GRID ? "grid" : A.def_view == VIEW_LIST ? "list" : "details", A.def_icon, A.view_per_folder, A.def_group);
+    fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",
+            A.def_view == VIEW_GRID ? "grid" : A.def_view == VIEW_LIST ? "list" : "details", A.def_icon, A.def_list_icon, A.def_listv_icon, A.view_per_folder,
+            A.def_group);
     fprintf(f, "verify_copies=%d\ntransfers_at_once=%d\n", A.verify_copies, A.transfers_at_once);
     fprintf(f, "integration_prev_folder_app=%s\nintegration_show_in_folder=%d\nintegration_asked=%d\n", A.ig_prev_fm, A.ig_fm1,
             A.ig_asked);
@@ -632,10 +636,12 @@ static bool session_restore(void) {
         Tab *t = tab_new_in(pn, f[2], A.ntabs, false);
         if (t && atoi(f[1])) pn->cur = t;
         if (t && n == 4) {
-            int v = 0, px = 96, dock = 0;
-            if (sscanf(f[3], "%d:%d:%d", &v, &px, &dock) >= 2) {
+            int v = 0, px = 96, dock = 0, lpx = A.def_list_icon, lvpx = A.def_listv_icon;
+            if (sscanf(f[3], "%d:%d:%d:%d:%d", &v, &px, &dock, &lpx, &lvpx) >= 2) {
                 t->pane[0].view = CLAMP(v, 0, 2);
                 t->pane[0].icon_px = CLAMP(px, 32, 256);
+                t->pane[0].list_px = CLAMP(lpx, 16, 64);
+                t->pane[0].listv_px = CLAMP(lvpx, 16, 64);
                 t->dock_on = dock == 1; // its shell starts when the tab is first shown
             }
         }
@@ -825,12 +831,18 @@ static void folders_load(void) {
     char line[PATH_MAX + 64];
     while (fgets(line, sizeof line, f)) {
         line[strcspn(line, "\r\n")] = 0;
-        // view icon sort desc group recursive<TAB>path
-        int v, ic, so, de, gr, rec, off = 0;
-        if (sscanf(line, "%d %d %d %d %d %d\t%n", &v, &ic, &so, &de, &gr, &rec, &off) != 6 || !off || line[off] != '/') continue;
+        // view icon sort desc group recursive [details icon [list icon]]<TAB>path
+        int v, ic, so, de, gr, rec, li = 16, lv = 16, off = 0;
+        if (sscanf(line, "%d %d %d %d %d %d%n", &v, &ic, &so, &de, &gr, &rec, &off) != 6) continue;
+        int o2 = 0;
+        if (sscanf(line + off, " %d%n", &li, &o2) == 1) off += o2;
+        o2 = 0;
+        if (sscanf(line + off, " %d%n", &lv, &o2) == 1) off += o2;
+        if (line[off] != '\t' || line[off + 1] != '/') continue;
+        off++;
         g_fv = xrealloc(g_fv, (size_t)(g_nfv + 1) * sizeof(FolderView));
         g_fv[g_nfv++] = (FolderView){strdup(line + off), CLAMP(v, 0, 2), CLAMP(ic, 32, 256), CLAMP(so, 0, SORT_COUNT - 1),
-                                     CLAMP(gr, 0, GROUP_COUNT - 1), de != 0, rec != 0};
+                                     CLAMP(gr, 0, GROUP_COUNT - 1), CLAMP(li, 16, 64), CLAMP(lv, 16, 64), de != 0, rec != 0};
     }
     fclose(f);
 }
@@ -845,8 +857,8 @@ static void folders_save(void) {
     FILE *f = fopen(tmp, "w");
     if (!f) return;
     for (int i = 0; i < g_nfv; i++)
-        if (!strpbrk(g_fv[i].path, "\n\r")) fprintf(f, "%d %d %d %d %d %d\t%s\n", g_fv[i].view, g_fv[i].icon, g_fv[i].sort, g_fv[i].desc, g_fv[i].group,
-                g_fv[i].recursive, g_fv[i].path);
+        if (!strpbrk(g_fv[i].path, "\n\r")) fprintf(f, "%d %d %d %d %d %d %d %d\t%s\n", g_fv[i].view, g_fv[i].icon, g_fv[i].sort, g_fv[i].desc, g_fv[i].group,
+                g_fv[i].recursive, g_fv[i].list, g_fv[i].listv, g_fv[i].path);
     if (fclose(f) == 0) rename(tmp, path);
     g_fv_dirty = false;
 }
@@ -878,6 +890,8 @@ static void folder_view_remember(Pane *p) {
     }
     fv->view = p->view;
     fv->icon = p->icon_px;
+    fv->list = p->list_px;
+    fv->listv = p->listv_px;
     fv->sort = p->sort_key;
     fv->desc = p->sort_desc;
     fv->group = p->group;
@@ -892,6 +906,8 @@ static void folder_view_apply(Pane *p, const char *path) {
     if (A.view_per_folder) {
         p->view = fv ? fv->view : A.def_view;
         p->icon_px = fv ? fv->icon : A.def_icon;
+        p->list_px = fv ? fv->list : A.def_list_icon;
+        p->listv_px = fv ? fv->listv : A.def_listv_icon;
     }
     p->sort_key = fv ? fv->sort : A.def_sort_key;
     p->sort_desc = fv ? fv->desc : A.def_sort_desc;
@@ -908,6 +924,8 @@ static void folder_view_action(Pane *p, int act) {
     } else if (act == ACT_FV_ALL) {
         A.def_view = p->view;
         A.def_icon = p->icon_px;
+        A.def_list_icon = p->list_px;
+        A.def_listv_icon = p->listv_px;
         A.def_sort_key = p->sort_key;
         A.def_sort_desc = p->sort_desc;
         A.def_group = p->group;
@@ -924,6 +942,8 @@ static void folder_view_action(Pane *p, int act) {
         if (!A.view_per_folder) { // the tab's own view goes back to the default too
             p->view = A.def_view;
             p->icon_px = A.def_icon;
+            p->list_px = A.def_list_icon;
+            p->listv_px = A.def_listv_icon;
         }
         layout();
         pane_resort(p);

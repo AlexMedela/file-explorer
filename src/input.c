@@ -262,6 +262,13 @@ static void on_text(const char *text) {
     A.redraw = true;
 }
 
+// The status bar's size slider at x (its track as drawn).
+static void size_slider_at(f32 x) {
+    Rect tr = A.r_size;
+    f32 kr = roundf(S(5)), x0 = tr.x + kr, x1 = tr.x + tr.w - kr;
+    if (x1 > x0) pane_size_from_t(active_pane(), (x - x0) / (x1 - x0));
+}
+
 static i64 item_at(Pane *p, f32 x, f32 y) {
     PaneLayout *ly = &p->ly;
     if (y < ly->list.y || y >= ly->list.y + ly->list.h) return -1;
@@ -294,7 +301,7 @@ static int grp_hdr_at(Pane *p, f32 y) {
 // x-extent of the clickable name (icon + text) for a row
 static f32 row_name_end(Pane *p, i64 r) {
     Entry *e = &p->L->entries[p->order[r]];
-    f32 nx = p->ly.col_name + tree_indent(p->L, e) + roundf(S(16)) + roundf(S(9));
+    f32 nx = p->ly.col_name + tree_indent(p->L, e) + roundf(S(p->list_px)) + roundf(S(9));
     const char *b = p->L->tree ? rel_base(e->name) : e->name;
     f32 w = text_width(&A.font, b, (int)strlen(b));
     return MIN(nx + w + S(8), p->ly.name_end - S(6));
@@ -691,12 +698,13 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         if (in_rect(A.r_gear, x, y)) { options_open(); return; }
         if (in_rect(A.r_feat, x, y)) { menu_open_features(active_pane(), 0, 0); return; }
         if (A.r_xfer.w > 0 && in_rect(A.r_xfer, x, y)) { queue_toggle(); return; }
-        static const int lvl_for[3] = {0, 1, 4};
+        if (A.r_size.w > 0 && in_rect(A.r_size, x, y)) { // the size slider: jump there, then follow the pointer
+            A.drag = DRAG_SIZE;
+            size_slider_at(x);
+            return;
+        }
         for (int i = 0; i < 3; i++)
-            if (in_rect(A.r_viewbtn[i], x, y)) {
-                Pane *ap2 = active_pane();
-                set_zoom_level(ap2, i == 2 && ap2->view == VIEW_GRID ? zoom_level_of(ap2) : lvl_for[i]);
-            }
+            if (in_rect(A.r_viewbtn[i], x, y)) pane_set_view(active_pane(), i); // (VIEW_*, at the size it had)
         return;
     }
     if (in_rect(A.r_sdiv, x, y) && b->button == SDL_BUTTON_LEFT) { // the sidebar's edge: drag to resize, double-click resets
@@ -928,6 +936,8 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     } else if (A.drag == DRAG_PLACE_PENDING || A.drag == DRAG_PLACE) {
         if (A.drag == DRAG_PLACE_PENDING && fabsf(m->y - A.band_my0) > S(6)) A.drag = DRAG_PLACE;
         if (A.drag == DRAG_PLACE) qa_drop_point(m->y, &A.qa_ins_g, &A.qa_ins_i);
+    } else if (A.drag == DRAG_SIZE) {
+        size_slider_at(m->x);
     } else if (A.drag == DRAG_SIDEBAR) {
         A.side_w = CLAMP(m->x / A.scale, 150.f, MAX(150.f, MIN(480.f, ((f32)A.W / A.scale) - 520.f)));
         A.settings_dirty = true;
@@ -1010,9 +1020,10 @@ static void on_wheel(SDL_MouseWheelEvent *w) {
             return;
         }
     }
-    if (SDL_GetModState() & SDL_KMOD_CTRL) { // like File Pilot: Ctrl+wheel changes the view / icon size
+    if (A.r_size.w > 0 && in_rect(A.r_size, w->mouse_x, w->mouse_y)) { pane_size_step(active_pane(), w->y > 0 ? 1 : -1); return; }
+    if (SDL_GetModState() & SDL_KMOD_CTRL) { // Ctrl+wheel: bigger / smaller content, the view stays
         Pane *zp = pane_at(w->mouse_x, w->mouse_y);
-        if (zp) zoom_step(zp, w->y > 0 ? 1 : -1);
+        if (zp) pane_size_step(zp, w->y > 0 ? 1 : -1);
         else set_zoom(A.zoom + (w->y > 0 ? 0.1f : -0.1f));
         return;
     }

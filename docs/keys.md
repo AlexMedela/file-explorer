@@ -58,8 +58,9 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Sidebar → Devices | USB drives, SD cards and unmounted partitions: click to mount and open, ⏏ to eject (udisks2) |
 | Sidebar → Devices (phones) | Phones and cameras on a USB cable (built-in iPhone / MTP / PTP connector, GVfs as a fallback): click to connect and open, ⏏ when done |
 | Sidebar → Network, `smb://` / `sftp://` in the path bar | Network locations (GVfs, sshfs, CIFS, NFS); typing a URI mounts it; ⏏ disconnects |
-| Ctrl+= / Ctrl+- / Ctrl+0, Ctrl+wheel | Zoom the UI |
-| Ctrl+wheel over files, Ctrl+Shift+1…6, status-bar buttons | **Views**: Details, List, Grid (small → extra large icons with thumbnails) |
+| Ctrl+= / Ctrl+- / Ctrl+0, Ctrl+wheel outside the files | Zoom the whole UI |
+| Ctrl+Shift+1…6, status-bar buttons, right-click empty space | **Views**: Details, List, Grid (small → extra large icons with thumbnails) |
+| Ctrl+wheel over files, the size slider in the status bar | **Size** of the content in the current view (the view stays): grid icons 32–256 px, Details / List icons 16–64 px with taller rows (thumbnails from 32 px). Each view keeps its own size, also for new tabs and after a restart, until you change it |
 | Right-click a column header | Show/hide columns (Date created, Extension, Permissions, Owner…), size bars, alternating rows; drag headers to reorder, drag edges to resize |
 | Right-click empty space → Group by | Group by date / type / size; click a group header to collapse it |
 | Right-click empty space → view options | A tab keeps its **view** (Details, List, icon size) while you browse; new tabs open in the default view (Options → Views; "Each folder keeps its own view" remembers it per folder instead). Sort and grouping are remembered **per folder**; "Use this view in subfolders" / "everywhere" / "Reset folder view" |

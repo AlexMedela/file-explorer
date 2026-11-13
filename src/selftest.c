@@ -1944,7 +1944,7 @@ static int run_selftest_m7(void) {
     st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
     ST_CHECK(st_wait_cond(c_thumb_ready, 5000));
     st_shot("grid");
-    // Ctrl+wheel over the pane steps the zoom level
+    // Ctrl+wheel over the pane makes the content smaller / bigger, the view stays
     SDL_MouseWheelEvent wev;
     SDL_zero(wev);
     wev.y = -1;
@@ -1953,11 +1953,45 @@ static int run_selftest_m7(void) {
     SDL_SetModState(SDL_KMOD_CTRL);
     on_wheel(&wev);
     SDL_SetModState(SDL_KMOD_NONE);
-    ST_CHECK(zoom_level_of(p) == 3);
+    ST_CHECK(p->view == VIEW_GRID && p->icon_px == 80);
     set_zoom_level(p, 1); // list
     ST_CHECK(p->view == VIEW_LIST && p->ly.cell_h == p->ly.row_h + roundf(S(2)));
     set_zoom_level(p, 0); // details
     st_wait();
+    { // details: bigger icons, taller rows; the status bar slider (log scale: the far end is the biggest)
+        f32 rh0 = p->ly.row_h;
+        wev.y = 1;
+        SDL_SetModState(SDL_KMOD_CTRL);
+        for (int k = 0; k < 3; k++) on_wheel(&wev);
+        SDL_SetModState(SDL_KMOD_NONE);
+        ST_CHECK(p->view == VIEW_DETAILS && p->list_px == 32 && p->ly.row_h > rh0);
+        st_shot("details-big");
+        st_frames(1);
+        Rect sr = A.r_size;
+        ST_CHECK(sr.w > 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sr.x + sr.w - 1, sr.y + sr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.drag == DRAG_SIZE && p->list_px == 64);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, sr.x, sr.y + sr.h * 0.5f, 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sr.x, sr.y + sr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.drag == DRAG_NONE && p->list_px == 16 && p->ly.row_h == rh0);
+        // each view keeps its own size through the status bar's view buttons, and new tabs get it too
+        Rect vb0 = A.r_viewbtn[0], vb2 = A.r_viewbtn[2];
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, vb2.x + vb2.w * 0.5f, vb2.y + vb2.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, vb2.x + vb2.w * 0.5f, vb2.y + vb2.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(p->view == VIEW_GRID && p->icon_px == 80 && A.def_icon == 80);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, vb0.x + vb0.w * 0.5f, vb0.y + vb0.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, vb0.x + vb0.w * 0.5f, vb0.y + vb0.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(p->view == VIEW_DETAILS && p->icon_px == 80);
+        pane_set_view(p, VIEW_LIST);
+        wev.y = 1;
+        SDL_SetModState(SDL_KMOD_CTRL);
+        on_wheel(&wev);
+        SDL_SetModState(SDL_KMOD_NONE);
+        ST_CHECK(p->listv_px == 20 && p->list_px == 16 && A.def_listv_icon == 20);
+        ST_CHECK(A.def_icon == 80 && A.def_list_icon == 16); // (what pane_init gives new tabs)
+        pane_set_view(p, VIEW_DETAILS);
+        st_wait();
+    }
 
     // grouping (details): size groups, collapse/expand by clicking the header
     pane_set_group(p, GROUP_SIZE);

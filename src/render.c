@@ -1154,8 +1154,9 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
         if (cs == CMP_SAME && !cut) g_alpha = 0.5f; // the same on both sides: in the background
         name_c = git_name_color(gs, name_c, bright);
         if (p->view == VIEW_LIST) {
-            f32 is = roundf(S(16)), ix = r.x + S(10), iy = roundf(r.y + (r.h - is) * 0.5f);
-            if (e->flags & ENT_DIR) draw_dir_icon(ix, iy, is, name, hidden);
+            f32 is = roundf(S(p->listv_px)), ix = r.x + S(10), iy = roundf(r.y + (r.h - is) * 0.5f);
+            if (p->listv_px >= 32) draw_item_icon_big(p, e, ix, iy, is, cut); // (big enough for thumbnails)
+            else if (e->flags & ENT_DIR) draw_dir_icon(ix, iy, is, name, hidden);
             else if (!draw_icon_for_name(ix, iy, is, name, e->mflags & MF_EXEC)) draw_file_icon(ix, iy, is, file_color(e));
             f32 tx = ix + is + S(8);
             if (renaming) {
@@ -1989,7 +1990,7 @@ static void draw_list(Pane *p, bool active) {
     SDL_Rect clip = {(int)lr.x, (int)lr.y, (int)lr.w, (int)lr.h};
     draw_clip(&clip);
     Font *f = &A.font;
-    f32 rh = ly->row_h, is = roundf(S(16));
+    f32 rh = ly->row_h, is = roundf(S(p->list_px));
     f32 rx = lr.x + roundf(S(6)), rw = ly->track.x - rx - roundf(S(2));
     i64 first = (i64)(p->scroll / rh);
     bool hovering = A.mouse_in && A.drag == DRAG_NONE && in_rect(lr, A.mx, A.my) && !in_rect(ly->track, A.mx, A.my);
@@ -2074,7 +2075,8 @@ static void draw_list(Pane *p, bool active) {
             for (int k = 0; k < d; k++)
                 draw_rect(roundf(ly->col_name + roundf(S(16)) * (f32)k + roundf(S(7))), y, 1, rh, CA(COL_TEXT_FAINT, 0.35f));
         }
-        if (e->flags & ENT_DIR) draw_dir_icon(icx, iy, is, rel_base(e->name), hidden);
+        if (p->list_px >= 32) draw_item_icon_big(p, e, icx, iy, is, cut); // (big enough for thumbnails)
+        else if (e->flags & ENT_DIR) draw_dir_icon(icx, iy, is, rel_base(e->name), hidden);
         else if (!draw_icon_for_name(icx, iy, is, rel_base(e->name), e->mflags & MF_EXEC)) draw_file_icon(icx, iy, is, file_color(e));
         if (e->flags & ENT_LINK) { // small link badge
             f32 bs = roundf(S(7));
@@ -2423,6 +2425,16 @@ static void draw_eye_icon(f32 cx, f32 cy, f32 hw, Color c) {
     draw_rrect(cx - rp, cy - rp, rp * 2, rp * 2, rp, c);
 }
 
+// A magnifier s wide with - or + in its lens: the size slider's ends.
+static void draw_zoom_icon(f32 cx, f32 cy, f32 s, bool plus, Color c) {
+    f32 t = MAX(1.f, roundf(S(1.4f))), d = roundf(s * 0.74f), x = roundf(cx - s * 0.5f), y = roundf(cy - s * 0.5f);
+    draw_rrect_outline(x, y, d, d, d * 0.5f, t, c);
+    f32 lc = d * 0.5f, k = d * 0.5f * 0.7071f; // the handle leaves the lens at its lower right
+    draw_line(x + lc + k, y + lc + k, x + s - t * 0.5f, y + s - t * 0.5f, t * 1.3f, c);
+    if (plus) draw_plus(x + lc, y + lc, roundf(d * 0.46f), t, c);
+    else draw_minus(x + lc, y + lc, roundf(d * 0.46f), t, c);
+}
+
 static void draw_status_term(Term *t);
 
 
@@ -2430,7 +2442,7 @@ static void draw_status(void) {
     Pane *p = active_pane();
     Listing *L = p->L;
     Rect s = A.r_status;
-    A.r_xfer = (Rect){0, 0, 0, 0};
+    A.r_xfer = A.r_size = (Rect){0, 0, 0, 0};
     if (picker_active()) { draw_picker_bar(s); return; } // Open / Save / Choose folder bar
     if (active_term()) { draw_status_term(active_term()); return; }
     draw_rect(s.x, s.y, s.w, s.h, C(COL_TOOLBAR));
@@ -2550,6 +2562,22 @@ static void draw_status(void) {
             draw_rrect(cx - q - S(1), cy + S(1), q, q, S(1.5f), ic);
             draw_rrect(cx + S(1), cy + S(1), q, q, S(1.5f), ic);
         }
+    }
+    // size slider: how big the content is in this view (Ctrl+wheel)
+    if (!pane_du_on(p) && !pane_snap_on(p) && s.w > S(640)) {
+        f32 sw = roundf(S(80)), kr = roundf(S(5)), i0 = roundf(S(15)), i1 = i0;
+        Rect tr = {bx - S(10) - i1 - S(6) - sw, s.y, sw, s.h};
+        A.r_size = tr;
+        bool hv = hot(tr) || A.drag == DRAG_SIZE;
+        f32 cy = roundf(s.y + s.h * 0.5f), x0 = tr.x + kr, x1 = tr.x + tr.w - kr;
+        Color ic = hv ? C(COL_TEXT) : C(COL_TEXT_DIM);
+        draw_zoom_icon(tr.x - S(6) - i0 * 0.5f, cy, i0, false, ic); // smaller / bigger on its ends
+        draw_zoom_icon(tr.x + tr.w + S(6) + i1 * 0.5f, cy, i1, true, ic);
+        f32 th = MAX(2.f, roundf(S(3))), kx = roundf(x0 + pane_size_t(p) * (x1 - x0));
+        draw_rrect(x0, roundf(cy - th * 0.5f), x1 - x0, th, th * 0.5f, C(COL_CONTROL));
+        draw_rrect(x0, roundf(cy - th * 0.5f), kx - x0, th, th * 0.5f, C(COL_ACCENT));
+        draw_rrect(kx - kr, cy - kr, kr * 2, kr * 2, kr, hv ? C(COL_ACCENT) : C(COL_TEXT2));
+        bx = tr.x - S(6) - i0 - S(4);
     }
     // transfers (the queue, Ctrl+J): only while there are some, or the queue is open; the bar under the arrows is
     // how far the running ones are

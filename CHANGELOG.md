@@ -3,6 +3,7 @@
 ## Unreleased
 
 **New**
+- Ctrl+wheel over the files makes them bigger or smaller and keeps the view, instead of switching between Details, List and icons. Details and List get bigger icons (with thumbnails from 32 px) and taller rows; the grid's icons grow in finer steps. A size slider in the status bar, next to the view buttons, does the same. Each view keeps the size you last picked for it (also in new tabs and after a restart) until you change it.
 - A ⋯ button next to the type filter opens the folder's menu (new folder, paste, view, sort, properties…), handy when the folder is so full there's no empty space left to right-click. Its "Properties", "Copy path", "Pin this folder" and "Paste" are about the folder itself, also when something is selected.
 
 **Fixed**

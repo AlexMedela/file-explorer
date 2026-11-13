@@ -220,6 +220,7 @@ typedef struct Pane {
     char search_next_q[256]; // query of a staged search (L_next) not yet shown
     bool resort_on_complete;
     int view, icon_px; // VIEW_*, grid icon size (logical px)
+    int list_px, listv_px; // details / list view icon size (logical px; the rows grow with it)
     int group;         // GROUP_*
     int tf_mode;       // type filter: 0 all, 1 files only, 2 folders only (kept while navigating)
     char tf_exts[512]; // hidden extensions "|png|"
@@ -247,7 +248,7 @@ typedef struct Pane {
 
 typedef struct FolderView {
     char *path;
-    int view, icon, sort, group;
+    int view, icon, sort, group, list, listv; // (list, listv: the details / list view icon sizes)
     bool desc, recursive; // recursive: also applies to subfolders without their own setting
 } FolderView;
 
@@ -345,7 +346,7 @@ typedef struct { // one sidebar row
 } Place;
 
 enum { DRAG_NONE, DRAG_SCROLL, DRAG_BAND_PENDING, DRAG_BAND, DRAG_SPLIT, DRAG_ITEMS_PENDING, DRAG_ITEMS, DRAG_PREVIEW, DRAG_SIDEBAR,
-       DRAG_TAB_PENDING, DRAG_TAB, DRAG_COL_RESIZE, DRAG_COL_PENDING, DRAG_COL, DRAG_PLACE_PENDING, DRAG_PLACE, DRAG_DOCK };
+       DRAG_TAB_PENDING, DRAG_TAB, DRAG_COL_RESIZE, DRAG_COL_PENDING, DRAG_COL, DRAG_PLACE_PENDING, DRAG_PLACE, DRAG_DOCK, DRAG_SIZE };
 
 enum { U_RENAME, U_MOVE, U_COPY, U_TRASH, U_CREATE };
 typedef struct {
@@ -532,10 +533,11 @@ static struct {
     u32 pal_gen;
     int pal_n, pal_sel, pal_top;
     Rect pal_r, pal_list;
-    int def_view, def_icon, def_group;
+    int def_view, def_icon, def_list_icon, def_listv_icon, def_group; // (sizes: the last ones picked, per view)
     bool view_per_folder; // off: a tab keeps its view (layout, icon size) while browsing; new tabs start in def_view
     char icon_theme_name[64]; // from settings, applied once the renderer exists (custom themes are scanned first)
     Rect r_viewbtn[3], r_gear, r_feat, r_xfer;
+    Rect r_size;          // the size slider next to them (track; w 0: not shown)
     // columns (shared by all panes)
     int cols[COL_COUNT], ncols;
     f32 colw[COL_COUNT];
@@ -705,6 +707,7 @@ static inline Tab *cur_tab(void) { return A.tabs[A.cur]; }
 static inline Pane *active_pane(void) { return &cur_tab()->pane[0]; }
 
 static inline bool pane_is_archive(const Pane *p) { return strstr(p->path, "::") != NULL; }
+static inline int pane_rows_px(const Pane *p) { return p->view == VIEW_LIST ? p->listv_px : p->list_px; } // (not grid)
 static inline bool pane_tree_on(const Pane *p) { return p->tree && p->view == VIEW_DETAILS && !pane_is_archive(p) && !p->search_q[0]; }
 static inline int pane_group_eff(const Pane *p) { return p->view == VIEW_DETAILS && !pane_tree_on(p) ? p->group : GROUP_NONE; }
 
@@ -895,6 +898,7 @@ static void layout_pane(Pane *p, Rect area) {
     }
     static const f32 row_px[3] = {22, 26, 32};
     ly->row_h = roundf(S(row_px[CLAMP(A.row_spacing, 0, 2)]));
+    if (p->view != VIEW_GRID) ly->row_h = MAX(ly->row_h, roundf(S(pane_rows_px(p) + 6))); // bigger icons: taller rows
     {
         f32 avail = ly->list.w - roundf(S(12));
         if (p->view == VIEW_GRID) {
@@ -906,7 +910,7 @@ static void layout_pane(Pane *p, Rect area) {
             ly->cell_h = isz + roundf(S(16)) + roundf(A.font.line_h * 2.3f) + roundf(S(6));
         } else if (p->view == VIEW_LIST) {
             ly->pad = roundf(S(6));
-            ly->per_row = MAX(1, (int)((avail - ly->pad * 2) / roundf(S(250))));
+            ly->per_row = MAX(1, (int)((avail - ly->pad * 2) / roundf(S(234 + p->listv_px))));
             ly->cell_w = floorf((avail - ly->pad * 2) / ly->per_row);
             ly->cell_h = ly->row_h + roundf(S(2));
         } else {
@@ -2611,6 +2615,8 @@ static void pane_init(Pane *p, const char *path, int sort_key, bool sort_desc) {
     memset(p, 0, sizeof *p);
     p->view = A.def_view;
     p->icon_px = A.def_icon ? A.def_icon : 96;
+    p->list_px = A.def_list_icon ? A.def_list_icon : 16;
+    p->listv_px = A.def_listv_icon ? A.def_listv_icon : 16;
     p->group = A.def_group;
     p->tree = A.def_tree;
     p->sort_key = sort_key;
@@ -3701,7 +3707,6 @@ static void tilde_path(const char *path, char *out, size_t cap);
 static void pin_toggle(const char *path);
 static int pin_index(const char *path);
 static void set_zoom_level(Pane *p, int lvl);
-static void zoom_step(Pane *p, int dir);
 static int zoom_level_of(const Pane *p);
 static void pane_target_folder(Pane *p, char *out, size_t cap);
 static void preview_toggle(void);
@@ -9831,7 +9836,6 @@ static void search_exit(Pane *p) {
 
 static void reload_fonts(void);
 static void set_zoom_level(Pane *p, int lvl);
-static void zoom_step(Pane *p, int dir);
 
 static void set_zoom(f32 z) {
     z = CLAMP(roundf(z * 10.f) / 10.f, 0.6f, 2.5f);
@@ -9851,11 +9855,10 @@ static int zoom_level_of(const Pane *p) {
     return best;
 }
 
-static void set_zoom_level(Pane *p, int lvl) {
-    lvl = CLAMP(lvl, 0, ZOOM_COUNT - 1);
+// Switch to a view at the size it had (the status bar buttons).
+static void pane_set_view(Pane *p, int view) {
     p->du = p->snapv = false; // picking a view leaves the disk usage map / the snapshots
-    p->view = g_zoom[lvl].view;
-    if (g_zoom[lvl].view == VIEW_GRID) p->icon_px = g_zoom[lvl].px;
+    p->view = view;
     folder_view_remember(p);
     layout();
     pane_resort(p); // grouping only applies to the details view
@@ -9867,7 +9870,66 @@ static void set_zoom_level(Pane *p, int lvl) {
     A.redraw = true;
 }
 
-static void zoom_step(Pane *p, int dir) { set_zoom_level(p, zoom_level_of(p) + dir); }
+// A view preset (menus, Ctrl+Shift+1...6): the view, and for icons that size.
+static void set_zoom_level(Pane *p, int lvl) {
+    lvl = CLAMP(lvl, 0, ZOOM_COUNT - 1);
+    if (g_zoom[lvl].view == VIEW_GRID) p->icon_px = A.def_icon = g_zoom[lvl].px;
+    pane_set_view(p, g_zoom[lvl].view);
+}
+
+
+// Content size inside the view (Ctrl+wheel, the status bar slider): grid icons, or the icons (and rows) of details / list.
+static const int g_grid_px[] = {32, 40, 48, 56, 64, 72, 80, 96, 112, 128, 152, 176, 208, 256};
+static const int g_list_px[] = {16, 20, 24, 32, 40, 48, 64};
+static void pane_size_range(const Pane *p, int *lo, int *hi) {
+    *lo = p->view == VIEW_GRID ? 32 : 16;
+    *hi = p->view == VIEW_GRID ? 256 : 64;
+}
+static int pane_size(const Pane *p) { return p->view == VIEW_GRID ? p->icon_px : pane_rows_px(p); }
+
+static void pane_set_size(Pane *p, int px) {
+    int lo, hi;
+    pane_size_range(p, &lo, &hi);
+    px = CLAMP(px, lo, hi);
+    if (px == pane_size(p)) return;
+    i64 keep = p->cursor;
+    // (and the size this view has from now on: new tabs, after a restart)
+    if (p->view == VIEW_GRID) p->icon_px = A.def_icon = px;
+    else if (p->view == VIEW_LIST) p->listv_px = A.def_listv_icon = px;
+    else p->list_px = A.def_list_icon = px;
+    A.settings_dirty = true;
+    folder_view_remember(p);
+    layout();
+    p->scroll = p->scroll_target = CLAMP(p->scroll, 0.0, max_scroll(p));
+    if (keep >= 0) { // (the cursor stays in sight)
+        ensure_visible(p, keep);
+        p->scroll = p->scroll_target;
+    }
+    A.redraw = true;
+}
+
+// One step bigger (dir > 0) or smaller, from wherever the slider left it.
+static void pane_size_step(Pane *p, int dir) {
+    if (pane_du_on(p) || pane_snap_on(p)) return;
+    const int *t = p->view == VIEW_GRID ? g_grid_px : g_list_px;
+    int n = p->view == VIEW_GRID ? (int)ARRAY_COUNT(g_grid_px) : (int)ARRAY_COUNT(g_list_px), cur = pane_size(p), px = cur;
+    if (dir > 0) { for (int i = 0; i < n; i++) if (t[i] > cur) { px = t[i]; break; } }
+    else { for (int i = n - 1; i >= 0; i--) if (t[i] < cur) { px = t[i]; break; } }
+    pane_set_size(p, px);
+}
+
+// The slider: position (0..1) <-> size, on a log scale (each step looks alike).
+static f32 pane_size_t(const Pane *p) {
+    int lo, hi;
+    pane_size_range(p, &lo, &hi);
+    return CLAMP(logf((f32)pane_size(p) / (f32)lo) / logf((f32)hi / (f32)lo), 0.f, 1.f);
+}
+static void pane_size_from_t(Pane *p, f32 t) {
+    int lo, hi;
+    pane_size_range(p, &lo, &hi);
+    f32 px = (f32)lo * powf((f32)hi / (f32)lo, CLAMP(t, 0.f, 1.f));
+    pane_set_size(p, (int)roundf(px / 2.f) * 2); // (even sizes)
+}
 
 static int pin_index(const char *path) { return qa_find(path, NULL, NULL) ? 0 : -1; }
 
