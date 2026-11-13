@@ -1,7 +1,13 @@
+#include "tab_preferences.c"
+#include "header_preferences.c"
+
+#define NAV_SELECTION_DEFAULT 40
+#define NAV_CORNER_RADIUS 7.f // shared by path field and tabs
+
 // theme.c - colour palette: built-in themes, accent colour, JSON colour schemes
 
 typedef struct {
-    u32 bg, sidebar, tabbar, toolbar, field, field_hover, border, hover, sel, sel_focus, sel_idle;
+    u32 bg, sidebar, tabbar, toolbar, status, field, field_hover, border, hover, sel, sel_focus, sel_idle;
     u32 text, text_dim, text_faint, text2, text_strong, text_hidden;
     u32 accent, accent_hover, on_accent, folder, folder_tab;
     u32 sel_text, sel_dim, sel_hl;
@@ -11,7 +17,7 @@ typedef struct {
 
 static const struct { const char *key; size_t off; } g_theme_keys[] = {
 #define TK(f) {#f, offsetof(Theme, f)}
-    TK(bg), TK(sidebar), TK(tabbar), TK(toolbar), TK(field), TK(field_hover), TK(border), TK(hover), TK(sel),
+    TK(bg), TK(sidebar), TK(tabbar), TK(toolbar), TK(status), TK(field), TK(field_hover), TK(border), TK(hover), TK(sel),
     TK(sel_focus), TK(sel_idle), TK(text), TK(text_dim), TK(text_faint), TK(text2), TK(text_strong), TK(text_hidden),
     TK(accent), TK(accent_hover), TK(on_accent), TK(folder), TK(folder_tab), TK(sel_text), TK(sel_dim), TK(sel_hl),
     TK(popup), TK(popup_border), TK(control), TK(control_hover), TK(control_off), TK(chip), TK(tab_hover), TK(sunken),
@@ -21,7 +27,7 @@ static const struct { const char *key; size_t off; } g_theme_keys[] = {
 };
 
 static const Theme g_theme_dark = {
-    .bg = 0x1B1B20, .sidebar = 0x161619, .tabbar = 0x131316, .toolbar = 0x1F1F25, .field = 0x2A2A31,
+    .bg = 0x1B1B20, .sidebar = 0x161619, .tabbar = 0x131316, .toolbar = 0x1F1F25, .status = 0x1F1F25, .field = 0x2A2A31,
     .field_hover = 0x303038, .border = 0x2B2B32, .hover = 0x26262D, .sel = 0x24436E, .sel_focus = 0x2C5A97,
     .sel_idle = 0x30343E, .text = 0xE6E6EA, .text_dim = 0x9A9CA5, .text_faint = 0x6A6C75, .text2 = 0xC9CBD2,
     .text_strong = 0xFFFFFF, .text_hidden = 0x8E9099, .accent = 0x4C9BFF, .accent_hover = 0x5AA6FF,
@@ -34,7 +40,7 @@ static const Theme g_theme_dark = {
 };
 
 static const Theme g_theme_light = {
-    .bg = 0xFBFBFC, .sidebar = 0xF0F1F4, .tabbar = 0xE4E5EA, .toolbar = 0xF6F6F8, .field = 0xE9EAEE,
+    .bg = 0xFBFBFC, .sidebar = 0xF0F1F4, .tabbar = 0xE4E5EA, .toolbar = 0xF6F6F8, .status = 0xF6F6F8, .field = 0xE9EAEE,
     .field_hover = 0xE0E2E7, .border = 0xDCDDE2, .hover = 0xEDEFF3, .sel = 0xCCE1FB, .sel_focus = 0xB5D3FA,
     .sel_idle = 0xE0E3E9, .text = 0x1D1E22, .text_dim = 0x5D6068, .text_faint = 0x8E9199, .text2 = 0x3A3C42,
     .text_strong = 0x000000, .text_hidden = 0x8A8D95, .accent = 0x2F7BE5, .accent_hover = 0x4C8FF0,
@@ -47,7 +53,7 @@ static const Theme g_theme_light = {
 };
 
 static const Theme g_theme_black = {
-    .bg = 0x000000, .sidebar = 0x0A0A0B, .tabbar = 0x000000, .toolbar = 0x0E0E10, .field = 0x1A1A1E,
+    .bg = 0x000000, .sidebar = 0x0A0A0B, .tabbar = 0x000000, .toolbar = 0x0E0E10, .status = 0x0E0E10, .field = 0x1A1A1E,
     .field_hover = 0x222227, .border = 0x1E1E22, .hover = 0x16161A, .sel = 0x1D3A63, .sel_focus = 0x24508C,
     .sel_idle = 0x24272F, .text = 0xE6E6EA, .text_dim = 0x9A9CA5, .text_faint = 0x63656D, .text2 = 0xC9CBD2,
     .text_strong = 0xFFFFFF, .text_hidden = 0x86888F, .accent = 0x4C9BFF, .accent_hover = 0x5AA6FF,
@@ -60,7 +66,7 @@ static const Theme g_theme_black = {
 };
 
 static const Theme g_theme_monokai = {
-    .bg = 0x272822, .sidebar = 0x1E1F1C, .tabbar = 0x1A1B17, .toolbar = 0x2D2E27, .field = 0x3E3D32,
+    .bg = 0x272822, .sidebar = 0x1E1F1C, .tabbar = 0x1A1B17, .toolbar = 0x2D2E27, .status = 0x2D2E27, .field = 0x3E3D32,
     .field_hover = 0x49483E, .border = 0x3B3C35, .hover = 0x34352D, .sel = 0x49483E, .sel_focus = 0x5E5C4A,
     .sel_idle = 0x3E3D32, .text = 0xF8F8F2, .text_dim = 0xA59F85, .text_faint = 0x75715E, .text2 = 0xD6D3C2,
     .text_strong = 0xFFFFFF, .text_hidden = 0x8F8B76, .accent = 0x66D9EF, .accent_hover = 0x8BE4F4,
@@ -73,7 +79,7 @@ static const Theme g_theme_monokai = {
 };
 
 static const Theme g_theme_nord = {
-    .bg = 0x2E3440, .sidebar = 0x292E39, .tabbar = 0x242933, .toolbar = 0x323946, .field = 0x3B4252,
+    .bg = 0x2E3440, .sidebar = 0x292E39, .tabbar = 0x242933, .toolbar = 0x323946, .status = 0x323946, .field = 0x3B4252,
     .field_hover = 0x434C5E, .border = 0x3B4252, .hover = 0x363D4A, .sel = 0x3B4F6B, .sel_focus = 0x4C6A92,
     .sel_idle = 0x3B4252, .text = 0xECEFF4, .text_dim = 0xA3ACBD, .text_faint = 0x6F7A8E, .text2 = 0xD8DEE9,
     .text_strong = 0xFFFFFF, .text_hidden = 0x7B8598, .accent = 0x88C0D0, .accent_hover = 0x9FD0DE,
@@ -96,6 +102,18 @@ static int g_nthemes;
 
 static Theme T = g_theme_dark; // the palette everything draws with
 static int g_theme_cur;
+enum { SURFACE_SIDEBAR, SURFACE_HEADER, SURFACE_MAIN, SURFACE_STATUS, SURFACE_COUNT };
+static int g_surface_brightness[SURFACE_COUNT]; // signed percentage, -30 .. +30
+static bool g_unified_surfaces = true, g_show_separators = true;
+static int g_navigation_selection_opacity = NAV_SELECTION_DEFAULT;
+static bool g_accent_system, g_match_system_background;
+static char g_previous_theme[64] = "Dark";
+static u32 g_scroll_custom; // 0 = automatic; otherwise 0x01000000 | rgb
+static int g_system_color_scheme; // portal: 0 unknown, 1 dark, 2 light
+static Theme g_system_palette;
+static bool g_system_palette_valid;
+static u32 g_system_accent; // 0 = unavailable; otherwise 0x01000000 | rgb
+static void system_accent_start(void);
 static u32 g_accent_custom; // 0 = theme accent, else 0x01000000 | rgb
 
 static const struct { const char *name; u32 rgb; } g_accents[] = {
@@ -108,6 +126,7 @@ static const struct { const char *name; u32 rgb; } g_accents[] = {
 #define COL_SIDEBAR       (T.sidebar)
 #define COL_TABBAR        (T.tabbar)
 #define COL_TOOLBAR       (T.toolbar)
+#define COL_STATUS        (T.status)
 #define COL_FIELD         (T.field)
 #define COL_FIELD_HOVER   (T.field_hover)
 #define COL_BORDER        (T.border)
@@ -180,12 +199,89 @@ static bool parse_hex_color(const char *s, u32 *out) {
     return false;
 }
 
-// Recompute T from the selected theme + accent override.
+#include "desktop_palette.c"
+
+// Brightness is derived from the saved palette, never from a previous adjustment.
+static u32 surface_adjust(u32 col, int amount) {
+    return rgb_mix(col, amount < 0 ? 0x000000 : 0xFFFFFF, fabsf((f32)CLAMP(amount, -30, 30)) / 100.f);
+}
+
+// One subdued accent blend for all navigation lists, independent of light/dark
+// theme. The base is the actual surface behind the row, not a selection color.
+static u32 navigation_surface_color(u32 background, bool selected) {
+    return rgb_mix(background, T.accent, selected ? CLAMP(g_navigation_selection_opacity, 0, 100) / 100.f : 0.08f);
+}
+
+// All neutral tab surfaces derive from the effective navigation background,
+// including desktop tint and header brightness. Only pills use selection fills.
+static u32 tab_container_color(void) {
+    return rgb_mix(T.toolbar, 0x000000, 0.28f);
+}
+static u32 classic_tab_color(bool selected, bool hovered) {
+    return selected ? T.toolbar : rgb_mix(T.toolbar, 0x000000, hovered ? 0.06f : 0.12f);
+}
+static u32 tab_surface_color(bool focused, bool active) {
+    if (g_tab_style == TAB_CLASSIC) return classic_tab_color(focused, !focused);
+    u32 base = tab_container_color();
+    if (focused && !active)
+        return rgb_mix(base, T.accent, CLAMP(g_navigation_selection_opacity, 0, 100) / 100.f * 0.60f);
+    return navigation_surface_color(base, focused);
+}
+static u32 surface_foreground_color(u32 background, bool selected, bool dim) {
+    u32 foreground = selected ? T.sel_text : T.text;
+    if (fabsf(rgb_luma(foreground) - rgb_luma(background)) < 0.45f)
+        foreground = rgb_luma(background) > 0.55f ? 0x111111 : 0xFFFFFF;
+    return dim ? rgb_mix(foreground, background, 0.25f) : foreground;
+}
+
+static u32 sidebar_surface_color(bool selected) {
+    return navigation_surface_color(T.sidebar, selected);
+}
+
+// Settings and the color field share strict validation; black is a valid override.
+static bool scrollbar_color_parse(const char *value, u32 *out) {
+    if (!*value || str_ieq(value, "auto")) { *out = 0; return true; }
+    const char *hex = *value == '#' ? value + 1 : value;
+    size_t n = strlen(hex);
+    if ((n != 3 && n != 6) || strspn(hex, "0123456789abcdefABCDEF") != n) return false;
+    u32 rgb;
+    if (!parse_hex_color(hex, &rgb)) return false;
+    *out = 0x01000000u | rgb;
+    return true;
+}
+
+// Recompute T from the selected theme, surface preferences and accent override.
 static void theme_apply(void) {
     if (g_theme_cur < 0 || g_theme_cur >= g_nthemes) g_theme_cur = 0;
     T = g_themes[g_theme_cur].t;
-    if (g_accent_custom) {
-        u32 a = g_accent_custom & 0xFFFFFF;
+    bool system = !strcmp(g_themes[g_theme_cur].name, "System");
+    if (system || g_match_system_background) {
+        if (g_system_palette_valid) T = g_system_palette;
+        else {
+            T = g_system_color_scheme == 2 ? g_theme_light : g_theme_dark;
+            if (g_system_accent) {
+                u32 accent = g_system_accent & 0xFFFFFF;
+                T.bg = rgb_mix(T.bg, accent, 0.06f);
+                T.sidebar = rgb_mix(T.sidebar, accent, 0.06f);
+                T.preview_bg = rgb_mix(T.preview_bg, accent, 0.06f);
+                T.toolbar = T.tabbar = T.status = rgb_mix(T.toolbar, accent, 0.06f);
+            }
+        }
+    }
+    if (g_unified_surfaces) {
+        T.sidebar = T.tabbar = T.toolbar = T.status = T.preview_bg = T.bg;
+        T.alt_row = rgb_mix(T.bg, T.text, 0.025f); // keep optional zebra rows usable
+    }
+    T.sidebar = surface_adjust(T.sidebar, g_surface_brightness[SURFACE_SIDEBAR]);
+    T.preview_bg = surface_adjust(T.preview_bg, g_surface_brightness[SURFACE_SIDEBAR]);
+    T.tabbar = surface_adjust(T.tabbar, g_surface_brightness[SURFACE_HEADER]);
+    T.toolbar = surface_adjust(T.toolbar, g_surface_brightness[SURFACE_HEADER]);
+    T.bg = surface_adjust(T.bg, g_surface_brightness[SURFACE_MAIN]);
+    T.alt_row = surface_adjust(T.alt_row, g_surface_brightness[SURFACE_MAIN]);
+    T.status = surface_adjust(T.status, g_surface_brightness[SURFACE_STATUS]);
+    u32 override = g_accent_system ? g_system_accent : g_accent_custom ? g_accent_custom : system ? g_system_accent : 0;
+    if (override) {
+        u32 a = override & 0xFFFFFF;
         bool light = theme_is_light(&T);
         T.accent = a;
         T.accent_hover = rgb_mix(a, light ? 0x000000 : 0xFFFFFF, 0.15f);
@@ -193,6 +289,25 @@ static void theme_apply(void) {
         T.sel = rgb_mix(T.bg, a, light ? 0.22f : 0.36f);
         T.sel_focus = rgb_mix(T.bg, a, light ? 0.34f : 0.52f);
         T.group_text = rgb_mix(T.text, a, 0.55f);
+        // Selection text must contrast with very light system highlight colors.
+        bool light_sel = rgb_luma(T.sel) > 0.55f;
+        T.sel_text = light_sel ? 0x111111 : 0xFFFFFF;
+        T.sel_dim = rgb_mix(T.sel_text, T.sel, 0.22f);
+    }
+    // Automatic scrollbars use the available desktop highlight. Without one,
+    // keep the selected theme's defaults. Manual color always wins.
+    if (g_scroll_custom) {
+        T.scroll = g_scroll_custom & 0xFFFFFF;
+        T.scroll_hover = rgb_mix(T.scroll, T.text, 0.25f);
+    } else if (g_system_accent) {
+        u32 accent = g_system_accent & 0xFFFFFF;
+        T.scroll = rgb_mix(T.bg, accent, 0.55f);
+        T.scroll_hover = rgb_mix(T.bg, accent, 0.80f);
+        // Valid black/white accents must not make an automatic thumb invisible.
+        if (fabsf(rgb_luma(T.scroll) - rgb_luma(T.bg)) < 0.10f)
+            T.scroll = rgb_mix(T.bg, T.text, 0.35f);
+        if (fabsf(rgb_luma(T.scroll_hover) - rgb_luma(T.bg)) < 0.15f)
+            T.scroll_hover = rgb_mix(T.bg, T.text, 0.55f);
     }
 }
 
@@ -285,6 +400,10 @@ static void themes_scan(void) {
         e->file[0] = 0;
         e->t = *builtin[i].t;
     }
+    ThemeEntry *system = &g_themes[g_nthemes++];
+    snprintf(system->name, sizeof system->name, "System");
+    system->file[0] = 0;
+    system->t = g_theme_dark; // resolved from desktop settings by theme_apply
     int nbuiltin = g_nthemes;
     char dir[PATH_MAX];
     themes_dir(dir, sizeof dir);
@@ -315,6 +434,41 @@ static int theme_find(const char *name) {
     for (int i = 0; i < g_nthemes; i++)
         if (str_ieq(g_themes[i].name, name)) return i;
     return -1;
+}
+
+// One transition for the dropdown and follow-system switch: they cannot disagree.
+static void theme_select(int index) {
+    if (index < 0 || index >= g_nthemes) index = 0;
+    bool system = !strcmp(g_themes[index].name, "System");
+    if (system && g_theme_cur >= 0 && g_theme_cur < g_nthemes &&
+        strcmp(g_themes[g_theme_cur].name, "System"))
+        snprintf(g_previous_theme, sizeof g_previous_theme, "%s", g_themes[g_theme_cur].name);
+    g_theme_cur = index;
+    g_match_system_background = system;
+    if (!system) snprintf(g_previous_theme, sizeof g_previous_theme, "%s", g_themes[index].name);
+}
+static void theme_follow_system(bool enabled) {
+    int index = theme_find(enabled ? "System" : g_previous_theme);
+    if (!enabled && index >= 0 && !strcmp(g_themes[index].name, "System")) index = 0;
+    theme_select(index);
+}
+static void theme_restore_selection(const char *name) {
+    bool follow = g_match_system_background || !strcmp(name, "System");
+    if (follow) {
+        if (strcmp(name, "System") && theme_find(name) >= 0)
+            snprintf(g_previous_theme, sizeof g_previous_theme, "%s", name);
+        g_theme_cur = MAX(0, theme_find("System"));
+        g_match_system_background = true;
+    } else theme_select(theme_find(name));
+}
+
+// A newly captured palette already contains its surface adjustments. Baking
+// them into the file and applying them again would change the saved appearance.
+static void theme_use_capture(int index) {
+    theme_select(index);
+    g_unified_surfaces = false;
+    memset(g_surface_brightness, 0, sizeof g_surface_brightness);
+    theme_apply();
 }
 
 // Write the current palette as a JSON scheme (a starting point for custom themes).

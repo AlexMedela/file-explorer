@@ -111,6 +111,7 @@ static void draw_folder_icon(f32 x, f32 y, f32 s, u32 col, u32 tab) {
 // Icon id from the current set at (x, y), s px; hidden = faded. False if it couldn't be drawn.
 static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
     if (id < 0) return false;
+    if (draw_nerd_icon(x, y, s, id, hidden)) return true;
     if (s <= 48) {
         Glyph *g = icon_glyph(id, (int)roundf(s));
         if (g) {
@@ -129,6 +130,10 @@ static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
     SDL_RenderTexture(A.ren, t, NULL, &dst);
     SDL_SetTextureAlphaMod(t, 255);
     return true;
+}
+
+static bool draw_system_symbol(f32 x, f32 y, f32 size, int symbol, bool dim) {
+    return icon_system_selected() && draw_icon_id(x, y, size, ICON_SYSTEM_BASE + symbol, dim);
 }
 
 // A folder: the icon set's folder icon for this name (falls back to the built-in folder).
@@ -153,6 +158,7 @@ static void draw_file_icon(f32 x, f32 y, f32 s, u32 col) {
 // Drive: body, slot and status light, pixel-snapped so they stay centred and crisp at any scale.
 // dim (not mounted): solid colours faded towards the sidebar, so the slot keeps its contrast.
 static void draw_drive_icon_ex(f32 x, f32 y, f32 s, bool dim) {
+    if (draw_system_symbol(x, y, s, SYS_DRIVE, dim)) return;
     u32 body = 0x9AA0AC, slot = 0x5C616B, light = 0x4FD18B;
     if (dim) {
         body = rgb_mix(body, COL_SIDEBAR, 0.45f);
@@ -171,6 +177,7 @@ static void draw_drive_icon(f32 x, f32 y, f32 s) { draw_drive_icon_ex(x, y, s, f
 
 // Phone (upright body, screen, speaker slot) or camera (body, bump, lens), the drive icon's colours; dim: not connected.
 static void draw_phone_icon(f32 x, f32 y, f32 s, bool camera, bool dim) {
+    if (draw_system_symbol(x, y, s, camera ? SYS_CAMERA : SYS_PHONE, dim)) return;
     u32 body = 0x9AA0AC, screen = 0x5C616B, accent = 0x7FB2FF;
     if (dim) {
         body = rgb_mix(body, COL_SIDEBAR, 0.45f);
@@ -282,49 +289,50 @@ static void draw_split_icon(Rect sr, bool down, Color ic) {
 
 static void draw_panel_bar(Panel *pn) {
     Rect tb = pn->bar;
+    if (tb.h <= 0) return;
     bool active_panel = pn == A.ap, multi = A.npanels > 1;
     draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TABBAR));
     Font *f = &A.font;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)tb.x, (int)tb.y, (int)tb.w, (int)tb.h});
     Rect pr = pn->plus;
-    // Backgrounds first, so the active card (and its flares) sits on top of a hovered neighbour:
-    // active tab = card merging into the toolbar with outward-curving bottom corners (Chrome / Brave style);
-    // hovered inactive tab = the same shape in a fainter colour.
-    f32 rad = roundf(S(8));
-    for (int pass = 0; pass < 2; pass++)
+    bool pills = g_tab_style == TAB_PILLS;
+    draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TOOLBAR));
+    if (pills) {
+        Tab *first = panel_tab(pn, 0), *last = panel_tab(pn, -1);
+        if (first && last) {
+            f32 pad = roundf(S(6));
+            draw_rrect(first->r.x - pad, tb.y + S(2), last->r.x + last->r.w - first->r.x + pad * 2,
+                       tb.h - S(4), S(NAV_CORNER_RADIUS + 2), C(tab_container_color()));
+        }
+    } else if (g_show_separators) {
+        draw_rect(tb.x, tb.y + tb.h - 1, tb.w, 1, C(COL_BORDER));
+    }
+    // As in the original renderer, paint inactive cards before the active one
+    // so its outward-curving bottom corners cover neighboring backgrounds.
+    for (int pass = 0; pass < 2; pass++) {
         for (int i = 0; i < A.ntabs; i++) {
             Tab *t = A.tabs[i];
             if (t->panel != pn) continue;
             Rect r = t->r;
             bool cur = pn->cur == t;
+            if ((pass == 1) != cur || r.w <= 0) continue;
             bool hover = A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my);
-            if (pass == 0 && !cur && hover) { // the active card's shape, faded halfway towards the tab bar
-                f32 bot = tb.y + tb.h;
-                Color hc = C(rgb_mix(COL_TABBAR, COL_TOOLBAR, 0.5f));
-                draw_rrect(r.x, r.y, r.w, r.h + rad * 2, rad, hc);
-                draw_flare(r.x - rad, bot - rad, rad, 0.f, r.x, bot, hc);
-                draw_flare(r.x + r.w + rad, bot - rad, rad, (f32)M_PI * 0.5f, r.x + r.w, bot, hc);
-            } else if (pass == 1 && cur) {
-                f32 bot = tb.y + tb.h;
-                // inactive panel of a split: the same dimming as its toolbar below (that overlay stops at the bar)
-                u32 card = t->term ? term_bg_color() : COL_TOOLBAR; // a terminal tab merges into the terminal below
-                if (multi && !active_panel && A.dim_inactive && !t->term) card = rgb_mix(card, 0x000000, 0.10f);
-                if (t->term && fabsf(rgb_luma(card) - rgb_luma(COL_TABBAR)) < 0.09f) {
-                    // a terminal colour close to the tab bar's (black on a dark theme...): outline the card and the
-                    // bar's bottom edge so the tab still reads as a tab
-                    Color bc = C(rgb_mix(COL_TABBAR, term_fg_color(), theme_is_light(&T) ? 0.22f : 0.16f));
-                    draw_rect(tb.x, bot - 1, tb.w, 1, bc);
-                    draw_rrect(r.x - 1, r.y - 1, r.w + 2, r.h + rad * 2 + 1, rad + 1, bc);
-                    draw_flare(r.x - rad, bot - rad, rad - 1, 0.f, r.x, bot, bc);
-                    draw_flare(r.x + r.w + rad, bot - rad, rad - 1, (f32)M_PI * 0.5f, r.x + r.w, bot, bc);
+            if (pills) {
+                if (cur || hover)
+                    draw_rrect(r.x, r.y, r.w, r.h, S(NAV_CORNER_RADIUS), C(tab_surface_color(cur, active_panel)));
+            } else {
+                f32 rad = MIN(roundf(S(8)), r.w * 0.5f), bottom = tb.y + tb.h;
+                Color fill = C(classic_tab_color(cur, hover));
+                draw_rrect(r.x, r.y, r.w, r.h + rad * 2, rad, fill);
+                draw_flare(r.x - rad, bottom - rad, rad, 0.f, r.x, bottom, fill);
+                draw_flare(r.x + r.w + rad, bottom - rad, rad, (f32)M_PI * 0.5f, r.x + r.w, bottom, fill);
+                if (cur) { // neutral contour keeps the original silhouette on a seamless header
+                    draw_rrect_outline(r.x, r.y, r.w, r.h + rad * 2, rad, MAX(1.f, S(1)),
+                                       C(rgb_mix(COL_TOOLBAR, COL_TEXT, 0.18f)));
                 }
-                draw_rrect(r.x, r.y, r.w, r.h + rad * 2, rad, C(card)); // card merging into the toolbar
-                // flares: concave corners curving out into the toolbar (drawn over a hovered neighbour)
-                draw_flare(r.x - rad, bot - rad, rad, 0.f, r.x, bot, C(card));
-                draw_flare(r.x + r.w + rad, bot - rad, rad, (f32)M_PI * 0.5f, r.x + r.w, bot, C(card));
             }
         }
-    Tab *prev = NULL;
+    }
     for (int i = 0; i < A.ntabs; i++) {
         Tab *t = A.tabs[i];
         if (t->panel != pn) continue;
@@ -333,18 +341,19 @@ static void draw_panel_bar(Panel *pn) {
         bool cur = pn->cur == t;
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my));
         bool dragging = A.drag == DRAG_TAB && A.drag_tab == t;
-        if (prev && !cur && pn->cur != prev && !hover) draw_rect(r.x - 1, r.y + S(9), 1, r.h - S(18), C(COL_FIELD));
-        prev = t;
-        if (A.drop_tab == t) draw_rrect_outline(r.x + S(1), r.y + S(1), r.w - S(2), r.h - S(4), S(6), MAX(1.f, S(1.3f)), C(COL_ACCENT));
+        u32 surface = !pills ? classic_tab_color(cur, hover) :
+                      cur || hover ? tab_surface_color(cur, active_panel) : tab_container_color();
+        u32 foreground = surface_foreground_color(surface, pills && cur, false);
+        u32 muted = surface_foreground_color(surface, pills && cur, true);
+        if (A.drop_tab == t) draw_rrect_outline(r.x + S(1), r.y + S(1), r.w - S(2), r.h - S(4), S(NAV_CORNER_RADIUS), MAX(1.f, S(1.3f)), C(COL_ACCENT));
+        if (r.w < S(48)) continue; // keep icons inside compressed pills
         if (dragging) g_alpha = 0.45f;
-        f32 is = roundf(S(15)), ix = roundf(r.x + S(12)), iy = roundf(r.y + (r.h - is) * 0.5f);
+        f32 is = roundf(S(15)), ix = roundf(r.x + S(12)), iy = roundf(tb.y + (tb.h - is) * 0.5f);
         char dnb[NAME_MAX + 1];
         const char *label = t->term ? term_label(t->term) : disp_name(p->path, dnb, sizeof dnb);
-        // the active terminal tab sits on the terminal's own colour: use its foreground so the text stays readable
-        bool on_term = t->term && cur;
-        u32 tfg = on_term ? term_fg_color() : 0, tbg = on_term ? term_bg_color() : 0;
+        // Terminal and folder tabs share the same theme-aware pill palette.
         if (t->term) { // a small terminal: rounded box with ">_"
-            Color tcc = on_term ? C(rgb_mix(tfg, tbg, 0.35f)) : C(COL_TEXT_DIM);
+            Color tcc = C(cur && active_panel ? foreground : muted);
             draw_rrect_outline(ix, iy + is * 0.1f, is, is * 0.8f, S(2.5f), MAX(1.f, S(1.2f)), tcc);
             f32 lt = MAX(1.f, roundf(S(1.3f)));
             draw_line(ix + is * 0.25f, iy + is * 0.35f, ix + is * 0.42f, iy + is * 0.5f, lt, tcc);
@@ -355,25 +364,29 @@ static void draw_panel_bar(Panel *pn) {
         bool show_close = A.ntabs > 1 && (cur || hover) && r.w > S(90);
         f32 tx = ix + is + roundf(S(8));
         f32 maxw = r.x + r.w - tx - (show_close ? csz + S(12) : S(10));
-        Color tc = cur ? (active_panel || !multi ? C(COL_TEXT) : C(COL_TEXT2)) : C(COL_TEXT_DIM);
-        if (on_term) tc = C(active_panel || !multi ? tfg : rgb_mix(tfg, tbg, 0.25f));
-        draw_text_fit(f, tx, text_y(f, r.y, r.h), maxw, label, (int)strlen(label), tc, 0);
+        Color tc = C(cur && (active_panel || !multi) ? foreground : muted);
+        draw_text_fit(f, tx, text_y(f, tb.y, tb.h), maxw, label, (int)strlen(label), tc, 0);
         if (show_close) {
-            Rect c = {r.x + r.w - csz - roundf(S(8)), r.y + (r.h - csz) * 0.5f, csz, csz};
+            Rect c = {r.x + r.w - csz - roundf(S(8)), tb.y + (tb.h - csz) * 0.5f, csz, csz};
             bool ch = A.mouse_in && in_rect(c, A.mx, A.my);
-            if (ch) draw_rrect(c.x, c.y, c.w, c.h, S(4), on_term ? C(rgb_mix(tbg, tfg, 0.14f)) : C(COL_CHIP));
-            Color xc = on_term ? C(ch ? tfg : rgb_mix(tfg, tbg, 0.35f)) : C(ch ? COL_TEXT : COL_TEXT_DIM);
+            if (ch) draw_rrect(c.x, c.y, c.w, c.h, S(4), C(rgb_mix(surface, foreground, 0.14f)));
+            Color xc = C(ch ? foreground : muted);
             draw_cross(c.x + c.w * 0.5f, c.y + c.h * 0.5f, S(7), MAX(1.f, S(1.3f)), xc);
         }
         g_alpha = 1.f;
     }
-    // + and split buttons (+'s highlight after the tab backgrounds: the active tab's flare can reach under it)
-    if (A.drag == DRAG_NONE && hot(pr)) draw_rrect(pr.x, pr.y, pr.w, pr.h, pr.w * 0.5f, C(COL_TAB_HOVER));
-    draw_plus(pr.x + pr.w * 0.5f, pr.y + pr.h * 0.5f, S(12), MAX(2.f, S(1.8f)), C(COL_TEXT_DIM));
+    // Compact headers prioritize tab labels over optional new-tab/split buttons.
+    if (pr.w > 0) {
+        if (A.drag == DRAG_NONE && hot(pr)) draw_rrect(pr.x, pr.y, pr.w, pr.h, S(3), C(COL_TAB_HOVER));
+        if (!draw_system_symbol(pr.x + (pr.w - S(16)) * 0.5f, pr.y + (pr.h - S(16)) * 0.5f, S(16), SYS_ADD, false))
+            draw_plus(pr.x + pr.w * 0.5f, pr.y + pr.h * 0.5f, S(12), MAX(2.f, S(1.8f)), C(COL_TEXT_DIM));
+    }
     Rect sr = pn->splitbtn;
-    bool sh = hot(sr);
-    if (sh) draw_rrect(sr.x, sr.y, sr.w, sr.h, S(6), C(COL_HOVER));
-    draw_split_icon(sr, sh && (SDL_GetModState() & SDL_KMOD_SHIFT), sh ? C(COL_TEXT) : C(COL_TEXT_DIM));
+    if (sr.w > 0) {
+        bool sh = hot(sr);
+        if (sh) draw_rrect(sr.x, sr.y, sr.w, sr.h, S(6), C(COL_HOVER));
+        draw_split_icon(sr, sh && (SDL_GetModState() & SDL_KMOD_SHIFT), sh ? C(COL_TEXT) : C(COL_TEXT_DIM));
+    }
     // insertion caret while dragging a tab over this bar
     bool tab_caret = A.drag == DRAG_TAB && A.tdrop_kind == TD_BAR && A.tdrop_panel == pn;
     if (tab_caret || (A.drag == DRAG_ITEMS && A.drop_newtab == pn)) { // ... or folders that become new tabs (at the end)
@@ -387,16 +400,30 @@ static void draw_panel_bar(Panel *pn) {
 static void draw_node_dividers(Node *n) {
     if (!n || n->kind == NODE_PANEL) return;
     bool h = A.drag_node == n || (A.drag == DRAG_NONE && A.mouse_in && in_rect(n->div, A.mx, A.my) && node_div_at(A.root, A.mx, A.my) == n);
-    Color c = h ? C(COL_ACCENT) : C(COL_DIVIDER);
-    if (n->kind == NODE_HSPLIT) draw_rect(n->b->r.x - 1, n->r.y, 1, n->r.h, c);
-    else draw_rect(n->r.x, n->b->r.y - 1, n->r.w, 1, c);
+    Color c = h ? C(COL_ACCENT) : g_show_separators ? C(COL_DIVIDER) : C(COL_BG);
+    if (n->kind == NODE_HSPLIT) {
+        f32 x = n->b->r.x - 1;
+        draw_rect(x, n->r.y, 1, n->r.h, c);
+        if (!h && !g_show_separators) {
+            // A hidden split gap follows the adjacent header's brightness too.
+            for (int i = 0; i < A.npanels; i++) {
+                Panel *pn = A.panels[i];
+                if (!pn->cur || fabsf(pn->area.x - n->b->r.x) > 0.5f) continue;
+                PaneLayout *ly = &pn->cur->pane[0].ly;
+                f32 y = MAX(n->r.y, pn->area.y);
+                f32 bottom = MIN(n->r.y + n->r.h, ly->header.y + ly->header.h);
+                if (bottom > y) draw_rect(x, y, 1, bottom - y, C(COL_TOOLBAR));
+            }
+        }
+    } else draw_rect(n->r.x, n->b->r.y - 1, n->r.w, 1,
+                     !h && !g_show_separators ? C(COL_TOOLBAR) : c);
     draw_node_dividers(n->a);
     draw_node_dividers(n->b);
 }
 
 // Where a dropped tab / folder would go in panel pn: the half on side zone, or all of it (ZONE_CENTER).
 static void draw_split_zone(Panel *pn, int zone) {
-    Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
+    Rect a = panel_content_rect(pn);
     Rect z = a;
     if (zone == ZONE_LEFT) z.w = roundf(a.w * 0.5f);
     else if (zone == ZONE_RIGHT) { z.w = roundf(a.w * 0.5f); z.x = a.x + a.w - z.w; }
@@ -440,18 +467,23 @@ static void draw_branch_icon(f32 x, f32 cy, Color ic) {
 static void draw_toolbar(Pane *p, bool active, bool split) {
     PaneLayout *ly = &p->ly;
     Rect tb = ly->toolbar;
+    if (tb.w <= 0) return;
     draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TOOLBAR));
     Rect btn[3] = {ly->back, ly->fwd, ly->up};
     bool enabled[3] = {p->hist_pos > 0, p->hist_pos < p->hist_n - 1, p->path[1] != 0};
     for (int i = 0; i < 3; i++) {
         Rect r = btn[i];
+        if (r.w <= 0) continue;
         bool hover = hand_if(A.mouse_in && in_rect(r, A.mx, A.my) && enabled[i]);
         if (hover) draw_rrect(r.x, r.y, r.w, r.h, S(6), C(COL_FIELD_HOVER));
         Color c = enabled[i] ? C(COL_TEXT) : C(COL_TEXT_FAINT);
-        draw_chevron(r.x + r.w * 0.5f, r.y + r.h * 0.5f, S(11), i, MAX(1.5f, S(1.6f)), c);
+        f32 is = roundf(S(16));
+        if (!draw_system_symbol(roundf(r.x + (r.w - is) * 0.5f), roundf(r.y + (r.h - is) * 0.5f), is,
+                                SYS_PREV + i, !enabled[i]))
+            draw_chevron(r.x + r.w * 0.5f, r.y + r.h * 0.5f, S(11), i, MAX(1.5f, S(1.6f)), c);
     }
 
-    {   // type filter (funnel)
+    if (ly->filterbtn.w > 0) { // type filter (funnel)
         Rect fb = ly->filterbtn;
         bool on = p->tf_mode || p->tf_exts[0], hv = hot(fb);
         if (on || hv) draw_rrect(fb.x, fb.y, fb.w, fb.h, S(6), on ? CA(COL_ACCENT, 0.22f) : C(COL_FIELD_HOVER));
@@ -472,11 +504,12 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
             draw_rrect(roundf(mb.x + (mb.w - d) * 0.5f + (f32)k * S(6)), cy, d, d, d * 0.5f, C(COL_TEXT_DIM));
     }
     Rect pb = ly->pathbar;
+    if (pb.w <= 0) return;
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);
     if (hover) A.ptr_text = true; // a click outside the crumbs edits the path
-    draw_rrect(pb.x, pb.y, pb.w, pb.h, S(7), C(editing ? COL_FIELD_HOVER : COL_FIELD));
-    if (editing) draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
+    draw_rrect(pb.x, pb.y, pb.w, pb.h, S(NAV_CORNER_RADIUS), C(editing ? COL_FIELD_HOVER : COL_FIELD));
+    if (editing) draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(NAV_CORNER_RADIUS), MAX(1.f, S(1.2f)), C(COL_ACCENT));
 
     Font *f = &A.font;
     f32 ty = text_y(f, pb.y, pb.h);
@@ -545,17 +578,16 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
 
 static bool sidebar_edge_hot(void) { return A.drag == DRAG_SIDEBAR || (A.drag == DRAG_NONE && A.mouse_in && in_rect(A.r_sdiv, A.mx, A.my)); }
 
-// Brand header: logo + app name, pinned above the (scrolling) sidebar.
+// The label shares the same surface and row as navigation/window controls.
 static void draw_brand(void) {
     Rect r = A.r_brand;
-    draw_rect(r.x, r.y, r.w, r.h, C(COL_SIDEBAR));
-    draw_rect(r.x + r.w - 1, r.y, 1, r.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
-    f32 lh = roundf(S(17)), lw = roundf(lh * 624.f / 456.f), lx = roundf(r.x + S(18)), ly = roundf(r.y + (r.h - lh) * 0.5f);
-    Glyph *g = icon_glyph(lh < 48 ? ICON_LOGO_SMALL : ICON_LOGO, (int)lw); // square raster, logo centred in it
-    if (g) draw_glyph(g, lx, roundf(ly - (lw - lh) * 0.5f), (Color){1, 1, 1, 1});
-    Font *f = &A.font_brand;
-    f32 tx = lx + lw + roundf(S(8));
-    draw_text_fit(f, tx, text_y(f, r.y, r.h), r.x + r.w - tx - S(8), APP_LABEL, (int)strlen(APP_LABEL), C(COL_TEXT), 0);
+    if (r.h <= 0) return;
+    draw_rect(r.x, r.y, r.w, r.h, C(COL_TOOLBAR));
+    const char *label = header_label_text();
+    draw_text_fit(&A.font, r.x + S(16), text_y(&A.font, r.y, r.h), MAX(0.f, r.w - S(32)),
+                  label, (int)strlen(label), C(COL_TEXT), 0);
+    if (g_show_separators || sidebar_edge_hot())
+        draw_rect(r.x + r.w - 1, r.y, 1, r.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
 }
 
 // Input method: the text being composed, in a box under the focused field (underlined, like other apps show it).
@@ -579,17 +611,20 @@ static void draw_window_controls(void) {
     if (!A.csd) return;
     Rect s = A.r_wstrip;
     if (s.w > 0) {
-        draw_rect(s.x, s.y, s.w, s.h, C(COL_TABBAR));
-        draw_rect(s.x, s.y, 1, s.h, C(COL_BORDER));
+        draw_rect(s.x, s.y, s.w, s.h, C(COL_TOOLBAR));
     }
     bool max = window_maximized();
     f32 lt = MAX(1.f, roundf(S(1))), is = roundf(S(10));
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; A.r_wctl.w > 0 && i < 3; i++) {
         Rect b = wctl_button(i);
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(b, A.mx, A.my));
         if (hover) draw_rect(b.x, b.y, b.w, b.h, i == 2 ? (Color){0xC4 / 255.f, 0x2B / 255.f, 0x1C / 255.f, 1} : C(COL_TAB_HOVER));
         Color ic = hover ? (i == 2 ? (Color){1, 1, 1, 1} : C(COL_TEXT)) : C(COL_TEXT2);
         f32 cx = roundf(b.x + b.w * 0.5f), cy = roundf(b.y + b.h * 0.5f), x0 = cx - is * 0.5f, y0 = cy - is * 0.5f;
+        int symbol = i == 0 ? SYS_WINDOW_MINIMIZE : i == 2 ? SYS_WINDOW_CLOSE : max ? SYS_WINDOW_RESTORE : SYS_WINDOW_MAXIMIZE;
+        int px = MAX(1, (int)roundf(S(16)));
+        Glyph *g = icon_glyph(ICON_SYSTEM_BASE + symbol, px);
+        if (g) { draw_glyph(g, roundf(cx - px * 0.5f), roundf(cy - px * 0.5f), ic); continue; }
         if (i == 0) draw_rect(x0, cy, is, lt, ic);
         else if (i == 1 && !max) draw_rrect_outline(x0, y0, is, is, S(1.5f), lt, ic);
         else if (i == 1) { // restore: two overlapping windows
@@ -601,7 +636,7 @@ static void draw_window_controls(void) {
     }
     f32 cr = window_corner_radius();
     if (cr > 0) draw_rrect_outline(0, 0, (f32)A.W, (f32)A.H, cr, 1, C(COL_BORDER)); // (the corners are cut after the frame)
-    else if (!max) {
+    else if (!max && g_show_separators) {
         Color bc = C(COL_BORDER);
         f32 W = (f32)A.W, H = (f32)A.H;
         draw_rect(0, 0, W, 1, bc);
@@ -623,7 +658,8 @@ static void draw_sidebar(void) {
     Pane *p = active_pane();
     Rect sb = A.r_sidebar;
     draw_rect(sb.x, sb.y, sb.w, sb.h, C(COL_SIDEBAR));
-    draw_rect(sb.x + sb.w - 1, sb.y, 1, sb.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
+    if (g_show_separators || sidebar_edge_hot())
+        draw_rect(sb.x + sb.w - 1, sb.y, 1, sb.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
     Font *fs = &A.font_small, *f = &A.font;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)sb.x, (int)sb.y, (int)sb.w - 1, (int)sb.h});
     bool dragging_place = A.drag == DRAG_PLACE;
@@ -639,7 +675,7 @@ static void draw_sidebar(void) {
                 draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), CA(COL_ACCENT, 0.25f));
                 draw_rrect_outline(r.x, r.y + 1, r.w, r.h - 2, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
             } else if (hover) {
-                draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(COL_HOVER));
+                draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(sidebar_surface_color(false)));
             }
             f32 tx = r.x + S(10), tmax = r.x + r.w - S(6);
             pl->eject = (Rect){0, 0, 0, 0};
@@ -679,13 +715,8 @@ static void draw_sidebar(void) {
         if (A.drop_place == i) {
             draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), CA(COL_ACCENT, 0.25f));
             draw_rrect_outline(r.x, r.y + 1, r.w, r.h - 2, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
-        } else if (active) draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(rgb_mix(COL_SEL_IDLE, COL_ACCENT, 0.16f))); // accent-tinted
-        else if (hover && A.drag == DRAG_NONE) draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(COL_HOVER));
-        if (active) { // accent edge: the left strip of the row's own rounded shape, full height
-            ClipSave ac = draw_clip_push((SDL_Rect){(int)r.x, (int)r.y, (int)roundf(S(3)), (int)r.h});
-            draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(COL_ACCENT));
-            draw_clip_pop(ac);
-        }
+        } else if (active) draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(sidebar_surface_color(true)));
+        else if (hover && A.drag == DRAG_NONE) draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(sidebar_surface_color(false)));
         if (lifted) g_alpha = 0.45f;
         f32 is = roundf(S(16)), ix = roundf(r.x + S(12)), iy = roundf(r.y + (r.h - is) * 0.5f);
         pl->eject = (Rect){0, 0, 0, 0};
@@ -791,7 +822,8 @@ static void draw_sidebar(void) {
         } else {
             if (show_eject && !has_bar) lmax -= roundf(S(22)) + S(4); // button next to a plain name
             draw_text_fit(f, lx, text_y(f, r.y - (has_bar ? S(3) : 0), r.h), lmax, pl->label,
-                          (int)strlen(pl->label), C(active ? COL_TEXT : pl->kind == PK_UNMOUNTED || phone_off ? COL_TEXT_DIM : COL_TEXT2), 0);
+                          (int)strlen(pl->label), C(active ? surface_foreground_color(sidebar_surface_color(true), false, false) :
+                            pl->kind == PK_UNMOUNTED || phone_off ? COL_TEXT_DIM : COL_TEXT2), 0);
         }
         g_alpha = 1.f;
     }
@@ -859,8 +891,8 @@ static void draw_header(Pane *p) {
     PaneLayout *ly = &p->ly;
     Rect h = ly->header;
     if (h.h <= 0) return;
-    draw_rect(h.x, h.y, h.w, h.h, C(COL_BG));
-    draw_rect(h.x, h.y + h.h - 1, h.w, 1, C(COL_BORDER));
+    draw_rect(h.x, h.y, h.w, h.h, C(COL_TOOLBAR));
+    if (g_show_separators) draw_rect(h.x, h.y + h.h - 1, h.w, 1, C(COL_BORDER));
     Font *f = &A.font_small;
     f32 ty = text_y(f, h.y, h.h);
     bool dragging_here = A.drag == DRAG_COL && A.drag_pane == p;
@@ -887,7 +919,7 @@ static void draw_header(Pane *p) {
         if (i > 0) {
             bool eh = (A.drag == DRAG_COL_RESIZE && A.drag_pane == p && ly->cid[i - 1] == A.drag_edge_col) ||
                       (A.mouse_in && A.drag == DRAG_NONE && in_rect(h, A.mx, A.my) && header_edge_at(ly, A.mx) == i - 1);
-            draw_rect(x0, h.y + S(eh ? 5 : 9), 1, h.h - S(eh ? 10 : 18), eh ? C(COL_ACCENT) : C(COL_BORDER));
+            if (g_show_separators || eh) draw_rect(x0, h.y + S(eh ? 5 : 9), 1, h.h - S(eh ? 10 : 18), eh ? C(COL_ACCENT) : C(COL_BORDER));
         }
     }
     if (dragging_here && A.col_insert >= 0) { // reorder caret
@@ -1019,6 +1051,7 @@ static void draw_item_icon_big(Pane *p, Entry *e, f32 ix, f32 iy, f32 isz, bool 
         }
     }
     int id = icon_for_name(name, e->mflags & MF_EXEC);
+    if (draw_nerd_icon(ix, iy, isz, id, hidden)) return;
     if (isz <= 48) {
         Glyph *g = icon_glyph(id, (int)isz);
         if (g) { draw_glyph(g, roundf(ix), roundf(iy), (Color){1, 1, 1, 1}); return; }
@@ -1793,7 +1826,7 @@ static void draw_snapview(Pane *p, bool active) {
     f32 c0 = rx + roundf(S(10)), c1 = c0 + roundf(S(96)), c2 = c1 + roundf(S(176)), c3 = c2 + roundf(S(112));
     {
         Rect h = {lr.x, lr.y, lr.w, hh};
-        draw_rect(h.x, h.y + h.h - 1, h.w, 1, C(COL_BORDER));
+        if (g_show_separators) draw_rect(h.x, h.y + h.h - 1, h.w, 1, C(COL_BORDER));
         f32 ty = text_y(fs, h.y, h.h);
         const char *lab[4] = {"Snapshot", "Date", "Kind", "Description"};
         f32 cx[4] = {c0, c1, c2, c3};
@@ -1808,7 +1841,7 @@ static void draw_snapview(Pane *p, bool active) {
     {
         Rect b = v->hdr;
         draw_rect(b.x, b.y, b.w, b.h, C(COL_TOOLBAR));
-        draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
+        if (g_show_separators) draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
         f32 bh = roundf(S(28)), by = b.y + roundf((b.h - bh) * 0.5f), bx = b.x + b.w - roundf(S(8));
         bx -= bh;
         v->bback = (Rect){bx, by, bh, bh};
@@ -1943,7 +1976,7 @@ static void draw_snapbar(Pane *p) {
     Rect b = ly->snapbar;
     Font *fs = &A.font_small;
     draw_rect(b.x, b.y, b.w, b.h, C(rgb_mix(COL_TOOLBAR, COL_ACCENT, 0.1f)));
-    draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
+    if (g_show_separators) draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
     char root[PATH_MAX], live[PATH_MAX], nm[96], msg[PATH_MAX + 160], tl[PATH_MAX];
     if (!snap_where(p->path, root, sizeof root, live, sizeof live, nm, sizeof nm)) return;
     Rect bc, br, ba;
@@ -2050,7 +2083,7 @@ static void draw_list(Pane *p, bool active) {
             char cnt[32];
             fmt_count(cnt, gh->count);
             f32 ex2 = draw_text(&A.font_small, ex + S(8), text_y(&A.font_small, y, rh), cnt, (int)strlen(cnt), C(COL_TEXT_FAINT));
-            draw_rect(ex2 + S(10), roundf(cyh), MAX(0.f, ly->track.x - S(12) - ex2 - S(10)), 1, C(COL_BORDER));
+            if (g_show_separators) draw_rect(ex2 + S(10), roundf(cyh), MAX(0.f, ly->track.x - S(12) - ex2 - S(10)), 1, C(COL_BORDER));
             continue;
         }
         if (i >= (i64)p->count) break;
@@ -2285,7 +2318,7 @@ static void draw_searchbar(Pane *p) {
     Rect sb = ly->sbar;
     Font *f = &A.font, *fs = &A.font_small;
     draw_rect(sb.x, sb.y, sb.w, sb.h, C(COL_TOOLBAR));
-    draw_rect(sb.x, sb.y, sb.w, 1, C(COL_BORDER));
+    if (g_show_separators) draw_rect(sb.x, sb.y, sb.w, 1, C(COL_BORDER));
     Rect field, toggle, close, cont, opt[3];
     search_bar_layout(p, &field, &toggle, &close, &cont, opt);
     bool focused = A.search_pane == p;
@@ -2368,7 +2401,7 @@ static void draw_trashbar(Pane *p) {
     Rect tb = ly->trashbar;
     Font *fs = &A.font_small;
     draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TOOLBAR));
-    draw_rect(tb.x, tb.y, tb.w, 1, C(COL_BORDER));
+    if (g_show_separators) draw_rect(tb.x, tb.y, tb.w, 1, C(COL_BORDER));
     char msg[96], n[32];
     int st = p->L ? atomic_load(&p->L->state) : LST_ERROR;
     u32 total = (st == LST_READY || st == LST_COMPLETE) ? p->L->count : 0; // count is published with the state
@@ -2385,7 +2418,7 @@ static void draw_cmpbar(Pane *p) {
     Rect b = ly->cmpbar;
     Font *fs = &A.font_small;
     draw_rect(b.x, b.y, b.w, b.h, C(COL_TOOLBAR));
-    draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
+    if (g_show_separators) draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
     Rect sw, sync, close;
     cmp_bar_layout(p, &sw, &sync, &close);
     f32 is = roundf(S(14)), ix = b.x + S(14), iy = roundf(b.y + (b.h - is) * 0.5f), t = MAX(1.f, roundf(S(1.3f)));
@@ -2461,8 +2494,8 @@ static void draw_status(void) {
     A.r_xfer = A.r_size = (Rect){0, 0, 0, 0};
     if (picker_active()) { draw_picker_bar(s); return; } // Open / Save / Choose folder bar
     if (active_term()) { draw_status_term(active_term()); return; }
-    draw_rect(s.x, s.y, s.w, s.h, C(COL_TOOLBAR));
-    draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
+    draw_rect(s.x, s.y, s.w, s.h, C(COL_STATUS));
+    if (g_show_separators) draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
     Font *f = &A.font_small;
     f32 ty = text_y(f, s.y, s.h);
     char left[256], right[256], n1[32], n2[32];
@@ -2543,7 +2576,7 @@ static void draw_status(void) {
         bool hv = hot(r), on = options_is_open();
         if (hv || on) draw_rrect(r.x, r.y, r.w, r.h, S(5), on ? CA(COL_ACCENT, 0.25f) : C(COL_FIELD));
         draw_gear_icon(r.x + r.w * 0.5f, r.y + r.h * 0.5f, S(7), on ? C(COL_ACCENT) : hv ? C(COL_TEXT) : C(COL_TEXT_DIM),
-                       C(hv || on ? (on ? rgb_mix(COL_TOOLBAR, COL_ACCENT, 0.25f) : COL_FIELD) : COL_TOOLBAR));
+                       C(hv || on ? (on ? rgb_mix(COL_STATUS, COL_ACCENT, 0.25f) : COL_FIELD) : COL_STATUS));
     }
     { // features (eye): view toggles that otherwise only have a key
         Rect r = {A.r_gear.x - bw, s.y + roundf(S(3)), bw - S(2), bh};
@@ -2552,7 +2585,7 @@ static void draw_status(void) {
         if (hv || on) draw_rrect(r.x, r.y, r.w, r.h, S(5), on ? CA(COL_ACCENT, 0.25f) : C(COL_FIELD));
         Color ic = on ? C(COL_ACCENT) : hv ? C(COL_TEXT) : C(COL_TEXT_DIM);
         draw_eye_icon(r.x + r.w * 0.5f, r.y + r.h * 0.5f, S(7.5f), ic);
-        draw_rect(roundf(r.x - S(6)), r.y + S(4), 1, r.h - S(8), C(COL_BORDER));
+        if (g_show_separators) draw_rect(roundf(r.x - S(6)), r.y + S(4), 1, r.h - S(8), C(COL_BORDER));
     }
     // view switcher: details / list / grid
     f32 bx = s.x + s.w - S(4) - bw * 5 - S(10);
@@ -2775,7 +2808,7 @@ static void draw_queue(void) {
     f32 vw = roundf(S(16) + S(8) + text_width(fs, vl, (int)strlen(vl)));
     A.q_verify = (Rect){x + w - pad - vw, y + S(15), vw, roundf(S(22))};
     sheet_check(A.q_verify, vl, A.verify_copies);
-    draw_rect(x + S(1), y + headh - S(1), w - S(2), 1, C(COL_BORDER));
+    if (g_show_separators) draw_rect(x + S(1), y + headh - S(1), w - S(2), 1, C(COL_BORDER));
     if (!A.nops) {
         const char *e = "Copies, moves and deletes show up here while they run.";
         draw_text_fit(fs, x + pad, text_y(fs, y + headh, rowh), w - pad * 2, e, (int)strlen(e), C(COL_TEXT_FAINT), 0);
@@ -3209,7 +3242,7 @@ static void drag_card_paint(const DragCard *c, f32 x, f32 y, bool square) {
     }
     if (c->act[0]) { // what the drop does, under a line
         ty += S(2);
-        draw_rect(x + S(8), ty, c->w - S(16), 1, C(COL_BORDER));
+        if (g_show_separators) draw_rect(x + S(8), ty, c->w - S(16), 1, C(COL_BORDER));
         ty += S(3);
         draw_text_fit(f, lx, text_y(f, ty, c->row_h), c->w - S(20), c->act, (int)strlen(c->act), C(COL_ACCENT), 0);
     }
@@ -3431,7 +3464,7 @@ static void draw_preview(void) {
     Font *f = &A.font, *fs = &A.font_small;
     draw_rect(r.x, r.y, r.w, r.h, C(COL_PREVIEW_BG));
     bool dh = A.drag == DRAG_PREVIEW || (A.mouse_in && in_rect(A.r_pdiv, A.mx, A.my));
-    draw_rect(r.x, r.y, 1, r.h, C(dh ? COL_ACCENT : COL_BORDER));
+    if (g_show_separators || dh) draw_rect(r.x, r.y, 1, r.h, C(dh ? COL_ACCENT : COL_BORDER));
     f32 pad = roundf(S(16)), x = r.x + pad, w = r.w - pad * 2, y = r.y + pad;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x + 1, (int)r.y, (int)r.w - 1, (int)r.h});
     Listing *L = p->L;

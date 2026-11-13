@@ -1230,8 +1230,8 @@ static void tc_reload_all(void) {
 
 static void draw_status_term(Term *t) {
     Rect s = A.r_status;
-    draw_rect(s.x, s.y, s.w, s.h, C(COL_TOOLBAR));
-    draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
+    draw_rect(s.x, s.y, s.w, s.h, C(COL_STATUS));
+    if (g_show_separators) draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
     Font *f = &A.font_small;
     char left[300], right[96];
     snprintf(left, sizeof left, "Terminal \xC2\xB7 %s", term_label(t));
@@ -1244,7 +1244,7 @@ static void draw_status_term(Term *t) {
     f32 gs = roundf(S(22));
     A.r_gear = (Rect){roundf(s.x + s.w - gs - S(4)), roundf(s.y + (s.h - gs) * 0.5f), gs, gs};
     if (hot(A.r_gear)) draw_rrect(A.r_gear.x, A.r_gear.y, gs, gs, S(5), C(COL_CHIP));
-    draw_gear_icon(A.r_gear.x + gs * 0.5f, A.r_gear.y + gs * 0.5f, S(7), C(COL_TEXT_DIM), C(COL_TOOLBAR));
+    draw_gear_icon(A.r_gear.x + gs * 0.5f, A.r_gear.y + gs * 0.5f, S(7), C(COL_TEXT_DIM), C(COL_STATUS));
 }
 
 static bool term_wants_mouse(Term *t, SDL_Keymod mod) { return t->mouse_mode && !(mod & SDL_KMOD_SHIFT); }

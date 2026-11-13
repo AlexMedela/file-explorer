@@ -74,6 +74,14 @@ static void settings_defaults(void) {
     A.conflict_last = CF_KEEP_BOTH;
     snprintf(A.theme_name, sizeof A.theme_name, "Dark");
     g_accent_custom = 0;
+    g_accent_system = g_match_system_background = false;
+    snprintf(g_previous_theme, sizeof g_previous_theme, "Dark");
+    g_scroll_custom = 0;
+    g_unified_surfaces = g_show_separators = true;
+    g_navigation_selection_opacity = NAV_SELECTION_DEFAULT;
+    tab_preferences_defaults();
+    header_preferences_defaults();
+    memset(g_surface_brightness, 0, sizeof g_surface_brightness);
     A.ui_font[0] = 0;
     A.font_size = 13;
     A.row_spacing = 1;
@@ -256,6 +264,18 @@ static void settings_load(void) {
             }
             session_line("ptab", v);
         } else if (!strcmp(k, "dim_inactive")) A.dim_inactive = atoi(v);
+        else if (!strcmp(k, "navigation_selection_opacity")) g_navigation_selection_opacity = CLAMP(atoi(v), 0, 100);
+        else if (!strcmp(k, "previous_theme")) snprintf(g_previous_theme, sizeof g_previous_theme, "%s", v);
+        else if (!strcmp(k, "scrollbar_color")) { u32 color; if (scrollbar_color_parse(v, &color)) g_scroll_custom = color; }
+        else if (tab_preferences_read(k, v) || header_preferences_read(k, v)) {}
+        else if (!strcmp(k, "match_system_background")) g_match_system_background = atoi(v) != 0;
+        else if (!strcmp(k, "system_accent")) g_accent_system = atoi(v) != 0;
+        else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v) != 0;
+        else if (!strcmp(k, "show_separators")) g_show_separators = atoi(v) != 0;
+        else if (!strcmp(k, "sidebar_brightness")) g_surface_brightness[SURFACE_SIDEBAR] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "header_brightness")) g_surface_brightness[SURFACE_HEADER] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "main_brightness")) g_surface_brightness[SURFACE_MAIN] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "status_brightness")) g_surface_brightness[SURFACE_STATUS] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "settings_version")) g_settings_file_version = atoi(v);
         else if (!strcmp(k, "integration_prev_folder_app")) snprintf(A.ig_prev_fm, sizeof A.ig_prev_fm, "%s", v);
         else if (!strcmp(k, "integration_show_in_folder")) A.ig_fm1 = atoi(v);
@@ -492,6 +512,18 @@ static void settings_write(FILE *f) {
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
             A.dblclick_up, A.drop_ask, A.def_tree, A.single_instance);
     keys_save(f);
+    tab_preferences_write(f);
+    header_preferences_write(f);
+    fprintf(f, "navigation_selection_opacity=%d\n", g_navigation_selection_opacity);
+    fprintf(f, "previous_theme=%s\n", g_previous_theme);
+    if (g_scroll_custom) fprintf(f, "scrollbar_color=#%06X\n", g_scroll_custom & 0xFFFFFF);
+    else fprintf(f, "scrollbar_color=auto\n");
+    fprintf(f, "match_system_background=%d\n", g_match_system_background);
+    fprintf(f, "system_accent=%d\nunified_surfaces=%d\nshow_separators=%d\n"
+               "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\nstatus_brightness=%d\n",
+            g_accent_system, g_unified_surfaces, g_show_separators,
+            g_surface_brightness[SURFACE_SIDEBAR], g_surface_brightness[SURFACE_HEADER],
+            g_surface_brightness[SURFACE_MAIN], g_surface_brightness[SURFACE_STATUS]);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
     fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",

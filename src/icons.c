@@ -33,6 +33,8 @@ static const char g_branch_svg[] =
     "<path d=\"M600 231V267A167 167 0 0 1 433 434H366A133 133 0 0 0 233 566\"/></g></svg>";
 static NSVGimage *g_branch_img;
 
+#include "system_icons.c"
+
 static int g_icon_theme; // 0..ICON_THEMES-1 built in, then custom themes (icon_theme_name)
 
 // --- custom icon themes: <config>/icons/<Name>/ with SVGs named like the built-in icons ("python.svg",
@@ -84,18 +86,29 @@ static void net_icons_free_images(void) {
     g_net_img_n = 0;
 }
 
-static int icon_theme_count(void) { return ICON_THEMES + g_ncit; }
-static const char *icon_theme_name(int t) {
-    return t < ICON_THEMES ? g_icon_theme_names[t] : t < icon_theme_count() ? g_cit[t - ICON_THEMES].name : "";
+static int icon_system_base(void) { return ICON_THEMES + g_ncit; }
+static bool icon_system_selected(void) { return g_icon_theme >= icon_system_base(); }
+static const char *icon_system_theme(void) {
+    int i = g_icon_theme - icon_system_base() - 1;
+    return i >= 0 && i < g_nsystem_icons ? g_system_icons[i].name : g_system_icon_current;
 }
-static CustomIconTheme *icon_custom(void) { return g_icon_theme >= ICON_THEMES ? &g_cit[g_icon_theme - ICON_THEMES] : NULL; }
+static int icon_theme_count(void) { return ICON_THEMES + g_ncit + 1 + g_nsystem_icons; }
+static const char *icon_theme_name(int t) {
+    if (t < 0 || t >= icon_theme_count()) return "";
+    if (t < ICON_THEMES) return g_icon_theme_names[t];
+    if (t < icon_system_base()) return g_cit[t - ICON_THEMES].name;
+    return t == icon_system_base() ? "System" : g_system_icons[t - icon_system_base() - 1].label;
+}
+static CustomIconTheme *icon_custom(void) {
+    return g_icon_theme >= ICON_THEMES && g_icon_theme < icon_system_base() ? &g_cit[g_icon_theme - ICON_THEMES] : NULL;
+}
 static int icon_id_limit(void) { CustomIconTheme *c = icon_custom(); return ICON_EXT_BASE + (c ? c->next : 0); }
 
 // SVG text of icon id in the current theme.
 static const char *icon_src(int id) {
     CustomIconTheme *c = icon_custom();
     if (id >= ICON_EXT_BASE) return c && id - ICON_EXT_BASE < c->next ? c->ext_svg[id - ICON_EXT_BASE] : NULL;
-    if (!c) return g_icon_svg[g_icon_theme][id];
+    if (!c) return g_icon_svg[g_icon_theme < ICON_THEMES ? g_icon_theme : 0][id];
     return c->svg[id] ? c->svg[id] : g_icon_svg[c->base][id];
 }
 static NSVGimage *g_icon_img[ICON_COUNT]; // parsed lazily (current theme)
@@ -378,8 +391,58 @@ static NSVGimage *icon_image(int id) {
     return *slot;
 }
 
+#include "system_icon_raster.c"
+
+#define ICON_SYSTEM_BASE 0x200000
+static const char *g_system_symbols[] = {"drive-harddisk", "smartphone", "camera-photo", "go-previous", "go-next", "go-up", "list-add", "utilities-terminal", "view-split-left-right", "window-minimize", "window-maximize", "window-restore", "window-close"};
+enum { SYS_DRIVE, SYS_PHONE, SYS_CAMERA, SYS_PREV, SYS_NEXT, SYS_UP, SYS_ADD, SYS_TERMINAL, SYS_SPLIT, SYS_WINDOW_MINIMIZE, SYS_WINDOW_MAXIMIZE, SYS_WINDOW_RESTORE, SYS_WINDOW_CLOSE };
+
+// Map the existing file classification to freedesktop icon names. The selected
+// theme's inheritance supplies missing icons, then bundled art is the fallback.
+static const char *system_icon_name(int id) {
+    const char *name = g_icon_names[id];
+    static const struct { const char *app, *desktop; } map[] = {
+        {"folder-home", "user-home"}, {"folder-docs", "folder-documents"},
+        {"folder-images", "folder-pictures"}, {"folder-audio", "folder-music"},
+        {"folder-video", "folder-videos"}, {"folder-download", "folder-download"},
+        {"folder-desktop", "user-desktop"}, {"folder-trash", "user-trash"}, {"trash", "user-trash"},
+        {"image", "image-x-generic"}, {"svg", "image-svg+xml"}, {"audio", "audio-x-generic"},
+        {"video", "video-x-generic"}, {"zip", "application-x-compressed-tar"}, {"pdf", "application-pdf"},
+        {"word", "x-office-document"}, {"table", "x-office-spreadsheet"}, {"powerpoint", "x-office-presentation"},
+        {"python", "text-x-python"}, {"javascript", "application-javascript"}, {"typescript", "text-x-typescript"},
+        {"c", "text-x-csrc"}, {"h", "text-x-chdr"}, {"cpp", "text-x-c++src"}, {"hpp", "text-x-c++hdr"},
+        {"html", "text-html"}, {"css", "text-css"}, {"json", "application-json"}, {"xml", "application-xml"},
+        {"console", "text-x-script"}, {"exe", "application-x-executable"}, {"font", "font-x-generic"},
+        {"document", "text-x-generic"}, {"markdown", "text-markdown"}, {"database", "application-x-sqlite3"},
+    };
+    for (size_t i = 0; i < ARRAY_COUNT(map); i++) if (!strcmp(name, map[i].app)) return map[i].desktop;
+    return !strncmp(name, "folder", 6) ? "folder" : "text-x-generic";
+}
+static u8 *system_icon_raster(int id, int w, int h) {
+    bool window = id >= ICON_SYSTEM_BASE + SYS_WINDOW_MINIMIZE && id <= ICON_SYSTEM_BASE + SYS_WINDOW_CLOSE;
+    if ((!window && !icon_system_selected()) || id < 0) return NULL;
+    if (id >= ICON_SYSTEM_BASE && id < ICON_SYSTEM_BASE + (int)ARRAY_COUNT(g_system_symbols)) {
+        const char *theme = window ? g_system_icon_current : icon_system_theme();
+        return system_action_raster(theme, g_system_symbols[id - ICON_SYSTEM_BASE], w, h, window);
+    }
+    if (id >= ICON_COUNT) return NULL;
+    const char *name = system_icon_name(id), *theme = icon_system_theme();
+    char path[PATH_MAX];
+    if (system_icon_lookup(theme, name, MAX(w, h), path, sizeof path)) {
+        u8 *pixels = system_icon_raster_path(path, w, h);
+        if (pixels) return pixels;
+    }
+    const char *fallback = !strncmp(g_icon_names[id], "folder", 6) ? "folder" : "text-x-generic";
+    if (strcmp(name, fallback) && system_icon_lookup(theme, fallback, MAX(w, h), path, sizeof path))
+        return system_icon_raster_path(path, w, h);
+    return NULL;
+}
+
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
+    u8 *system = system_icon_raster(id, w, h);
+    if (system) return system;
+    if (id >= ICON_SYSTEM_BASE) return NULL;
     NSVGimage *img = icon_image(id);
     if (!img || img->width <= 0 || img->height <= 0) return NULL;
     if (!g_rast) g_rast = nsvgCreateRasterizer();
@@ -394,12 +457,17 @@ static IconSlot g_icon_cache[512];
 // g_icon_cache_n lives in font.c (reset together with the atlas)
 
 static Glyph *icon_glyph(int id, int px) {
-    if (id < 0 || (id >= icon_id_limit() && (id < ICON_NET_BASE || id >= ICON_NET_BASE + net_icon_count())) || px <= 0 || px > 256) return NULL;
+    bool system = id >= ICON_SYSTEM_BASE && id < ICON_SYSTEM_BASE + (int)ARRAY_COUNT(g_system_symbols);
+    if (id < 0 || (!system && id >= icon_id_limit() && (id < ICON_NET_BASE || id >= ICON_NET_BASE + net_icon_count())) || px <= 0 || px > 256) return NULL;
     for (int i = 0; i < g_icon_cache_n; i++)
-        if (g_icon_cache[i].id == id && g_icon_cache[i].px == px) return &g_icon_cache[i].g;
+        if (g_icon_cache[i].id == id && g_icon_cache[i].px == px)
+            return g_icon_cache[i].g.w ? &g_icon_cache[i].g : NULL;
     if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0; // crude eviction (atlas keeps the pixels)
     u8 *buf = icon_raster(id, px, px);
-    if (!buf) return NULL;
+    if (!buf) { // cache missing system symbols too: do not repeat disk lookups every frame
+        g_icon_cache[g_icon_cache_n++] = (IconSlot){.id = id, .px = px};
+        return NULL;
+    }
     int ax, ay;
     if (!atlas_pack(px, px, &ax, &ay)) { free(buf); return NULL; }
     for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
@@ -415,9 +483,59 @@ static Glyph *icon_glyph(int id, int px) {
     return &s->g;
 }
 
+// Optional Nerd Font file/folder glyphs. Use an explicit font file so a random
+// font's private-use characters can never silently stand in for these icons.
+// Missing glyphs keep the selected SVG theme. The font shares the GPU atlas.
+static bool draw_nerd_icon(f32 x, f32 y, f32 size, int id, bool hidden) {
+    static Font font;
+    static bool checked, ready;
+    if (icon_system_selected()) return false;
+    if (id < 0 || id >= ICON_COUNT) return false; // logos/network keep their own art
+    if (!checked) {
+        checked = true;
+        const char *path = getenv("FE_NERD_FONT");
+        if (path && *path && g_nfonts < (int)ARRAY_COUNT(g_fonts))
+            ready = font_init(&font, path, 16);
+    }
+    if (!ready) return false;
+    const char *name = g_icon_names[id];
+    bool folder = !strncmp(name, "folder", 6);
+    u32 cp = folder ? 0xf07b : 0xf15b;
+    if (!strcmp(name, "folder-home")) cp = 0xf015;
+    else if (!strcmp(name, "trash") || !strcmp(name, "folder-trash")) cp = 0xf1f8;
+    else if (!strcmp(name, "image") || !strcmp(name, "svg")) cp = 0xf1c5;
+    else if (!strcmp(name, "audio")) cp = 0xf1c7;
+    else if (!strcmp(name, "video")) cp = 0xf1c8;
+    else if (!strcmp(name, "zip")) cp = 0xf1c6;
+    else if (!strcmp(name, "pdf")) cp = 0xf1c1;
+    else if (!strcmp(name, "git")) cp = 0xf1d3;
+    else if (!folder && strcmp(name, "document")) cp = 0xf1c9;
+    if (!FT_Get_Char_Index(font.faces[0], cp)) return false;
+    int px = MAX(1, (int)roundf(size * 0.85f));
+    // Include size in the cache key: tab, sidebar and grid sizes coexist without
+    // invalidating each other's glyphs every frame.
+    u32 key = cp | ((u32)px << 16), slot;
+    Glyph *g = glyph_find(&font, key, &slot);
+    if (!g) {
+        if (font.px != px) {
+            if (FT_Set_Pixel_Sizes(font.faces[0], 0, (FT_UInt)px)) return false;
+            font.px = px;
+        }
+        g = glyph_make(&font, slot, key, 0, FT_Get_Char_Index(font.faces[0], cp));
+    }
+    if (!g || !g->w || !g->h) return false;
+    u32 col = folder ? COL_ACCENT : COL_TEXT_DIM;
+    if (hidden) col = rgb_mix(col, COL_BG, 0.5f);
+    draw_glyph(g, roundf(x + (size - g->w) * 0.5f),
+               roundf(y + (size - g->h) * 0.5f), C(col));
+    return true;
+}
+
 // Draw the icon for a file name at (x, y), s pixels. Returns false if it couldn't (caller falls back).
 static bool draw_icon_for_name(f32 x, f32 y, f32 s, const char *name, bool exec) {
-    Glyph *g = icon_glyph(icon_for_name(name, exec), (int)roundf(s));
+    int id = icon_for_name(name, exec);
+    if (draw_nerd_icon(x, y, s, id, false)) return true;
+    Glyph *g = icon_glyph(id, (int)roundf(s));
     if (!g) return false;
     draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
     return true;
@@ -438,7 +556,8 @@ static int g_nbig;
 static u64 g_big_clock;
 
 static SDL_Texture *big_icon_tex(int id, int px) {
-    if (id < 0 || id >= icon_id_limit() || px <= 0 || px > 512) return NULL;
+    bool system = id >= ICON_SYSTEM_BASE && id < ICON_SYSTEM_BASE + (int)ARRAY_COUNT(g_system_symbols);
+    if (id < 0 || (!system && id >= icon_id_limit()) || px <= 0 || px > 512) return NULL;
     g_big_clock++;
     for (int i = 0; i < g_nbig; i++)
         if (g_big_icons[i].id == id && g_big_icons[i].px == px) {
@@ -485,7 +604,7 @@ static void icons_sync_theme(void) {
     g_icon_main = COL_TEXT2;
     g_icon_bg = COL_BG;
     if (first) return;
-    bool any = false;
+    bool any = icon_system_selected(); // symbolic desktop icons follow the foreground
     for (int i = 0; i < ICON_COUNT; i++)
         if (g_icon_img[i] && (strstr(icon_src(i), ICON_THEME_MARK) || strstr(icon_src(i), ICON_THEME_SHADE))) {
             nsvgDelete(g_icon_img[i]);
@@ -507,7 +626,9 @@ static void icons_sync_theme(void) {
 static int icon_theme_find(const char *name) {
     for (int i = 0; i < icon_theme_count(); i++)
         if (str_ieq(name, icon_theme_name(i))) return i;
-    return -1;
+    // Also accept the installed folder name (e.g. icon_theme=Reversal).
+    int system = system_icon_theme_find(name);
+    return system >= 0 ? icon_system_base() + 1 + system : -1;
 }
 
 // Drop parsed SVGs and every rasterized copy (theme switched or reloaded).
@@ -575,7 +696,7 @@ static void icon_themes_scan(const char *dir) {
         snprintf(tdir, sizeof tdir, "%s/%s", dir, de->d_name);
         struct stat st;
         if (stat(tdir, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
-        bool clash = false; // a built-in name can't be reused
+        bool clash = str_ieq(de->d_name, "System"); // reserved desktop-following choice
         for (int i = 0; i < ICON_THEMES; i++) clash |= str_ieq(de->d_name, g_icon_theme_names[i]);
         if (clash) continue;
         CustomIconTheme *c = &g_cit[g_ncit];
@@ -632,6 +753,7 @@ static void icon_themes_scan(const char *dir) {
     }
     if (d) closedir(d);
     qsort(g_cit, (size_t)g_ncit, sizeof g_cit[0], cmp_cit);
+    system_icons_scan();
     int t = icon_theme_find(cur);
     g_icon_theme = t >= 0 ? t : 0;
     if (was_custom || g_icon_theme >= ICON_THEMES) icons_flush(); // its files may have changed

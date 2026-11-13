@@ -364,7 +364,8 @@ static void tab_drop_update(f32 x, f32 y) {
             return;
         }
         if (!in_rect(pn->area, x, y)) continue;
-        Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
+        Rect a = panel_content_rect(pn);
+        if (!in_rect(a, x, y)) continue; // navigation is not a split-drop target
         f32 fx = (x - a.x) / MAX(a.w, 1.f), fy = (y - a.y) / MAX(a.h, 1.f);
         f32 d[4] = {fx, 1 - fx, fy, 1 - fy};
         int zone = ZONE_CENTER;

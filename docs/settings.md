@@ -14,15 +14,31 @@ pinned folders, columns, and your tabs/split panes (`restore_session=0` to start
 (0 = all at once) and `verify_copies=0` are the transfer queue's settings. `renderer=auto` uses
 OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is resized; Vulkan can take less memory
 on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
-`title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling
-compositors included, so it looks the same everywhere: minimise / maximise / close at the end of the tab strip; drag
-the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.
-`system` leaves the title bar to the desktop (on a tiling compositor: no buttons at all).
-`FE_TITLE_BAR=app|system` overrides it for one run.
-`round_corners=1` (Options -> Appearance -> Rounded corners, off by default) rounds the window's corners with Explorer's own title bar,
-and draws a drop shadow round it the way GTK apps do (square and without shadow when maximised or snapped). On X11 this
-needs a compositor (else the corners stay square) and the OpenGL renderer (Automatic picks it there); the shadow needs a
-window manager that reads `_GTK_FRAME_EXTENTS` (mutter, KWin, xfwm4 and others). Turning it on takes a restart. `FE_SQUARE_CORNERS=1` / `FE_NO_SHADOW=1` turn the corners / the shadow off for one run.
+Options > Appearance > **Title bar** has two choices:
+
+- **Integrated header** (`title_bar=app`) places minimize/maximize/close on the first tab/navigation row.
+  Tabs above navigation share the controls row; with tabs below or only one tab, navigation shares it.
+  Drag the left label or empty header space to move, double-click it to maximize, or right-click for the window menu.
+- **Desktop title bar** (`title_bar=system`) leaves decorations and buttons to the desktop. Tiling/window-manager
+  setups that omit a native title bar are supported without reserving extra space inside the app.
+
+**Show window controls** hides/shows the three app-drawn buttons in Integrated header mode. Hiding them gives their
+space back to tabs/navigation and leaves header dragging, edge resizing, shortcuts and the window menu available.
+Desktop-provided controls are configured by the window manager. App-drawn controls use the desktop icon theme's
+window-action shapes when available, with built-in vector fallbacks, independently of the selected file-icon set.
+Older `title_bar=auto` settings remain readable; the UI no longer exposes Automatic or "Explorer's own" choices.
+`FE_TITLE_BAR=app|system` still overrides the mode for one run.
+
+**Header label** chooses File-Explorer (default), Hostname, Custom or Hidden. **Custom header text** applies a custom
+single-line label; Default restores File-Explorer without changing window-control visibility. Hostname uses the
+machine/container hostname visible to the running app. Saved keys are `header_label=app|hostname|custom|hidden`,
+`header_text=...`, and `show_window_controls=1|0`.
+
+`round_corners=1` (Options > Appearance > Rounded corners, off by default) rounds the window's corners
+and draws a drop shadow with the integrated header. It stays square without a shadow when maximized or snapped.
+On X11 this needs a compositor and the OpenGL renderer; the shadow needs a window manager that reads
+`_GTK_FRAME_EXTENTS`. Changing this setting takes a restart. `FE_SQUARE_CORNERS=1` and `FE_NO_SHADOW=1`
+disable corners and the shadow for one run.
 
 **Dropping files** (Options > Behaviour > Mouse): a drop moves (copies onto another drive or from another app) unless
 Ctrl / Shift / Ctrl+Shift say copy / move / link. `drop_ask=1` ("Ask what to do when dropping files") opens a menu
@@ -38,11 +54,82 @@ zypper) update with the system and makepkg / source builds are told the command 
 
 Per-folder views live in `~/.config/file-explorer/folders.conf`, saved layouts in `layouts.conf`.
 
+**System theme and icons.** Options > Appearance > Theme > **System** uses the desktop's colors where exposed.
+KDE palette colors come from the Settings portal or shared `kdeglobals`; other desktops use their standard
+light/dark preference with an accent tint when full colors are unavailable. **Follow system appearance** automatically
+selects **System** in the Theme dropdown. Turning it off restores the previous theme; choosing a manual theme also
+turns following off. Older `match_system_background=1` settings are kept compatible and select System on startup.
+All surface brightness controls still apply afterward.
+
+File icons > **System** follows the current desktop icon theme; **System: Reversal** (or another installed name)
+selects that theme explicitly. Themes are discovered from `~/.local/share/icons`, `~/.icons`, and the XDG data
+locations. Distrobox also checks `/run/host/usr/share/icons` when available. PNG/SVG files, sizes/scales and theme
+inheritance are supported; missing icons use hicolor, then bundled icons. XPM is unsupported. Install Reversal in the
+container or the shared `~/.local/share/icons` if it is not visible. Restart or open "Icon themes folder" to rescan.
+System icon choices take precedence over `FE_NERD_FONT`. See [UI revamp](ui-revamp.md) for details.
+
+Options > Appearance > Tabs offers **Tab position** (Above navigation / Below navigation) and **Tab style**
+(Classic Explorer / Pills). Defaults are below + pills. Pills center inside a shared rounded enclosure made from
+a darkened version of the effective navigation background, share the path field's corner radius, and show their
+individual surface only on hover/selection. Pills share the manual/system accent and selection-opacity setting with sidebar/configuration navigation;
+hover uses 8% accent and selected tabs in inactive split panes use a weaker selection tint. Classic tabs restore the original
+rounded cards and outward-curving bottom corners: the active card matches navigation and has a subtle neutral contour to preserve its shape;
+inactive cards are slightly darker, while the surrounding row matches navigation. Text and close controls maintain contrast on these backgrounds. The row appears only with
+two or more tabs in a pane, in either style/position. Ctrl+T opens another tab when the row is hidden.
+Saved keys are `tab_position=below` (`above` is also accepted) and `tab_style=pills` (`classic` is also accepted).
+
+Sidebar and configuration navigation use a uniform accent-tinted selection, without a left-edge marker.
+Selection defaults to 40% of the manual/system accent, identically in light and dark themes.
+Appearance > Navigation selection opacity adjusts it from 0% to 100% in 5% steps and also applies to pill focus; the value is saved as
+`navigation_selection_opacity=40`. Hover remains at 8%. Each fill blends against that navigation area's actual background.
+
+**Scrollbar colour** (Options > Appearance > Scrollbars): Auto derives the thumb and hover colors from the
+desktop highlight when available. Without a desktop color, it uses the selected theme's scrollbar colors.
+The input accepts `#RRGGBB` or `#RGB`; click Apply or press Enter. A custom color always takes priority, including
+in the System theme, and survives desktop color changes. Click Auto to restore automatic matching. Escape cancels
+an unapplied edit. Saved setting: `scrollbar_color=auto` or, for example, `scrollbar_color=#3DAEE9`.
+
+**Surfaces and system highlight** (Options > Appearance): "Unified surfaces" uses the theme's main background
+for the side panels, header, center and status bar (enabled by default). Independent brightness controls adjust
+each area from -30% to +30% in 5% steps; 0 restores its original brightness. The header control includes navigation,
+pill tabs and the app-drawn title strip; side panels includes the sidebar and preview. Turning off unified surfaces
+restores the selected theme's original surface differences. Terminal content keeps its terminal palette.
+
+"Show separator lines" is **on by default**. Turn it off to hide panel/header/status borders and column dividers.
+Resize targets still work and show a highlight on hover; focus and interactive-control outlines stay visible.
+
+"Match system highlight" uses the standard XDG Settings portal's `org.freedesktop.appearance/accent-color` and
+follows live changes. The option is available on every distribution and uses optional `libdbus-1.so.3` at runtime.
+The desktop must provide xdg-desktop-portal and a backend that exposes its accent color; otherwise the theme accent
+is used. In Distrobox this reads the host desktop's session bus. Selecting a manual accent switches system matching
+off; toggling system matching off restores the previous manual choice. No KDE/GNOME-specific commands are required.
+See the [portal specification](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html).
+
+Saved keys (automatically managed by the Appearance controls):
+```ini
+unified_surfaces=1
+show_separators=1
+sidebar_brightness=0
+header_brightness=0
+main_brightness=0
+status_brightness=0
+system_accent=0
+match_system_background=0
+previous_theme=Dark
+scrollbar_color=auto
+header_label=app
+header_text=
+show_window_controls=1
+```
+
 Colour schemes: `~/.config/file-explorer/themes/*.json` (Options → "Create theme from current colours" writes a
 starting point). Any key you leave out comes from the `base` theme:
 ```json
 { "name": "My theme", "base": "dark", "colors": { "bg": "#1b1b20", "accent": "#ff8800", "folder": "#e9b44c" } }
 ```
+Creating a theme from the current appearance bakes in the surface colors, resets their brightness controls to 0,
+and turns off Unified surfaces so those colors are not adjusted twice.
+
 The app icon follows the accent colour: in the window, and for launchers and docks through a recoloured copy at
 `~/.local/share/icons/hicolor/scalable/apps/dev.fileexplorer.svg` (none for the default Blue; delete it after
 uninstalling). Docks and launchers may only pick up a new colour once they reload their icons.

@@ -35,3 +35,10 @@
 - `src/app.c` – layout, input, virtualized list, navigation, tabs, dialogs, menus, progress cards, transfer queue, undo.
   `src/input.c` (keyboard/mouse), `src/render.c` (drawing), `src/settings.c` (config files) and
   `src/selftest.c` (self-tests) are included from it.
+
+- `src/theme.c` owns the effective palette and scrollbar colors; `src/tab_preferences.c` shares tab settings and
+  geometry across rendering and input; `src/header_preferences.c` owns the label and control-visibility settings. `src/desktop_config.c` / `src/desktop_palette.c` read desktop colors without
+  GTK/Qt build dependencies. `src/system_appearance.c` monitors the optional Settings portal off the UI thread and
+  posts updates to the existing main queue. The optional libdbus loader is shared with integration via `src/dbus.c`.
+- `src/system_icons.c` resolves installed freedesktop icon themes and inheritance; `src/system_icon_raster.c` converts
+  SVG/PNG icons into the existing atlas/texture caches in `icons.c`. Missing icons keep bundled fallbacks.

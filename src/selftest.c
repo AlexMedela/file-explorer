@@ -1492,6 +1492,13 @@ static void st_setup_m6(void) {
 }
 
 static void st_drag_tab(Tab *t, f32 x, f32 y, SDL_Keymod mod) {
+    // A single tab is intentionally hidden. Give it a temporary companion so
+    // drag tests still use a visible tab and restore the one-tab state after.
+    Tab *companion = NULL;
+    if (panel_ntabs(t->panel) == 1) {
+        companion = tab_new_in(t->panel, t->pane[0].path, panel_end_index(t->panel), false);
+        st_wait();
+    }
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, t->r.x + S(30), t->r.y + t->r.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
     st_mouse(SDL_EVENT_MOUSE_MOTION, t->r.x + S(60), t->r.y + t->r.h * 0.5f + S(4), 0, 0, mod);
     st_mouse(SDL_EVENT_MOUSE_MOTION, x, y, 0, 0, mod);
@@ -1499,12 +1506,15 @@ static void st_drag_tab(Tab *t, f32 x, f32 y, SDL_Keymod mod) {
     on_mouse_up();
     SDL_SetModState(SDL_KMOD_NONE);
     st_wait();
+    if (companion) { tab_close(tab_index(companion)); st_wait(); }
 }
 
 static int run_selftest_m6(void) {
     st_wait();
     Panel *p0 = A.ap;
     ST_CHECK(A.npanels == 1 && A.root->kind == NODE_PANEL);
+    ST_CHECK(panel_ntabs(p0) == 1 && p0->bar.h == 0 && p0->cur->r.w == 0);
+    ST_CHECK(p0->cur->pane[0].ly.header.y == p0->cur->pane[0].ly.toolbar.y + p0->cur->pane[0].ly.toolbar.h);
     { // tab bar hover states (FE_SHOTS): inactive tab, + button
         int nt = A.ntabs;
         st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
@@ -1518,7 +1528,7 @@ static int run_selftest_m6(void) {
         st_shot("tab-plus-hover");
         st_mouse(SDL_EVENT_MOUSE_MOTION, A.r_content.x + S(300), A.r_content.y + S(300), 0, 0, 0);
         st_key(SDLK_W, SDL_KMOD_CTRL); st_wait();
-        ST_CHECK(A.ntabs == nt);
+        ST_CHECK(A.ntabs == nt && p0->bar.h == 0);
     }
 
     // split right (Ctrl+\) then split that one down (Ctrl+Shift+\): nested tree
@@ -1545,6 +1555,31 @@ static int run_selftest_m6(void) {
     st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
     pane_navigate(active_pane(), M6_BASE "/d", true); st_wait();
     ST_CHECK(panel_ntabs(p0) == 2 && panel_ntabs(p1) == 1 && panel_ntabs(p2) == 1);
+    { // All four tab configurations retain content/drop bounds and click targets.
+        for (int position = TAB_BELOW; position <= TAB_ABOVE; position++) {
+            for (int style = TAB_PILLS; style <= TAB_CLASSIC; style++) {
+                opt_choice_set(OPT_TAB_POSITION, position);
+                opt_choice_set(OPT_TAB_STYLE, style);
+                PaneLayout *ly = &p0->cur->pane[0].ly;
+                Rect first = panel_tab(p0, 0)->r, last = panel_tab(p0, 1)->r;
+                if (position == TAB_BELOW) ST_CHECK(p0->bar.y >= ly->toolbar.y + ly->toolbar.h);
+                else ST_CHECK(ly->toolbar.y >= p0->bar.y + p0->bar.h);
+                Rect content = panel_content_rect(p0);
+                ST_CHECK(ly->header.y == content.y && content.y >= p0->bar.y + p0->bar.h);
+                ST_CHECK(content.y >= ly->toolbar.y + ly->toolbar.h);
+                ST_CHECK(first.x + first.w < last.x);
+                if (style == TAB_PILLS)
+                    ST_CHECK(fabsf((first.x + last.x + last.w) * 0.5f - (p0->area.x + p0->area.w * 0.5f)) <= S(1));
+                else ST_CHECK(first.x == p0->area.x + roundf(S(8)));
+                ST_CHECK(last.x + last.w <= p0->plus.x && p0->plus.x + p0->plus.w <= p0->splitbtn.x);
+                ST_CHECK(p1->bar.h == 0 && p2->bar.h == 0); // one tab stays hidden in either mode
+                st_frames(1);
+            }
+        }
+        opt_choice_set(OPT_TAB_POSITION, TAB_BELOW);
+        opt_choice_set(OPT_TAB_STYLE, TAB_PILLS);
+    }
+
     st_key(SDLK_1, SDL_KMOD_CTRL);
     ST_CHECK(A.ap == p0 && p0->cur == panel_tab(p0, 0));
     st_key(SDLK_9, SDL_KMOD_CTRL);
@@ -1552,7 +1587,7 @@ static int run_selftest_m6(void) {
 
     // drag p0's "d" tab onto p2's tab bar -> moved there
     Tab *td = p0->cur;
-    st_drag_tab(td, p2->bar.x + p2->bar.w - S(80), p2->bar.y + p2->bar.h * 0.5f, 0);
+    st_drag_tab(td, p2->area.x + p2->area.w * 0.5f, p2->area.y + p2->area.h * 0.5f, 0);
     ST_CHECK(td->panel == p2 && panel_ntabs(p2) == 2 && panel_ntabs(p0) == 1 && A.ap == p2 && p2->cur == td);
     // drag it to the left edge of p1 -> new split inside p1's slot
     st_drag_tab(td, p1->area.x + S(20), p1->area.y + p1->area.h * 0.5f, 0);
@@ -1690,8 +1725,10 @@ static int run_selftest_m6(void) {
     {   // pointer shape: hand over buttons (the new-tab +), I-beam over the path bar, arrow over the file list
         Panel *pn = A.ap;
         PaneLayout *ly = &pn->cur->pane[0].ly;
-        st_mouse(SDL_EVENT_MOUSE_MOTION, pn->plus.x + pn->plus.w * 0.5f, pn->plus.y + pn->plus.h * 0.5f, 0, 0, 0);
-        ST_CHECK(A.cursor_shown == 3);
+        if (pn->plus.w > 0) {
+            st_mouse(SDL_EVENT_MOUSE_MOTION, pn->plus.x + pn->plus.w * 0.5f, pn->plus.y + pn->plus.h * 0.5f, 0, 0, 0);
+            ST_CHECK(A.cursor_shown == 3);
+        } else ST_CHECK(panel_ntabs(pn) == 1 && pn->bar.h == 0);
         st_mouse(SDL_EVENT_MOUSE_MOTION, ly->pathbar.x + ly->pathbar.w - S(4), ly->pathbar.y + ly->pathbar.h * 0.5f, 0, 0, 0);
         ST_CHECK(A.cursor_shown == 4);
         st_mouse(SDL_EVENT_MOUSE_MOTION, ly->list.x + ly->list.w * 0.5f, ly->list.y + ly->list.h - S(4), 0, 0, 0);
@@ -2712,11 +2749,13 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.show_hidden == hid);
     // appearance: font size, row spacing
     st_opt_click(st_opt_hit(HP_NAV, -1, OC_APPEARANCE));
+    st_type("Font size"); st_frames(1);
     int px0 = A.font.px;
     st_opt_click(st_opt_hit(HP_PLUS, OPT_FONT_SIZE, 0));
     ST_CHECK(A.font_size == 14 && A.font.px == (int)roundf(14.f * A.scale) && A.font.px > px0);
     st_opt_click(st_opt_hit(HP_MINUS, OPT_FONT_SIZE, 0));
     ST_CHECK(A.font_size == 13);
+    st_key(SDLK_A, SDL_KMOD_CTRL); st_type("Row spacing"); st_frames(1);
     st_opt_click(st_opt_hit(HP_SEG, OPT_ROW_SPACING, 0));
     ST_CHECK(A.row_spacing == 0);
     { // the scrollbar's thumb can be dragged (not only the wheel); a press on its track pages
@@ -2773,6 +2812,89 @@ static int run_selftest_m9(void) {
     opt_button(OPT_THEME_NEW);
     ST_CHECK(theme_find("My theme") >= 0 && g_theme_cur == theme_find("My theme"));
     sheet_close();
+
+    // Surface controls are independent, reversible and saved; system accent
+    // falls back cleanly when the desktop does not expose a valid color.
+    {
+        int saved_theme = g_theme_cur;
+        g_theme_cur = theme_find("Dark");
+        theme_apply();
+        ST_CHECK(g_show_separators && g_unified_surfaces);
+        ST_CHECK(T.bg == T.sidebar && T.bg == T.toolbar && T.bg == T.status);
+        u32 bg = T.bg, header = T.toolbar, status = T.status;
+        opt_int_step(OPT_SIDEBAR_BRIGHTNESS, -1);
+        ST_CHECK(T.sidebar != bg && T.bg == bg && T.toolbar == header && T.status == status);
+        opt_int_step(OPT_SIDEBAR_BRIGHTNESS, 1);
+        ST_CHECK(T.sidebar == bg);
+        opt_int_step(OPT_STATUS_BRIGHTNESS, 1);
+        ST_CHECK(T.status != status && T.toolbar == header);
+        opt_bool_toggle(OPT_SEPARATORS);
+        ST_CHECK(!g_show_separators);
+        opt_bool_toggle(OPT_SYSTEM_ACCENT); // tests never open the real session bus
+        ST_CHECK(g_accent_system && T.accent == g_theme_dark.accent);
+        g_system_accent = system_accent_rgb((double[]){0.25, 0.5, 1.0});
+        theme_apply();
+        ST_CHECK(T.accent == 0x4080FF);
+        ST_CHECK(!system_accent_rgb((double[]){-0.1, 0.5, 1.0}));
+        ST_CHECK(!system_accent_rgb((double[]){NAN, 0.5, 1.0}));
+        opt_choice_set(OPT_TAB_POSITION, TAB_ABOVE);
+        opt_choice_set(OPT_TAB_STYLE, TAB_CLASSIC);
+        settings_save();
+        settings_load();
+        ST_CHECK(g_tab_position == TAB_ABOVE && g_tab_style == TAB_CLASSIC);
+        opt_choice_set(OPT_TAB_POSITION, TAB_BELOW);
+        opt_choice_set(OPT_TAB_STYLE, TAB_PILLS);
+        ST_CHECK(g_accent_system && !g_show_separators && g_unified_surfaces);
+        ST_CHECK(g_surface_brightness[SURFACE_STATUS] == 5);
+        g_accent_system = false;
+        g_system_accent = 0;
+        g_show_separators = true;
+        memset(g_surface_brightness, 0, sizeof g_surface_brightness);
+        g_theme_cur = saved_theme;
+        theme_apply();
+    }
+
+    // Follow-system UI and dropdown share one selection; manual scrollbar entry
+    // uses the real text input and settings persistence paths.
+    opt_choice_set(OPT_THEME, theme_find("Nord"));
+    opt_bool_toggle(OPT_SYSTEM_BACKGROUND);
+    ST_CHECK(g_match_system_background && g_theme_cur == theme_find("System"));
+    settings_save(); settings_load(); theme_restore_selection(A.theme_name);
+    ST_CHECK(g_theme_cur == theme_find("System") && !strcmp(g_previous_theme, "Nord"));
+    opt_bool_toggle(OPT_SYSTEM_BACKGROUND);
+    ST_CHECK(!g_match_system_background && g_theme_cur == theme_find("Nord"));
+    options_open();
+    te_set(&g_opt.search, "Scrollbar colour", 0, 0); st_frames(1);
+    st_opt_click(st_opt_hit(HP_EDIT_FIELD, OPT_SCROLL_COLOR, 0));
+    st_key(SDLK_A, SDL_KMOD_CTRL); st_type("#C040A0");
+    st_key(SDLK_RETURN, SDL_KMOD_NONE);
+    ST_CHECK(g_scroll_custom == 0x01C040A0 && T.scroll == 0xC040A0);
+    settings_save(); settings_load();
+    ST_CHECK(g_scroll_custom == 0x01C040A0);
+    st_frames(1);
+    st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_SCROLL_COLOR, 0));
+    ST_CHECK(g_scroll_custom == 0);
+    sheet_close();
+
+    options_open();
+    te_set(&g_opt.search, "Custom header text", 0, 0); st_frames(1);
+    st_opt_click(st_opt_hit(HP_EDIT_FIELD, OPT_HEADER_TEXT, 0));
+    st_key(SDLK_A, SDL_KMOD_CTRL); st_type("Workstation files"); st_key(SDLK_RETURN, SDL_KMOD_NONE);
+    ST_CHECK(g_header_label == HEADER_CUSTOM && !strcmp(header_label_text(), "Workstation files"));
+    settings_save(); settings_load();
+    ST_CHECK(g_header_label == HEADER_CUSTOM && !strcmp(g_header_custom, "Workstation files"));
+    st_frames(1); st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_HEADER_TEXT, 0));
+    ST_CHECK(g_header_label == HEADER_APP && !strcmp(header_label_text(), "File-Explorer"));
+    sheet_close();
+
+    // Navigation opacity uses the existing numeric control and survives reload.
+    ST_CHECK(g_navigation_selection_opacity == 40);
+    opt_int_step(OPT_NAV_SELECTION_OPACITY, 1);
+    ST_CHECK(g_navigation_selection_opacity == 45);
+    settings_save(); settings_load();
+    ST_CHECK(g_navigation_selection_opacity == 45);
+    opt_int_step(OPT_NAV_SELECTION_OPACITY, -1);
+    ST_CHECK(g_navigation_selection_opacity == 40);
 
     // settings round trip
     g_theme_cur = theme_find("Nord");
@@ -3333,18 +3455,23 @@ static int run_selftest_m9(void) {
         ST_CHECK(A.csd && A.r_wctl.w > 0 && fabsf(A.r_wctl.x + A.r_wctl.w - (f32)A.W) < 1);
         Panel *tr = NULL; // the panel at the top right
         for (int i = 0; i < A.npanels; i++)
-            if (A.panels[i]->bar.y < 1 && A.panels[i]->bar.x + A.panels[i]->bar.w >= A.r_content.x + A.r_content.w - 1) tr = A.panels[i];
-        ST_CHECK(tr && tr->splitbtn.x + tr->splitbtn.w <= A.r_wctl.x);
+            if (fabsf(A.panels[i]->area.y - A.r_content.y) < 1 &&
+                A.panels[i]->area.x + A.panels[i]->area.w >= A.r_content.x + A.r_content.w - 1) tr = A.panels[i];
+        ST_CHECK(tr && tr->area.y == 0);
+        ST_CHECK(A.r_brand.h == A.r_wctl.h && A.r_content.y == 0);
         f32 d = SDL_GetWindowPixelDensity(A.win);
         #define ST_HIT(px, py) window_hit_test(A.win, &(SDL_Point){(int)((px) / d), (int)((py) / d)}, NULL)
         Rect b1 = wctl_button(1);
         ST_CHECK(ST_HIT(b1.x + b1.w * 0.5f, b1.y + b1.h * 0.5f) == SDL_HITTEST_NORMAL);
         ST_CHECK(ST_HIT(A.r_brand.x + A.r_brand.w * 0.5f, A.r_brand.y + A.r_brand.h * 0.5f) == SDL_HITTEST_DRAGGABLE);
         if (tr) {
-            f32 ex = tr->plus.x + tr->plus.w + S(16); // between + and the split button: empty strip
-            if (ex < tr->splitbtn.x) ST_CHECK(ST_HIT(ex, tr->bar.y + tr->bar.h * 0.5f) == SDL_HITTEST_DRAGGABLE);
+            f32 ex = tr->plus.x + tr->plus.w + S(16);
+            if (tr->bar.h > 0 && ex < tr->splitbtn.x)
+                ST_CHECK(ST_HIT(ex, tr->bar.y + tr->bar.h * 0.5f) ==
+                         (tr->bar.y < 0.5f ? SDL_HITTEST_DRAGGABLE : SDL_HITTEST_NORMAL));
             Rect tb = tr->cur->r;
-            ST_CHECK(ST_HIT(tb.x + tb.w * 0.5f, tb.y + tb.h * 0.5f) == SDL_HITTEST_NORMAL); // a tab stays a tab
+            if (tr->bar.h > 0) ST_CHECK(ST_HIT(tb.x + tb.w * 0.5f, tb.y + tb.h * 0.5f) == SDL_HITTEST_NORMAL);
+            else ST_CHECK(panel_ntabs(tr) == 1 && tb.w == 0);
         }
         ST_CHECK(ST_HIT(1, A.H * 0.5f) == SDL_HITTEST_RESIZE_LEFT);
         ST_CHECK(ST_HIT(A.W - 1, A.H - 1) == SDL_HITTEST_RESIZE_BOTTOMRIGHT);
@@ -3357,10 +3484,43 @@ static int run_selftest_m9(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, wctl_button(2).x + S(20), S(15), SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
         ST_CHECK(!strcmp(A.last_opened, "window:close"));
+        Tab *extra = tab_new_in(A.ap, active_pane()->path, panel_end_index(A.ap), true);
+        st_wait();
+        for (int position = TAB_BELOW; position <= TAB_ABOVE; position++) {
+            for (int style = TAB_PILLS; style <= TAB_CLASSIC; style++) {
+                opt_choice_set(OPT_TAB_POSITION, position); opt_choice_set(OPT_TAB_STYLE, style); st_frames(1);
+                for (int i = 0; i < A.npanels; i++) {
+                    Panel *pn = A.panels[i];
+                    if (pn->area.y > 0.5f || !pn->cur) continue;
+                    PaneLayout *ly = &pn->cur->pane[0].ly;
+                    Rect first = position == TAB_ABOVE && pn->bar.h > 0 ? pn->bar : ly->toolbar;
+                    ST_CHECK(first.y == 0);
+                    if (pn->area.x + pn->area.w > A.r_wctl.x)
+                        ST_CHECK(first.x + first.w <= A.r_wctl.x || first.w == 0);
+                    if (ly->pathbar.w > 0)
+                        ST_CHECK(!titlebar_drag_at(ly->pathbar.x + ly->pathbar.w * 0.5f, ly->pathbar.y + ly->pathbar.h * 0.5f));
+                }
+            }
+        }
+        opt_bool_toggle(OPT_WINDOW_CONTROLS); st_frames(1);
+        ST_CHECK(!g_show_window_controls && A.r_wctl.w == 0 && A.r_wstrip.w == 0);
+        for (int i = 0; i < A.npanels; i++) {
+            Panel *pn = A.panels[i];
+            if (pn->area.y > 0.5f || !pn->cur) continue;
+            Rect top = g_tab_position == TAB_ABOVE && pn->bar.h > 0 ? pn->bar : pn->cur->pane[0].ly.toolbar;
+            ST_CHECK(top.w == pn->area.w);
+        }
+        settings_save(); settings_load(); layout();
+        ST_CHECK(!g_show_window_controls && A.r_wctl.w == 0);
+        opt_bool_toggle(OPT_WINDOW_CONTROLS); st_frames(1);
+        ST_CHECK(g_show_window_controls && A.r_wctl.w > 0);
+        tab_close(tab_index(extra)); st_wait();
+        opt_choice_set(OPT_TAB_POSITION, TAB_BELOW); opt_choice_set(OPT_TAB_STYLE, TAB_PILLS);
         bool pv = A.preview_on;
         if (!pv) preview_toggle();
         layout();
         ST_CHECK(A.r_wstrip.w > 0 && A.r_preview.y >= A.r_wctl.h);
+        ST_CHECK(titlebar_drag_at(A.r_wstrip.x + S(12), A.r_wstrip.h * 0.5f));
         st_frames(1);
         st_shot("m9-titlebar");
         if (!pv) preview_toggle();
