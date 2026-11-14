@@ -336,6 +336,104 @@ static int apps_for_mime(const char *mime, DesktopApp **out, int max) {
     return n;
 }
 
+// --- recently used apps (per MIME type, $XDG_STATE_HOME/file-explorer/recent-apps) ---
+
+#define RECENT_APPS 5
+typedef struct {
+    char mime[160];
+    char id[RECENT_APPS][256]; // newest first
+    int n;
+} RecentApps;
+static RecentApps *g_rapps;
+static int g_nrapps;
+static bool g_rapps_loaded;
+
+static void recent_apps_file(char *out, size_t cap, bool dir_only) {
+    const char *x = getenv("XDG_STATE_HOME");
+    char base[PATH_MAX];
+    if (x && x[0] == '/') snprintf(base, sizeof base, "%s/file-explorer", x);
+    else snprintf(base, sizeof base, "%s/.local/state/file-explorer", getenv("HOME") ? getenv("HOME") : "/tmp");
+    if (dir_only) snprintf(out, cap, "%s", base);
+    else snprintf(out, cap, "%s/recent-apps", base);
+}
+
+static RecentApps *recent_apps_find(const char *mime, bool add) {
+    for (int i = 0; i < g_nrapps; i++)
+        if (!strcmp(g_rapps[i].mime, mime)) return &g_rapps[i];
+    if (!add) return NULL;
+    g_rapps = xrealloc(g_rapps, sizeof *g_rapps * (size_t)(g_nrapps + 1));
+    RecentApps *r = &g_rapps[g_nrapps++];
+    memset(r, 0, sizeof *r);
+    snprintf(r->mime, sizeof r->mime, "%s", mime);
+    return r;
+}
+
+// One line per type: "mime<TAB>id;id;id".
+static void recent_apps_load(void) {
+    if (g_rapps_loaded) return;
+    g_rapps_loaded = true;
+    char path[PATH_MAX], line[2048];
+    recent_apps_file(path, sizeof path, false);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *tab = strchr(line, '\t');
+        if (!tab || tab == line) continue;
+        *tab = 0;
+        RecentApps *r = recent_apps_find(line, true);
+        char *save = NULL;
+        for (char *id = strtok_r(tab + 1, ";", &save); id && r->n < RECENT_APPS; id = strtok_r(NULL, ";", &save))
+            snprintf(r->id[r->n++], sizeof r->id[0], "%s", id);
+    }
+    fclose(f);
+}
+
+static void recent_apps_save(void) {
+    char dir[PATH_MAX], path[PATH_MAX], tmp[PATH_MAX + 8];
+    recent_apps_file(dir, sizeof dir, true);
+    recent_apps_file(path, sizeof path, false);
+    mkdir_p(dir, 0700);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    for (int i = 0; i < g_nrapps; i++) {
+        if (!g_rapps[i].n) continue;
+        fprintf(f, "%s\t", g_rapps[i].mime);
+        for (int k = 0; k < g_rapps[i].n; k++) fprintf(f, "%s;", g_rapps[i].id[k]);
+        fputc('\n', f);
+    }
+    if (fclose(f) == 0) rename(tmp, path);
+    else unlink(tmp);
+}
+
+// An app was picked for this type: it goes to the front of its recent list.
+static void recent_apps_push(const char *mime, const char *id) {
+    if (!mime[0] || !id[0] || strpbrk(id, ";\t\n") || strpbrk(mime, "\t\n")) return;
+    recent_apps_load();
+    RecentApps *r = recent_apps_find(mime, true);
+    int k = 0;
+    while (k < r->n && strcmp(r->id[k], id)) k++;
+    if (k == r->n && r->n < RECENT_APPS) r->n++;
+    if (k == RECENT_APPS) k = RECENT_APPS - 1; // full: the oldest drops off
+    memmove(r->id[1], r->id[0], sizeof r->id[0] * (size_t)k);
+    snprintf(r->id[0], sizeof r->id[0], "%s", id);
+    recent_apps_save();
+}
+
+// The installed apps recently used for this type, newest first.
+static int recent_apps_for(const char *mime, DesktopApp **out, int max) {
+    recent_apps_load();
+    apps_load();
+    RecentApps *r = recent_apps_find(mime, false);
+    int n = 0;
+    for (int k = 0; r && k < r->n && n < max; k++) {
+        DesktopApp *a = app_by_id(r->id[k]);
+        if (a) out[n++] = a;
+    }
+    return n;
+}
+
 static void spawn_terminal(const char *dir, char *const cmd[]); // (app.c)
 
 // Launch an app with files, expanding the Exec field codes.
@@ -395,16 +493,24 @@ static bool app_launch(const DesktopApp *a, char **files, int nfiles) {
             argv[argc++] = t;
         }
     }
-    if (!used) // app without file codes: append the files
+    // one folder: the app starts in it (terminals, editors opening a project); one without file codes (a plain
+    // terminal) takes no argument then - it would read the folder as a command or a file
+    struct stat st;
+    const char *dir = nfiles == 1 && !strstr(files[0], "://") && stat(files[0], &st) == 0 && S_ISDIR(st.st_mode) ? files[0] : NULL;
+    if (!used && !dir) // app without file codes: append the files
         for (int k = 0; k < nfiles && argc < 250; k++) argv[argc++] = files[k];
     argv[argc] = NULL;
     bool ok = false;
     if (argc && a->terminal) { // a console program (vim, htop...): in a terminal window
-        spawn_terminal(NULL, argv);
+        spawn_terminal(dir, argv);
         ok = true;
     } else if (argc) {
         pid_t pid;
-        ok = posix_spawnp(&pid, argv[0], NULL, spawn_attr(), argv, environ) == 0;
+        posix_spawn_file_actions_t fa;
+        posix_spawn_file_actions_init(&fa);
+        if (dir) posix_spawn_file_actions_addchdir_np(&fa, dir);
+        ok = posix_spawnp(&pid, argv[0], &fa, spawn_attr(), argv, environ) == 0;
+        posix_spawn_file_actions_destroy(&fa);
     }
     for (int i = 0; i < nuri; i++) free(uris[i]);
     return ok;

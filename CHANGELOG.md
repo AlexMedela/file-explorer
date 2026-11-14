@@ -4,6 +4,7 @@
 
 **New**
 - Rounded window corners and a drop shadow, like GTK apps (Options > Appearance > Rounded corners, off by default, takes a restart). Square and without shadow when maximised or snapped. On X11 it needs a compositor. Thanks to @zeropaulsy.
+- Open folders with other apps: right-click a folder → "Open with…", or empty space → "Open this folder with…" for the folder you are in, to open a project in your editor, terminal or game engine. The app starts inside the folder. "Open with" is a submenu (also for files): the apps you picked for that type before through "Other app…" come first, then the apps for that type.
 
 ## 0.11.1
 

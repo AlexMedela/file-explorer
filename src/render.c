@@ -3028,13 +3028,14 @@ static void draw_dialog(void) {
     }
 }
 
-static void draw_menu(void) {
-    Menu *m = &A.menu;
+static void draw_menu_in(Menu *m, bool frame) {
     if (!m->open) return;
     Font *f = &A.font, *fs = &A.font_small;
     Rect r = m->r;
-    draw_rrect(r.x, r.y, r.w, r.h, S(9), C(COL_POPUP));
-    draw_rrect_outline(r.x, r.y, r.w, r.h, S(9), 1, C(COL_POPUP_BORDER));
+    if (frame) {
+        draw_rrect(r.x, r.y, r.w, r.h, MENU_RADIUS, C(COL_POPUP));
+        draw_rrect_outline(r.x, r.y, r.w, r.h, MENU_RADIUS, 1, C(COL_POPUP_BORDER));
+    }
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x, (int)r.y + 1, (int)r.w, (int)r.h - 2});
     bool anycheck = false; // one check mark column for the whole menu keeps labels aligned
     for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable;
@@ -3047,7 +3048,7 @@ static void draw_menu(void) {
             draw_rect(r.x + S(10), roundf(yy + h * 0.5f), r.w - S(20), 1, C(COL_POPUP_BORDER));
         } else {
             if (i == m->hover && it->enabled) draw_rrect(r.x + S(5), yy, r.w - S(10), h, S(6), C(COL_SEL_FOCUS));
-            hand_if(it->enabled && A.mouse_in && menu_item_at(A.mx, A.my) == i);
+            hand_if(it->enabled && A.mouse_in && menu_item_at_in(m, A.mx, A.my) == i && !(m == &A.menu && menu_sub_shown() && in_rect(g_menu_sub.r, A.mx, A.my)));
             Color tc = it->enabled ? C(COL_TEXT) : C(COL_TEXT_FAINT);
             f32 lx = anycheck ? r.x + S(30) : r.x + S(16);
             if (it->checkable) {
@@ -3057,6 +3058,11 @@ static void draw_menu(void) {
                     draw_line(cx - S(1), cy + S(3), cx + S(5), cy - S(4), t, it->enabled ? C(COL_ACCENT) : C(COL_TEXT_FAINT));
                 }
             }
+            if (it->head) { // section title
+                draw_text(fs, lx, text_y(fs, yy, h), it->label, (int)strlen(it->label), C(COL_TEXT_FAINT));
+                yy += h;
+                continue;
+            }
             if (it->info) { // key (dim) + value
                 draw_text(fs, lx, text_y(fs, yy, h), it->label, (int)strlen(it->label), C(COL_TEXT_FAINT));
                 int vl = (int)strlen(it->shortcut);
@@ -3065,6 +3071,11 @@ static void draw_menu(void) {
                 continue;
             }
             draw_text(f, lx, text_y(f, yy, h), it->label, (int)strlen(it->label), tc);
+            if (it->sub) { // opens a submenu: a chevron where the shortcut would be
+                draw_chevron(r.x + r.w - S(20), yy + h * 0.5f, S(4), 1, MAX(1.f, S(1.5f)), it->enabled ? (i == m->hover ? C(COL_SEL_DIM) : C(COL_TEXT_DIM)) : C(COL_TEXT_FAINT));
+                yy += h;
+                continue;
+            }
             int sl = (int)strlen(it->shortcut);
             f32 sw = text_width(fs, it->shortcut, sl);
             draw_text(fs, r.x + r.w - S(16) - sw, text_y(fs, yy, h), it->shortcut, sl,
@@ -3072,18 +3083,61 @@ static void draw_menu(void) {
         }
         yy += h;
     }
-    if (menu_scrollable()) { // scroll arrows (click, hover or wheel)
+    if (menu_scrollable_in(m)) { // scroll arrows (click, hover or wheel)
         f32 ah = roundf(S(18));
         for (int d = -1; d <= 1; d += 2) {
             bool show = d < 0 ? m->scroll > 0 : m->scroll < m->content_h - r.h;
             if (!show) continue;
             f32 ay = d < 0 ? r.y : r.y + r.h - ah;
-            bool hv = hand_if(A.mouse_in && in_rect(r, A.mx, A.my) && menu_arrow_at(A.my) == d);
+            bool hv = hand_if(A.mouse_in && in_rect(r, A.mx, A.my) && menu_arrow_at_in(m, A.my) == d);
             draw_rrect(r.x + 1, ay, r.w - 2, ah, S(8), C(hv ? COL_CONTROL_HOVER : COL_POPUP));
             draw_chevron(r.x + r.w * 0.5f, ay + ah * 0.5f, S(5), d < 0 ? 2 : 3, MAX(1.f, S(1.5f)), C(COL_TEXT_DIM));
         }
     }
     draw_clip_pop(cs);
+}
+
+// The menu and its submenu as one shape: the submenu grows out of the menu's side; where their top / bottom edges
+// meet, the step turns into a rounded inside corner (or one straight edge when they line up); a separator stands
+// where the shared side was. One outline all round (draw_rpoly), so it looks like a single menu at any scale.
+static void draw_menu_pair(Menu *m, Menu *sm) {
+    Rect a = m->r, b = sm->r;
+    bool right = b.x > a.x;
+    // worked out with the submenu on the right; on the left: mirrored (x -> -x, order reversed to stay clockwise)
+    f32 L = right ? a.x : -(a.x + a.w), R = right ? a.x + a.w : -a.x, R2 = right ? b.x + b.w : -b.x;
+    f32 at = a.y, ab = a.y + a.h, t = b.y, bb = b.y + b.h;
+    f32 vx[12], vy[12];
+    int n = 0;
+    #define V(x, y) (vx[n] = (x), vy[n] = (y), n++)
+    V(L, at);
+    if (t != at) { V(R, at); V(R, t); }
+    V(R2, t);
+    V(R2, bb);
+    if (bb != ab) { V(R, bb); V(R, ab); }
+    V(L, ab);
+    #undef V
+    if (!right) {
+        for (int i = 0; i < n; i++) vx[i] = -vx[i];
+        for (int i = 0, j = n - 1; i < j; i++, j--) { f32 tx = vx[i], ty = vy[i]; vx[i] = vx[j]; vy[i] = vy[j]; vx[j] = tx; vy[j] = ty; }
+    }
+    f32 sx = right ? a.x + a.w : a.x; // the shared side
+    f32 y0 = MAX(at, t), y1 = MIN(ab, bb);
+    draw_rpoly(vx, vy, n, MENU_RADIUS, MENU_JOIN_RADIUS, sx, (y0 + y1) * 0.5f, C(COL_POPUP), C(COL_POPUP_BORDER));
+    f32 in = roundf(S(8));
+    if (y1 - y0 > in * 2) draw_rect(right ? sx - 1 : sx, y0 + in, 1, y1 - y0 - in * 2, C(COL_POPUP_BORDER)); // separator
+    draw_menu_in(m, false);
+    draw_menu_in(sm, false);
+}
+
+static void draw_menu(void) {
+    Menu *m = &A.menu, *sm = &g_menu_sub;
+    bool beside = menu_sub_shown() && sm->r.y < m->r.y + m->r.h && sm->r.y + sm->r.h > m->r.y &&
+                  (sm->r.x == m->r.x + m->r.w || sm->r.x + sm->r.w == m->r.x);
+    if (beside) draw_menu_pair(m, sm);
+    else { // no room beside the menu on either side: the submenu sits over it, a popup of its own
+        draw_menu_in(m, true);
+        if (menu_sub_shown()) draw_menu_in(sm, true);
+    }
 }
 
 // The card next to the pointer while dragging items: the first few of them as they're stacked in the list (icon +

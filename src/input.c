@@ -624,6 +624,12 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         return;
     }
     if (A.menu.open) {
+        if (menu_sub_shown() && in_rect(g_menu_sub.r, x, y)) {
+            int arrow = menu_arrow_at_in(&g_menu_sub, y);
+            if (arrow) menu_scroll_by_in(&g_menu_sub, (f32)arrow * g_menu_sub.r.h * 0.5f);
+            else if (b->button == SDL_BUTTON_LEFT) menu_sub_activate(menu_item_at_in(&g_menu_sub, x, y));
+            return;
+        }
         if (in_rect(A.menu.r, x, y)) {
             int arrow = menu_arrow_at(y);
             if (arrow) menu_scroll_by((f32)arrow * A.menu.r.h * 0.5f);
@@ -891,10 +897,7 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     A.mouse_in = true;
     A.redraw = true;
     if (A.term_mouse) { term_mouse_move(A.term_mouse, m->x, m->y, true); return; }
-    if (A.menu.open) {
-        int i = menu_item_at(m->x, m->y);
-        if (i >= 0 || in_rect(A.menu.r, m->x, m->y)) A.menu.hover = i;
-    }
+    if (A.menu.open) menu_motion(m->x, m->y);
     if (A.pal_open && in_rect(A.pal_list, m->x, m->y)) {
         int i = A.pal_top + (int)((m->y - A.pal_list.y) / roundf(S(40)));
         if (i < A.pal_n) A.pal_sel = i;
@@ -998,7 +1001,8 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
 static void on_wheel(SDL_MouseWheelEvent *w) {
     if (sheet_open()) { sheet_wheel(w->y); return; }
     if (A.menu.open) { // scroll a tall menu; don't scroll what's underneath
-        if (in_rect(A.menu.r, w->mouse_x, w->mouse_y)) menu_scroll_by(-w->y * S(28) * 2);
+        if (menu_sub_shown() && in_rect(g_menu_sub.r, w->mouse_x, w->mouse_y)) menu_scroll_by_in(&g_menu_sub, -w->y * S(28) * 2);
+        else if (in_rect(A.menu.r, w->mouse_x, w->mouse_y)) menu_scroll_by(-w->y * S(28) * 2);
         return;
     }
     {

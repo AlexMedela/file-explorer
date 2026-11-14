@@ -384,6 +384,7 @@ typedef struct {
 } Dialog;
 static int g_dlg_opt; // the choice picked in the dialog that just closed
 
+#define OW_MENU_APPS 15 // apps in the Open with submenu (ACT_OW_APP_BASE + index)
 enum {
     ACT_OPEN, ACT_OPEN_TAB, ACT_CUT, ACT_COPY, ACT_PASTE, ACT_RENAME, ACT_TRASH, ACT_DELETE, ACT_COPY_PATH,
     ACT_TERMINAL, ACT_TERMINAL_LOCAL, ACT_SSH_TERMINAL, ACT_TERMINAL_EXTERNAL, ACT_TERM_COPY, ACT_TERM_PASTE, ACT_TERM_CLEAR,
@@ -416,6 +417,7 @@ enum {
     ACT_QA_MOVE_BASE = 480, // + group index (up to 16)
     ACT_DEV_MOUNT = 500, ACT_DEV_UNMOUNT, ACT_DEV_EJECT, ACT_NET_DISCONNECT, ACT_DEV_OPEN_TAB,
     ACT_DEV_RENAME, ACT_DEV_RESET_NAME, ACT_DEV_SECTION_TOGGLE, ACT_NET_CONNECT_SAVED, ACT_NET_FORGET, ACT_NET_EDIT_SAVED, ACT_NET_NEW,
+    ACT_OW_APP_BASE = 520, // + index of an app in the Open with submenu (up to OW_MENU_APPS, below 540)
     ACT_CMP_PICK_BASE = 560, // + "Compare with..." folder index (up to 12)
     ACT_ADDON_BASE = 580, ACT_ADDON_LAST = 599, // add-ons' actions (addons.c)
     ACT_CLOUD_NEW = 540, ACT_CLOUD_REFRESH, ACT_CLOUD_SECTION_TOGGLE, ACT_CLOUD_CONNECT, ACT_CLOUD_CONNECT_TAB, ACT_CLOUD_DISCONNECT,
@@ -441,13 +443,15 @@ typedef struct {
     bool enabled, sep;
     bool checkable, checked;
     bool info; // key/value row (shortcut holds the value)
+    void (*sub)(struct Pane *); // fills the submenu this item opens (g_menu_sub), or NULL
+    bool head; // a section title (small, dim, not an action)
 } MenuItem;
 typedef struct {
     bool open;
     struct Pane *pane;
     Rect r;
-    MenuItem items[40];
-    char scbuf[40][48];
+    MenuItem items[48];
+    char scbuf[48][48];
     char infobuf[16][160]; // values of info rows
     int ninfo;
     int n, hover;
@@ -458,6 +462,13 @@ typedef struct {
     bool folder;     // the folder's own menu (empty space, the ... button): its actions are about the folder,
     bool act_folder; // not the selection or the cursor (set while one of them runs)
 } Menu;
+#define MENU_RADIUS roundf(S(9))      // menus' corners
+#define MENU_JOIN_RADIUS roundf(S(9)) // the rounded inside corners where a submenu meets its menu
+// One level of submenu, beside an item of A.menu (shown only while A.menu is open). menu_add & co. fill
+// g_menu_build while it's set (a submenu being built), else A.menu.
+static Menu g_menu_sub;
+static int g_menu_sub_of = -1; // the A.menu item it belongs to
+static Menu *g_menu_build;
 
 #define MAX_OPS 32
 
@@ -4086,7 +4097,7 @@ static void new_window(const char *path) {
     ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
     if (n <= 0) return;
     exe[n] = 0;
-    char *argv[] = {exe, "--new-window", (char *)path, NULL};
+    char *argv[] = {exe, "--new-window", (char *)path, NULL, false};
     pid_t pid;
     posix_spawn(&pid, exe, NULL, spawn_attr(), argv, environ);
 }
@@ -4122,7 +4133,7 @@ static void open_path(const char *full) {
     DesktopApp *a = open_app_for(full);
     char *files[] = {(char *)full};
     if (a && app_launch(a, files, 1)) return;
-    char *argv[] = {"xdg-open", (char *)full, NULL};
+    char *argv[] = {"xdg-open", (char *)full, NULL, false};
     pid_t pid;
     if (in_path("xdg-open") && posix_spawnp(&pid, "xdg-open", NULL, spawn_attr(), argv, environ) == 0) return;
     // no xdg-utils (minimal installs): links and folders from the desktop entries too
@@ -5584,6 +5595,7 @@ static void paste_dir(Pane *p, char *out, size_t cap) {
 }
 
 static void drop_menu_do(int act);
+static void open_with_menu_app(Pane *p, int k);
 
 static void do_action(Pane *p, int act) {
     int n = 0;
@@ -5592,6 +5604,7 @@ static void do_action(Pane *p, int act) {
         switch (act) {
         case ACT_CUT: case ACT_COPY: case ACT_PASTE: case ACT_RENAME: case ACT_TRASH: case ACT_DELETE:
         case ACT_NEW_FOLDER: case ACT_NEW_FILE: case ACT_BATCH_RENAME: case ACT_OPEN_WITH: case ACT_PROPERTIES:
+        case ACT_OW_APP_BASE ... ACT_OW_APP_BASE + OW_MENU_APPS - 1:
             toast("Archives are read-only here \xE2\x80\x94 drag items out or use Extract");
             return;
         default: break;
@@ -5787,6 +5800,7 @@ static void do_action(Pane *p, int act) {
         break;
     case ACT_PREVIEW: preview_toggle(); break;
     case ACT_OPEN_WITH:
+        if (A.menu.act_folder) { openwith_open((char *[]){p->path}, 1); break; }
         paths = pane_selection_paths(p, &n);
         if (n) openwith_open(paths, n);
         break;
@@ -5860,6 +5874,7 @@ static void do_action(Pane *p, int act) {
         else if (act == ACT_TF_RESET) { p->tf_mode = 0; p->tf_exts[0] = 0; pane_resort(p); }
         else if (act >= ACT_TF_EXT_BASE && act < ACT_TF_EXT_BASE + g_ntf) tf_toggle(p, g_tf_keys[act - ACT_TF_EXT_BASE]);
         else if (act >= ACT_CMP_PICK_BASE && act < ACT_CMP_PICK_BASE + 12) cmp_action(p, act);
+        else if (act >= ACT_OW_APP_BASE && act < ACT_OW_APP_BASE + OW_MENU_APPS) open_with_menu_app(p, act - ACT_OW_APP_BASE);
         else if (act == ACT_TRASH_RESTORE) trash_restore(p, false);
         else if (act == ACT_TRASH_RESTORE_ALL) trash_restore(p, true);
         else if (act == ACT_TRASH_EMPTY) trash_delete(p, true);
@@ -6016,7 +6031,7 @@ static void arc_action(Pane *p, int act) {
 static const char *keymap_label(int id);
 
 static void menu_add(const char *label, const char *sc, int act, bool enabled) {
-    Menu *m = &A.menu;
+    Menu *m = g_menu_build ? g_menu_build : &A.menu;
     if (m->n >= (int)ARRAY_COUNT(m->items)) return;
     // rebindable actions show their current key (tab-menu actions alias the tab commands)
     int cmd = act == ACT_TAB_NEW ? CMD_NEW_TAB : act == ACT_TAB_CLOSE ? CMD_CLOSE_TAB : act == ACT_TAB_WINDOW ? CMD_NEW_WINDOW : act;
@@ -6026,20 +6041,92 @@ static void menu_add(const char *label, const char *sc, int act, bool enabled) {
         snprintf(m->scbuf[m->n], sizeof m->scbuf[m->n], "%s", k);
         sc = m->scbuf[m->n];
     }
-    m->items[m->n++] = (MenuItem){label, sc, act, enabled, false, false, false, false};
+    m->items[m->n++] = (MenuItem){label, sc, act, enabled, false, false, false, false, NULL, false};
 }
 
 static void menu_sep(void) {
-    Menu *m = &A.menu;
-    if (m->n && !m->items[m->n - 1].sep) m->items[m->n++] = (MenuItem){NULL, NULL, -1, false, true, false, false, false};
+    Menu *m = g_menu_build ? g_menu_build : &A.menu;
+    if (m->n && !m->items[m->n - 1].sep) m->items[m->n++] = (MenuItem){NULL, NULL, -1, false, true, false, false, false, NULL, false};
 }
 
-static f32 menu_item_h(const MenuItem *it) { return it->sep ? roundf(S(9)) : it->info ? roundf(S(24)) : roundf(S(28)); }
+static f32 menu_item_h(const MenuItem *it) {
+    return it->sep ? roundf(S(9)) : it->info || it->head ? roundf(S(24)) : roundf(S(28));
+}
+
+static void menu_add_head(const char *label) {
+    Menu *m = g_menu_build ? g_menu_build : &A.menu;
+    if (m->n < (int)ARRAY_COUNT(m->items)) m->items[m->n++] = (MenuItem){label, "", -1, false, false, false, false, false, NULL, true};
+}
 
 static void menu_finish(f32 x, f32 y);
 static void menu_add_check_key(const char *label, int act, bool checked, int key_id);
 static void menu_open_columns(Pane *p, f32 x, f32 y);
 static void menu_add_check(const char *label, int act, bool checked, bool enabled);
+
+// "Open with" submenu: apps picked for that type through "Other app..." (the sheet) before, newest first, then the
+// apps the sheet lists for it by default (its default app first). Ids are kept, not app pointers: the app list can
+// be reloaded while it's open.
+#define OW_MENU_TYPE_APPS 10 // more than this: "Other app..." has the rest
+static struct {
+    char mime[160];
+    char id[OW_MENU_APPS][256], name[OW_MENU_APPS][128];
+    int n, npick; // the first npick are picked ones, the rest the type's own
+    int def;      // the type's default app's index, or -1
+} g_ow_menu;
+
+static void menu_sub_open_with(Pane *p) {
+    (void)p;
+    bool heads = g_ow_menu.npick && g_ow_menu.n > g_ow_menu.npick; // titled only when there are both
+    for (int k = 0; k < g_ow_menu.n; k++) {
+        if (heads && k == 0) menu_add_head("Recent");
+        if (heads && k == g_ow_menu.npick) { menu_sep(); menu_add_head("Suggested"); }
+        menu_add(g_ow_menu.name[k], k == g_ow_menu.def ? "default" : "", ACT_OW_APP_BASE + k, true);
+    }
+    menu_sep();
+    menu_add("Other app\xE2\x80\xA6", "", ACT_OPEN_WITH, true);
+}
+
+static void ow_menu_add_app(const DesktopApp *a) {
+    for (int k = 0; k < g_ow_menu.n; k++)
+        if (!strcmp(g_ow_menu.id[k], a->id)) return;
+    if (g_ow_menu.n >= OW_MENU_APPS) return;
+    snprintf(g_ow_menu.id[g_ow_menu.n], sizeof g_ow_menu.id[0], "%s", a->id);
+    snprintf(g_ow_menu.name[g_ow_menu.n++], sizeof g_ow_menu.name[0], "%s", a->name);
+}
+
+static void menu_add_open_with(const char *label, const char *mime, bool enabled) {
+    snprintf(g_ow_menu.mime, sizeof g_ow_menu.mime, "%s", mime);
+    g_ow_menu.n = g_ow_menu.npick = 0;
+    g_ow_menu.def = -1;
+    if (enabled) {
+        DesktopApp *ta[512], *ra[RECENT_APPS];
+        int nt = apps_for_mime(mime, ta, 512), nr = recent_apps_for(mime, ra, RECENT_APPS);
+        for (int k = 0; k < nr; k++) { // (one the type lists anyway stays in its own section)
+            bool own = false;
+            for (int j = 0; j < nt && !own; j++) own = ta[j] == ra[k];
+            if (!own) ow_menu_add_app(ra[k]);
+        }
+        g_ow_menu.npick = g_ow_menu.n;
+        if (nt && ta[0] == app_default_for(mime)) g_ow_menu.def = g_ow_menu.n;
+        for (int k = 0; k < MIN(nt, OW_MENU_TYPE_APPS); k++) ow_menu_add_app(ta[k]);
+    }
+    menu_add(label, "", ACT_OPEN_WITH, enabled);
+    A.menu.items[A.menu.n - 1].sub = menu_sub_open_with;
+}
+
+// Open with an app from the submenu: the right-clicked selection, or the folder itself (its own menu).
+static void open_with_menu_app(Pane *p, int k) {
+    if (k < 0 || k >= g_ow_menu.n) return;
+    DesktopApp *a = (apps_load(), app_by_id(g_ow_menu.id[k]));
+    if (!a) { toast("%s is no longer installed", g_ow_menu.name[k]); return; }
+    int n = 0;
+    char **paths = A.menu.act_folder ? strv_dup((char *[]){p->path}, 1) : pane_selection_paths(p, &n);
+    if (A.menu.act_folder) n = 1;
+    if (!n) return;
+    if (!app_launch(a, paths, n)) toast("Couldn't start %s", a->name);
+    else if (k < g_ow_menu.npick) recent_apps_push(g_ow_menu.mime, a->id); // a picked one: moves to the top
+    strv_free(paths, n);
+}
 
 static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
     Menu *m = &A.menu;
@@ -6065,7 +6152,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         }
         if (e->flags & ENT_MATCH) menu_add("Open at this line", "Enter", ACT_CS_OPEN_LINE, true);
         else menu_add("Open", "Enter", ACT_OPEN, true);
-        if (!dir) menu_add("Open with\xE2\x80\xA6", "", ACT_OPEN_WITH, true);
+        menu_add_open_with("Open with", mime_for_file(path_basename(e->name), dir), true);
         if (p->L->is_content) {
             menu_add("Fold all matches", "", ACT_CS_FOLD_ALL, true);
             menu_add("Unfold all matches", "", ACT_CS_UNFOLD_ALL, true);
@@ -6170,6 +6257,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         menu_sep();
         menu_add(pin_index(p->path) >= 0 ? "Unpin this folder" : "Pin this folder", "Ctrl+D", ACT_PIN, true);
         menu_add("Copy path", "Ctrl+Shift+C", ACT_COPY_PATH, true);
+        menu_add_open_with("Open this folder with", "inode/directory", !pane_is_archive(p) && !pane_is_trash(p));
         menu_terminal_items(p);
         menu_add("Properties", "Alt+Enter", ACT_PROPERTIES, true);
     }
@@ -6178,9 +6266,9 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
 }
 
 static void menu_add_check(const char *label, int act, bool checked, bool enabled) {
-    Menu *m = &A.menu;
+    Menu *m = g_menu_build ? g_menu_build : &A.menu;
     if (m->n >= (int)ARRAY_COUNT(m->items)) return;
-    m->items[m->n++] = (MenuItem){label, "", act, enabled, false, true, checked, false};
+    m->items[m->n++] = (MenuItem){label, "", act, enabled, false, true, checked, false, NULL, false};
 }
 
 // Right-click on a column header.
@@ -6767,8 +6855,9 @@ static void qa_pin_paths(char **paths, int n, int g) {
     A.settings_dirty = true;
 }
 
-static void menu_finish(f32 x, f32 y) {
-    Menu *m = &A.menu;
+// Size and place a menu at x, y (kept inside the window). x_left >= 0: no room to the right of x - it ends at
+// x_left instead (a submenu opens on the parent's other side).
+static void menu_layout(Menu *m, f32 x, f32 y, f32 x_left) {
     bool reopen = m->open && m->ox == x && m->oy == y; // keep_open menus rebuild in place: keep the scroll
     if (!reopen) m->scroll = 0;
     m->ox = x;
@@ -6780,16 +6869,17 @@ static void menu_finish(f32 x, f32 y) {
         h += menu_item_h(it);
         if (it->sep) continue;
         lw = MAX(lw, text_width(f, it->label, (int)strlen(it->label)));
-        sw = MAX(sw, text_width(&A.font_small, it->shortcut, (int)strlen(it->shortcut)));
+        sw = MAX(sw, it->sub ? S(10) : text_width(&A.font_small, it->shortcut, (int)strlen(it->shortcut)));
     }
     bool anycheck = false;
     for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable;
     f32 w = roundf(lw + sw + S(64) + (anycheck ? S(14) : 0));
+    if (x_left >= 0 && x + w > A.W - S(4) && x_left - w >= S(4)) x = x_left - w;
     x = MAX(S(4), MIN(x, A.W - w - S(4)));
     m->content_h = h;
     f32 avail = (f32)A.H - S(8);
-    if (h > avail) h = avail; // too tall for the window: scroll inside
-    if (y + h > A.H - S(4)) y = y - h >= S(4) ? y - h : MAX(S(4), A.H - S(4) - h);
+    if (h > avail) h = roundf(avail); // too tall for the window: scroll inside (whole pixels, like every edge)
+    if (y + h > A.H - S(4)) y = x_left >= 0 ? MAX(S(4), A.H - S(4) - h) : y - h >= S(4) ? y - h : MAX(S(4), A.H - S(4) - h);
     m->r = (Rect){roundf(x), roundf(y), w, h};
     m->scroll = CLAMP(m->scroll, 0.f, MAX(0.f, m->content_h - m->r.h));
     m->open = true;
@@ -6797,40 +6887,57 @@ static void menu_finish(f32 x, f32 y) {
     A.redraw = true;
 }
 
-static bool menu_scrollable(void) { return A.menu.content_h > A.menu.r.h + 0.5f; }
+static void menu_finish(f32 x, f32 y) {
+    g_menu_sub.open = false; // a new menu (or one rebuilt in place) starts without its submenu
+    g_menu_sub_of = -1;
+    menu_layout(&A.menu, x, y, -1);
+}
+
+static bool menu_sub_shown(void) { return A.menu.open && g_menu_sub.open; }
+
+static bool menu_scrollable_in(const Menu *m) { return m->content_h > m->r.h + 0.5f; }
+static bool menu_scrollable(void) { return menu_scrollable_in(&A.menu); }
 
 // Scroll arrows at the top/bottom edge of a scrolling menu: -1 up, 1 down, 0 none.
-static int menu_arrow_at(f32 y) {
-    Menu *m = &A.menu;
-    if (!menu_scrollable()) return 0;
+static int menu_arrow_at_in(const Menu *m, f32 y) {
+    if (!menu_scrollable_in(m)) return 0;
     f32 ah = roundf(S(18));
     if (m->scroll > 0 && y < m->r.y + ah) return -1;
     if (m->scroll < m->content_h - m->r.h && y >= m->r.y + m->r.h - ah) return 1;
     return 0;
 }
+static int menu_arrow_at(f32 y) { return menu_arrow_at_in(&A.menu, y); }
 
-static void menu_scroll_by(f32 dy) {
-    Menu *m = &A.menu;
+static void menu_scroll_by_in(Menu *m, f32 dy) {
     m->scroll = CLAMP(m->scroll + dy, 0.f, MAX(0.f, m->content_h - m->r.h));
     A.redraw = true;
 }
+static void menu_sub_close(void);
+static void menu_scroll_by(f32 dy) { // its submenu would no longer sit next to its item
+    if (g_menu_sub.open && dy != 0) menu_sub_close();
+    menu_scroll_by_in(&A.menu, dy);
+}
+
+// Top of item i, in window coordinates.
+static f32 menu_item_y(const Menu *m, int i) {
+    f32 top = m->r.y + roundf(S(5)) - m->scroll;
+    for (int k = 0; k < i; k++) top += menu_item_h(&m->items[k]);
+    return top;
+}
 
 // Keep item i inside the visible part of the menu.
-static void menu_reveal(int i) {
-    Menu *m = &A.menu;
-    if (!menu_scrollable() || i < 0) return;
-    f32 top = roundf(S(5));
-    for (int k = 0; k < i; k++) top += menu_item_h(&m->items[k]);
+static void menu_reveal_in(Menu *m, int i) {
+    if (!menu_scrollable_in(m) || i < 0) return;
+    f32 top = menu_item_y(m, i) - m->r.y + m->scroll;
     f32 h = menu_item_h(&m->items[i]), ah = roundf(S(18));
     if (top - ah < m->scroll) m->scroll = top - ah;
     if (top + h + ah > m->scroll + m->r.h) m->scroll = top + h + ah - m->r.h;
-    menu_scroll_by(0);
+    menu_scroll_by_in(m, 0);
 }
 
-static int menu_item_at(f32 x, f32 y) {
-    Menu *m = &A.menu;
+static int menu_item_at_in(const Menu *m, f32 x, f32 y) {
     if (!in_rect(m->r, x, y)) return -1;
-    if (menu_arrow_at(y)) return -1;
+    if (menu_arrow_at_in(m, y)) return -1;
     f32 yy = m->r.y + roundf(S(5)) - m->scroll;
     for (int i = 0; i < m->n; i++) {
         f32 h = menu_item_h(&m->items[i]);
@@ -6839,9 +6946,49 @@ static int menu_item_at(f32 x, f32 y) {
     }
     return -1;
 }
+static int menu_item_at(f32 x, f32 y) { return menu_item_at_in(&A.menu, x, y); }
+
+static void menu_sub_close(void) {
+    g_menu_sub.open = false;
+    g_menu_sub_of = -1;
+    A.redraw = true;
+}
+
+// Open item i's submenu beside it; from the keyboard its first item gets the highlight.
+static void menu_sub_open(int i, bool kb) {
+    Menu *m = &A.menu, *sm = &g_menu_sub;
+    if (i < 0 || i >= m->n || !m->items[i].sub || !m->items[i].enabled) return;
+    if (menu_sub_shown() && g_menu_sub_of == i) { // already open
+        if (kb && sm->hover < 0) sm->hover = 0;
+        return;
+    }
+    sm->open = false;
+    sm->n = 0;
+    sm->hover = -1;
+    sm->pane = m->pane;
+    sm->keep_open = false;
+    sm->reopen = NULL;
+    g_menu_build = sm;
+    m->items[i].sub(m->pane);
+    g_menu_build = NULL;
+    if (!sm->n) return;
+    // grows out of the menu's side (drawn as one shape with it), its first item level with the parent item
+    menu_layout(sm, m->r.x + m->r.w, menu_item_y(m, i) - roundf(S(5)), m->r.x);
+    // a top / bottom just short of the menu's would leave a step too small to round off: line them up instead
+    f32 snap = MENU_RADIUS + MENU_JOIN_RADIUS;
+    f32 db = (m->r.y + m->r.h) - (sm->r.y + sm->r.h);
+    if (fabsf(sm->r.y - m->r.y) < snap) sm->r.y = m->r.y;
+    else if (fabsf(db) < snap && sm->r.y + db >= m->r.y + snap) sm->r.y += db;
+    g_menu_sub_of = i;
+    m->hover = i;
+    if (kb)
+        for (int k = 0; k < sm->n; k++)
+            if (!sm->items[k].sep && sm->items[k].enabled) { sm->hover = k; break; }
+}
 
 static void menu_activate(int i) {
     Menu *m = &A.menu;
+    if (i >= 0 && i < m->n && m->items[i].sub && m->items[i].enabled) { menu_sub_open(i, true); return; } // stays open
     m->open = false;
     A.redraw = true;
     if (i < 0 || i >= m->n || !m->items[i].enabled || m->items[i].sep) return;
@@ -6859,25 +7006,69 @@ static void menu_activate(int i) {
     }
 }
 
+// An item of the submenu: runs like one of A.menu's (same pane, same folder / selection target), both close.
+static void menu_sub_activate(int i) {
+    Menu *m = &A.menu, *sm = &g_menu_sub;
+    bool ok = i >= 0 && i < sm->n && sm->items[i].enabled && !sm->items[i].sep;
+    int act = ok ? sm->items[i].act : -1;
+    menu_sub_close();
+    m->open = false;
+    if (!ok) return;
+    Pane *mp = m->pane;
+    m->act_folder = m->folder;
+    if (mp && pane_exists(mp)) do_action(mp, act);
+    m->act_folder = false;
+}
+
+static void menu_move_in(Menu *m, int dir) {
+    int i = m->hover;
+    for (int step = 0; step < m->n; step++) {
+        i = (i + dir + m->n) % m->n;
+        if (!m->items[i].sep && m->items[i].enabled) break;
+    }
+    m->hover = i;
+    menu_reveal_in(m, i);
+}
+
 static void menu_key(SDL_Keycode k) {
     Menu *m = &A.menu;
     int dir = k == SDLK_DOWN ? 1 : k == SDLK_UP ? -1 : 0;
+    A.redraw = true;
+    if (menu_sub_shown()) { // the keyboard is in the submenu; Left / Escape go back to the menu
+        Menu *sm = &g_menu_sub;
+        if (dir) menu_move_in(sm, dir);
+        else if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_RIGHT) menu_sub_activate(sm->hover);
+        else if (k == SDLK_LEFT || k == SDLK_ESCAPE) menu_sub_close();
+        else if (k == SDLK_PAGEDOWN || k == SDLK_PAGEUP) menu_scroll_by_in(sm, (k == SDLK_PAGEDOWN ? 1 : -1) * sm->r.h * 0.8f);
+        return;
+    }
     if (dir) {
-        int i = m->hover;
-        for (int step = 0; step < m->n; step++) {
-            i = (i + dir + m->n) % m->n;
-            if (!m->items[i].sep && m->items[i].enabled) break;
-        }
-        m->hover = i;
-        menu_reveal(i);
+        menu_move_in(m, dir);
     } else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
         menu_activate(m->hover);
+    } else if (k == SDLK_RIGHT) {
+        menu_sub_open(m->hover, true);
     } else if (k == SDLK_ESCAPE) {
         m->open = false;
     } else if (k == SDLK_PAGEDOWN || k == SDLK_PAGEUP) {
         menu_scroll_by((k == SDLK_PAGEDOWN ? 1 : -1) * m->r.h * 0.8f);
     }
-    A.redraw = true;
+}
+
+// Pointer over the menus: highlight, and open (or close) a submenu by hovering its item.
+static void menu_motion(f32 x, f32 y) {
+    Menu *m = &A.menu;
+    if (menu_sub_shown() && in_rect(g_menu_sub.r, x, y)) {
+        g_menu_sub.hover = menu_item_at_in(&g_menu_sub, x, y);
+        m->hover = g_menu_sub_of;
+        return;
+    }
+    int i = menu_item_at(x, y);
+    if (i < 0 && !in_rect(m->r, x, y)) return;
+    m->hover = i;
+    if (i < 0) return; // a separator or a disabled row: the submenu stays
+    if (m->items[i].sub) menu_sub_open(i, false);
+    else if (menu_sub_shown()) menu_sub_close();
 }
 
 // --- drag & drop -----------------------------------------------------------
@@ -8072,7 +8263,7 @@ static void menu_add_info(const char *key, const char *fmt, ...) {
     vsnprintf(buf, sizeof m->infobuf[0], fmt, ap);
     va_end(ap);
     if (strlen(buf) > 72) memcpy(buf + 69, "\xE2\x80\xA6", 4); // long subjects / URLs
-    m->items[m->n++] = (MenuItem){key, buf, -1, false, false, false, false, true};
+    m->items[m->n++] = (MenuItem){key, buf, -1, false, false, false, false, true, NULL, false};
 }
 
 // Click on the path bar's branch chip: what the repository is, where it syncs to, and a few actions.
@@ -9388,7 +9579,7 @@ static void snap_changes(Pane *p) { // what changed: a post and its pre, the two
     v->cb = b;
     char range[48];
     snprintf(range, sizeof range, "%d..%d", a, b);
-    const char *av[] = {snapper_bin(), "-c", v->l->config, "status", range, NULL};
+    const char *av[] = {snapper_bin(), "-c", v->l->config, "status", range, NULL, false};
     snap_cmd(p, SC_STATUS, av, 8u << 20);
 }
 
@@ -9400,7 +9591,7 @@ static void snap_delete_cb(int choice, bool check, void *ud) {
     if (!s) return;
     char n1[16], n2[16];
     snprintf(n1, sizeof n1, "%d", s->num);
-    const char *av[] = {snapper_bin(), "-c", p->sv->l->config, "delete", n1, NULL, NULL};
+    const char *av[] = {snapper_bin(), "-c", p->sv->l->config, "delete", n1, NULL, NULL, false};
     if (p->sv->sel2 >= 0 && p->sv->l->s[p->sv->sel2].num) { snprintf(n2, sizeof n2, "%d", p->sv->l->s[p->sv->sel2].num); av[5] = n2; }
     snap_cmd(p, SC_DELETE, av, 4096);
 }
@@ -9409,7 +9600,7 @@ static void snap_create_cb(int choice, bool check, void *ud) {
     (void)check;
     Pane *p = ud;
     if (choice != 0 || !pane_exists(p) || !p->sv || !p->sv->l) return;
-    const char *av[] = {snapper_bin(), "-c", p->sv->l->config, "create", "--description", "File Explorer", "--cleanup-algorithm", "number", NULL};
+    const char *av[] = {snapper_bin(), "-c", p->sv->l->config, "create", "--description", "File Explorer", "--cleanup-algorithm", "number", NULL, false};
     snap_cmd(p, SC_CREATE, av, 4096);
 }
 
@@ -10698,11 +10889,11 @@ static bool tray_host_available(void) {
         // asked with whichever D-Bus tool is there: busctl (systemd), gdbus (GLib), dbus-send (dbus)
         char out[128];
         char *busctl[] = {"busctl", "--user", "call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
-                          "NameHasOwner", "s", "org.kde.StatusNotifierWatcher", NULL};
+                          "NameHasOwner", "s", "org.kde.StatusNotifierWatcher", NULL, false};
         char *gdbus[] = {"gdbus", "call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus",
-                         "--method", "org.freedesktop.DBus.NameHasOwner", "org.kde.StatusNotifierWatcher", NULL};
+                         "--method", "org.freedesktop.DBus.NameHasOwner", "org.kde.StatusNotifierWatcher", NULL, false};
         char *dsend[] = {"dbus-send", "--session", "--print-reply", "--dest=org.freedesktop.DBus", "/org/freedesktop/DBus",
-                         "org.freedesktop.DBus.NameHasOwner", "string:org.kde.StatusNotifierWatcher", NULL};
+                         "org.freedesktop.DBus.NameHasOwner", "string:org.kde.StatusNotifierWatcher", NULL, false};
         char **tries[] = {busctl, gdbus, dsend};
         g_tray_host = 0;
         for (size_t i = 0; i < ARRAY_COUNT(tries) && !A.selftest && !A.screenshot; i++) {

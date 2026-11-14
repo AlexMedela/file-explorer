@@ -2148,6 +2148,166 @@ static int run_selftest_m8(void) {
     st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
     ST_CHECK(!sheet_open());
 
+    { // a folder opened with an app: it starts inside it; an Exec without file codes gets no argument
+        DesktopApp term = {"faketerm.desktop", "/tmp/faketerm.desktop", "Fake terminal",
+                           "sh -c \"pwd > " M8_BASE "/launched; printf '%%s' \\\"$1\\\" >> " M8_BASE "/launched\" sh", "", ";", false, false};
+        char *dirs[1] = {M8_BASE "/dir"};
+        ST_CHECK(app_launch(&term, dirs, 1));
+        for (int k = 0; k < 200 && st_size(M8_BASE "/launched") <= 0; k++) SDL_Delay(5);
+        SDL_Delay(20);
+        char buf[256] = {0};
+        int fd = open(M8_BASE "/launched", O_RDONLY);
+        if (fd >= 0) { ssize_t r = read(fd, buf, sizeof buf - 1); (void)r; close(fd); }
+        ST_CHECK(!strcmp(buf, M8_BASE "/dir\n"));
+        unlink(M8_BASE "/launched");
+    }
+    { // apps picked for a type through the sheet (newest first, kept across runs), the "Open with" submenu
+        DesktopApp *ap[2]; // apps that don't list folders themselves
+        int na = 0;
+        for (int i = 0; i < g_napps && na < 2; i++)
+            if (!g_apps[i].nodisplay && !ow_type_app("inode/directory", &g_apps[i])) ap[na++] = &g_apps[i];
+        if (na == 2) {
+            recent_apps_push("inode/directory", ap[0]->id);
+            recent_apps_push("inode/directory", ap[1]->id);
+            recent_apps_push("inode/directory", ap[0]->id);
+            recent_apps_push("text/plain", ap[1]->id);
+            free(g_rapps); g_rapps = NULL; g_nrapps = 0; g_rapps_loaded = false; // read back from the file
+            DesktopApp *ra[RECENT_APPS];
+            ST_CHECK(recent_apps_for("inode/directory", ra, RECENT_APPS) == 2 && ra[0] == ap[0] && ra[1] == ap[1]);
+            ST_CHECK(recent_apps_for("text/plain", ra, RECENT_APPS) == 1 && ra[0] == ap[1]);
+            ST_CHECK(recent_apps_for("image/png", ra, RECENT_APPS) == 0);
+
+            st_select(p, "dir");
+            menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+            int oi = -1;
+            for (int i = 0; i < A.menu.n; i++)
+                if (A.menu.items[i].label && !strcmp(A.menu.items[i].label, "Open with")) oi = i;
+            ST_CHECK(oi >= 0 && A.menu.items[oi].sub);
+            A.menu.hover = oi;
+            menu_key(SDLK_RIGHT); // the keyboard opens it, on its first app
+            { // "Recent": the picked ones (newest first), "Suggested": the type's own apps (as the sheet lists them), then "Other app..."
+                DesktopApp *ta[OW_MENU_TYPE_APPS];
+                int nt = apps_for_mime("inode/directory", ta, OW_MENU_TYPE_APPS);
+                Menu *sm = &g_menu_sub;
+                ST_CHECK(g_ow_menu.npick == 2 && g_ow_menu.n == nt + 2);
+                if (nt) {
+                    ST_CHECK(menu_sub_shown() && g_menu_sub_of == oi && sm->n == 1 + 2 + 2 + nt + 2 && sm->hover == 1);
+                    ST_CHECK(sm->items[0].head && !strcmp(sm->items[0].label, "Recent") && !sm->items[0].enabled);
+                    ST_CHECK(!strcmp(sm->items[1].label, ap[0]->name) && sm->items[1].act == ACT_OW_APP_BASE);
+                    ST_CHECK(!strcmp(sm->items[2].label, ap[1]->name));
+                    ST_CHECK(sm->items[3].sep && sm->items[4].head && !strcmp(sm->items[4].label, "Suggested"));
+                    ST_CHECK(!strcmp(sm->items[5].label, ta[0]->name) && sm->items[5].act == ACT_OW_APP_BASE + 2);
+                    ST_CHECK(g_ow_menu.def == (ta[0] == app_default_for("inode/directory") ? 2 : -1));
+                    menu_key(SDLK_UP); // titles are skipped: from the first app up to "Other app..."
+                    ST_CHECK(sm->hover == sm->n - 1);
+                    menu_key(SDLK_DOWN);
+                    ST_CHECK(sm->hover == 1);
+                } else { // no section titles with one section
+                    ST_CHECK(menu_sub_shown() && sm->n == 2 + 2 && !sm->items[0].head && sm->hover == 0);
+                }
+                ST_CHECK(!strcmp(sm->items[sm->n - 1].label, "Other app\xE2\x80\xA6"));
+            }
+            ST_CHECK(g_menu_sub.r.x >= A.menu.r.x + A.menu.r.w - S(8) || g_menu_sub.r.x + g_menu_sub.r.w <= A.menu.r.x + S(8));
+            st_frames(2);
+            st_shot("openwith-submenu");
+            menu_key(SDLK_LEFT); // back to the menu, which stays open
+            ST_CHECK(A.menu.open && !menu_sub_shown() && A.menu.hover == oi);
+            { // hovering the item opens it too; another item closes it
+                f32 iy = menu_item_y(&A.menu, oi) + S(8);
+                menu_motion(A.menu.r.x + S(20), iy);
+                ST_CHECK(menu_sub_shown() && g_menu_sub.hover < 0);
+                menu_motion(g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, 0) + S(8)); // a section title: nothing
+                ST_CHECK(menu_sub_shown() && g_menu_sub.hover == (g_menu_sub.items[0].head ? -1 : 0) && A.menu.hover == oi);
+                menu_motion(g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, 1) + S(8));
+                ST_CHECK(menu_sub_shown() && g_menu_sub.hover == 1 && A.menu.hover == oi);
+                int other = oi > 0 ? oi - 1 : oi + 1;
+                while (other > 0 && (A.menu.items[other].sep || !A.menu.items[other].enabled)) other--;
+                menu_motion(A.menu.r.x + S(20), menu_item_y(&A.menu, other) + S(8));
+                ST_CHECK(!menu_sub_shown() && A.menu.open);
+            }
+            menu_sub_open(oi, true);
+            menu_key(SDLK_UP); // wraps round to "Other app..."
+            menu_key(SDLK_RETURN);
+            ST_CHECK(!A.menu.open && g_sheet.kind == SHEET_OPENWITH && !strcmp(g_sheet.mime, "inode/directory"));
+            ST_CHECK(g_sheet.npaths == 1 && !strcmp(g_sheet.paths[0], M8_BASE "/dir"));
+            st_frames(2);
+            st_shot("openwith-folder");
+            ST_CHECK(g_sheet.rcheck_def.w == 0); // no "Always use this app" for folders (that's the file manager)
+            st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+
+            // the folder's own menu: "Open this folder with" is about the folder, not the selection
+            menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), false);
+            oi = -1;
+            for (int i = 0; i < A.menu.n; i++)
+                if (A.menu.items[i].label && !strcmp(A.menu.items[i].label, "Open this folder with")) oi = i;
+            ST_CHECK(oi >= 0 && A.menu.items[oi].sub);
+            menu_reveal_in(&A.menu, oi); // (a long menu: scrolled to it, as hovering or the arrow keys would)
+            menu_activate(oi); // a click opens the submenu, the menu stays
+            ST_CHECK(A.menu.open && menu_sub_shown());
+            ST_CHECK(g_menu_sub.r.x == A.menu.r.x + A.menu.r.w); // grows out of the menu's side
+            st_frames(2);
+            st_shot("openwith-submenu-folder");
+            if (menu_scrollable()) { // scrolling the menu closes its submenu (it would float off its item)
+                menu_scroll_by(-S(28));
+                ST_CHECK(A.menu.open && !menu_sub_shown());
+                menu_sub_open(oi, false);
+            }
+            menu_sub_activate(g_menu_sub.n - 1);
+            ST_CHECK(!A.menu.open && !menu_sub_shown() && g_sheet.kind == SHEET_OPENWITH && !strcmp(g_sheet.paths[0], p->path));
+            st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+
+            for (int zi = 0; zi < 2; zi++) { // other zoom levels: whole pixels, still one shape (or apart when there's no room)
+                set_zoom(zi ? 2.0f : 1.3f);
+                layout();
+                st_frames(2);
+                st_select(p, "dir");
+                menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+                for (int i = 0; i < A.menu.n; i++)
+                    if (A.menu.items[i].sub) { menu_sub_open(i, true); break; }
+                Rect mr = A.menu.r, sr = g_menu_sub.r;
+                ST_CHECK(menu_sub_shown() && mr.h == roundf(mr.h) && sr.h == roundf(sr.h) && mr.y == roundf(mr.y) && sr.y == roundf(sr.y));
+                bool beside = sr.x == mr.x + mr.w || sr.x + sr.w == mr.x;
+                ST_CHECK(beside || (A.W - S(4) - (mr.x + mr.w) < sr.w && mr.x - S(4) < sr.w)); // apart only with no room on either side
+                st_frames(2);
+                st_shot(zi ? "openwith-submenu-zoom200" : "openwith-submenu-zoom130");
+                A.menu.open = false;
+            }
+            set_zoom(1.f);
+            layout();
+            st_frames(2);
+
+            { // no room on the right: it grows out of the menu's left side
+                st_select(p, "dir");
+                menu_open(p, (f32)A.W, p->ly.list.y + S(40), true);
+                for (int i = 0; i < A.menu.n; i++)
+                    if (A.menu.items[i].sub) { menu_sub_open(i, false); break; }
+                ST_CHECK(menu_sub_shown() && g_menu_sub.r.x + g_menu_sub.r.w == A.menu.r.x);
+                st_frames(2);
+                st_shot("openwith-submenu-left");
+                A.menu.open = false;
+            }
+
+            // nothing picked for a type: just its own apps (the sheet's list) + "Other app..."
+            st_select(p, "photo1.jpg");
+            menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+            oi = -1;
+            for (int i = 0; i < A.menu.n; i++)
+                if (A.menu.items[i].label && !strcmp(A.menu.items[i].label, "Open with")) oi = i;
+            ST_CHECK(oi >= 0 && A.menu.items[oi].sub);
+            {
+                DesktopApp *ta[OW_MENU_TYPE_APPS];
+                int nt = apps_for_mime("image/jpeg", ta, OW_MENU_TYPE_APPS);
+                menu_sub_open(oi, false);
+                ST_CHECK(menu_sub_shown() && g_ow_menu.n == nt && g_ow_menu.npick == 0 && g_menu_sub.n == nt + 1 + (nt > 0));
+                for (int k = 0; k < g_menu_sub.n; k++) ST_CHECK(!g_menu_sub.items[k].head); // one section: no titles
+            }
+            A.menu.open = false;
+        } else {
+            fprintf(stderr, "selftest-m8: fewer than 2 apps installed, recent apps checks skipped\n");
+        }
+    }
+    ST_CHECK(!sheet_open());
+
     { // Delete permanently: danger badge + red default button + the items listed
         sel_clear(p);
         for (u32 i = 0; i < p->count && i < 6; i++) sel_set(p, i, true);

@@ -249,12 +249,25 @@ static void openwith_open(char **paths, int n) {
     A.redraw = true;
 }
 
+// Folders: the default app for them is the file manager - Options > Integration owns that, not this sheet.
+static bool ow_is_folder(const Sheet *s) { return !strcmp(s->mime, "inode/directory"); }
+
+// One of the apps the type lists anyway (the Open with submenu shows those already)?
+static bool ow_type_app(const char *mime, const DesktopApp *a) {
+    DesktopApp *ta[512];
+    int n = apps_for_mime(mime, ta, 512);
+    for (int k = 0; k < n; k++)
+        if (ta[k] == a) return true;
+    return false;
+}
+
 static void openwith_go(void) {
     Sheet *s = &g_sheet;
     if (s->sel < 0 || s->sel >= s->napps) return;
     DesktopApp *a = s->apps[s->sel];
-    if (s->set_default) app_set_default(a, s->mime);
+    if (s->set_default && !ow_is_folder(s)) app_set_default(a, s->mime);
     if (!app_launch(a, s->paths, s->npaths)) toast("Couldn't start %s", a->name);
+    else if (!ow_type_app(s->mime, a)) recent_apps_push(s->mime, a->id); // joins the context menu's Open with submenu
     sheet_close();
 }
 
@@ -337,9 +350,13 @@ static void openwith_draw(void) {
     f32 fy = r.y + h - foot + S(10);
     char lab[220];
     snprintf(lab, sizeof lab, "Always use this app for %s", s->mime);
-    s->rcheck_def = (Rect){r.x + pad, fy, w - pad * 2, roundf(S(22))};
-    sheet_check(s->rcheck_def, lab, s->set_default);
-    s->rcheck_all = (Rect){r.x + pad, fy + roundf(S(24)), roundf(S(200)), roundf(S(22))};
+    s->rcheck_def = (Rect){0};
+    if (!ow_is_folder(s)) {
+        s->rcheck_def = (Rect){r.x + pad, fy, w - pad * 2, roundf(S(22))};
+        sheet_check(s->rcheck_def, lab, s->set_default);
+        fy += roundf(S(24));
+    }
+    s->rcheck_all = (Rect){r.x + pad, fy, roundf(S(200)), roundf(S(22))};
     sheet_check(s->rcheck_all, "Show all apps", s->show_all);
     f32 bw = roundf(S(96));
     s->ropen = (Rect){r.x + w - pad - bw, r.y + h - pad - bh, bw, bh};

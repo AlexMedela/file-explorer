@@ -166,6 +166,71 @@ static void draw_rrect_outline(f32 x, f32 y, f32 w, f32 h, f32 r, f32 t, Color c
     }
 }
 
+// A right-angled polygon (vertices clockwise on screen, axis-aligned edges) with rounded corners - radius rc where it
+// turns outward, ri where it turns inward - filled with fill and outlined (1 px) with line, either may be
+// transparent. The same edge maths as draw_rrect / draw_rrect_outline (contour on the given edges, 1 px feathers),
+// so a shape made of several boxes looks exactly like one of them, with no seams. The fill is a fan from (qx, qy),
+// which must see the whole shape.
+static void draw_rpoly(const f32 *vx, const f32 *vy, int nv, f32 rc, f32 ri, f32 qx, f32 qy, Color fill, Color line) {
+    enum { MAXS = 16 * 17 };
+    f32 px[MAXS], py[MAXS], nx[MAXS], ny[MAXS];
+    int ns = 0;
+    for (int i = 0; i < nv && ns < MAXS - 17; i++) {
+        int pi = (i + nv - 1) % nv, ni = (i + 1) % nv;
+        f32 ix = vx[i] - vx[pi], iy = vy[i] - vy[pi], ox = vx[ni] - vx[i], oy = vy[ni] - vy[i];
+        f32 li = sqrtf(ix * ix + iy * iy), lo = sqrtf(ox * ox + oy * oy);
+        if (li <= 0 || lo <= 0) continue;
+        ix /= li; iy /= li; ox /= lo; oy /= lo;
+        bool convex = ix * oy - iy * ox > 0;
+        f32 r = MIN(convex ? rc : ri, MIN(li, lo) * 0.5f);
+        f32 cx = vx[i] - ix * r + ox * r, cy = vy[i] - iy * r + oy * r; // the arc's centre
+        f32 a0 = atan2f(vy[i] - iy * r - cy, vx[i] - ix * r - cx), sweep = (convex ? 1.f : -1.f) * (f32)M_PI * 0.5f;
+        int seg = r < 0.5f ? 0 : CLAMP((int)(r * 0.8f) + 3, 3, 16);
+        for (int k = 0; k <= seg; k++) {
+            f32 a = a0 + sweep * (f32)k / (f32)MAX(seg, 1), dx = cosf(a), dy = sinf(a);
+            px[ns] = cx + dx * r;
+            py[ns] = cy + dy * r;
+            if (seg) { nx[ns] = convex ? dx : -dx; ny[ns] = convex ? dy : -dy; }
+            else { nx[ns] = -iy + -oy; ny[ns] = ix + ox; } // sharp corner: mitred
+            ns++;
+        }
+    }
+    if (ns < 3) return;
+    if (fill.a) {
+        Color fo = fill;
+        fo.a = 0;
+        draw_reserve(1 + ns * 2, ns * 9);
+        int q = dv(qx, qy, fill, WU, WU), base = g_nv;
+        for (int i = 0; i < ns; i++) {
+            dv(px[i] - nx[i] * 0.5f, py[i] - ny[i] * 0.5f, fill, WU, WU);
+            dv(px[i] + nx[i] * 0.5f, py[i] + ny[i] * 0.5f, fo, WU, WU);
+        }
+        for (int i = 0; i < ns; i++) {
+            int j = (i + 1) % ns, ii = base + 2 * i, jj = base + 2 * j;
+            di3(q, ii, jj);
+            di4(ii, ii + 1, jj + 1, jj);
+        }
+    }
+    if (line.a) {
+        Color lo = line;
+        lo.a = 0;
+        draw_reserve(ns * 4, ns * 18);
+        int base = g_nv;
+        for (int i = 0; i < ns; i++) {
+            dv(px[i] + nx[i] * 0.5f, py[i] + ny[i] * 0.5f, lo, WU, WU);   // outer feather
+            dv(px[i] - nx[i] * 0.5f, py[i] - ny[i] * 0.5f, line, WU, WU); // outer edge
+            dv(px[i] - nx[i] * 0.5f, py[i] - ny[i] * 0.5f, line, WU, WU); // inner edge (1 px: the same place)
+            dv(px[i] - nx[i] * 1.5f, py[i] - ny[i] * 1.5f, lo, WU, WU);   // inner feather
+        }
+        for (int i = 0; i < ns; i++) {
+            int j = (i + 1) % ns, a = base + 4 * i, b = base + 4 * j;
+            di4(a, a + 1, b + 1, b);
+            di4(a + 1, a + 2, b + 2, b + 1);
+            di4(a + 2, a + 3, b + 3, b + 2);
+        }
+    }
+}
+
 // Concave corner ("flare"): fills the region between corner point (kx, ky) and a quarter arc of radius r
 // around (cx, cy) from angle a0 to a0 + 90 degrees, anti-aliased along the arc. Only that region is painted,
 // so whatever is underneath shows through the carved-out part.
