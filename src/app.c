@@ -15242,6 +15242,9 @@ static const char *g_demo_out; // --demo OUT.mp4: the intro video (demo.c; only
 static void demo_capture(void);
 #endif
 
+static SDL_Texture *g_vk_frame_target;
+static int g_vk_frame_w, g_vk_frame_h;
+
 static void frame(void) {
   trash_size_poll();
   icons_sync_theme();
@@ -15258,6 +15261,37 @@ static void frame(void) {
     x11_tiled_update();
   if (A.win_shadow)
     window_size_update(); // (maximised or not: the shadow comes and goes)
+  // Diagnostic: render the whole frame to a texture, then make a single copy
+  // to the Vulkan swapchain. This isolates in-frame texture updates from the
+  // window buffer and helps distinguish rendering from presentation flicker.
+  bool target_frame = false;
+  SDL_Rect window_viewport;
+  SDL_GetRenderViewport(A.ren, &window_viewport);
+  const char *renderer_name = SDL_GetRendererName(A.ren);
+  if (getenv("FE_VK_TARGET") && renderer_name &&
+      (!strcmp(renderer_name, "vulkan") || !strcmp(renderer_name, "gpu"))) {
+    int width = 0, height = 0;
+    SDL_GetWindowSizeInPixels(A.win, &width, &height);
+    if (width > 0 && height > 0) {
+      if (g_vk_frame_target && (width != g_vk_frame_w || height != g_vk_frame_h)) {
+        SDL_DestroyTexture(g_vk_frame_target);
+        g_vk_frame_target = NULL;
+      }
+      if (!g_vk_frame_target) {
+        g_vk_frame_target = SDL_CreateTexture(A.ren, SDL_PIXELFORMAT_RGBA32,
+                                               SDL_TEXTUREACCESS_TARGET, width, height);
+        if (g_vk_frame_target) {
+          SDL_SetTextureBlendMode(g_vk_frame_target, SDL_BLENDMODE_NONE);
+          g_vk_frame_w = width;
+          g_vk_frame_h = height;
+        }
+      }
+      if (g_vk_frame_target && SDL_SetRenderTarget(A.ren, g_vk_frame_target)) {
+        SDL_SetRenderViewport(A.ren, &window_viewport);
+        target_frame = true;
+      }
+    }
+  }
   u64 t0 = now_ns();
   f32 dt = A.last_frame ? (f32)((t0 - A.last_frame) / 1e9) : 0.016f;
   dt = MIN(dt, 0.05f);
@@ -15296,21 +15330,44 @@ static void frame(void) {
   }
   layout();
 
-  // If the glyph atlas fills up, redraw before presenting. Vulkan can also
-  // lose already-queued pane geometry when the atlas texture is updated during
-  // a frame, even after SDL_FlushRenderer. Draw the complete frame again once
-  // its new glyphs are cached, before that partial frame reaches the screen.
+  // The glyph atlas is never mutated while the pass that reaches the screen
+  // is sampling it. When a frame needs new glyphs, Vulkan draws a discarded
+  // discovery pass first, publishes the complete CPU atlas, then draws the
+  // frame again; that presented pass buffers no new glyphs. Each pass uses a
+  // slot from a small ring sized to the swapchain, so no in-flight frame
+  // samples the texture being uploaded.
   ime_update_area();
-  const char *renderer = SDL_GetRendererName(A.ren);
-  bool vulkan = renderer && !strcmp(renderer, "vulkan");
-  for (int attempt = 0; attempt < 3; attempt++) {
-    u64 upload_before = g_atlas_upload_serial;
-    frame_draw();
-    if (g_atlas_full) {
+  atlas_sync_slots();
+  atlas_begin_frame();
+  if (g_atlas_vulkan) {
+    bool stable = false;
+    for (int attempt = 0; attempt < 4 && !stable; attempt++) {
+      u64 before = atlas_version();
+      frame_draw();
+      if (g_atlas_full) {
+        if (attempt == 0 || !atlas_grow())
+          atlas_reset();
+        continue;
+      }
+      if (atlas_version() == before && atlas_slot_is_current()) {
+        stable = true; // this pass is complete and samples a current atlas
+        break;
+      }
+      // This pass may show stale or missing glyphs; publish the complete CPU
+      // atlas before drawing the pass that will be presented.
+      atlas_publish();
+    }
+    if (!stable) { // extremely rare: content kept adding glyphs
+      atlas_publish();
+      frame_draw();
+    }
+  } else {
+    for (int attempt = 0; attempt < 3; attempt++) {
+      frame_draw();
+      if (!g_atlas_full)
+        break;
       if (attempt == 0 || !atlas_grow())
         atlas_reset();
-    } else if (!vulkan || g_atlas_upload_serial == upload_before) {
-      break;
     }
   }
   A.frame_ms = (f32)((now_ns() - t0) / 1e6);
@@ -15358,11 +15415,20 @@ static void frame(void) {
     A.shot_once[0] = 0;
   }
   rec_frame();
+  if (target_frame) {
+    SDL_SetRenderTarget(A.ren, NULL);
+    SDL_SetRenderViewport(A.ren, NULL);
+    SDL_SetRenderDrawColor(A.ren, 0, 0, 0, 0);
+    SDL_RenderClear(A.ren);
+    SDL_RenderTexture(A.ren, g_vk_frame_target, NULL, NULL);
+  }
   shadow_surface_apply();
   bool sync_ack = A.win_x11 && x11_sync_ready();
   if (A.win_x11)
     x11_frame_begin(sync_ack);
-  SDL_RenderPresent(A.ren);
+  bool presented = SDL_RenderPresent(A.ren);
+  if (presented) atlas_end_frame();
+  if (target_frame) SDL_SetRenderViewport(A.ren, &window_viewport);
   if (A.win_x11)
     x11_frame_end(sync_ack);
   if (g_atlas_full) {
