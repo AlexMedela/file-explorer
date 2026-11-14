@@ -9,7 +9,7 @@ enum {
     OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
-    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES,
+    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
 };
 
@@ -32,6 +32,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_LOAD_TIMES, "Load times", "How long the folder took to list, in the status bar"},
     {OC_APPEARANCE, OK_BOOL, OPT_SMOOTH, "Smooth scrolling", "Animate scrolling instead of jumping"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: Explorer's own on every desktop (Automatic), or the desktop's title bar (System)"},
+    {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Font, colours, padding and cursor of terminal tabs (F4)"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_NEW, "Create theme from current colours", "Writes a JSON scheme you can edit"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_FOLDER, "Themes folder", "Open the folder and reload theme files"},
@@ -271,6 +272,7 @@ static void opt_choice_set(int id, int i) {
 static bool opt_bool_get(int id) {
     switch (id) {
     case OPT_DIM_INACTIVE: return A.dim_inactive;
+    case OPT_ROUND_CORNERS: return A.round_corners;
     case OPT_ALT_ROWS: return A.alt_rows;
     case OPT_SIZE_BARS: return A.size_bars;
     case OPT_LOAD_TIMES: return A.load_times;
@@ -302,6 +304,11 @@ static bool opt_bool_get(int id) {
 static void opt_bool_toggle(int id) {
     switch (id) {
     case OPT_DIM_INACTIVE: A.dim_inactive = !A.dim_inactive; break;
+    case OPT_ROUND_CORNERS:
+        A.round_corners = !A.round_corners;
+        if (A.round_corners && !A.win_alpha && A.csd) toast("Rounded corners: after a restart");
+        A.redraw = true;
+        break;
     case OPT_ALT_ROWS: A.alt_rows = !A.alt_rows; break;
     case OPT_SIZE_BARS: A.size_bars = !A.size_bars; break;
     case OPT_LOAD_TIMES: A.load_times = !A.load_times; break;

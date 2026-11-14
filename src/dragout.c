@@ -269,11 +269,14 @@ static void x_motion_q(bool poll, bool *held) {
     g_xd.ry = ry;
     int lx = 0, ly = 0;
     unsigned long child = 0;
-    if (poll && g_xd.translate(g_xd.dpy, g_xd.root, g_xd.win, rx, ry, &lx, &ly, &child) && (lx < 0 || ly < 0 || lx >= A.W || ly >= A.H)) {
-        A.mx = (f32)lx; // (SDL tells nothing out there now: no folder inside stays the drop target)
-        A.my = (f32)ly;
-        if (A.drag == DRAG_ITEMS && g_do.src && pane_exists(g_do.src)) drop_target(g_do.src, A.mx, A.my);
-        A.redraw = true;
+    if (poll && g_xd.translate(g_xd.dpy, g_xd.root, g_xd.win, rx, ry, &lx, &ly, &child)) {
+        lx -= A.shadow_px, ly -= A.shadow_px; // (content coordinates: the window's shadow margin left out)
+        if (lx < 0 || ly < 0 || lx >= A.W || ly >= A.H) {
+            A.mx = (f32)lx; // (SDL tells nothing out there now: no folder inside stays the drop target)
+            A.my = (f32)ly;
+            if (A.drag == DRAG_ITEMS && g_do.src && pane_exists(g_do.src)) drop_target(g_do.src, A.mx, A.my);
+            A.redraw = true;
+        }
     }
     // the card first (to beside the pointer): where it was may be under the pointer now and hide the target
     x_card_follow(!(A.mx >= 0 && A.my >= 0 && A.mx < A.W && A.my < A.H));
@@ -376,6 +379,9 @@ static bool SDLCALL x_hook(void *ud, XEvent *xe) {
     }
     return true;
 }
+
+// (app.c's X11 hook, which SDL's single hook slot holds when the window has rounded corners, passes events on here)
+static bool dragout_x11_event(void *ud, XEvent *xe) { return g_do.sys == DOS_X11 ? x_hook(ud, xe) : true; }
 
 static bool x_init(void) {
     const char *drv = SDL_GetCurrentVideoDriver();
@@ -863,7 +869,7 @@ static void dragout_tick(void) {
     if (g_do.sys != DOS_WAYLAND) return;
     pthread_mutex_lock(&g_wl.self_mtx); // (Wayland) our own drag back over this window: what our data device saw
     int ev = g_wl.self_ev;
-    f32 dens = SDL_GetWindowPixelDensity(A.win), x = (f32)g_wl.sx * dens, y = (f32)g_wl.sy * dens;
+    f32 dens = SDL_GetWindowPixelDensity(A.win), m = (f32)A.shadow_px, x = (f32)g_wl.sx * dens - m, y = (f32)g_wl.sy * dens - m; // (surface: shadow margin included)
     g_wl.self_ev = 0;
     pthread_mutex_unlock(&g_wl.self_mtx);
     if (ev) dragout_self_at(ev & W_SELF_DROP ? W_SELF_DROP : ev & W_SELF_OVER ? W_SELF_OVER : W_SELF_LEAVE, x, y);
