@@ -5,7 +5,7 @@ extern char **environ;
 #define S(x) ((x) * A.scale)
 #define APP_NAME "File Explorer" // system-facing name: window title, launcher, tray
 #define APP_LABEL "Explorer"   // shown next to the logo inside the app
-#define APP_VERSION "0.11.1"    // bumped with each tagged release
+#define APP_VERSION "0.11.2"    // bumped with each tagged release
 
 typedef struct { f32 x, y, w, h; } Rect;
 static inline bool in_rect(Rect r, f32 x, f32 y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }

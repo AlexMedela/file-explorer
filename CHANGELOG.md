@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.2
 
 **New**
 - Rounded window corners and a drop shadow, like GTK apps (Options > Appearance > Rounded corners, off by default, takes a restart). Square and without shadow when maximised or snapped. On X11 it needs a compositor. Thanks to @zeropaulsy.
