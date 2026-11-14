@@ -245,3 +245,6 @@ dark surfaces retain their original icon colors.
 
 Navigation path and search fields, the pill enclosure, and unfocused classic tabs
 share one neutral background. Focus is indicated by the accent outline.
+
+In Open with, the default-app label uses a 15% lighter accent on dark list
+backgrounds. Selected rows retain their contrasting selection text color.

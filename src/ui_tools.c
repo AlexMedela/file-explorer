@@ -380,7 +380,10 @@ static void openwith_draw(void) {
         }
         f32 tx = ix + is + S(12);
         f32 ex = draw_text(f, tx, text_y(f, rr.y, rr.h), a->name, (int)strlen(a->name), C(sel ? COL_SEL_TEXT : COL_TEXT));
-        if (a == def) draw_text(fs, ex + S(10), text_y(fs, rr.y, rr.h), "default", 7, C(sel ? COL_SEL_DIM : COL_ACCENT));
+        if (a == def) {
+            u32 label = rgb_luma(well) < 0.5f ? rgb_mix(COL_ACCENT, 0xFFFFFF, 0.15f) : COL_ACCENT;
+            draw_text(fs, ex + S(10), text_y(fs, rr.y, rr.h), "default", 7, C(sel ? COL_SEL_DIM : label));
+        }
     }
     if (!s->napps) {
         const char *m = "No apps found";

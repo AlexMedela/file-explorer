@@ -827,7 +827,7 @@ static void icon_themes_readme(const char *dir) {
     snprintf(path, sizeof path, "%s/README.txt", dir);
     FILE *f = fopen(path, "w");
     if (!f) return;
-    fprintf(f, "Custom icon themes\n==================\n\n"
+    fputs("Custom icon themes\n==================\n\n"
                "Each folder here is an icon theme; its name appears under Options > Appearance > File icons.\n\n"
                "  MyTheme/\n"
                "    theme.conf        optional: base=Material | Catppuccin | Symbols | Monokai\n"
@@ -847,7 +847,7 @@ static void icon_themes_readme(const char *dir) {
                "    net-homelab.svg   an extra icon for network locations (Connect to server > Icon), offered\n"
                "                      whichever file icon theme is selected; a folder may hold only net-*.svg files\n\n"
                "After adding or editing files, press \"Icon themes folder\" in Options again to reload.\n\n"
-               "Built-in icon names:\n");
+               "Built-in icon names:\n", f);
     for (int i = 0; i < ICON_COUNT; i++) fprintf(f, "  %s\n", g_icon_names[i]);
     fclose(f);
 }
