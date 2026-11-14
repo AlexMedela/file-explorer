@@ -628,11 +628,6 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         return;
     }
     if (A.menu.open) {
-        if (g_menu_parent.open && !in_rect(A.menu.r, x, y) && in_rect(g_menu_parent.r, x, y)) {
-            menu_restore_parent();
-            if (b->button == SDL_BUTTON_LEFT) menu_activate(menu_item_at(x, y));
-            return;
-        }
         if (menu_sub_shown() && in_rect(g_menu_sub.r, x, y)) {
             int arrow = menu_arrow_at_in(&g_menu_sub, y);
             if (arrow) menu_scroll_by_in(&g_menu_sub, (f32)arrow * g_menu_sub.r.h * 0.5f);
@@ -646,7 +641,6 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
             return;
         }
         A.menu.open = false;
-        g_menu_parent.open = false;
         if (b->button != SDL_BUTTON_RIGHT) return; // a right-click elsewhere opens a new menu
     }
     if (b->button == SDL_BUTTON_LEFT) {

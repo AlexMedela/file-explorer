@@ -3,9 +3,10 @@
 extern char **environ;
 
 #define S(x) ((x) * A.scale)
-#define APP_NAME "File Explorer" // system-facing name: window title, launcher, tray
-#define APP_LABEL "Explorer"   // shown next to the logo inside the app
-#define APP_VERSION "0.11.2"    // bumped with each tagged release
+#define APP_NAME                                                               \
+  "File Explorer"            // system-facing name: window title, launcher, tray
+#define APP_LABEL "Explorer" // shown next to the logo inside the app
+#define APP_VERSION "0.11.2" // bumped with each tagged release
 
 typedef struct {
   f32 x, y, w, h;
@@ -790,21 +791,6 @@ typedef struct {
 static Menu g_menu_sub;
 static int g_menu_sub_of = -1; // the A.menu item it belongs to
 static Menu *g_menu_build;
-static Menu g_menu_parent;
-static bool g_menu_building_child;
-
-static bool menu_is_submenu(int act) {
-    return act == ACT_MENU_VIEWS || act == ACT_MENU_SORT || act == ACT_MENU_GROUP;
-}
-
-// Menu shortcut strings live inside the menu; rebase them when saving a parent.
-static void menu_copy(Menu *dst, const Menu *src) {
-    *dst = *src;
-    for (int i = 0; i < src->n; i++)
-        for (int k = 0; k < (int)ARRAY_COUNT(src->scbuf); k++)
-            if (src->items[i].shortcut == src->scbuf[k]) dst->items[i].shortcut = dst->scbuf[k];
-}
-
 
 #define MAX_OPS 32
 
@@ -8354,6 +8340,9 @@ static void menu_add_check_key(const char *label, int act, bool checked,
 static void menu_open_columns(Pane *p, f32 x, f32 y);
 static void menu_add_check(const char *label, int act, bool checked,
                            bool enabled);
+static void menu_sub_views(Pane *p);
+static void menu_sub_sort(Pane *p);
+static void menu_sub_group(Pane *p);
 
 // "Open with" submenu: apps picked for that type through "Other app..." (the
 // sheet) before, newest first, then the apps the sheet lists for it by default
@@ -8448,7 +8437,6 @@ static void open_with_menu_app(Pane *p, int k) {
 }
 
 static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
-  if (!g_menu_building_child) g_menu_parent.open = false;
   Menu *m = &A.menu;
   m->keep_open = false;
   m->reopen = NULL;
@@ -8541,8 +8529,11 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
     menu_add("Undo", "Ctrl+Z", ACT_UNDO, A.nundo > 0);
     menu_sep();
     menu_add("Views", "", ACT_MENU_VIEWS, true);
+    m->items[m->n - 1].sub = menu_sub_views;
     menu_add("Sort by", "", ACT_MENU_SORT, true);
+    m->items[m->n - 1].sub = menu_sub_sort;
     menu_add("Group by", "", ACT_MENU_GROUP, true);
+    m->items[m->n - 1].sub = menu_sub_group;
     menu_sep();
     menu_add(A.show_hidden ? "Hide hidden files" : "Show hidden files",
              "Ctrl+H", ACT_HIDDEN, true);
@@ -8580,75 +8571,64 @@ static void menu_add_check(const char *label, int act, bool checked,
                                 true,  checked, false, NULL,    false};
 }
 
+static void menu_sub_views(Pane *p) {
+  Menu *m = g_menu_build ? g_menu_build : &A.menu;
+  static const int levels[] = {0, 1, 2, 4, 6, 7};
+  static const char *shortcuts[] = {"Ctrl+Shift+6", "Ctrl+Shift+5",
+                                    "Ctrl+Shift+4", "Ctrl+Shift+3",
+                                    "Ctrl+Shift+2", "Ctrl+Shift+1"};
+  int current = zoom_level_of(p);
+  for (size_t i = 0; i < ARRAY_COUNT(levels); i++) {
+    menu_add_check(g_zoom[levels[i]].label, ACT_VIEW_BASE + levels[i],
+                   current == levels[i], true);
+    m->items[m->n - 1].shortcut = shortcuts[i];
+  }
+  menu_add_check("Tree view", ACT_TREE_VIEW, p->tree, !pane_is_archive(p));
+  const char *key = keymap_label(CMD_TREE_VIEW);
+  if (key) {
+    snprintf(m->scbuf[m->n - 1], sizeof m->scbuf[0], "%s", key);
+    m->items[m->n - 1].shortcut = m->scbuf[m->n - 1];
+  }
+  menu_add_check_key("Disk usage", ACT_DU_TOGGLE, p->du, CMD_DISK_USAGE);
+  m->items[m->n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
+  menu_add_check_key("Snapshots of this drive", ACT_SNAP_TOGGLE, p->snapv,
+                     CMD_SNAPSHOTS);
+  m->items[m->n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
+  menu_sep();
+  FolderView *view = folder_view_find(p->path, true);
+  menu_add_check("Use this view in subfolders", ACT_FV_SUBFOLDERS,
+                 view && view->recursive, true);
+  menu_add("Use this view everywhere", "", ACT_FV_ALL, true);
+  menu_add("Reset folder view", "", ACT_FV_RESET, view != NULL);
+}
+
+static void menu_sub_sort(Pane *p) {
+  static const char *labels[SORT_COUNT] = {
+      "Name", "Date modified", "Type", "Size", "Date created", "Extension",
+      "Permissions", "Owner"};
+  for (int i = 0; i < SORT_COUNT; i++)
+    menu_add_check(labels[i], ACT_SORT_BASE + i, p->sort_key == i, true);
+  menu_sep();
+  menu_add_check("Ascending", ACT_SORT_ASC, !p->sort_desc, true);
+  menu_add_check("Descending", ACT_SORT_DESC, p->sort_desc, true);
+}
+
+static void menu_sub_group(Pane *p) {
+  static const char *labels[] = {"None", "Date", "Type", "Size"};
+  for (int g = 0; g < GROUP_COUNT; g++)
+    menu_add_check(labels[g], ACT_GROUP_BASE + g, p->group == g,
+                   p->view == VIEW_DETAILS || g == GROUP_NONE);
+}
+
 static void menu_open_sort(Pane *p, f32 x, f32 y) {
-    Menu *m = &A.menu;
-    m->n = 0; m->ninfo = 0; m->hover = -1;
-    m->pane = p; m->keep_open = false; m->reopen = NULL;
-    static const char *labels[SORT_COUNT] = {"Name", "Date modified", "Type", "Size", "Date created", "Extension", "Permissions", "Owner"};
-    for (int i = 0; i < SORT_COUNT; i++)
-        menu_add_check(labels[i], ACT_SORT_BASE + i, p->sort_key == i, true);
-    menu_sep();
-    menu_add_check("Ascending", ACT_SORT_ASC, !p->sort_desc, true);
-    menu_add_check("Descending", ACT_SORT_DESC, p->sort_desc, true);
-    menu_finish(x, y);
-}
-
-static void menu_open_child(int i) {
-    Menu *m = &A.menu;
-    if (i < 0 || i >= m->n || !menu_is_submenu(m->items[i].act)) return;
-    int act = m->items[i].act;
-    f32 y = m->r.y + S(5) - m->scroll;
-    for (int k = 0; k < i; k++) y += menu_item_h(&m->items[k]);
-    m->hover = i;
-    menu_copy(&g_menu_parent, m);
-    Pane *p = m->pane;
-    f32 x = m->r.x + m->r.w;
-    memset(m, 0, sizeof *m);
-    m->pane = p; m->hover = -1;
-    g_menu_building_child = true;
-    if (act == ACT_MENU_SORT) menu_open_sort(p, x, y);
-    else {
-        if (act == ACT_MENU_VIEWS) {
-            static const int lv[] = {0, 1, 2, 4, 6, 7};
-            static const char *sc[] = {"Ctrl+Shift+6", "Ctrl+Shift+5", "Ctrl+Shift+4", "Ctrl+Shift+3", "Ctrl+Shift+2", "Ctrl+Shift+1"};
-            int cur = zoom_level_of(p);
-            for (size_t i = 0; i < ARRAY_COUNT(lv); i++) {
-                menu_add_check(g_zoom[lv[i]].label, ACT_VIEW_BASE + lv[i], cur == lv[i], true);
-                A.menu.items[A.menu.n - 1].shortcut = sc[i];
-            }
-            menu_add_check("Tree view", ACT_TREE_VIEW, p->tree, !pane_is_archive(p));
-            const char *tk = keymap_label(CMD_TREE_VIEW);
-            snprintf(A.menu.scbuf[A.menu.n - 1], sizeof A.menu.scbuf[0], "%s", tk ? tk : "");
-            A.menu.items[A.menu.n - 1].shortcut = A.menu.scbuf[A.menu.n - 1];
-            menu_add_check_key("Disk usage", ACT_DU_TOGGLE, p->du, CMD_DISK_USAGE);
-            A.menu.items[A.menu.n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
-            menu_add_check_key("Snapshots of this drive", ACT_SNAP_TOGGLE, p->snapv, CMD_SNAPSHOTS);
-            A.menu.items[A.menu.n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
-
-            menu_sep();
-            FolderView *fv = folder_view_find(p->path, true);
-            menu_add_check("Use this view in subfolders", ACT_FV_SUBFOLDERS, fv && fv->recursive, true);
-            menu_add("Use this view everywhere", "", ACT_FV_ALL, true);
-            menu_add("Reset folder view", "", ACT_FV_RESET, fv != NULL);
-        } else {
-            static const char *labels[] = {"None", "Date", "Type", "Size"};
-            for (int g = 0; g < GROUP_COUNT; g++)
-                menu_add_check(labels[g], ACT_GROUP_BASE + g, p->group == g, p->view == VIEW_DETAILS || g == GROUP_NONE);
-        }
-        menu_finish(x, y);
-    }
-    g_menu_building_child = false;
-    if (x + m->r.w > A.W - S(4)) x = g_menu_parent.r.x - m->r.w;
-    m->r.x = CLAMP(x, S(4), MAX(S(4), A.W - m->r.w - S(4)));
-    m->r.y = CLAMP(y, S(4), MAX(S(4), A.H - m->r.h - S(4)));
-    m->hover = 0;
-}
-
-static void menu_restore_parent(void) {
-    if (!g_menu_parent.open) return;
-    menu_copy(&A.menu, &g_menu_parent);
-    g_menu_parent.open = false;
-    A.redraw = true;
+  Menu *m = &A.menu;
+  m->n = m->ninfo = 0;
+  m->hover = -1;
+  m->pane = p;
+  m->keep_open = false;
+  m->reopen = NULL;
+  menu_sub_sort(p);
+  menu_finish(x, y);
 }
 
 // Right-click on a column header.
@@ -8676,7 +8656,7 @@ static void menu_open_columns(Pane *p, f32 x, f32 y) {
 static void menu_add_check_key(const char *label, int act, bool checked,
                                int key_id) {
   menu_add_check(label, act, checked, true);
-  Menu *m = &A.menu;
+  Menu *m = g_menu_build ? g_menu_build : &A.menu;
   const char *k = keymap_label(key_id);
   if (k && m->n) {
     snprintf(m->scbuf[m->n - 1], sizeof m->scbuf[0], "%s", k);
@@ -9567,16 +9547,11 @@ static void menu_sub_open(int i, bool kb) {
 
 static void menu_activate(int i) {
   Menu *m = &A.menu;
-  if (i >= 0 && i < m->n && m->items[i].enabled && menu_is_submenu(m->items[i].act)) {
-    menu_open_child(i);
-    return;
-  }
   if (i >= 0 && i < m->n && m->items[i].sub && m->items[i].enabled) {
     menu_sub_open(i, true);
     return;
   } // stays open
   m->open = false;
-  g_menu_parent.open = false;
   A.redraw = true;
   if (i < 0 || i >= m->n || !m->items[i].enabled || m->items[i].sep)
     return;
@@ -9642,17 +9617,12 @@ static void menu_key(SDL_Keycode k) {
   }
   if (dir) {
     menu_move_in(m, dir);
-  } else if (k == SDLK_LEFT && g_menu_parent.open) {
-    menu_restore_parent();
   } else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
     menu_activate(m->hover);
   } else if (k == SDLK_RIGHT) {
-    if (m->hover >= 0 && m->hover < m->n && menu_is_submenu(m->items[m->hover].act))
-      menu_open_child(m->hover);
-    else menu_sub_open(m->hover, true);
+    menu_sub_open(m->hover, true);
   } else if (k == SDLK_ESCAPE) {
-    if (g_menu_parent.open) menu_restore_parent();
-    else m->open = false;
+    m->open = false;
   } else if (k == SDLK_PAGEDOWN || k == SDLK_PAGEUP) {
     menu_scroll_by((k == SDLK_PAGEDOWN ? 1 : -1) * m->r.h * 0.8f);
   }
@@ -9673,9 +9643,7 @@ static void menu_motion(f32 x, f32 y) {
   m->hover = i;
   if (i < 0)
     return; // a separator or a disabled row: the submenu stays
-  if (menu_is_submenu(m->items[i].act))
-    menu_open_child(i);
-  else if (m->items[i].sub)
+  if (m->items[i].sub)
     menu_sub_open(i, false);
   else if (menu_sub_shown())
     menu_sub_close();

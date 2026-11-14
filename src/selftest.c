@@ -2784,7 +2784,7 @@ static int run_selftest_m9(void) {
     do_action(p, ACT_SORT_ASC);
     ST_CHECK(p->sort_key == SORT_SIZE && !p->sort_desc);
     pane_set_sort(p, SORT_NAME);
-    // Compact parent menu: hover opens Views, arrows return/open, clicks activate child actions.
+    // Views, Sort and Group share the connected Open With submenu behavior.
     menu_open(p, S(100), S(100), false);
     int views = -1, sorts = -1, groups = -1;
     for (int i = 0; i < A.menu.n; i++) {
@@ -2796,22 +2796,35 @@ static int run_selftest_m9(void) {
     }
     ST_CHECK(views >= 0 && sorts >= 0 && groups >= 0);
     if (views >= 0 && sorts >= 0 && groups >= 0) {
-        f32 vy = A.menu.r.y + S(5) - A.menu.scroll;
-        for (int i = 0; i < views; i++) vy += menu_item_h(&A.menu.items[i]);
-        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), vy + S(12), 0, 0, 0);
-        ST_CHECK(g_menu_parent.open && A.menu.items[0].act == ACT_VIEW_BASE);
+        ST_CHECK(A.menu.items[views].sub && A.menu.items[sorts].sub && A.menu.items[groups].sub);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), menu_item_y(&A.menu, views) + S(12), 0, 0, 0);
+        ST_CHECK(menu_sub_shown() && g_menu_sub.items[0].act == ACT_VIEW_BASE);
         st_frames(1);
-        menu_key(SDLK_LEFT);
-        ST_CHECK(!g_menu_parent.open && A.menu.items[views].act == ACT_MENU_VIEWS);
-        A.menu.hover = sorts;
+        st_mouse(SDL_EVENT_MOUSE_MOTION, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, 0) + S(12), 0, 0, 0);
+        ST_CHECK(g_menu_sub.hover == 0 && A.menu.open);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), menu_item_y(&A.menu, sorts) + S(12), 0, 0, 0);
+        ST_CHECK(menu_sub_shown() && g_menu_sub_of == sorts && g_menu_sub.n == SORT_COUNT + 3);
+        int descending = g_menu_sub.n - 1;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, descending) + S(12), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.menu.open && p->sort_desc);
+        do_action(p, ACT_SORT_ASC);
+
+        menu_open(p, S(100), S(100), false);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), menu_item_y(&A.menu, groups) + S(12), 0, 0, 0);
+        ST_CHECK(menu_sub_shown() && g_menu_sub_of == groups && g_menu_sub.n == GROUP_COUNT);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, GROUP_NONE) + S(12), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.menu.open && p->group == GROUP_NONE);
+
+        menu_open(p, S(100), S(100), false);
+        A.menu.hover = views;
         menu_key(SDLK_RIGHT);
-        ST_CHECK(g_menu_parent.open && A.menu.hover == 0 && A.menu.n == SORT_COUNT + 3);
+        ST_CHECK(menu_sub_shown() && g_menu_sub.hover == 0);
         menu_key(SDLK_ESCAPE);
-        ST_CHECK(!g_menu_parent.open && A.menu.open);
-        menu_activate(groups);
-        ST_CHECK(g_menu_parent.open && A.menu.n == GROUP_COUNT);
-        menu_activate(GROUP_NONE);
-        ST_CHECK(!A.menu.open && !g_menu_parent.open && p->group == GROUP_NONE);
+        ST_CHECK(A.menu.open && !menu_sub_shown());
+        menu_key(SDLK_ESCAPE);
+        ST_CHECK(!A.menu.open);
     }
     do_action(p, ACT_TERMINAL_EXTERNAL);
     ST_CHECK(g_sheet.kind == SHEET_OPTIONS && g_opt.cat == OC_INTEGRATION);

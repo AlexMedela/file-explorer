@@ -3304,11 +3304,6 @@ static void draw_menu_pair(Menu *m, Menu *sm) {
 
 static void draw_menu(void) {
     Menu *m = &A.menu, *sm = &g_menu_sub;
-    if (g_menu_parent.open) {
-        draw_menu_in(&g_menu_parent, true);
-        draw_menu_in(m, true);
-        return;
-    }
     bool beside = menu_sub_shown() && sm->r.y < m->r.y + m->r.h && sm->r.y + sm->r.h > m->r.y &&
                   (sm->r.x == m->r.x + m->r.w || sm->r.x + sm->r.w == m->r.x);
     if (beside) draw_menu_pair(m, sm);
