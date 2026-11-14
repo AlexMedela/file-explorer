@@ -4735,6 +4735,34 @@ static int run_selftest_m10(void) {
         ST_CHECK(st_wait_cond(c_dev_idle, 5000) && st_place_row(PK_PHONE, NULL) < 0);
     }
 
+    // Publishing a new Vulkan atlas must leave already queued geometry intact
+    // and keep subsequent geometry on the current ring slot.
+    if (g_atlas_vulkan) {
+        atlas_reset();
+        atlas_publish(); // the reset atlas (white block) is now current
+        draw_clip(NULL);
+        SDL_SetRenderDrawColor(A.ren, 0, 0, 0, 255);
+        SDL_RenderClear(A.ren);
+        draw_rect(20, 20, 20, 20, C(0xFF0000));
+        draw_flush();
+        int ax, ay;
+        ST_CHECK(atlas_pack(2, 2, &ax, &ay));
+        atlas_publish(); // publish the newly packed glyphs
+        ST_CHECK(atlas_slot_is_current());
+        ST_CHECK(g_atlas_tex == g_atlas_slots[g_atlas_slot]);
+        draw_rect(60, 20, 20, 20, C(0x00FF00));
+        draw_flush();
+        SDL_Surface *pixels = SDL_RenderReadPixels(A.ren, NULL);
+        if (pixels) {
+            Uint8 r = 0, g = 0, b = 0;
+            SDL_ReadSurfacePixel(pixels, 30, 30, &r, &g, &b, NULL);
+            ST_CHECK(r > 200 && g < 50 && b < 50);
+            SDL_ReadSurfacePixel(pixels, 70, 30, &r, &g, &b, NULL);
+            ST_CHECK(g > 200 && r < 50 && b < 50);
+        } else ST_CHECK(false);
+        SDL_DestroySurface(pixels);
+        if (SDL_RenderPresent(A.ren)) atlas_end_frame();
+    }
     // first frames after idling (with glyph uploads mid-frame) still draw every row; the Vulkan bug this guards
     // against (fixed in atlas_upload) depends on GPU timing, so this is a sanity check rather than a reliable repro
     {
