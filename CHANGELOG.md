@@ -4,11 +4,11 @@
 
 **New**
 - Rounded window corners and a drop shadow, like GTK apps (Options > Appearance > Rounded corners, off by default, takes a restart). Square and without shadow when maximised or snapped. On X11 it needs a compositor. Thanks to @zeropaulsy.
-- Open folders with other apps: right-click a folder → "Open with…", or empty space → "Open this folder with…" for the folder you are in, to open a project in your editor, terminal or game engine. The app starts inside the folder. "Open with" is a submenu (also for files): the apps you picked for that type before through "Other app…" come first, then the apps for that type.
-- The terminal panel has a close button (×, top right) and a "Hide terminal panel" entry in its right-click menu, so it can be closed without F4.
+- Open folders with other apps: right-click a folder → "Open with…", or empty space → "Open this folder with…" for the folder you are in, to open a project in your editor, terminal or game engine. The app starts inside the folder. "Open with" is a submenu (also for files): the apps you picked for that type before through "Other app…" come first, then the apps for that type. Thanks to @pr83-glitch.
+- The terminal panel has a close button (×, top right) and a "Hide terminal panel" entry in its right-click menu, so it can be closed without F4. Thanks to @pr83-glitch.
 
 **Fixed**
-- "Open in external terminal" opens in that folder with every terminal, also Ghostty and terminals that hand the window to one already running (the folder is passed with the terminal's own option, e.g. `--working-directory`).
+- "Open in external terminal" opens in that folder with every terminal, also Ghostty and terminals that hand the window to one already running (the folder is passed with the terminal's own option, e.g. `--working-directory`). Thanks to @pr83-glitch.
 - The scrollbars in Options, Open with and Properties can be dragged (and clicking beside the thumb jumps a page), not only scrolled with the wheel. Thanks to @juangiler.
 
 ## 0.11.1
@@ -19,7 +19,7 @@
 
 **Fixed**
 - Dragging files out to other apps on X11 (LXQt, Xfce, MATE, ...) when the press on the file is also the click that brings the window to the front: the drag no longer stops at the window's edge and lands in the wrong app, or nowhere.
-- Folders on network drives (SSH/SFTP, SMB, NFS, cloud) get their sizes too instead of showing "…" forever. In SSH folders the server measures them itself (one quick `du` over the connection); elsewhere they're counted in the background by one gentle thread. A folder that can't be measured shows "—".
+- Folders on network drives (SSH/SFTP, SMB, NFS, cloud) get their sizes too instead of showing "…" forever. In SSH folders the server measures them itself (one quick `du` over the connection); elsewhere they're counted in the background by one gentle thread. A folder that can't be measured shows "—". Thanks to @pr83-glitch.
 
 ## 0.11.0
 
