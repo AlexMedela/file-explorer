@@ -1273,6 +1273,15 @@ static void window_size_update(void) {
     if (A.ren) SDL_SetRenderViewport(A.ren, m ? &(SDL_Rect){m, m, A.W, A.H} : NULL);
 }
 
+// Min size is 760x420, capped at half the display so a snapped window fits on small screens.
+static void window_min_size_update(void) {
+    SDL_Rect b;
+    SDL_DisplayID d = SDL_GetDisplayForWindow(A.win);
+    int w = 760, h = 420;
+    if (d && SDL_GetDisplayUsableBounds(d, &b) && b.w > 0 && b.h > 0) w = MIN(w, b.w / 2), h = MIN(h, b.h / 2);
+    SDL_SetWindowMinimumSize(A.win, w, h);
+}
+
 // The compositor's sizes are for the window without its shadow; SDL makes the surface that size: add the margin.
 // (Not while tiled: there the window has no shadow and takes the compositor's size as it is.) Only until the
 // toplevel's configure events are hooked (toplevel_configure adds it from then on), or if they can't be.
@@ -11617,7 +11626,7 @@ int main(int argc, char **argv) {
     if (!A.win) { fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError()); return 1; }
     window_icon_update();
     titlebar_apply();
-    SDL_SetWindowMinimumSize(A.win, 760, 420);
+    window_min_size_update();
     // Renderer: Vulkan uses noticeably less memory than GL with Mesa; fall back to SDL's default.
     A.ren = NULL;
     // headless: self-tests on the software renderer (deterministic), screenshots on the GPU (what users see)
