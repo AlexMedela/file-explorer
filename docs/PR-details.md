@@ -75,22 +75,27 @@ being changed, so a frame could present partial folder or preview rows.
 
 Main changes:
 
-- The atlas is now a ring of textures, one per swapchain image. SDL presents by
-  waiting on the fence for the next command buffer, so a slot is idle when it
-  becomes current again and no frame samples the texture being uploaded. The
-  ring size follows `SDL_PROP_RENDERER_VULKAN_SWAPCHAIN_IMAGE_COUNT_NUMBER` and
-  is rebuilt if the count changes after a resize.
+- Vulkan uses one atlas texture per SDL frame slot. The slot count follows
+  `SDL_PROP_RENDERER_VULKAN_SWAPCHAIN_IMAGE_COUNT_NUMBER`, which SDL exposes as
+  its swapchain image count / potential frames in flight ([SDL renderer
+  properties](https://wiki.libsdl.org/SDL3/SDL_GetRendererProperties)). Slots
+  advance with SDL's command-buffer rotation, whose fence is waited before
+  reuse. The ring is rebuilt if SDL reports a different slot count.
 - A frame that needs unknown glyphs first draws a discarded discovery pass.
   That pass fills the CPU atlas and the glyph caches. The complete atlas is
   then uploaded once to the current slot, and the presented pass is drawn
   again without any texture update.
-- Frames without new glyphs take a single pass and no upload.
+- A current slot with an up-to-date atlas takes one pass and no upload. A slot
+  whose copy is stale after startup, an atlas reset, or a ring rebuild is
+  uploaded before the frame that uses it, even if that frame adds no glyphs.
 - The Vulkan path no longer calls `SDL_FlushRenderer` or creates and destroys a
-  texture per frame; those actions submit work and wait for the GPU.
+  texture per frame, avoiding that per-frame texture lifecycle and its
+  synchronization cost.
 - The non-Vulkan path keeps its incremental dirty-rectangle uploads.
 - `FE_VK_TARGET=1` remains an environment-gated diagnostic that renders the
-  frame to an offscreen texture before copying it to the swapchain, separating
-  rendering problems from presentation problems.
+  frame to an offscreen texture before copying it to the swapchain. It changes
+  the render-target path for comparison; by itself it does not prove whether a
+  problem is in rendering or presentation.
 
 Improvements:
 
@@ -98,14 +103,17 @@ Improvements:
   adds glyphs; the user confirmed no flicker after the change.
 - An atlas update is one full upload in a frame that needs new glyphs instead
   of a render-pass break between queued surfaces.
-- No texture is created or destroyed in the steady-state frame path, removing
-  GPU idle stalls.
-- Costs stay bounded: one atlas per swapchain image (4 MB at 1024 squared,
-  16 MB at 2048 squared) and only frames with new glyphs pay for the discovery
-  pass and the upload.
+- No texture is created or destroyed in the steady-state frame path, avoiding
+  per-frame allocation and destruction work.
+- Each slot uses 4 MiB at 1024 squared or 16 MiB at 2048 squared; total atlas
+  memory is per-slot memory multiplied by the slot count. Only frames that
+  discover glyphs or need to catch a stale slot pay for the extra pass/upload.
 
-M10 checks that geometry queued before and after a publish survives and that
-drawing continues on the current ring slot.
+M10 checks that geometry queued before and after an atlas publish survives and
+that publishing updates the selected ring slot. It also resets the atlas after
+idle periods and captures rendered folder-row text to catch blank output. This
+is a timing-sensitive smoke check, not a deterministic reproduction of the
+terminal typing race.
 
 ## Review findings resolved
 
@@ -213,12 +221,14 @@ inspection is more useful than its raw whole-file diff when tracing behavior.
   clicking child actions without Escape, and keyboard close behavior.
 - Native M11 and M6 passed again after the terminal draw-order fix. The F4
   panel screenshot from M11 still shows the folder and sidebar correctly.
-- The Vulkan release build passed, as did native M6, M8, M9, M10, and M11 on
-  Vulkan after the frame-slotted atlas change. M10 checks pane rendering and
-  verifies that geometry queued before and after an atlas publish survives.
-  M10 passed on OpenGL too.
-- The user confirmed that folder and preview surfaces no longer flicker during
-  rapid terminal output after the change.
+- The Fedora `fedora-build` release build passed on the frame-slotted atlas
+  commit. Native M6, M8, M9, M10, and M11 passed with the Vulkan renderer;
+  M10 also passed with `FE_VK_TARGET=1` and with OpenGL. M10 checks geometry
+  queued across an atlas publish and captures folder-row text after atlas
+  resets. The latter is a timing-sensitive smoke check, not a deterministic
+  reproduction of rapid terminal output.
+- The user confirmed that the frame-slotted atlas change stopped folder and
+  preview flicker during rapid terminal output on their Vulkan setup.
 - Standalone appearance and system-icon suites passed with GCC `-O2`,
   `-Wall -Wextra -Werror`; isolated terminal shaping/rendering checks passed.
 - Git whitespace and source ASCII checks passed; no conflict markers or
