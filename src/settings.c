@@ -54,6 +54,7 @@ static void settings_defaults(void) {
     A.ndev_names = 0;
     A.devs_collapsed = A.nets_collapsed = false;
     g_term_look_setting = 0;
+    g_external_terminal[0] = 0;
     A.nservers = 0;
     addon_settings_defaults();
     g_cloud_collapsed = false;
@@ -313,6 +314,7 @@ static void settings_load(void) {
                 if (str_ieq(v, g_accents[i].name)) g_accent_custom = 0x01000000u | g_accents[i].rgb;
             if (!g_accent_custom && parse_hex_color(v, &c)) g_accent_custom = 0x01000000u | c;
         } else if (!strcmp(k, "font")) snprintf(A.ui_font, sizeof A.ui_font, "%s", v);
+        else if (!strcmp(k, "external_terminal")) snprintf(g_external_terminal, sizeof g_external_terminal, "%s", v);
         else if (!strcmp(k, "font_size")) A.font_size = CLAMP(atoi(v), 9, 24);
         else if (!strcmp(k, "row_spacing")) A.row_spacing = CLAMP(atoi(v), 0, 2);
         else if (!strcmp(k, "smooth_scroll")) A.smooth_scroll = atoi(v);
@@ -511,6 +513,7 @@ static void settings_write(FILE *f) {
     addon_settings_save(f);
     fputs(g_settings_other, f);
     cloud_settings_save(f);
+    fprintf(f, "external_terminal=%s\n", g_external_terminal);
     fprintf(f, "term_look=%s\n", g_term_look_setting ? "app" : "match");
     for (int i = 0; i < A.nservers; i++) fprintf(f, "server=%s\t%s%s%s\n", A.servers[i].name, A.servers[i].uri, A.servers[i].icon[0] ? "\t" : "", A.servers[i].icon);
     fprintf(f, "icon_theme=%s\napp_icon=%s\n", icon_theme_name(g_icon_theme), g_app_icon_path);

@@ -1,5 +1,5 @@
 // term.c - terminal tabs: a shell (or ssh) in a pseudo-terminal, emulated by libvterm, drawn with the UI's
-// GPU text renderer. Looks like the user's default terminal: font, colours, padding, cursor and scrollback are
+// GPU text renderer. Uses Explorer's font with HarfBuzz ligatures. Colours, padding, cursor and scrollback are
 // read from its config (foot, kitty, Alacritty, Ghostty), and follow it when that file changes.
 // (included from app.c)
 
@@ -388,12 +388,12 @@ struct Term {
 static Font g_term_font, g_term_bold;
 static bool g_term_font_ok;
 static f32 g_term_font_scale;
-static char g_term_font_family[128];
+static char g_term_font_family[PATH_MAX];
 
 static void term_fonts(void) {
-    if (g_term_font_ok && g_term_font_scale == A.scale && !strcmp(g_term_font_family, g_tc.family)) return;
-    int px = MAX(6, (int)roundf(g_tc.size_pt * 96.f / 72.f * A.scale));
-    char *path = font_family_file(g_tc.family);
+    if (g_term_font_ok && g_term_font_scale == A.scale && !strcmp(g_term_font_family, A.font_path) && g_term_font.px == MAX(6, (int)roundf(A.font_size * A.scale))) return;
+    int px = MAX(6, (int)roundf(A.font_size * A.scale));
+    char *path = strdup(A.font_path);
     if (!path && A.mono_path) path = strdup(A.mono_path);
     if (!path) path = strdup(A.font_path);
     char *bold = font_weight_file(path, FC_WEIGHT_BOLD);
@@ -408,7 +408,7 @@ static void term_fonts(void) {
     free(path);
     free(bold);
     g_term_font_scale = A.scale;
-    snprintf(g_term_font_family, sizeof g_term_font_family, "%s", g_tc.family);
+    snprintf(g_term_font_family, sizeof g_term_font_family, "%s", A.font_path);
     // Free the old glyphs' space, but not now: this runs mid-frame and text queued before it would vanish for a
     // frame (a blink). A "full" atlas makes frame() reset it and draw the frame again before presenting.
     g_atlas_full = true;
@@ -919,7 +919,7 @@ static void term_metrics(f32 *cw, f32 *ch) {
     Glyph *g = font_glyph(&g_term_font, 'M');
     *cw = MAX(1.f, roundf(g->adv));
     f32 lh = g_tc.line_pt > 0 ? roundf(g_tc.line_pt * 96.f / 72.f * A.scale) : roundf(g_term_font.line_h);
-    *ch = MAX(2.f, lh);
+    *ch = MAX(roundf(g_term_font.line_h), lh);
 }
 
 static void term_layout(Term *t, Rect area) {
@@ -931,6 +931,97 @@ static void term_layout(Term *t, Rect area) {
     t->oy = area.y + py;
     int cols = (int)((area.w - px * 2) / t->cw), rows = (int)((area.h - py * 2) / t->ch);
     term_resize(t, rows, cols);
+}
+
+// Keep operator-only runs on the font's Latin OpenType features. JetBrains Mono
+// Nerd Font stores programming ligatures in calt, including its Mono variant.
+static void term_shape_buffer(hb_font_t *font, hb_buffer_t *buf) {
+    hb_buffer_set_direction(buf, HB_DIRECTION_LTR);
+    hb_buffer_guess_segment_properties(buf);
+    // Operator-only runs have Common/Unknown script. Select Latin explicitly so
+    // the font's Latin calt lookups (JetBrains Mono / Nerd Font included) run.
+    hb_script_t script = hb_buffer_get_script(buf);
+    if (script == HB_SCRIPT_COMMON || script == HB_SCRIPT_INHERITED || script == HB_SCRIPT_UNKNOWN)
+        hb_buffer_set_script(buf, HB_SCRIPT_LATIN);
+    hb_feature_t features[] = {{HB_TAG('l','i','g','a'), 1, 0, (unsigned)-1},
+                               {HB_TAG('c','a','l','t'), 1, 0, (unsigned)-1},
+                               {HB_TAG('d','l','i','g'), 1, 0, (unsigned)-1}};
+    hb_shape(font, buf, features, ARRAY_COUNT(features));
+}
+
+static u32 term_cell_foreground(Term *t, int r, int c, const TCell *cell) {
+    u32 fg = cell->attr & 8 ? cell->bg : cell->fg;
+    if (term_in_sel(t, r, c) && g_tc.has_sel_fg) fg = g_tc.sel_fg;
+    return fg;
+}
+
+// Shape equal-font, single-width cell runs, anchoring each cluster to the terminal grid.
+// This permits programming ligatures while selection, cursor and wide glyphs retain their cells.
+static int term_draw_run(Term *t, int r, int c, f32 y, f32 base, Font *f) {
+    TCell first;
+    term_cell(t, r, c, &first);
+    int fi = shape_face(f, first.ch, -1), end = c;
+    static hb_buffer_t *buf;
+    if (!buf) buf = hb_buffer_create();
+    hb_buffer_clear_contents(buf);
+    hb_buffer_set_content_type(buf, HB_BUFFER_CONTENT_TYPE_UNICODE);
+    hb_buffer_set_cluster_level(buf, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS);
+    while (end < t->cols) {
+        TCell cell;
+        if (!term_cell(t, r, end, &cell) || cell.width != 1 || !cell.ch || cell.ch == (u32)-1 ||
+            ((cell.attr ^ first.attr) & 3) || shape_face(f, cell.ch, fi) != fi) break;
+        hb_buffer_add(buf, cell.ch, (unsigned)(end - c));
+        end++;
+    }
+    if (end == c) return c;
+    if (!f->hb[fi]) f->hb[fi] = hb_ft_font_create_referenced(f->faces[fi]);
+    term_shape_buffer(f->hb[fi], buf);
+    unsigned n;
+    hb_glyph_info_t *info = hb_buffer_get_glyph_infos(buf, &n);
+    hb_glyph_position_t *pos = hb_buffer_get_glyph_positions(buf, NULL);
+    f32 sc = MIN(f->fscale[fi], 1.f) / 64.f;
+    for (unsigned i = 0; i < n;) {
+        unsigned next = i + 1;
+        while (next < n && info[next].cluster == info[i].cluster) next++;
+        unsigned cell_end = next < n ? info[next].cluster : (unsigned)(end - c);
+        f32 advance = 0;
+        for (unsigned j = i; j < next; j++) advance += pos[j].x_advance * sc;
+        f32 span = (cell_end - info[i].cluster) * t->cw;
+        f32 xs = advance > 0 ? span / advance : 1.f, pen = 0;
+        f32 origin = t->ox + (c + info[i].cluster) * t->cw;
+        for (unsigned j = i; j < next; j++) {
+            Glyph *g = font_glyph_id(f, fi, info[j].codepoint);
+            f32 x = origin + (pen + pos[j].x_offset * sc + g->bx) * xs;
+            f32 gy = roundf(y + base - pos[j].y_offset * sc) - g->by;
+            if (g->w && g->color) draw_glyph_scale_xy(g, x, gy, xs, 1.f, (Color){1, 1, 1, 1});
+            else if (g->w) {
+                int left = MAX(c, (int)floorf((x - t->ox) / t->cw));
+                int right = MIN(end, (int)ceilf((x + g->w * xs - t->ox) / t->cw));
+                for (int k = left; k < right;) {
+                    TCell cell; term_cell(t, r, k, &cell);
+                    u32 fg = term_cell_foreground(t, r, k, &cell);
+                    int finish = k + 1;
+                    while (finish < right) {
+                        TCell next; term_cell(t, r, finish, &next);
+                        if (term_cell_foreground(t, r, finish, &next) != fg) break;
+                        finish++;
+                    }
+                    draw_glyph_slice_x(g, x, gy, xs, t->ox + k * t->cw, t->ox + finish * t->cw, C(fg));
+                    k = finish;
+                }
+            }
+            pen += pos[j].x_advance * sc;
+        }
+        i = next;
+    }
+    for (int k = c; k < end; k++) {
+        TCell cell; term_cell(t, r, k, &cell);
+        u32 fg = term_cell_foreground(t, r, k, &cell);
+        f32 x = t->ox + k * t->cw;
+        if (cell.attr & 4) draw_rect(x, roundf(y + base + MAX(1.f, S(1.5f))), t->cw, MAX(1.f, roundf(S(1))), C(fg));
+        if (cell.attr & 16) draw_rect(x, roundf(y + t->ch * 0.55f), t->cw, MAX(1.f, roundf(S(1))), C(fg));
+    }
+    return end - 1;
 }
 
 static void term_draw(Term *t, Rect area, bool focused) {
@@ -960,6 +1051,10 @@ static void term_draw(Term *t, Rect area, bool focused) {
                 }
                 if (cell.ch && cell.ch != (u32)-1 && cell.ch != ' ') {
                     Font *f = cell.attr & 1 ? &g_term_bold : &g_term_font;
+                    if (cell.width == 1) {
+                        c = term_draw_run(t, r, c, y, base, f);
+                        continue;
+                    }
                     Glyph *g = font_glyph(f, cell.ch);
                     if (g->w) draw_glyph(g, roundf(x) + g->bx, roundf(y + base) - g->by, g->color ? (Color){1, 1, 1, 1} : C(fg));
                 }

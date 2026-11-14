@@ -73,3 +73,21 @@ not build-verified here, and screenshots, live portal changes, actual Reversal
 rendering, window controls, and X11/Wayland interaction still require a native
 Fedora build before merging or release. Sanitizer validation is also pending;
 the local ASan runtime is unavailable.
+
+## 2026-11-14 menu, terminal and Trash follow-up
+
+- Menu subgroups now use the existing Menu storage with a saved parent and rebased
+  shortcut-string pointers; hover/click/arrow-key navigation shares action dispatch.
+- Terminal selection uses one executable field and direct process arguments. Apply
+  rejects missing/non-executable paths, preserves the previous value on failure,
+  and displays feedback above the Options sheet.
+- Terminal shaping enables liga/calt/dlig, retains the terminal cell grid and
+  paints glyph slices in each cell's colour. Font/weight boundaries remain explicit.
+  Fish redirection bold styling was confirmed as a cause of unjoined typed arrows;
+  the configuration workaround is documented rather than changing the user's theme.
+- Empty Trash reads its own directory, includes hidden/zero-byte items and preserves
+  the existing confirmation/cancellation path. Full/empty icon caches update with
+  measured contents and directory-watch events; explicit artwork overrides remain.
+- Standalone appearance/icon suites and isolated terminal-rendering checks passed.
+  Full native compilation, screenshots and the expanded m7/m8/m9/m11 regression
+  suites remain pending in the Fedora environment; see [Checkpoint](checkpoint.md).

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Nerd Font action icons, compact Views / Sort by / Group by context submenus,
+  and a navigation sort button with eight fields and explicit direction.
+- One external-terminal executable setting with validation, Apply/reset feedback,
+  accent hover colours, and executable-derived Open in menu labels.
+- Embedded terminals share Explorer's font and size, enable liga/calt/dlig, and
+  preserve ligatures across colour-only syntax-highlighting changes.
+- Empty Trash from Quick Access shares the existing confirmation dialog. Trash
+  artwork respects icon overrides and switches between full and empty states,
+  including zero-byte files; directory watching keeps the sidebar state current.
+
 - Local Samba/SMB, NFS and WebDAV share detection, including host configuration
   exposed by Distrobox, with protocol badges on the base folder icon.
 - Consistent lower-right share, symlink and Git repository badges; custom themes

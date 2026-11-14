@@ -196,9 +196,30 @@ a few lines of shell integration after your own startup files (bash: `--rcfile` 
 just updates and what you typed stays. Other shells, or one whose startup files fail before that, get a `cd` typed. Tabs that had it open get it back after a restart, with
 a new shell; `terminal_panel_height` is its height. Terminal tabs: Shift+F4 opens a terminal tab in the current
 folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. It runs your shell and looks like your default
-terminal (xdg-terminal-exec's choice, else $TERMINAL): font, colours, padding, cursor and scrollback are read from
+terminal (xdg-terminal-exec's choice, else $TERMINAL): colours, padding, cursor and scrollback are read from
 foot, kitty, Alacritty or Ghostty config and followed live (Options > Appearance > Terminal appearance). Ctrl+Shift+C/V
 copy and paste, Shift+PageUp/PageDown scroll back, Ctrl+Shift+W closes, Ctrl+Tab switches tabs. Built on libvterm.
+
+Terminal tabs and panels use the same font family and size as Explorer. Programming ligatures (liga, calt and
+dlig) are enabled when supported by that font. JetBrainsMono Nerd Font and its Mono variant retain programming
+ligatures through `calt`; the NL (no-ligatures) variant does not provide them. Install a Nerd Font or Symbols Nerd Font for private-use icons;
+fontconfig supplies fallback symbols, or set `FE_NERD_FONT` to a font file for an explicit override.
+Context menus show Nerd Font action icons beside their labels, with separate checkmarks for toggles. The external
+terminal uses U+E795, the filter uses U+EAF1, and sort uses U+F04BA. Apply and Default buttons highlight in the
+accent colour on hover.
+
+Right-clicking empty space opens a compact menu with **Views**, **Sort by**, and **Group by** submenus. Hover or
+click to open a submenu; Right Arrow opens it, Left Arrow or Escape returns to the parent. Views contains display
+layouts and folder-view preferences, Sort by includes direction, and Group by offers None, Date, Type and Size.
+
+Options > Integration > **Terminal executable** accepts an executable name on PATH or an absolute path
+(without arguments). Apply validates the executable and confirms the resulting menu label; errors keep the previous
+terminal selection. Default clears the selection and confirms the reset. The saved key
+is `external_terminal=...`. Before selection, **Open in external shell** opens these settings. After selection,
+the menu reads **Open in kitty** (or your chosen executable), with the U+E795 Nerd Font terminal icon. External shells retain the current folder and SSH behaviour for SFTP folders.
+
+The sort button beside the navigation bar's filter button offers Name, Date modified, Type, Size, Date created,
+Extension, Permissions and Owner, plus Ascending/Descending. Folder view preferences remember the selection.
 
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`
@@ -248,3 +269,46 @@ share one neutral background. Focus is indicated by the accent outline.
 
 In Open with, the default-app label uses a 15% lighter accent on dark list
 backgrounds. Selected rows retain their contrasting selection text color.
+
+Trash in Quick Access has an **Empty Trash** action in its right-click menu. It asks for confirmation and empties
+the Trash independently of the current folder or active filters. Trash icons follow the current desktop icon
+theme across the sidebar, tabs, previews and confirmation dialogs. An explicitly selected system icon theme,
+custom Trash artwork or `FE_NERD_FONT` override takes precedence. Both the Quick Access action and the bottom-right
+Empty Trash button use the same confirmation dialog.
+
+Trash uses `user-trash-full` (or its symbolic variant) when it contains items, and `user-trash` when empty.
+Zero-byte files and empty folders count as contents. The icon updates after trashing, restoring or emptying;
+the Empty Trash confirmation shows the full version. Themes without a full variant fall back to their normal bin.
+
+Terminal ligatures can span foreground-colour changes in Fish syntax highlighting. Shaping keeps operators
+together and paints each part in its cell colour; font-weight changes still start a separate shaping run.
+
+For Fish themes that make redirections bold, add this at the bottom of
+`~/.config/fish/config.fish`, after theme setup, to keep typed arrows in one font weight:
+
+```fish
+if status is-interactive
+    set -g fish_color_redirection cyan
+end
+```
+
+Apply with `source ~/.config/fish/config.fish`. A global setting is needed when a theme
+already sets the variable globally; a universal setting alone would be shadowed.
+The current session's colours can be inspected with
+`set --show fish_color_param fish_color_redirection fish_color_error`.
+Verify the font separately with `printf '%s\n' '-> => != == === <= >='`.
+
+For Kitty, edit the host's `~/.config/kitty/kitty.conf` (Fish in a container may
+have a separate shell configuration):
+
+```conf
+font_family JetBrainsMono Nerd Font Mono
+bold_font auto
+italic_font auto
+bold_italic_font auto
+disable_ligatures never
+```
+
+Use the installed family's exact name; Kitty's `kitten choose-fonts` can select it.
+Remove any `-liga` / `-calt` overrides and open a new Kitty window. Explorer's
+terminal keeps using the font selected in its own Appearance settings.

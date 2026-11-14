@@ -533,6 +533,8 @@ static void draw_branch_icon(f32 x, f32 cy, Color ic) {
     draw_glyph(g, roundf(x - margin), roundf(cy - (f32)px * 0.5f), ic);
 }
 
+static void draw_action_glyph(Font *f, u32 cp, Rect r, Color color);
+
 static void draw_toolbar_content(Pane *p, bool active, bool split) {
     PaneLayout *ly = &p->ly;
     Rect tb = ly->toolbar;
@@ -558,12 +560,12 @@ static void draw_toolbar_content(Pane *p, bool active, bool split) {
         bool on = p->tf_mode || p->tf_exts[0], hv = hot(fb);
         if (on || hv) draw_rrect(fb.x, fb.y, fb.w, fb.h, S(6), on ? CA(COL_ACCENT, 0.22f) : C(COL_FIELD_HOVER));
         Color fc = on ? C(COL_ACCENT) : C(navigation_dim);
-        f32 cx = fb.x + fb.w * 0.5f, cy = fb.y + fb.h * 0.5f, t = MAX(1.4f, S(1.5f));
-        draw_line(cx - S(7), cy - S(5), cx + S(7), cy - S(5), t, fc);
-        draw_line(cx - S(7), cy - S(5), cx - S(1.5f), cy + S(1), t, fc);
-        draw_line(cx + S(7), cy - S(5), cx + S(1.5f), cy + S(1), t, fc);
-        draw_line(cx - S(1.5f), cy + S(1), cx - S(1.5f), cy + S(6), t, fc);
-        draw_line(cx + S(1.5f), cy + S(1), cx + S(1.5f), cy + S(4.5f), t, fc);
+        draw_action_glyph(&A.font, 0xeaf1, (Rect){fb.x + S(6), fb.y + S(6), fb.w - S(12), fb.h - S(12)}, fc);
+    }
+    if (ly->sortbtn.w > 0) {
+        Rect sb = ly->sortbtn;
+        if (hot(sb)) draw_rrect(sb.x, sb.y, sb.w, sb.h, S(6), C(COL_FIELD_HOVER));
+        draw_action_glyph(&A.font, 0xf04ba, (Rect){sb.x + S(6), sb.y + S(6), sb.w - S(12), sb.h - S(12)}, C(navigation_dim));
     }
     {   // the folder's menu (three dots)
         Rect mb = ly->morebtn;
@@ -3138,6 +3140,66 @@ static void draw_dialog(void) {
     }
 }
 
+// Nerd Font action glyphs; the interface font's fontconfig fallback supplies symbols.
+static u32 menu_action_icon(const MenuItem *it) {
+    int a = it->act;
+    if (a == ACT_TERMINAL_EXTERNAL) return 0xe795;
+    switch (a) {
+    case ACT_CUT: return 0xf0c4;
+    case ACT_COPY: case ACT_TERM_COPY: case ACT_COPY_PATH: return 0xf0c5;
+    case ACT_PASTE: case ACT_TERM_PASTE: return 0xf0ea;
+    case ACT_TRASH: case ACT_DELETE: case ACT_TRASH_EMPTY: case ACT_TERM_CLEAR: return 0xf1f8;
+    case ACT_RENAME: return 0xf044;
+    case ACT_PROPERTIES: return 0xf05a;
+    case ACT_NEW_FOLDER: case ACT_NEW_FOLDER_IN: return 0xf07b;
+    case ACT_NEW_FILE: case ACT_NEW_FILE_IN: return 0xf15b;
+    case ACT_TERMINAL: case ACT_TERMINAL_LOCAL: case ACT_SSH_TERMINAL: case ACT_TERM_PANEL: return 0xf120;
+    case ACT_MENU_VIEWS: return 0xf009;
+    case ACT_MENU_SORT: return 0xf04ba;
+    case ACT_MENU_GROUP: return 0xf0c0;
+    case ACT_SORT_ASC: return 0xf15d;
+    case ACT_SORT_DESC: return 0xf15e;
+    case ACT_REFRESH: return 0xf021;
+    case ACT_UNDO: return 0xf0e2;
+    case ACT_SELECT_ALL: return 0xf046;
+    case ACT_PIN: return 0xf08d;
+    case ACT_COMPRESS_ZIP: case ACT_COMPRESS_TGZ: return 0xf1c6;
+    }
+    if (a >= ACT_SORT_BASE && a < ACT_SORT_BASE + SORT_COUNT) return 0xf0dc;
+    const char *l = it->label;
+    if (str_has_ci(l, "terminal") || str_has_ci(l, "shell")) return 0xf120;
+    if (str_has_ci(l, "copy")) return 0xf0c5;
+    if (str_has_ci(l, "delete") || str_has_ci(l, "remove") || str_has_ci(l, "forget")) return 0xf1f8;
+    if (str_has_ci(l, "rename") || str_has_ci(l, "edit")) return 0xf044;
+    if (str_has_ci(l, "refresh") || str_has_ci(l, "again")) return 0xf021;
+    if (str_has_ci(l, "search")) return 0xf002;
+    if (str_has_ci(l, "close") || str_has_ci(l, "cancel") || str_has_ci(l, "end compare")) return 0xf00d;
+    if (str_has_ci(l, "connect") || str_has_ci(l, "mount") || str_has_ci(l, "remote")) return 0xf0ac;
+    if (str_has_ci(l, "snapshot")) return 0xf030;
+    if (str_has_ci(l, "extract") || str_has_ci(l, "archive")) return 0xf1c6;
+    if (str_has_ci(l, "tab") || str_has_ci(l, "window") || str_has_ci(l, "split")) return 0xf2d2;
+    if (str_has_ci(l, "folder") || str_has_ci(l, "group")) return 0xf07b;
+    if (str_has_ci(l, "up")) return 0xf062;
+    if (str_has_ci(l, "down")) return 0xf063;
+    if (str_has_ci(l, "restore") || str_has_ci(l, "back")) return 0xf0e2;
+    if (str_has_ci(l, "open")) return 0xf07c;
+    if (str_has_ci(l, "size") || str_has_ci(l, "usage")) return 0xf080;
+    if (str_has_ci(l, "hidden") || str_has_ci(l, "preview") || str_has_ci(l, "show")) return 0xf06e;
+    if (str_has_ci(l, "git") || str_has_ci(l, "branch")) return 0xf126;
+    return it->checkable ? 0xf0c9 : 0xf013;
+}
+
+static void draw_action_glyph(Font *f, u32 cp, Rect r, Color color) {
+    Glyph *g = font_glyph(f, cp);
+    if (g->missing && cp == 0xe795) g = font_glyph(f, 0xf120);
+    if (g->missing && cp == 0xeaf1) g = font_glyph(f, 0xf0b0);
+    if (g->missing && cp == 0xf04ba) g = font_glyph(f, 0xf0dc);
+    if (g->missing) g = font_glyph(f, 0x2022);
+    f32 scale = MIN(1.f, MIN(r.w / MAX(1, g->w), r.h / MAX(1, g->h)));
+    draw_glyph_scaled(g, roundf(r.x + (r.w - g->w * scale) * .5f),
+                      roundf(r.y + (r.h - g->h * scale) * .5f), scale, color);
+}
+
 static void draw_menu_in(Menu *m, bool frame) {
     if (!m->open) return;
     Font *f = &A.font, *fs = &A.font_small;
@@ -3160,7 +3222,7 @@ static void draw_menu_in(Menu *m, bool frame) {
             if (i == m->hover && it->enabled) draw_rrect(r.x + S(5), yy, r.w - S(10), h, S(6), C(COL_SEL_FOCUS));
             hand_if(it->enabled && A.mouse_in && menu_item_at_in(m, A.mx, A.my) == i && !(m == &A.menu && menu_sub_shown() && in_rect(g_menu_sub.r, A.mx, A.my)));
             Color tc = it->enabled ? C(COL_TEXT) : C(COL_TEXT_FAINT);
-            f32 lx = anycheck ? r.x + S(30) : r.x + S(16);
+            f32 lx = anycheck ? r.x + S(56) : r.x + S(42);
             if (it->checkable) {
                 if (it->checked) {
                     f32 cx = r.x + S(14), cy = yy + h * 0.5f, t = MAX(1.4f, S(1.6f));
@@ -3180,6 +3242,7 @@ static void draw_menu_in(Menu *m, bool frame) {
                 yy += h;
                 continue;
             }
+            draw_action_glyph(f, menu_action_icon(it), (Rect){lx - S(25), yy + S(5), S(18), h - S(10)}, tc);
             draw_text(f, lx, text_y(f, yy, h), it->label, (int)strlen(it->label), tc);
             if (it->sub) { // opens a submenu: a chevron where the shortcut would be
                 draw_chevron(r.x + r.w - S(20), yy + h * 0.5f, S(4), 1, MAX(1.f, S(1.5f)), it->enabled ? (i == m->hover ? C(COL_SEL_DIM) : C(COL_TEXT_DIM)) : C(COL_TEXT_FAINT));
@@ -3241,6 +3304,11 @@ static void draw_menu_pair(Menu *m, Menu *sm) {
 
 static void draw_menu(void) {
     Menu *m = &A.menu, *sm = &g_menu_sub;
+    if (g_menu_parent.open) {
+        draw_menu_in(&g_menu_parent, true);
+        draw_menu_in(m, true);
+        return;
+    }
     bool beside = menu_sub_shown() && sm->r.y < m->r.y + m->r.h && sm->r.y + sm->r.h > m->r.y &&
                   (sm->r.x == m->r.x + m->r.w || sm->r.x + sm->r.w == m->r.x);
     if (beside) draw_menu_pair(m, sm);

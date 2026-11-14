@@ -450,6 +450,7 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
         menu_open(p, ly->morebtn.x, ly->morebtn.y + ly->morebtn.h + S(4), false);
         return;
     }
+    if (in_rect(ly->sortbtn, x, y)) { menu_open_sort(p, ly->sortbtn.x, ly->sortbtn.y + ly->sortbtn.h + S(4)); return; }
     if (in_rect(ly->filterbtn, x, y)) { menu_open_types(p, ly->filterbtn.x, ly->filterbtn.y + ly->filterbtn.h + S(4)); return; }
     if (ly->has_cmpbar && in_rect(ly->cmpbar, x, y)) { cmp_bar_click(p, x, y); return; }
     if (ly->has_trashbar && in_rect(ly->trashbar, x, y)) {
@@ -627,6 +628,11 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         return;
     }
     if (A.menu.open) {
+        if (g_menu_parent.open && !in_rect(A.menu.r, x, y) && in_rect(g_menu_parent.r, x, y)) {
+            menu_restore_parent();
+            if (b->button == SDL_BUTTON_LEFT) menu_activate(menu_item_at(x, y));
+            return;
+        }
         if (menu_sub_shown() && in_rect(g_menu_sub.r, x, y)) {
             int arrow = menu_arrow_at_in(&g_menu_sub, y);
             if (arrow) menu_scroll_by_in(&g_menu_sub, (f32)arrow * g_menu_sub.r.h * 0.5f);
@@ -640,6 +646,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
             return;
         }
         A.menu.open = false;
+        g_menu_parent.open = false;
         if (b->button != SDL_BUTTON_RIGHT) return; // a right-click elsewhere opens a new menu
     }
     if (b->button == SDL_BUTTON_LEFT) {

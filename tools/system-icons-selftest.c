@@ -76,9 +76,24 @@ int main(void) {
     snprintf(path, sizeof path, "%s/icons/Parent/16x16/places/inherited.svg", root); write_file(path, svg);
     snprintf(path, sizeof path, "%s/icons/hicolor/16x16/places/fallback.svg", root); write_file(path, svg);
     snprintf(path, sizeof path, "%s/icons/Reversal/16x16/places/window-close-symbolic.svg", root); write_file(path, svg);
+    snprintf(path, sizeof path, "%s/icons/Reversal/16x16/places/user-trash.svg", root);
+    write_file(path, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#ff0000\"/></svg>");
+    snprintf(path, sizeof path, "%s/icons/Reversal/16x16/places/user-trash-full.svg", root);
+    write_file(path, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#00ff00\"/></svg>");
     system_icons_scan();
     assert(system_icon_theme_find("Reversal") >= 0);
     assert(!strcmp(g_system_icon_current, "Reversal"));
+    { // Full and empty Trash artwork remain distinct, including dialog-sized rasterization.
+        const char *bins[] = {"user-trash", "user-trash-full"};
+        for (int k = 0; k < 2; k++) {
+            assert(system_icon_lookup("Reversal", bins[k], 32, path, sizeof path));
+            u8 *bin = system_icon_raster_path(path, 32, 32);
+            assert(bin);
+            int center = (16 * 32 + 16) * 4;
+            assert(bin[center] == (k ? 0 : 255) && bin[center + 1] == (k ? 255 : 0));
+            free(bin);
+        }
+    }
     assert(system_icon_lookup("Reversal", "folder", 16, path, sizeof path));
     assert(strstr(path, "/16x16/"));
     assert(system_icon_lookup("Reversal", "folder", 64, path, sizeof path));
@@ -171,6 +186,6 @@ int main(void) {
     system_icons_scan();
     assert(system_icon_lookup("Reversal", "folder", 16, path, sizeof path) && strstr(path, "/data/icons/"));
     assert(!nftw(temp, remove_fixture, 16, FTW_DEPTH | FTW_PHYS));
-    puts("System icon checks passed: SVG/CSS color preservation, discovery, current theme, SVG/PNG raster/color, symbolic window actions, size selection, inheritance, cycle/missing fallback, user overrides.");
+    puts("System icon checks passed: SVG/CSS color preservation, discovery, current theme, SVG/PNG raster/color, full/empty Trash, symbolic window actions, size selection, inheritance, cycle/missing fallback, user overrides.");
     return 0;
 }

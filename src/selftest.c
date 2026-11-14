@@ -1634,6 +1634,9 @@ static int run_selftest_m6(void) {
     ST_CHECK(st_size(M6_BASE "/b/file1.txt") == 100);
 
     // drop files onto a tab -> into that tab's folder
+    // A panel's only tab is hidden; add a second tab to expose this drop target.
+    tab_new_in(p2, M6_BASE "/c", panel_end_index(p2), true);
+    layout();
     panel_activate(p0);
     st_select(active_pane(), "file2.txt");
     f32 rowy = st_row_y(active_pane(), "file2.txt");
@@ -1810,6 +1813,71 @@ static int run_selftest_m7(void) {
     for (int t = 0; t < ICON_THEMES; t++) {
         icon_set_theme(t);
         ST_CHECK(icon_glyph(folder_icon_for_name("src"), 16) != NULL && big_icon_tex(icon_find("folder"), 96) != NULL);
+    }
+    { // Trash follows the live desktop icon theme even with bundled icons / Nerd Font override.
+        char root[PATH_MAX], path[PATH_MAX + 128];
+        snprintf(root, sizeof root, "%s/desktop-icons", M7_BASE);
+        system_icon_root(root);
+        const char *names[] = {"TrashThemeA", "TrashThemeB"};
+        for (int k = 0; k < 2; k++) {
+            snprintf(path, sizeof path, "%s/%s/16x16/places", root, names[k]); mkdir_p(path, 0700);
+            snprintf(path, sizeof path, "%s/%s/index.theme", root, names[k]);
+            FILE *f = fopen(path, "w");
+            if (f) { fputs("[Icon Theme]\nDirectories=16x16/places\n[16x16/places]\nSize=16\nType=Fixed\n", f); fclose(f); }
+            snprintf(path, sizeof path, "%s/%s/16x16/places/user-trash.svg", root, names[k]);
+            f = fopen(path, "w");
+            if (f) {
+                fprintf(f, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"%s\"/></svg>", k ? "#00ff00" : "#ff0000");
+                fclose(f);
+            }
+            if (g_nsystem_icons < SYS_ICON_THEMES) {
+                SystemIconTheme *theme = &g_system_icons[g_nsystem_icons++];
+                memset(theme, 0, sizeof *theme);
+                snprintf(theme->name, sizeof theme->name, "%s", names[k]);
+            }
+        }
+        icon_set_theme(0);
+        icons_set_trash_full(false);
+        for (int k = 0; k < 2; k++) {
+            snprintf(g_system_icon_current, sizeof g_system_icon_current, "%s", names[k]);
+            icons_flush();
+            u8 *pixels = system_icon_raster(icon_find("trash"), 16, 16);
+            ST_CHECK(pixels != NULL);
+            if (pixels) {
+                int center = (8 * 16 + 8) * 4;
+                ST_CHECK(pixels[center] == (k ? 0 : 255) && pixels[center + 1] == (k ? 255 : 0));
+                free(pixels);
+            }
+            // Explicit system selection takes precedence over the desktop's default.
+            int chosen = system_icon_theme_find(names[1 - k]);
+            icon_set_theme(icon_system_base() + 1 + chosen);
+            pixels = system_icon_raster(icon_find("trash"), 32, 32); // confirmation-dialog size
+            ST_CHECK(pixels != NULL);
+            if (pixels) {
+                int center = (16 * 32 + 16) * 4;
+                ST_CHECK(pixels[center] == (k ? 255 : 0) && pixels[center + 1] == (k ? 0 : 255));
+                free(pixels);
+            }
+            icon_set_theme(0);
+        }
+        snprintf(path, sizeof path, "%s/TrashThemeA/16x16/places/user-trash-full.svg", root);
+        FILE *full = fopen(path, "w");
+        if (full) {
+            fputs("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#0000ff\"/></svg>", full);
+            fclose(full);
+        }
+        snprintf(g_system_icon_current, sizeof g_system_icon_current, "TrashThemeA");
+        icons_set_trash_full(true);
+        u8 *full_pixels = system_icon_raster(icon_find("trash"), 32, 32);
+        ST_CHECK(full_pixels != NULL);
+        if (full_pixels) {
+            int center = (16 * 32 + 16) * 4;
+            ST_CHECK(full_pixels[center] == 0 && full_pixels[center + 1] == 0 && full_pixels[center + 2] == 255);
+            free(full_pixels);
+        }
+        icons_set_trash_full(false);
+        system_icons_scan();
+        icons_flush();
     }
     { // custom icon themes: <config>/icons/<Name>/ - overrides, ext-*.svg, base fallback, Options list, persistence
         char dir[PATH_MAX], path[PATH_MAX + 64];
@@ -2499,12 +2567,12 @@ static int run_selftest_m8(void) {
         ST_CHECK(trash_info("abc.txt", orig, sizeof orig, date, sizeof date) && !strcmp(orig, M8_BASE "/abc.txt"));
     }
     for (int k = 0; k < 300 && (A.trash_job || !A.trash_known); k++) { st_frames(1); SDL_Delay(5); }
-    ST_CHECK(A.trash_known && A.trash_size == 3); // abc.txt ("abc") is in it: the sidebar shows its size
+    ST_CHECK(A.trash_known && A.trash_size == 3 && g_trash_full); // abc.txt ("abc") is in it: the sidebar shows its size
     st_shot("trash");
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, p->ly.rrestore.x + 5, p->ly.rrestore.y + 5, SDL_BUTTON_LEFT, 1, 0);
     st_wait_ops();
     for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
-    ST_CHECK(A.trash_known && A.trash_size == 0); // restored: empty again
+    ST_CHECK(A.trash_known && A.trash_size == 0 && !g_trash_full); // restored: empty again
     ST_CHECK(st_exists(M8_BASE "/abc.txt") && !st_exists(M8_BASE "/xdg/Trash/info/abc.txt.trashinfo") && p->count == 0);
     pane_navigate(p, M8_BASE, true); st_wait();
     st_select(p, "abc.txt");
@@ -2526,6 +2594,31 @@ static int run_selftest_m8(void) {
     st_key(SDLK_RETURN, SDL_KMOD_NONE);
     st_wait_ops();
     ST_CHECK(p->count == 0 && !st_exists(M8_BASE "/xdg/Trash/files/photo3.jpg") && !st_exists(M8_BASE "/xdg/Trash/info/photo3.jpg.trashinfo"));
+
+    // Empty from Quick Access while viewing a different folder; include hidden trash entries.
+    pane_navigate(p, M8_BASE, true); st_wait();
+    st_write(M8_BASE "/xdg/Trash/files/.hidden-trash", 0);
+    trash_size_refresh();
+    for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(g_trash_full && A.trash_size == 0);
+    st_write(M8_BASE "/xdg/Trash/info/.hidden-trash.trashinfo", 1);
+    menu_open_place(ti, S(20), S(150));
+    int empty = -1;
+    for (int i = 0; i < A.menu.n; i++) if (A.menu.items[i].act == ACT_TRASH_EMPTY) empty = i;
+    ST_CHECK(empty >= 0 && !pane_is_trash(p));
+    if (empty >= 0) {
+        menu_activate(empty);
+        ST_CHECK(A.dlg.open && !strcmp(A.dlg.title, "Empty Trash") && strstr(A.dlg.msg, "all 1 items"));
+        if (A.dlg.open) dialog_choose(A.dlg.cancel);
+        ST_CHECK(st_exists(M8_BASE "/xdg/Trash/files/.hidden-trash") && st_exists(M8_BASE "/photo1.jpg"));
+        do_action(p, ACT_TRASH_EMPTY);
+        if (A.dlg.open) dialog_choose(0);
+        st_wait_ops();
+        ST_CHECK(!strcmp(p->path, M8_BASE) && st_exists(M8_BASE "/photo1.jpg"));
+        ST_CHECK(!st_exists(M8_BASE "/xdg/Trash/files/.hidden-trash") && !st_exists(M8_BASE "/xdg/Trash/info/.hidden-trash.trashinfo"));
+        do_action(p, ACT_TRASH_EMPTY);
+        ST_CHECK(!A.dlg.open && !strcmp(A.toast, "The trash is already empty"));
+    }
 
     // archives: compress a folder, browse into the zip, extract, read-only, zip-slip
     pane_navigate(p, M8_BASE, true); st_wait();
@@ -2682,6 +2775,63 @@ static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
 
+    // Toolbar sort selection, explicit direction and external-shell configuration entry.
+    st_frames(1);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, p->ly.sortbtn.x + 5, p->ly.sortbtn.y + 5, SDL_BUTTON_LEFT, 1, 0);
+    ST_CHECK(A.menu.open && A.menu.n == SORT_COUNT + 3);
+    menu_activate(SORT_SIZE);
+    ST_CHECK(p->sort_key == SORT_SIZE && p->sort_desc);
+    do_action(p, ACT_SORT_ASC);
+    ST_CHECK(p->sort_key == SORT_SIZE && !p->sort_desc);
+    pane_set_sort(p, SORT_NAME);
+    // Compact parent menu: hover opens Views, arrows return/open, clicks activate child actions.
+    menu_open(p, S(100), S(100), false);
+    int views = -1, sorts = -1, groups = -1;
+    for (int i = 0; i < A.menu.n; i++) {
+        int act = A.menu.items[i].act;
+        if (act == ACT_MENU_VIEWS) views = i;
+        if (act == ACT_MENU_SORT) sorts = i;
+        if (act == ACT_MENU_GROUP) groups = i;
+        ST_CHECK(!(act >= ACT_VIEW_BASE && act < ACT_VIEW_BASE + ZOOM_COUNT));
+    }
+    ST_CHECK(views >= 0 && sorts >= 0 && groups >= 0);
+    if (views >= 0 && sorts >= 0 && groups >= 0) {
+        f32 vy = A.menu.r.y + S(5) - A.menu.scroll;
+        for (int i = 0; i < views; i++) vy += menu_item_h(&A.menu.items[i]);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), vy + S(12), 0, 0, 0);
+        ST_CHECK(g_menu_parent.open && A.menu.items[0].act == ACT_VIEW_BASE);
+        st_frames(1);
+        menu_key(SDLK_LEFT);
+        ST_CHECK(!g_menu_parent.open && A.menu.items[views].act == ACT_MENU_VIEWS);
+        A.menu.hover = sorts;
+        menu_key(SDLK_RIGHT);
+        ST_CHECK(g_menu_parent.open && A.menu.hover == 0 && A.menu.n == SORT_COUNT + 3);
+        menu_key(SDLK_ESCAPE);
+        ST_CHECK(!g_menu_parent.open && A.menu.open);
+        menu_activate(groups);
+        ST_CHECK(g_menu_parent.open && A.menu.n == GROUP_COUNT);
+        menu_activate(GROUP_NONE);
+        ST_CHECK(!A.menu.open && !g_menu_parent.open && p->group == GROUP_NONE);
+    }
+    do_action(p, ACT_TERMINAL_EXTERNAL);
+    ST_CHECK(g_sheet.kind == SHEET_OPTIONS && g_opt.cat == OC_INTEGRATION);
+    te_set(&g_opt.terminal_path, "/proc/self/exe", 14, 0);
+    opt_terminal_path_apply();
+    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe") && strstr(A.toast, "Terminal applied: Open in exe"));
+    settings_save(); settings_load();
+    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe"));
+    te_set(&g_opt.terminal_path, "/nonexistent/terminal", 21, 0);
+    opt_terminal_path_apply();
+    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe") && strstr(A.toast, "not found"));
+    te_set(&g_opt.terminal_path, "/tmp", 4, 0);
+    opt_terminal_path_apply();
+    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe") && strstr(A.toast, "not executable"));
+    te_set(&g_opt.terminal_path, "", 0, 0);
+    opt_terminal_path_apply();
+    ST_CHECK(!g_external_terminal[0] && strstr(A.toast, "Terminal cleared"));
+    sheet_close();
+    g_opt.cat = OC_APPEARANCE;
+
     // --- themes ---
     ST_CHECK(g_nthemes >= 5 && T.bg == g_theme_dark.bg);
     st_shot("m9-dark");
@@ -2758,6 +2908,7 @@ static int run_selftest_m9(void) {
     st_key(SDLK_A, SDL_KMOD_CTRL); st_type("Row spacing"); st_frames(1);
     st_opt_click(st_opt_hit(HP_SEG, OPT_ROW_SPACING, 0));
     ST_CHECK(A.row_spacing == 0);
+    st_key(SDLK_ESCAPE, SDL_KMOD_NONE); // clear the search before testing list scrolling
     { // the scrollbar's thumb can be dragged (not only the wheel); a press on its track pages
         st_frames(1);
         SheetBar *sb = NULL;
@@ -2817,6 +2968,7 @@ static int run_selftest_m9(void) {
     // falls back cleanly when the desktop does not expose a valid color.
     {
         int saved_theme = g_theme_cur;
+        g_unified_surfaces = true; // theme capture intentionally turns this off
         g_theme_cur = theme_find("Dark");
         theme_apply();
         ST_CHECK(g_show_separators && g_unified_surfaces);
@@ -3630,6 +3782,59 @@ static bool st_term_wait(Term *t, const char *needle) {
 
 static int run_selftest_m11(void) {
     st_wait();
+    // Exercise the same calt shaping used by the renderer with patched JetBrains
+    // families when installed; Fira Code is a useful independent ligature fixture.
+    {
+        const char *families[] = {"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "JetBrainsMono NF", "Fira Code"};
+        for (size_t family = 0; family < ARRAY_COUNT(families); family++) {
+            char *path = font_family_file(families[family]);
+            if (!path) continue;
+            FT_Face face;
+            if (!FT_New_Face(g_ft, path, 0, &face)) {
+                FT_Set_Pixel_Sizes(face, 0, 16);
+                hb_font_t *font = hb_ft_font_create_referenced(face);
+                const char *sequences[] = {"->", "!=", "==="};
+                for (size_t seq = 0; seq < ARRAY_COUNT(sequences); seq++) {
+                    hb_buffer_t *buf = hb_buffer_create();
+                    const char *text = sequences[seq];
+                    int len = (int)strlen(text);
+                    hb_buffer_add_utf8(buf, text, len, 0, len);
+                    term_shape_buffer(font, buf);
+                    unsigned count;
+                    hb_glyph_info_t *glyphs = hb_buffer_get_glyph_infos(buf, &count);
+                    bool changed = count != (unsigned)len;
+                    for (unsigned i = 0; i < count; i++) {
+                        ST_CHECK(glyphs[i].codepoint != 0 && glyphs[i].cluster < (unsigned)len);
+                        if (glyphs[i].cluster < (unsigned)len)
+                            changed |= glyphs[i].codepoint != FT_Get_Char_Index(face, (unsigned char)text[glyphs[i].cluster]);
+                    }
+                    ST_CHECK(changed);
+                    hb_buffer_destroy(buf);
+                }
+                hb_font_destroy(font);
+                FT_Done_Face(face);
+            }
+            free(path);
+        }
+    }
+    { // Fish can change colour between operator characters; that must not break shaping.
+        Term sample = {0};
+        sample.rows = 2; sample.cols = 8; sample.cw = 10; sample.ch = 20;
+        sample.vt = vterm_new(sample.rows, sample.cols);
+        sample.scr = vterm_obtain_screen(sample.vt);
+        vterm_screen_reset(sample.scr, 1);
+        const char *ansi = "\033[31m=\033[32m=";
+        vterm_input_write(sample.vt, ansi, strlen(ansi));
+        vterm_screen_flush_damage(sample.scr);
+        TCell first, second;
+        ST_CHECK(term_cell(&sample, 0, 0, &first) && term_cell(&sample, 0, 1, &second));
+        ST_CHECK(first.fg != second.fg);
+        term_fonts();
+        ST_CHECK(term_draw_run(&sample, 0, 0, 0, 14, &g_term_font) == 1);
+        ST_CHECK(term_cell_foreground(&sample, 0, 0, &first) == first.fg);
+        ST_CHECK(term_cell_foreground(&sample, 0, 1, &second) == second.fg);
+        vterm_free(sample.vt);
+    }
     const char *cfg = "/tmp/fe-selftest-config";
     // --- the default terminal's config: foot (include + [colors-dark]), kitty, Alacritty (import), Ghostty (theme)
     st_write_text("/tmp/fe-selftest-config/xdg-terminals.list", "# preference\nfoot.desktop\n");
@@ -3693,6 +3898,7 @@ static int run_selftest_m11(void) {
     ST_CHECK(term_cell(t, hr, 0, &rc) && (rc.attr & 32) && rc.fg == 0xD0D3D9);                                // default = its foreground
     for (int k = 0; k < 100 && strcmp(t->title, "MyTitle"); k++) { st_frames(1); SDL_Delay(5); }
     ST_CHECK(!strcmp(term_label(t), "MyTitle"));
+    ST_CHECK(!strcmp(g_term_font.paths[0], A.font_path) && g_term_font.px == A.font.px);
     ST_CHECK(t->cols > 20 && t->rows > 5 && t->cw > 0); // sized to the panel
     st_frames(2);
     st_shot("terminal");

@@ -26,6 +26,7 @@ static NSVGimage *g_branch_img;
 #include "icon_contrast.c"
 static u32 g_icon_surface_bg; // set only while drawing navigation/sidebar icons
 
+static bool g_trash_full; // contents, including zero-byte files and empty folders
 static int g_icon_theme; // 0..ICON_THEMES-1 built in, then custom themes (icon_theme_name)
 
 // --- custom icon themes: <config>/icons/<Name>/ with SVGs named like the built-in icons ("python.svg",
@@ -426,21 +427,37 @@ static const char *system_icon_name(int id) {
     return !strncmp(name, "folder", 6) ? "folder" : "text-x-generic";
 }
 static u8 *system_icon_raster(int id, int w, int h) {
+    bool trash = id >= 0 && id < ICON_COUNT && (!strcmp(g_icon_names[id], "trash") || !strcmp(g_icon_names[id], "folder-trash"));
     bool window = id >= ICON_SYSTEM_BASE + SYS_WINDOW_MINIMIZE && id <= ICON_SYSTEM_BASE + SYS_WINDOW_CLOSE;
-    if ((!window && !icon_system_selected()) || id < 0) return NULL;
+    if ((!window && !trash && !icon_system_selected()) || id < 0) return NULL;
     if (id >= ICON_SYSTEM_BASE && id < ICON_SYSTEM_BASE + (int)ARRAY_COUNT(g_system_symbols)) {
         const char *theme = window ? g_system_icon_current : icon_system_theme();
         return system_action_raster(theme, g_system_symbols[id - ICON_SYSTEM_BASE], w, h, window);
     }
     if (id >= ICON_COUNT && (id < ICON_SHARE_BASE || id >= ICON_EXT_BASE)) return NULL;
     if (id == ICON_SHARE_BASE + 4) return NULL; // preserve the classic Git logo across desktop themes
-    const char *name = system_icon_name(id), *theme = icon_system_theme();
+    CustomIconTheme *custom = trash ? icon_custom() : NULL;
+    if (custom && custom->svg[id]) return NULL; // explicit custom Trash artwork wins
+    const char *name = system_icon_name(id);
+    const char *theme = trash && !icon_system_selected() ? g_system_icon_current : icon_system_theme();
     char path[PATH_MAX];
+    if (trash && g_trash_full) {
+        const char *full_names[] = {"user-trash-full", "user-trash-full-symbolic"};
+        for (size_t i = 0; i < ARRAY_COUNT(full_names); i++)
+            if (system_icon_lookup(theme, full_names[i], MAX(w, h), path, sizeof path)) {
+                u8 *pixels = system_icon_raster_path(path, w, h);
+                if (pixels) return pixels;
+            }
+    }
     if (system_icon_lookup(theme, name, MAX(w, h), path, sizeof path)) {
         u8 *pixels = system_icon_raster_path(path, w, h);
         if (pixels) return pixels;
     }
-    if (id >= ICON_SHARE_BASE + 3) return NULL; // use bundled emblem when the desktop has none
+    if (trash && system_icon_lookup(theme, "user-trash-symbolic", MAX(w, h), path, sizeof path)) {
+        u8 *pixels = system_icon_raster_path(path, w, h);
+        if (pixels) return pixels;
+    }
+    if (trash || id >= ICON_SHARE_BASE + 3) return NULL; // preserve the bundled bin/emblem when the desktop has none
     const char *fallback = (id >= ICON_SHARE_BASE || !strncmp(g_icon_names[id], "folder", 6)) ? "folder" : "text-x-generic";
     if (strcmp(name, fallback) && system_icon_lookup(theme, fallback, MAX(w, h), path, sizeof path))
         return system_icon_raster_path(path, w, h);
@@ -547,8 +564,10 @@ static bool draw_nerd_icon(f32 x, f32 y, f32 size, int id, bool hidden) {
     bool folder = !strncmp(name, "folder", 6);
     u32 cp = folder ? 0xf07b : 0xf15b;
     if (!strcmp(name, "folder-home")) cp = 0xf015;
-    else if (!strcmp(name, "trash") || !strcmp(name, "folder-trash")) cp = 0xf1f8;
-    else if (!strcmp(name, "image") || !strcmp(name, "svg")) cp = 0xf1c5;
+    else if (!strcmp(name, "trash") || !strcmp(name, "folder-trash")) {
+        cp = g_trash_full ? 0xf0a79 : 0xf0a7a; // nf-md-trash_can / trash_can_outline
+        if (!FT_Get_Char_Index(font.faces[0], cp)) cp = 0xf1f8;
+    } else if (!strcmp(name, "image") || !strcmp(name, "svg")) cp = 0xf1c5;
     else if (!strcmp(name, "audio")) cp = 0xf1c7;
     else if (!strcmp(name, "video")) cp = 0xf1c8;
     else if (!strcmp(name, "zip")) cp = 0xf1c6;
@@ -559,7 +578,7 @@ static bool draw_nerd_icon(f32 x, f32 y, f32 size, int id, bool hidden) {
     int px = MAX(1, (int)roundf(size * 0.85f));
     // Include size in the cache key: tab, sidebar and grid sizes coexist without
     // invalidating each other's glyphs every frame.
-    u32 key = cp | ((u32)px << 16), slot;
+    u32 key = cp | ((u32)px << 21), slot;
     Glyph *g = glyph_find(&font, key, &slot);
     if (!g) {
         if (font.px != px) {
@@ -702,6 +721,12 @@ static void icons_flush(void) {
     for (int i = 0; i < g_nbig; i++) SDL_DestroyTexture(g_big_icons[i].tex);
     g_nbig = 0;
     atlas_reset(); // glyph-atlas icons (and text, re-rasterized on demand)
+}
+
+static void icons_set_trash_full(bool full) {
+    if (g_trash_full == full) return;
+    g_trash_full = full;
+    icons_flush();
 }
 
 static void icon_set_theme(int t) {
