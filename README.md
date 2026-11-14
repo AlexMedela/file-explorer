@@ -65,5 +65,12 @@ All keys: [docs/keys.md](docs/keys.md)
 ## Docs
 [Install](docs/install.md) · [Keys](docs/keys.md) · [Settings](docs/settings.md) · [Integration](docs/integration.md) · [Building](docs/building.md) · [Architecture](docs/architecture.md)
 
+## Thanks
+To everyone who sent code, reported bugs or asked for features:
+
+<a href="https://github.com/zeropaulsy"><img src="https://github.com/zeropaulsy.png?size=96" width="48" height="48" alt="@zeropaulsy" title="@zeropaulsy"></a>
+<a href="https://github.com/juangiler"><img src="https://github.com/juangiler.png?size=96" width="48" height="48" alt="@juangiler" title="@juangiler"></a>
+<a href="https://github.com/pr83-glitch"><img src="https://github.com/pr83-glitch.png?size=96" width="48" height="48" alt="@pr83-glitch" title="@pr83-glitch"></a>
+
 ## Licence
 [MIT](LICENSE). Bundled icon sets and libraries keep their own licences, listed in [Building](docs/building.md#tools-and-self-tests).
