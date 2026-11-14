@@ -3616,6 +3616,16 @@ static int run_selftest_m11(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, fp->ly.list.x + S(300), fp->ly.list.y + fp->ly.list.h - S(10), SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, fp->ly.list.x + S(300), fp->ly.list.y + fp->ly.list.h - S(10), SDL_BUTTON_LEFT, 1, 0);
         ST_CHECK(!active_term() && ft->dock_on);
+        // its close button hides it (the shell keeps running); F4 brings it back
+        Rect xb = ft->dock_x;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, xb.x + xb.w * 0.5f, xb.y + xb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, xb.x + xb.w * 0.5f, xb.y + xb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        layout();
+        ST_CHECK(xb.w > 0 && !ft->dock_on && ft->dock == keep && !active_term() && fabsf(fp->ly.area.h - h0) < 1);
+        st_key(SDLK_F4, SDL_KMOD_NONE);
+        st_key(SDLK_F4, SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
+        layout();
+        ST_CHECK(ft->dock_on && ft->dock == keep && !active_term());
         // drag the line above it: taller, remembered
         f32 dh0 = ft->dock_r.h, ey = ft->dock_div.y + ft->dock_div.h * 0.5f;
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, ft->dock_r.x + S(200), ey, SDL_BUTTON_LEFT, 1, 0);

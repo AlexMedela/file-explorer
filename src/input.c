@@ -665,6 +665,11 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
     }
     Panel *bpn = panel_at(x, y);
     if (bpn && in_rect(bpn->bar, x, y)) { on_mouse_down_tabbar(bpn, b, x, y); return; }
+    if (bpn && bpn->cur && bpn->cur->dock_on && bpn->cur->dock && b->button == SDL_BUTTON_LEFT && in_rect(bpn->cur->dock_x, x, y)) {
+        if (bpn != A.ap) panel_activate(bpn);
+        dock_toggle(); // the terminal panel's close button: hidden, the shell keeps running (as with F4)
+        return;
+    }
     if (bpn && bpn->cur && bpn->cur->dock_on && b->button == SDL_BUTTON_LEFT && in_rect(bpn->cur->dock_div, x, y)) {
         if (b->clicks >= 2) { A.dock_h = 240; A.settings_dirty = true; } // double-click: the default height
         else {
@@ -691,6 +696,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
             menu_add("Paste", "Ctrl+Shift+V", ACT_TERM_PASTE, true);
             menu_sep();
             menu_add("Clear scrollback", "", ACT_TERM_CLEAR, true);
+            if (in_dock) menu_add("Hide terminal panel", "F4", ACT_TERM_PANEL, true);
             menu_finish(x, y);
             return;
         }

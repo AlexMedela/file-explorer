@@ -5,6 +5,10 @@
 **New**
 - Rounded window corners and a drop shadow, like GTK apps (Options > Appearance > Rounded corners, off by default, takes a restart). Square and without shadow when maximised or snapped. On X11 it needs a compositor. Thanks to @zeropaulsy.
 - Open folders with other apps: right-click a folder → "Open with…", or empty space → "Open this folder with…" for the folder you are in, to open a project in your editor, terminal or game engine. The app starts inside the folder. "Open with" is a submenu (also for files): the apps you picked for that type before through "Other app…" come first, then the apps for that type.
+- The terminal panel has a close button (×, top right) and a "Hide terminal panel" entry in its right-click menu, so it can be closed without F4.
+
+**Fixed**
+- "Open in external terminal" opens in that folder with every terminal, also Ghostty and terminals that hand the window to one already running (the folder is passed with the terminal's own option, e.g. `--working-directory`).
 
 ## 0.11.1
 

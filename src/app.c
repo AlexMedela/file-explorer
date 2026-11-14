@@ -271,7 +271,7 @@ typedef struct Tab {
     // the terminal panel under the folder (F4, like Dolphin): lives as long as the tab, shown or not
     Term *dock;
     bool dock_on, dock_focus; // shown / has the keyboard (else the folder has it)
-    Rect dock_r, dock_div;    // where it's drawn, the edge above it (drag to resize)
+    Rect dock_r, dock_div, dock_x; // where it's drawn, the edge above it (drag to resize), its close button (top right)
     char dock_cwd[PATH_MAX];  // the shell's folder as last seen: when it changes (cd typed there), the pane follows
     char dock_want[PATH_MAX]; // a cd we typed for the pane, until the shell gets there (or gives up)
     u64 dock_want_t;
@@ -1056,13 +1056,15 @@ static void layout_panel(Panel *pn, Rect r) {
         t->r = (Rect){x0 + k * tw, r.y + roundf(S(6)), tw, tb - roundf(S(6))};
         k++;
         Rect pb = body;
-        t->dock_r = t->dock_div = (Rect){0, 0, 0, 0};
+        t->dock_r = t->dock_div = t->dock_x = (Rect){0, 0, 0, 0};
         if (t->dock_on && !t->term) { // the terminal panel takes the bottom (the folder keeps at least a little)
             f32 dh = MIN(roundf(S(A.dock_h)), roundf(body.h * 0.8f));
             dh = MAX(dh, MIN(roundf(S(60)), roundf(body.h * 0.5f)));
             pb.h -= dh + 1;
             t->dock_r = (Rect){body.x, pb.y + pb.h + 1, body.w, dh};
             t->dock_div = (Rect){body.x, t->dock_r.y - roundf(S(3)), body.w, 1 + 2 * roundf(S(3))};
+            f32 xs = roundf(S(22));
+            t->dock_x = (Rect){t->dock_r.x + t->dock_r.w - xs - roundf(S(8)), t->dock_r.y + roundf(S(8)), xs, xs};
         }
         layout_pane(&t->pane[0], pb);
     }
@@ -5359,9 +5361,28 @@ static void spawn_terminal(const char *dir, char *const cmd[]) {
     char *argv[32];
     int n = 0;
     argv[n++] = exe;
+    // the folder as an option too, where the terminal has one: some don't start in the folder they're started in (one
+    // already running opens the window, or Ghostty, taking itself for launched from the desktop, starts in home)
+    char dopt[PATH_MAX + 32];
+    if (!strcmp(name, "wezterm")) argv[n++] = "start";
+    if (dir) {
+        static const char *const dflag[][2] = {
+            {"xdg-terminal-exec", "--dir="}, {"ghostty", "--working-directory="}, {"kitty", "--directory="},
+            {"foot", "--working-directory="}, {"alacritty", "--working-directory="}, {"wezterm", "--cwd="},
+            {"konsole", "--workdir="}, {"gnome-terminal", "--working-directory="}, {"kgx", "--working-directory="},
+            {"ptyxis", "--working-directory="}, {"xfce4-terminal", "--working-directory="}, {"mate-terminal", "--working-directory="},
+            {"tilix", "--working-directory="}, {"terminator", "--working-directory="}, {"lxterminal", "--working-directory="},
+            {"qterminal", "--workdir="}, {"rio", "--working-dir="}};
+        for (size_t i = 0; i < ARRAY_COUNT(dflag); i++)
+            if (!strcmp(name, dflag[i][0])) {
+                snprintf(dopt, sizeof dopt, "%s%s", dflag[i][1], dir);
+                argv[n++] = dopt;
+                break;
+            }
+    }
     char joined[PATH_MAX * 2] = "";
     if (cmd) { // how each terminal takes a command to run
-        if (!strcmp(name, "wezterm")) { argv[n++] = "start"; argv[n++] = "--"; }
+        if (!strcmp(name, "wezterm")) argv[n++] = "--";
         else if (!strcmp(name, "kgx") || !strcmp(name, "gnome-terminal") || !strcmp(name, "ptyxis")) argv[n++] = "--";
         else if (!strcmp(name, "xfce4-terminal") || !strcmp(name, "mate-terminal") || !strcmp(name, "terminator")) argv[n++] = "-x";
         else if (!strcmp(name, "tilix") || !strcmp(name, "qterminal") || !strcmp(name, "lxterminal")) { // one string
@@ -11033,8 +11054,13 @@ static void frame_draw(void) {
         else draw_pane(p, pn == A.ap && !(ct->dock_on && ct->dock_focus), multi);
         if (ct->dock_on && ct->dock && ct->dock_r.h > 0) { // the terminal panel, under a line
             bool dh = A.drag == DRAG_DOCK || (A.mouse_in && A.drag == DRAG_NONE && in_rect(ct->dock_div, A.mx, A.my));
+            ct->dock->hint_rpad = ct->dock_x.w + roundf(S(6)); // (its scrolled-back hint goes left of the close button)
             term_draw(ct->dock, ct->dock_r, pn == A.ap && ct->dock_focus);
             draw_rect(ct->dock_r.x, ct->dock_r.y - 1, ct->dock_r.w, 1, C(dh ? COL_ACCENT : COL_BORDER));
+            Rect xb = ct->dock_x; // close (hides it, like F4), for those who don't use the keys
+            bool xh = A.drag == DRAG_NONE && hot(xb);
+            draw_rrect(xb.x, xb.y, xb.w, xb.h, xb.h * 0.5f, C(xh ? COL_CONTROL_HOVER : COL_POPUP));
+            draw_cross(xb.x + xb.w * 0.5f, xb.y + xb.h * 0.5f, S(7), MAX(1.f, S(1.3f)), C(xh ? COL_TEXT : COL_TEXT_DIM));
         }
         draw_panel_bar(pn);
         if (multi && pn != A.ap && A.dim_inactive) {
@@ -11689,6 +11715,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < nextra; i++) open_target(extra_tabs[i], false, false);
     if (A.screenshot && getenv("FE_SHOT_OPTIONS")) options_open_page(OC_UPDATES); // visual checks of the Updates page
     if (A.screenshot && getenv("FE_SHOT_TERMINAL")) open_terminal(active_pane()->path); // visual checks of terminal tabs
+    if (A.screenshot && getenv("FE_SHOT_DOCK")) dock_toggle(); // visual checks of the terminal panel
     if (A.screenshot && getenv("FE_SHOT_CONNECT")) { // visual checks: Edit server (first saved one), "pick" opens the icon picker
         connect_open(A.nservers ? 0 : -1);
         if (!strcmp(getenv("FE_SHOT_CONNECT"), "pick")) g_sheet.cn_pick = true;

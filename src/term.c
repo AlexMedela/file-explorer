@@ -357,6 +357,7 @@ struct Term {
     TLine **sb;       // scrollback ring (oldest first): sb_head .. sb_n
     int sb_n, sb_cap, sb_head;
     int sb_off;       // lines scrolled back (0 = live)
+    f32 hint_rpad;    // room the owner keeps clear at the top right (the terminal panel's close button)
     char title[256], title_tmp[256];
     char cwd_label[NAME_MAX + 1];
     u64 label_t;
@@ -991,7 +992,7 @@ static void term_draw(Term *t, Rect area, bool focused) {
         snprintf(m, sizeof m, "\xE2\x86\x91 %d", t->sb_off);
         Font *fs = &A.font_small;
         f32 tw = text_width(fs, m, (int)strlen(m)) + S(16), hh = roundf(S(22));
-        Rect b = {area.x + area.w - tw - S(10), area.y + S(8), tw, hh};
+        Rect b = {area.x + area.w - tw - S(10) - t->hint_rpad, area.y + S(8), tw, hh};
         draw_rrect(b.x, b.y, b.w, b.h, hh * 0.5f, C(COL_POPUP));
         draw_text(fs, b.x + S(8), text_y(fs, b.y, b.h), m, (int)strlen(m), C(COL_TEXT_DIM));
     }
