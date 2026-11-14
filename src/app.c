@@ -1245,11 +1245,14 @@ static int shadow_margin_log(void) {
     return shadow_shown() ? SHADOW_MARGIN : 0;
 }
 
+// Pixels per unit of the margin (X11 windows have no pixel density: the display scale)
+static f32 shadow_scale(void) { return A.win_x11 ? A.dpi_scale : SDL_GetWindowPixelDensity(A.win); }
+
 // A.W / A.H and the viewport from the window's size and whether it has a shadow now.
 static void window_size_update(void) {
     int pw = 0, ph = 0;
     SDL_GetWindowSizeInPixels(A.win, &pw, &ph);
-    int m = (int)roundf((f32)shadow_margin_log() * (A.win_x11 ? A.dpi_scale : SDL_GetWindowPixelDensity(A.win)));
+    int m = (int)roundf((f32)shadow_margin_log() * shadow_scale());
     if (pw - 2 * m < 200 || ph - 2 * m < 200) m = 0;
     A.shadow_px = m;
     A.W = pw - 2 * m;
@@ -1338,8 +1341,10 @@ static bool wl_load(void) {
 // replace a listener; a proxy starts with its wl_object {interface, implementation, id}, so the slot is written
 // directly - only after checking it holds exactly what wl_proxy_get_listener returns (else: shadow while tiled).
 typedef struct { size_t size, alloc; void *data; } WlArray;
+typedef struct { const char *name; int version, method_count; const void *methods; int event_count; const void *events; } WlInterface;
 typedef void (*TopConfigureFn)(void *, void *, i32, i32, WlArray *);
-static void (*g_top_sdl[4])(void), (*g_top_ours[4])(void); // configure, close, configure_bounds, wm_capabilities
+#define TOP_EVENTS 4 // configure, close, configure_bounds, wm_capabilities (xdg_toplevel up to v7)
+static void (*g_top_sdl[TOP_EVENTS])(void), (*g_top_ours[TOP_EVENTS])(void);
 static void *g_top_hooked;
 
 // The size the compositor gives is the window's without its shadow: the margin is added here, so SDL sizes the
@@ -1369,9 +1374,15 @@ static void toplevel_hook(void) {
     const void *cur = g_wlwin.get_listener(top);
     void **slot = (void **)((char *)top + sizeof(void *));
     if (!cur || cur == (const void *)g_top_ours || *slot != cur) return;
-    memcpy(g_top_sdl, cur, sizeof g_top_sdl);
+    // SDL's listener has one entry per event of the interface it was built with: a newer protocol with more events
+    // than our copy holds is left alone (libwayland would call past its end)
+    const WlInterface *wi = *(const WlInterface *const *)top;
+    int nev = wi ? wi->event_count : 0;
+    if (nev < 1 || nev > TOP_EVENTS) return;
+    memset(g_top_sdl, 0, sizeof g_top_sdl);
+    memcpy(g_top_sdl, cur, (size_t)nev * sizeof g_top_sdl[0]);
     g_top_ours[0] = (void (*)(void))toplevel_configure;
-    for (int i = 1; i < 4; i++) g_top_ours[i] = g_top_sdl[i];
+    for (int i = 1; i < TOP_EVENTS; i++) g_top_ours[i] = g_top_sdl[i];
     *slot = (void *)g_top_ours;
 }
 
@@ -1506,9 +1517,10 @@ static void x11_capabilities(bool *composited, bool *extents) {
 }
 
 // (SDL's X11 event loop) the window manager's resize sync requests, the window's size, and changes to its tiled or
-// maximised state
+// maximised state. SDL keeps one hook: this one replaces dragout.c's, so it hands every event to that one first.
+static bool dragout_x11_event(void *ud, XEvent *xe);
 static bool x11_event_hook(void *ud, XEvent *xe) {
-    (void)ud;
+    if (!dragout_x11_event(ud, xe)) return false;
     XClientMsg_ *cm = (XClientMsg_ *)xe;
     if (cm->type == 33 /* ClientMessage */ && cm->window == g_x11.win && g_x11.sync_counter && cm->message_type == g_x11.a_protocols &&
         (XID_)cm->l[0] == g_x11.a_sync_req) { // a resize is coming: say when a frame of the new size is drawn
@@ -1662,7 +1674,7 @@ static void x11_shadow_apply(void) {
         sent = true;
     }
     if (g_x11.shape_rects) { // the window and its resize band take clicks; the rest of the shadow lets them through
-        int o = m && shadow_shown() ? MIN(m, (int)roundf(10.f * A.dpi_scale)) : 0; // (maximised: just the window)
+        int o = m && shadow_shown() ? MIN(m, (int)roundf(10.f * shadow_scale())) : 0; // (maximised: just the window)
         int in[4] = {m - o, m - o, pw - 2 * (m - o), ph - 2 * (m - o)};
         if (!m) in[0] = in[1] = 0, in[2] = in[3] = 65535; // (no shadow: all of it, whatever the size)
         if (memcmp(in, g_x11.in, sizeof in)) {
@@ -1804,7 +1816,7 @@ static SDL_HitTestResult window_hit_test(SDL_Window *w, const SDL_Point *pt, voi
     f32 d = SDL_GetWindowPixelDensity(w), m = (f32)A.shadow_px;
     f32 x = (f32)pt->x * d - m, y = (f32)pt->y * d - m, W = (f32)A.W, H = (f32)A.H; // (content coordinates)
     if (m > 0) { // in the shadow: a resize band along the window, the rest does nothing
-        f32 o = MIN(m, roundf(10.f * d));
+        f32 o = MIN(m, roundf(10.f * shadow_scale())); // (the resize band, as in the input region)
         if (x < -o || y < -o || x >= W + o || y >= H + o) return SDL_HITTEST_NORMAL;
     }
     SDL_HitTestResult e = window_edge_at(x, y);
