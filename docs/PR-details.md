@@ -57,7 +57,9 @@ fixes the context submenus and records the conflict review.
   paths retain the prior choice and show feedback. The embedded terminal uses
   the Explorer font/size and shapes `liga`, `calt`, and `dlig` while preserving
   the terminal cell grid and each cell's color. Font face and weight boundaries
-  remain explicit.
+  remain explicit. Visible terminals draw before folder, sidebar, and preview
+  surfaces so new terminal glyphs cannot update their shared texture after
+  those surfaces have been queued.
 - **Trash:** Empty Trash reads its own directory, including hidden and
   zero-byte items, regardless of the active pane. Confirmation and cancellation
   use the existing dialog. Full/empty icon caches follow measured contents and
@@ -161,12 +163,14 @@ inspection is more useful than its raw whole-file diff when tracing behavior.
 ## Verification
 
 - Fedora `fedora-build` Distrobox completed a release `bash build.sh` after
-  the connected-submenu fix.
+  the connected-submenu fix and after the terminal draw-order fix.
 - Offscreen native M6, M8, M9, and M11 self-tests passed after that fix.
   Before it, M6 through M11 passed for the rebase. M6 covers tab layout/drops,
   M8 Trash, M9 settings/menus/header, and M11 terminal behavior.
 - Expanded M9 checks cover parent-to-child hover, switching submenu groups,
   clicking child actions without Escape, and keyboard close behavior.
+- Native M11 and M6 passed again after the terminal draw-order fix. The F4
+  panel screenshot from M11 still shows the folder and sidebar correctly.
 - Standalone appearance and system-icon suites passed with GCC `-O2`,
   `-Wall -Wextra -Werror`; isolated terminal shaping/rendering checks passed.
 - Git whitespace and source ASCII checks passed; no conflict markers or

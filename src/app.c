@@ -15029,6 +15029,21 @@ static void frame_draw(void) {
   if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open)
     A.mouse_in = false;
   bool multi = A.npanels > 1;
+  // Terminal output can add glyphs to the shared atlas. Draw visible terminals
+  // first so their texture uploads happen before folder, sidebar and preview
+  // geometry is queued; otherwise those surfaces can blink while typing.
+  for (int i = 0; i < A.npanels; i++) {
+    Panel *pn = A.panels[i];
+    if (!pn->cur)
+      continue;
+    Tab *ct = pn->cur;
+    if (ct->term)
+      term_draw(ct->term, ct->pane[0].ly.area, pn == A.ap);
+    else if (ct->dock_on && ct->dock && ct->dock_r.h > 0) {
+      ct->dock->hint_rpad = ct->dock_x.w + roundf(S(6));
+      term_draw(ct->dock, ct->dock_r, pn == A.ap && ct->dock_focus);
+    }
+  }
   for (int i = 0; i < A.npanels; i++) {
     Panel *pn = A.panels[i];
     if (!pn->cur)
@@ -15036,7 +15051,6 @@ static void frame_draw(void) {
     Pane *p = &pn->cur->pane[0];
     Tab *ct = pn->cur;
     if (ct->term) {
-      term_draw(ct->term, p->ly.area, pn == A.ap);
       draw_toolbar(p, pn == A.ap, multi);
     } else
       draw_pane(p, pn == A.ap && !(ct->dock_on && ct->dock_focus), multi);
@@ -15044,11 +15058,6 @@ static void frame_draw(void) {
         ct->dock_r.h > 0) { // the terminal panel, under a line
       bool dh = A.drag == DRAG_DOCK || (A.mouse_in && A.drag == DRAG_NONE &&
                                         in_rect(ct->dock_div, A.mx, A.my));
-      ct->dock->hint_rpad =
-          ct->dock_x.w +
-          roundf(
-              S(6)); // (its scrolled-back hint goes left of the close button)
-      term_draw(ct->dock, ct->dock_r, pn == A.ap && ct->dock_focus);
       if (g_show_separators || dh)
         draw_rect(ct->dock_r.x, ct->dock_r.y - 1, ct->dock_r.w, 1,
                   C(dh ? COL_ACCENT : COL_BORDER));
