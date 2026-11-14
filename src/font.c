@@ -34,6 +34,7 @@ static int g_shelf_x, g_shelf_y, g_shelf_h;
 static int g_dirty_x0 = 1 << 30, g_dirty_y0 = 1 << 30, g_dirty_x1, g_dirty_y1;
 static SDL_Renderer *g_atlas_ren;
 static bool g_atlas_full;
+static u64 g_atlas_upload_serial;
 static Font *g_fonts[16]; // every font sharing the atlas (UI, small, brand, mono, terminal regular + bold)
 static int g_icon_cache_n; // icons.c: rasterized icon slots, invalid after an atlas reset
 static int g_nfonts;
@@ -88,6 +89,7 @@ static void atlas_upload(void) {
     // drops geometry queued earlier in the frame (rows flickered away when new glyphs appeared mid-frame).
     SDL_FlushRenderer(g_atlas_ren);
     SDL_UpdateTexture(g_atlas_tex, &r, &g_atlas[((size_t)r.y * ATLAS_SIZE + r.x) * 4], ATLAS_SIZE * 4);
+    g_atlas_upload_serial++;
     g_dirty_x0 = g_dirty_y0 = ATLAS_SIZE;
     g_dirty_x1 = g_dirty_y1 = 0;
 }

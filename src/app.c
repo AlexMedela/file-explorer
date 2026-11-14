@@ -15296,16 +15296,22 @@ static void frame(void) {
   }
   layout();
 
-  // If the glyph atlas fills up mid-frame, that frame would show missing text
-  // (a flicker): clear it and draw again (growing the atlas if one frame alone
-  // doesn't fit) before presenting.
+  // If the glyph atlas fills up, redraw before presenting. Vulkan can also
+  // lose already-queued pane geometry when the atlas texture is updated during
+  // a frame, even after SDL_FlushRenderer. Draw the complete frame again once
+  // its new glyphs are cached, before that partial frame reaches the screen.
   ime_update_area();
+  const char *renderer = SDL_GetRendererName(A.ren);
+  bool vulkan = renderer && !strcmp(renderer, "vulkan");
   for (int attempt = 0; attempt < 3; attempt++) {
+    u64 upload_before = g_atlas_upload_serial;
     frame_draw();
-    if (!g_atlas_full)
+    if (g_atlas_full) {
+      if (attempt == 0 || !atlas_grow())
+        atlas_reset();
+    } else if (!vulkan || g_atlas_upload_serial == upload_before) {
       break;
-    if (attempt == 0 || !atlas_grow())
-      atlas_reset();
+    }
   }
   A.frame_ms = (f32)((now_ns() - t0) / 1e6);
 

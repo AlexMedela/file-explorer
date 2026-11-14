@@ -59,7 +59,9 @@ fixes the context submenus and records the conflict review.
   the terminal cell grid and each cell's color. Font face and weight boundaries
   remain explicit. Visible terminals draw before folder, sidebar, and preview
   surfaces so new terminal glyphs cannot update their shared texture after
-  those surfaces have been queued.
+  those surfaces have been queued. Vulkan also redraws a frame before presenting
+  when its shared glyph texture changed during that frame, so that a partial
+  folder or preview draw is not presented while typing.
 - **Trash:** Empty Trash reads its own directory, including hidden and
   zero-byte items, regardless of the active pane. Confirmation and cancellation
   use the existing dialog. Full/empty icon caches follow measured contents and
@@ -171,6 +173,8 @@ inspection is more useful than its raw whole-file diff when tracing behavior.
   clicking child actions without Escape, and keyboard close behavior.
 - Native M11 and M6 passed again after the terminal draw-order fix. The F4
   panel screenshot from M11 still shows the folder and sidebar correctly.
+- The Vulkan release build passed, as did native M11 and M10 on Vulkan after
+  the frame retry. M10 includes a glyph-upload check for pane rendering.
 - Standalone appearance and system-icon suites passed with GCC `-O2`,
   `-Wall -Wextra -Werror`; isolated terminal shaping/rendering checks passed.
 - Git whitespace and source ASCII checks passed; no conflict markers or
