@@ -14,6 +14,16 @@ pinned folders, columns, and your tabs/split panes (`restore_session=0` to start
 (0 = all at once) and `verify_copies=0` are the transfer queue's settings. `renderer=auto` uses
 OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is resized; Vulkan can take less memory
 on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
+Options > Appearance > **Application icon** shows the current icon. Click **Choose image** to select an SVG
+or PNG; the choice applies immediately. **Use system** clears the override and follows the desktop icon theme.
+The saved `app_icon` value is the selected image path (empty for System). Missing images fall back to desktop artwork.
+
+Taskbar icons come from the desktop launcher independently of the window icon. Explorer copies the original
+artwork into the user's data directory and updates its per-user launcher to reference that copy. With Distrobox,
+it preserves the exported launch command and uses the exported desktop file's ID for window grouping. Restart
+once after installing this fix so an existing window picks up the corrected ID. No re-export is needed for each
+icon change once the launcher exists.
+
 Options > Appearance > **Title bar** has two choices:
 
 - **Integrated header** (`title_bar=app`) places minimize/maximize/close on the first tab/navigation row.
@@ -70,11 +80,11 @@ System icon choices take precedence over `FE_NERD_FONT`. See [UI revamp](ui-reva
 
 Options > Appearance > Tabs offers **Tab position** (Above navigation / Below navigation) and **Tab style**
 (Classic Explorer / Pills). Defaults are below + pills. Pills center inside a shared rounded enclosure made from
-a darkened version of the effective navigation background, share the path field's corner radius, and show their
+the same background as the navigation path and search fields, share the path field's corner radius, and show their
 individual surface only on hover/selection. Pills share the manual/system accent and selection-opacity setting with sidebar/configuration navigation;
 hover uses 8% accent and selected tabs in inactive split panes use a weaker selection tint. Classic tabs restore the original
 rounded cards and outward-curving bottom corners: the active card matches navigation and has a subtle neutral contour to preserve its shape;
-inactive cards are slightly darker, while the surrounding row matches navigation. Text and close controls maintain contrast on these backgrounds. The row appears only with
+inactive cards share the path/search field background, while the surrounding row matches navigation. Text and close controls maintain contrast on these backgrounds. The row appears only with
 two or more tabs in a pane, in either style/position. Ctrl+T opens another tab when the row is hidden.
 Saved keys are `tab_position=below` (`above` is also accepted) and `tab_style=pills` (`classic` is also accepted).
 
@@ -90,9 +100,9 @@ in the System theme, and survives desktop color changes. Click Auto to restore a
 an unapplied edit. Saved setting: `scrollbar_color=auto` or, for example, `scrollbar_color=#3DAEE9`.
 
 **Surfaces and system highlight** (Options > Appearance): "Unified surfaces" uses the theme's main background
-for the side panels, header, center and status bar (enabled by default). Independent brightness controls adjust
+for the sidebar, preview, header, center and status bar (enabled by default). Independent brightness controls adjust
 each area from -30% to +30% in 5% steps; 0 restores its original brightness. The header control includes navigation,
-pill tabs and the app-drawn title strip; side panels includes the sidebar and preview. Turning off unified surfaces
+pill tabs and the app-drawn title strip. Sidebar and preview brightness are independent. Turning off unified surfaces
 restores the selected theme's original surface differences. Terminal content keeps its terminal palette.
 
 "Show separator lines" is **on by default**. Turn it off to hide panel/header/status borders and column dividers.
@@ -110,6 +120,7 @@ Saved keys (automatically managed by the Appearance controls):
 unified_surfaces=1
 show_separators=1
 sidebar_brightness=0
+preview_brightness=0
 header_brightness=0
 main_brightness=0
 status_brightness=0
@@ -193,4 +204,44 @@ Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearanc
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`
 sets the icon for any extension, and `theme.conf` (`base=Catppuccin`) picks the set the missing icons come from.
 `net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
-lists every icon name.
+lists every icon name. See [Custom icons and folder badges](custom-icons.md) for
+a complete theme layout, badge sizing, overrides, and fallback rules.
+
+Folder icons keep their base artwork and show small badges at the lower right.
+Custom themes can provide these SVGs at the theme's root:
+
+| Filename | Badge |
+| --- | --- |
+| `folder-remote-smb.svg` | Samba/SMB, including Samba usershares |
+| `folder-remote-nfs.svg` | NFS exports |
+| `folder-publicshare.svg` | WebDAV and other local shares |
+| `emblem-symbolic-link.svg` | Symbolic link (folders and files) |
+| `emblem-git.svg` | Git repository folder |
+
+Use transparent backgrounds: these images overlay the base folder rather than
+replace it. Simultaneous badges stack upwards on the right in share, symlink,
+then Git order. A folder shared through multiple protocols uses SMB before NFS,
+then other shares. Git status letters/dots continue to show working-tree changes;
+the repository badge identifies the repository folder itself.
+
+Installed desktop themes use the same share and symlink names. The Git repository
+badge uses the bundled classic orange Git logo SVG unless a
+custom theme supplies `emblem-git.svg`. Missing custom share badges use
+`folder-shared` from the custom theme or its base set. Missing symlink badges use
+bundled artwork. Installed themes fall back to their folder icon for missing
+share artwork, and to bundled artwork for missing symlink emblems. Reload through "Icon themes
+folder" after editing SVGs.
+
+Text editing uses a thicker caret in the field's current text color, adapting to
+light and dark themes. The caret moves smoothly and gently pulses while idle;
+it stays solid during selection. Text selection uses the current accent color softened by a 5% blend toward the
+navigation field background, with contrasting dark or white selected text.
+
+Navigation and sidebar icons adapt to light surfaces: pale artwork is darkened
+while retaining its hue and shading, and sidebar headings/controls use stronger
+foreground contrast. Disconnected network icons remain subdued but readable.
+The adjustment is applied when drawing, so custom icon files stay unchanged and
+dark surfaces retain their original icon colors.
+
+Navigation path and search fields, the pill enclosure, and unfocused classic tabs
+share one neutral background. Focus is indicated by the accent outline.

@@ -1,19 +1,19 @@
 // SVG/PNG desktop icons fitted into the same RGBA boxes as bundled icons.
 static char *icon_read_svg(const char *path);
-static u8 *system_icon_raster_path(const char *path, int w, int h) {
+static u8 *system_icon_raster_path_colors(const char *path, int w, int h, bool native_colors) {
     const char *ext = strrchr(path, '.');
     if (ext && !strcasecmp(ext, ".svg")) {
         char *src = icon_read_svg(path);
         if (!src) return NULL;
-        // NanoSVG does not inherit CSS currentColor. Give symbolic icons the UI
-        // foreground instead of black, which is invisible on a dark surface.
-        char *p = src;
-        while ((p = strstr(p, "currentColor"))) {
-            char col[8];
-            snprintf(col, sizeof col, "#%06X", COL_TEXT2);
-            memcpy(p, col, 7);
-            memmove(p + 7, p + 12, strlen(p + 12) + 1);
-            p += 7;
+        // Preserve SVG/CSS colors (notably KDE ColorScheme-Accent). Only
+        // symbolic artwork without its own color inherits the UI foreground.
+        char *root = strstr(src, "<svg");
+        if (!native_colors && root) {
+            char *with_color = NULL;
+            if (asprintf(&with_color, "%.*s<svg color=\"#%06X\"%s", (int)(root - src), src,
+                         COL_TEXT2 & 0xFFFFFF, root + 4) < 0) with_color = NULL;
+            if (!with_color) { free(src); return NULL; }
+            free(src); src = with_color;
         }
         NSVGimage *img = nsvgParse(src, "px", 96.f);
         free(src);
@@ -56,6 +56,10 @@ static u8 *system_icon_raster_path(const char *path, int w, int h) {
     }
     stbi_image_free(src);
     return out;
+}
+
+static u8 *system_icon_raster_path(const char *path, int w, int h) {
+    return system_icon_raster_path_colors(path, w, h, false);
 }
 
 // Window actions commonly have symbolic-only assets. Normalize their RGB to

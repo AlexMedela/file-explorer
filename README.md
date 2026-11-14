@@ -74,3 +74,6 @@ To everyone who sent code, reported bugs or asked for features:
 
 ## Licence
 [MIT](LICENSE). Bundled icon sets and libraries keep their own licences, listed in [Building](docs/building.md#tools-and-self-tests).
+
+Custom file themes and share/symlink/Git badge overrides are documented in
+[Custom icons and folder badges](docs/custom-icons.md).

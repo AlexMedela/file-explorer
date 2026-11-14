@@ -1,5 +1,7 @@
 # Building from source
 
+For Bazzite and other immutable desktops, see [Build and export with Distrobox](immutable-distros.md).
+
 [README](../README.md) · [Install](install.md) · [Keys](keys.md) · [Settings](settings.md) · [Integration](integration.md) · [Building](building.md) · [Architecture](architecture.md)
 
 ```sh
@@ -80,3 +82,23 @@ file and folder icon themes (all MIT): [Material Icon Theme](https://github.com/
 Network location icons: brand logos from [Simple Icons](https://simpleicons.org) (CC0) and Material Icon Theme (MIT),
 in `third_party/net-icons/`; `tools/gen_net_icons.py` regenerates `src/net_icons.h`. Logos are trademarks of their owners.
 - `tools/mkfiles.sh DIR N` – generate a test directory with N files
+
+## Standalone regression checks
+
+Each of these test sources starts with its compiler command and runs without SDL
+or a display server:
+
+- `tools/appearance-selftest.c`: surface independence, tabs and theme preferences.
+- `tools/system-icons-selftest.c`: installed icon discovery and SVG/PNG rendering.
+- `tools/app-desktop-icon-selftest.c`: original launcher artwork and Distrobox IDs.
+- `tools/local-shares-selftest.c`: share protocols, host includes and usershares.
+- `tools/apps-discovery-selftest.c`: host-only handlers and SVG MIME associations.
+- `tools/svg-preview-selftest.c`: SVG size, transparency, colors and invalid input.
+- `tools/icon-contrast-selftest.c`: light-surface icon contrast and dark-surface preservation.
+- `tools/text-pointer-selftest.c`: caret hit testing, selection, scrolling and modal isolation.
+- `tools/text-caret-selftest.c`: movement, pulse timing and visibility after input.
+
+All nine passed on 2026-11-14 with `-Wall -Wextra -Werror` (and the suppressions
+shown in their source comments). The full application build and native UI suites
+still need the development dependencies above; the editing environment lacks
+SDL3 and the other required pkg-config packages.

@@ -102,7 +102,7 @@ static int g_nthemes;
 
 static Theme T = g_theme_dark; // the palette everything draws with
 static int g_theme_cur;
-enum { SURFACE_SIDEBAR, SURFACE_HEADER, SURFACE_MAIN, SURFACE_STATUS, SURFACE_COUNT };
+enum { SURFACE_SIDEBAR, SURFACE_HEADER, SURFACE_MAIN, SURFACE_STATUS, SURFACE_PREVIEW, SURFACE_COUNT };
 static int g_surface_brightness[SURFACE_COUNT]; // signed percentage, -30 .. +30
 static bool g_unified_surfaces = true, g_show_separators = true;
 static int g_navigation_selection_opacity = NAV_SELECTION_DEFAULT;
@@ -212,13 +212,18 @@ static u32 navigation_surface_color(u32 background, bool selected) {
     return rgb_mix(background, T.accent, selected ? CLAMP(g_navigation_selection_opacity, 0, 100) / 100.f : 0.08f);
 }
 
-// All neutral tab surfaces derive from the effective navigation background,
-// including desktop tint and header brightness. Only pills use selection fills.
+// One neutral fill for path/search fields, the pill enclosure and unfocused
+// classic tabs. Keep accent highlights separate from the shared background.
+static u32 navigation_field_color(void) {
+    return rgb_mix(surface_adjust(T.field, g_surface_brightness[SURFACE_HEADER]), 0x000000, 0.05f);
+}
 static u32 tab_container_color(void) {
-    return rgb_mix(T.toolbar, 0x000000, 0.28f);
+    return navigation_field_color();
 }
 static u32 classic_tab_color(bool selected, bool hovered) {
-    return selected ? T.toolbar : rgb_mix(T.toolbar, 0x000000, hovered ? 0.06f : 0.12f);
+    if (selected) return T.toolbar;
+    u32 base = navigation_field_color();
+    return hovered ? rgb_mix(base, T.text, 0.04f) : base;
 }
 static u32 tab_surface_color(bool focused, bool active) {
     if (g_tab_style == TAB_CLASSIC) return classic_tab_color(focused, !focused);
@@ -273,7 +278,7 @@ static void theme_apply(void) {
         T.alt_row = rgb_mix(T.bg, T.text, 0.025f); // keep optional zebra rows usable
     }
     T.sidebar = surface_adjust(T.sidebar, g_surface_brightness[SURFACE_SIDEBAR]);
-    T.preview_bg = surface_adjust(T.preview_bg, g_surface_brightness[SURFACE_SIDEBAR]);
+    T.preview_bg = surface_adjust(T.preview_bg, g_surface_brightness[SURFACE_PREVIEW]);
     T.tabbar = surface_adjust(T.tabbar, g_surface_brightness[SURFACE_HEADER]);
     T.toolbar = surface_adjust(T.toolbar, g_surface_brightness[SURFACE_HEADER]);
     T.bg = surface_adjust(T.bg, g_surface_brightness[SURFACE_MAIN]);

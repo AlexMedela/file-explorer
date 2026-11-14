@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Local Samba/SMB, NFS and WebDAV share detection, including host configuration
+  exposed by Distrobox, with protocol badges on the base folder icon.
+- Consistent lower-right share, symlink and Git repository badges; custom themes
+  can replace each badge SVG. See [the customization guide](docs/custom-icons.md).
+- Built-in SVG grid thumbnails and preview rendering, plus host application
+  discovery and launching for Open with in Distrobox.
+- Mouse caret placement and drag/word selection in text fields; thicker
+  text-colored carets with smooth motion, gentle pulse and accent selections.
+- Shared path/search/pill enclosure backgrounds, improved light-theme icon and
+  new-tab button contrast, and pointer cursors over clickable path segments.
+- Independent sidebar and preview-panel brightness controls.
+- Configurable application icon and improved Distrobox launcher identity,
+  artwork preservation and installation-path handling.
+
 ## 0.11.2
 
 **New**

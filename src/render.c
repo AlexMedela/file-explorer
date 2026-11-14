@@ -88,7 +88,7 @@ static void cursor_apply(void) {
     // dragging items, a tab or a sidebar place: the grabbing hand from the start (not only once it leaves the window)
     bool grab = A.cur_grab && (A.drag == DRAG_ITEMS || A.drag == DRAG_TAB || A.drag == DRAG_PLACE);
     int edge = cursor_edge();
-    int want = edge ? edge : A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_hand ? 3 : A.ptr_text ? 4 : 0;
+    int want = edge ? edge : A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : (A.ptr_text || g_text_selecting) ? 4 : A.ptr_hand ? 3 : 0;
     if (want == A.cursor_shown) return;
     A.cursor_shown = want;
     SDL_Cursor *c[] = {A.cur_default, A.cur_ew, A.cur_ns, A.cur_hand, A.cur_text, A.cur_grab, A.cur_nwse, A.cur_nesw};
@@ -117,7 +117,8 @@ static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
         if (g) {
             f32 a = g_alpha;
             if (hidden) g_alpha *= 0.55f;
-            draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
+            f32 tint = icon_glyph_tint(id, (int)roundf(s));
+            draw_glyph(g, roundf(x), roundf(y), (Color){tint, tint, tint, 1});
             g_alpha = a;
             return true;
         }
@@ -127,7 +128,12 @@ static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
     draw_flush();
     SDL_FRect dst = {roundf(x), roundf(y), roundf(s), roundf(s)};
     SDL_SetTextureAlphaMod(t, (u8)(255.f * g_alpha * (hidden ? 0.55f : 1.f)));
+    f32 tint = 1.f;
+    for (int i = 0; g_icon_surface_bg && i < g_nbig; i++) if (g_big_icons[i].tex == t)
+        tint = icon_contrast_scale(g_big_icons[i].lightness, rgb_luma(g_icon_surface_bg));
+    SDL_SetTextureColorMod(t, (u8)(255 * tint), (u8)(255 * tint), (u8)(255 * tint));
     SDL_RenderTexture(A.ren, t, NULL, &dst);
+    SDL_SetTextureColorMod(t, 255, 255, 255);
     SDL_SetTextureAlphaMod(t, 255);
     return true;
 }
@@ -142,11 +148,37 @@ static void draw_dir_icon(f32 x, f32 y, f32 s, const char *name, bool hidden) {
     draw_folder_icon(x, y + (s > 48 ? s * 0.04f : 0), s, hidden ? rgb_mix(COL_FOLDER, COL_BG, 0.35f) : COL_FOLDER, hidden ? rgb_mix(COL_FOLDER_TAB, COL_BG, 0.35f) : COL_FOLDER_TAB);
 }
 
+// All folder emblems share the same lower-right placement and scale. Additional
+// emblems stack upwards on the right, leaving the base folder visible.
+static void draw_folder_badge(f32 x, f32 y, f32 size, const char *key, bool hidden, int slot) {
+    f32 b = roundf(MAX(S(5), size * 0.32f));
+    f32 bx = roundf(x + size - b), by = roundf(y + size - b - slot * b);
+    draw_icon_id(bx, by, b, icon_find(key), hidden);
+}
+
+// Shared folders retain their base icon and receive a protocol emblem.
+static void draw_local_dir_icon(f32 x, f32 y, f32 size, const char *path, const char *name, bool hidden) {
+    unsigned kind = local_share_path(path);
+    const char *key = kind & LOCAL_SHARE_SMB ? "folder-remote-smb" :
+                      kind & LOCAL_SHARE_NFS ? "folder-remote-nfs" : "folder-publicshare";
+    draw_dir_icon(x, y, size, name, hidden);
+    if (kind) draw_folder_badge(x, y, size, key, hidden, 0);
+}
+
+static void draw_entry_dir_icon(f32 x, f32 y, f32 size, Pane *p, Entry *e, bool hidden) {
+    char path[PATH_MAX];
+    path_join(path, sizeof path, p->path, e->name);
+    draw_local_dir_icon(x, y, size, path, rel_base(e->name), hidden);
+    int slot = local_share_path(path) ? 1 : 0;
+    if (e->flags & ENT_LINK) draw_folder_badge(x, y, size, "emblem-symbolic-link", hidden, slot++);
+    if (git_entry_sub(p, e)) draw_folder_badge(x, y, size, "emblem-git", hidden, slot);
+}
+
 // A folder given by its full path: the trash gets the bin, home its folder, anything else goes by its name.
 static void draw_path_icon(f32 x, f32 y, f32 s, const char *path) {
     if (is_trash_dir(path) && draw_icon_id(x, y, s, icon_find("trash"), false)) return;
     const char *home = getenv("HOME");
-    draw_dir_icon(x, y, s, home && home[0] && !strcmp(path, home) ? "home" : path_basename(path), false);
+    draw_local_dir_icon(x, y, s, path, home && home[0] && !strcmp(path, home) ? "home" : path_basename(path), false);
 }
 
 static void draw_file_icon(f32 x, f32 y, f32 s, u32 col) {
@@ -160,6 +192,10 @@ static void draw_file_icon(f32 x, f32 y, f32 s, u32 col) {
 static void draw_drive_icon_ex(f32 x, f32 y, f32 s, bool dim) {
     if (draw_system_symbol(x, y, s, SYS_DRIVE, dim)) return;
     u32 body = 0x9AA0AC, slot = 0x5C616B, light = 0x4FD18B;
+    if (g_icon_surface_bg && rgb_luma(g_icon_surface_bg) > 0.65f) {
+        body = rgb_mix(body, 0x000000, 0.35f);
+        slot = rgb_mix(slot, 0x000000, 0.20f);
+    }
     if (dim) {
         body = rgb_mix(body, COL_SIDEBAR, 0.45f);
         slot = rgb_mix(slot, COL_SIDEBAR, 0.35f);
@@ -179,6 +215,10 @@ static void draw_drive_icon(f32 x, f32 y, f32 s) { draw_drive_icon_ex(x, y, s, f
 static void draw_phone_icon(f32 x, f32 y, f32 s, bool camera, bool dim) {
     if (draw_system_symbol(x, y, s, camera ? SYS_CAMERA : SYS_PHONE, dim)) return;
     u32 body = 0x9AA0AC, screen = 0x5C616B, accent = 0x7FB2FF;
+    if (g_icon_surface_bg && rgb_luma(g_icon_surface_bg) > 0.65f) {
+        body = rgb_mix(body, 0x000000, 0.35f);
+        accent = rgb_mix(accent, 0x000000, 0.30f);
+    }
     if (dim) {
         body = rgb_mix(body, COL_SIDEBAR, 0.45f);
         screen = rgb_mix(screen, COL_SIDEBAR, 0.35f);
@@ -250,6 +290,7 @@ static void draw_xfer_icon(f32 cx, f32 cy, f32 s, Color c) {
 }
 
 static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
+    te_register(t, f, r, pad);
     if (A.mouse_in && in_rect(r, A.mx, A.my)) A.ptr_text = true;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x + 1, (int)r.y, (int)r.w - 2, (int)r.h});
     int n = (int)strlen(t->buf);
@@ -261,6 +302,8 @@ static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
     if (tw - t->scroll < avail) t->scroll = MAX(0.f, tw - avail);
     f32 x = r.x + pad - t->scroll, ty = text_y(f, r.y, r.h);
     int lo = MIN(t->anchor, t->caret), hi = MAX(t->anchor, t->caret);
+    u32 selection = rgb_mix(COL_ACCENT, navigation_field_color(), 0.05f);
+    Color selected_text = rgb_luma(selection) > 0.45f ? C(0x101318) : C(0xFFFFFF);
     if (lo != hi && text_complex(t->buf, n)) { // right-to-left parts: the selection can be several pieces
         f32 w, x0, x1, px0 = -1, px1 = -1;
         int ng = text_shape(f, t->buf, n, &w);
@@ -268,14 +311,39 @@ static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
             shaped_span(ng, k, &x0, &x1);
             if (x0 == px0 && x1 == px1) continue; // same cluster as the character before
             px0 = x0, px1 = x1;
-            draw_rect(roundf(x + x0), r.y + roundf(S(4)), roundf(x1 - x0), r.h - roundf(S(8)), C(COL_SEL_FOCUS));
+            draw_rect(roundf(x + x0), r.y + roundf(S(4)), roundf(x1 - x0), r.h - roundf(S(8)), C(selection));
         }
     } else if (lo != hi) {
         f32 a = text_width(f, t->buf, lo), b = text_width(f, t->buf, hi);
-        draw_rect(roundf(x + a), r.y + roundf(S(4)), roundf(b - a), r.h - roundf(S(8)), C(COL_SEL_FOCUS));
+        draw_rect(roundf(x + a), r.y + roundf(S(4)), roundf(b - a), r.h - roundf(S(8)), C(selection));
     }
     draw_text(f, x, ty, t->buf, n, tc);
-    draw_rect(roundf(x + cx), r.y + roundf(S(5)), MAX(1.f, roundf(S(1.2f))), r.h - roundf(S(10)), C(COL_ACCENT));
+    if (lo != hi) {
+        // Repaint selected glyphs through the same visual spans as the highlight.
+        bool complex = text_complex(t->buf, n);
+        f32 width; int ng = complex ? text_shape(f, t->buf, n, &width) : 0;
+        int first = complex ? utf8_index(t->buf, lo) : 0;
+        int last = complex ? utf8_index(t->buf, hi) : 1;
+        for (int k = first; k < last; k++) {
+            f32 a, b;
+            if (complex) shaped_span(ng, k, &a, &b);
+            else { a = text_width(f, t->buf, lo); b = text_width(f, t->buf, hi); }
+            ClipSave selected = draw_clip_push((SDL_Rect){(int)roundf(x + a), (int)r.y,
+                                                       MAX(1, (int)roundf(b - a)), (int)r.h});
+            draw_text(f, x, ty, t->buf, n, selected_text);
+            draw_clip_pop(selected);
+            // draw_text may reuse the shaping scratch buffer.
+            if (complex) ng = text_shape(f, t->buf, n, &width);
+        }
+    }
+    f32 alpha;
+    f32 cursor = text_caret_animate(&t->animation, cx - t->scroll, t->caret, t->anchor,
+                                   now_ns(), g_text_selecting || A.selftest || A.screenshot, &alpha);
+    Color caret_color = tc;
+    caret_color.a *= alpha;
+    f32 caret_width = MAX(2.f, roundf(S(2.4f)));
+    f32 caret_x = CLAMP(roundf(r.x + pad + cursor), r.x + 1, MAX(r.x + 1, r.x + r.w - caret_width - 1));
+    draw_rect(caret_x, r.y + roundf(S(4)), caret_width, r.h - roundf(S(8)), caret_color);
     draw_clip_pop(cs);
 }
 
@@ -371,9 +439,16 @@ static void draw_panel_bar(Panel *pn) {
     }
     // Compact headers prioritize tab labels over optional new-tab/split buttons.
     if (pr.w > 0) {
-        if (A.drag == DRAG_NONE && hot(pr)) draw_rrect(pr.x, pr.y, pr.w, pr.h, S(3), C(COL_TAB_HOVER));
-        if (!draw_system_symbol(pr.x + (pr.w - S(16)) * 0.5f, pr.y + (pr.h - S(16)) * 0.5f, S(16), SYS_ADD, false))
-            draw_plus(pr.x + pr.w * 0.5f, pr.y + pr.h * 0.5f, S(12), MAX(2.f, S(1.8f)), C(COL_TEXT_DIM));
+        bool hovered = A.drag == DRAG_NONE && hot(pr);
+        u32 base = pills ? COL_TOOLBAR : COL_SIDEBAR;
+        u32 ink = surface_foreground_color(base, false, false);
+        u32 fill = pills ? rgb_mix(base, ink, 0.10f) : COL_TAB_HOVER;
+        if (hovered) draw_rrect(pr.x, pr.y, pr.w, pr.h, S(3), C(fill));
+        // A crisp foreground-colored plus stays legible even when the desktop
+        // icon theme supplies pale artwork intended for a dark background.
+        if (pills || !draw_system_symbol(pr.x + (pr.w - S(16)) * 0.5f, pr.y + (pr.h - S(16)) * 0.5f, S(16), SYS_ADD, false))
+            draw_plus(pr.x + pr.w * 0.5f, pr.y + pr.h * 0.5f, S(12), MAX(2.f, S(1.8f)),
+                      C(pills ? surface_foreground_color(hovered ? fill : base, false, false) : COL_TEXT_DIM));
     }
     Rect sr = pn->splitbtn;
     if (sr.w > 0) {
@@ -458,9 +533,10 @@ static void draw_branch_icon(f32 x, f32 cy, Color ic) {
     draw_glyph(g, roundf(x - margin), roundf(cy - (f32)px * 0.5f), ic);
 }
 
-static void draw_toolbar(Pane *p, bool active, bool split) {
+static void draw_toolbar_content(Pane *p, bool active, bool split) {
     PaneLayout *ly = &p->ly;
     Rect tb = ly->toolbar;
+    u32 navigation_dim = rgb_luma(COL_TOOLBAR) > 0.65f ? surface_foreground_color(COL_TOOLBAR, false, true) : COL_TEXT_DIM;
     if (tb.w <= 0) return;
     draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TOOLBAR));
     Rect btn[3] = {ly->back, ly->fwd, ly->up};
@@ -481,7 +557,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         Rect fb = ly->filterbtn;
         bool on = p->tf_mode || p->tf_exts[0], hv = hot(fb);
         if (on || hv) draw_rrect(fb.x, fb.y, fb.w, fb.h, S(6), on ? CA(COL_ACCENT, 0.22f) : C(COL_FIELD_HOVER));
-        Color fc = on ? C(COL_ACCENT) : C(COL_TEXT_DIM);
+        Color fc = on ? C(COL_ACCENT) : C(navigation_dim);
         f32 cx = fb.x + fb.w * 0.5f, cy = fb.y + fb.h * 0.5f, t = MAX(1.4f, S(1.5f));
         draw_line(cx - S(7), cy - S(5), cx + S(7), cy - S(5), t, fc);
         draw_line(cx - S(7), cy - S(5), cx - S(1.5f), cy + S(1), t, fc);
@@ -502,7 +578,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);
     if (hover) A.ptr_text = true; // a click outside the crumbs edits the path
-    draw_rrect(pb.x, pb.y, pb.w, pb.h, S(NAV_CORNER_RADIUS), C(editing ? COL_FIELD_HOVER : COL_FIELD));
+    draw_rrect(pb.x, pb.y, pb.w, pb.h, S(NAV_CORNER_RADIUS), C(navigation_field_color()));
     if (editing) draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(NAV_CORNER_RADIUS), MAX(1.f, S(1.2f)), C(COL_ACCENT));
 
     Font *f = &A.font;
@@ -519,6 +595,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         Crumb *c = &ly->crumbs[i];
         bool last = i == ly->ncrumbs - 1;
         bool h = hand_if(hover && in_rect(c->r, A.mx, A.my));
+        if (h) A.ptr_text = false; // clickable path segment, rather than editable space
         if (h) draw_rrect(c->r.x, c->r.y, c->r.w, c->r.h, S(5), C(COL_CHIP));
         if (i == 0 && ly->crumbs_trash) {
             f32 s = roundf(S(16)), ix = roundf(c->r.x + S(8));
@@ -540,7 +617,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
             if (i == 0 && ly->crumbs_elided) {
                 draw_chevron(sx, pb.y + pb.h * 0.5f, S(7), 1, MAX(1.f, S(1.2f)), C(COL_TEXT_FAINT));
                 f32 ex = c->r.x + c->r.w + sep_w + roundf(S(8));
-                draw_text(f, ex, ty, ELLIPSIS, 3, C(COL_TEXT_DIM));
+                draw_text(f, ex, ty, ELLIPSIS, 3, C(navigation_dim));
                 sx = ly->crumbs[i + 1].r.x - sep_w * 0.5f;
             }
             draw_chevron(sx, pb.y + pb.h * 0.5f, S(7), 1, MAX(1.f, S(1.2f)), C(COL_TEXT_FAINT));
@@ -556,8 +633,9 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         ly->gitchip = c;
         ly->has_gitchip = true;
         bool hv = hand_if(hover && in_rect(c, A.mx, A.my)), on = A.menu.open && A.menu.pane == p && A.menu.n && A.menu.items[0].info;
+        if (hv) A.ptr_text = false;
         draw_rrect(c.x, c.y, c.w, c.h, S(5), on ? CA(COL_ACCENT, 0.25f) : C(hv ? COL_CONTROL_HOVER : COL_CHIP));
-        draw_branch_icon(c.x + S(6), c.y + c.h * 0.5f, C(COL_TEXT_DIM));
+        draw_branch_icon(c.x + S(6), c.y + c.h * 0.5f, C(navigation_dim));
         f32 tx = c.x + S(22), ty = text_y(fs, c.y, c.h);
         int ah, bh;
         git_sync_counts(p, &ah, &bh);
@@ -568,6 +646,12 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         draw_rrect(c.x + c.w - S(8) - dr, c.y + c.h * 0.5f - dr, dr * 2, dr * 2, dr, C(dirty ? COL_WARN : COL_OK));
     }
     draw_clip(NULL);
+}
+
+static void draw_toolbar(Pane *p, bool active, bool split) {
+    u32 saved = g_icon_surface_bg; g_icon_surface_bg = COL_TOOLBAR;
+    draw_toolbar_content(p, active, split);
+    g_icon_surface_bg = saved;
 }
 
 static bool sidebar_edge_hot(void) { return A.drag == DRAG_SIDEBAR || (A.drag == DRAG_NONE && A.mouse_in && in_rect(A.r_sdiv, A.mx, A.my)); }
@@ -648,9 +732,12 @@ static void draw_status_dot(f32 ix, f32 iy, f32 is, u32 dot, bool hover) {
     draw_rrect(dx, dy, dr * 2, dr * 2, dr, C(dot));
 }
 
-static void draw_sidebar(void) {
+static void draw_sidebar_content(void) {
     Pane *p = active_pane();
     Rect sb = A.r_sidebar;
+    bool light_sidebar = rgb_luma(COL_SIDEBAR) > 0.65f;
+    u32 sidebar_dim = light_sidebar ? surface_foreground_color(COL_SIDEBAR, false, true) : COL_TEXT_DIM;
+    u32 sidebar_faint = light_sidebar ? sidebar_dim : COL_TEXT_FAINT;
     draw_rect(sb.x, sb.y, sb.w, sb.h, C(COL_SIDEBAR));
     if (g_show_separators || sidebar_edge_hot())
         draw_rect(sb.x + sb.w - 1, sb.y, 1, sb.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
@@ -679,13 +766,13 @@ static void draw_sidebar(void) {
                 pl->eject = pr;
                 bool ph = A.mouse_in && in_rect(pr, A.mx, A.my);
                 if (ph) draw_rrect(pr.x, pr.y, pr.w, pr.h, S(5), C(COL_CHIP));
-                draw_plus(pr.x + bs * 0.5f, pr.y + bs * 0.5f, S(10), MAX(2.f, S(1.6f)), C(ph ? COL_TEXT : hover ? COL_TEXT_DIM : COL_TEXT_FAINT));
+                draw_plus(pr.x + bs * 0.5f, pr.y + bs * 0.5f, S(10), MAX(2.f, S(1.6f)), C(ph ? COL_TEXT : hover ? sidebar_dim : sidebar_faint));
                 tmax = pr.x - S(4);
             }
             { // collapse chevron
                 bool col = pl->kind == PK_GROUP ? A.qa[pl->group].collapsed : pl->kind == PK_DEVICES ? A.devs_collapsed
                          : pl->kind == PK_ADDONHDR ? addon_section_collapsed(pl) : pl->kind == PK_CLOUDHDR ? g_cloud_collapsed : A.nets_collapsed;
-                draw_chevron(r.x + S(9), r.y + r.h * 0.5f, S(4), col ? 1 : 3, MAX(1.f, S(1.3f)), C(hover ? COL_TEXT_DIM : COL_TEXT_FAINT));
+                draw_chevron(r.x + S(9), r.y + r.h * 0.5f, S(4), col ? 1 : 3, MAX(1.f, S(1.3f)), C(hover ? sidebar_dim : sidebar_faint));
                 tx = r.x + S(18);
             }
             if (editing) {
@@ -695,13 +782,13 @@ static void draw_sidebar(void) {
                 te_draw(&A.qa_te, fs, er, roundf(S(4)), C(COL_TEXT));
             } else {
                 draw_text_fit(fs, tx, text_y(fs, r.y, r.h), tmax - tx, pl->label, (int)strlen(pl->label),
-                              C(hover ? COL_TEXT_DIM : COL_TEXT_FAINT), 0);
+                              C(hover ? sidebar_dim : sidebar_faint), 0);
             }
             continue;
         }
         if (pl->kind == PK_ADDON) { addon_place_draw(pl, r, hover); continue; }
         if (pl->kind == PK_NETEMPTY || pl->kind == PK_ADDONEMPTY || pl->kind == PK_CLOUDEMPTY) { // placeholder text, not a row you can use
-            draw_text_fit(fs, r.x + S(12), text_y(fs, r.y, r.h), r.w - S(18), pl->label, (int)strlen(pl->label), C(COL_TEXT_FAINT), 0);
+            draw_text_fit(fs, r.x + S(12), text_y(fs, r.y, r.h), r.w - S(18), pl->label, (int)strlen(pl->label), C(sidebar_dim), 0);
             continue;
         }
         bool active = !strcmp(pl->path, p->path);
@@ -718,7 +805,7 @@ static void draw_sidebar(void) {
         bool phone_off = pl->kind == PK_PHONE && !pl->path[0]; // not connected yet: dim, "Connect" on hover
         Cloud *cl = pl->kind == PK_CLOUD && pl->item < g_ncloud ? &g_cloud[pl->item] : NULL;
         bool cloud_off = cl && !pl->path[0];
-        if (pl->kind == PK_HOME) draw_dir_icon(ix, iy, is, "home", false);
+        if (pl->kind == PK_HOME) draw_local_dir_icon(ix, iy, is, pl->path, "home", false);
         else if (pl->kind == PK_DRIVE) draw_drive_icon(ix, iy, is);
         else if (pl->kind == PK_UNMOUNTED) draw_drive_icon_ex(ix, iy, is, true);
         else if (pl->kind == PK_PHONE)
@@ -730,7 +817,7 @@ static void draw_sidebar(void) {
             draw_net_icon(ix, iy, is, cloud_icon(cl), cloud_off && cl->state != CS_FAILED && cl->state != CS_RETRY ? 0.5f : 1.f);
             draw_status_dot(ix, iy, is, cloud_busy(cl) && cl->state != CS_RETRY ? 0xE8B04B : cl->state == CS_RETRY || cl->state == CS_FAILED ? 0xE5534B : 0, hover);
         } else if (pl->kind == PK_TRASH) draw_path_icon(ix, iy, is, pl->path);
-        else draw_dir_icon(ix, iy, is, path_basename(pl->path), false);
+        else draw_path_icon(ix, iy, is, pl->path);
         f32 lx = ix + is + S(10), lmax = r.x + r.w - lx - S(6);
         f32 bar_end = r.x + r.w - S(8); // usage bar's right end (shortened when the eject button shows)
         if (show_eject) { // eject / disconnect button: takes the free-space text's place, nothing else moves
@@ -741,7 +828,7 @@ static void draw_sidebar(void) {
             bool eh = in_rect(er, A.mx, A.my);
             if (eh) draw_rrect(er.x, er.y, er.w, er.h, S(5), C(COL_CHIP));
             f32 cx = er.x + bs * 0.5f, cy = er.y + bs * 0.5f, w2 = S(5);
-            Color ec = C(eh ? COL_TEXT : COL_TEXT_DIM);
+            Color ec = C(eh ? COL_TEXT : sidebar_dim);
             for (f32 k = 0; k < S(5); k += 1.f) // triangle
                 draw_rect(roundf(cx - w2 * (k / S(5))), roundf(cy - S(4) + k), roundf(w2 * 2 * (k / S(5))), 1, ec);
             draw_rect(roundf(cx - w2), roundf(cy + S(3)), roundf(w2 * 2), MAX(1.f, roundf(S(1.6f))), ec);
@@ -750,13 +837,13 @@ static void draw_sidebar(void) {
             char sz[32];
             fmt_size(sz, sizeof sz, A.trash_size);
             f32 tw = text_width(fs, sz, (int)strlen(sz));
-            draw_text(fs, r.x + r.w - S(8) - tw, text_y(fs, r.y, r.h), sz, (int)strlen(sz), C(COL_TEXT_FAINT));
+            draw_text(fs, r.x + r.w - S(8) - tw, text_y(fs, r.y, r.h), sz, (int)strlen(sz), C(sidebar_dim));
             lmax -= tw + S(10);
         }
         if (cloud_off && (hover || cloud_busy(cl))) { // "Connect" on hover, "Connecting..." while it does
             const char *t = cloud_busy(cl) ? "Connecting\xE2\x80\xA6" : "Connect";
             f32 tw = text_width(fs, t, (int)strlen(t));
-            draw_text(fs, r.x + r.w - S(8) - tw, text_y(fs, r.y, r.h), t, (int)strlen(t), C(cloud_busy(cl) ? COL_TEXT_FAINT : COL_ACCENT));
+            draw_text(fs, r.x + r.w - S(8) - tw, text_y(fs, r.y, r.h), t, (int)strlen(t), C(cloud_busy(cl) ? sidebar_dim : COL_ACCENT));
             lmax -= tw + S(8);
         }
         if ((pl->kind == PK_NETSAVED || phone_off) && hover) { // saved server, phone: "Connect" on hover
@@ -772,7 +859,7 @@ static void draw_sidebar(void) {
                 sz[k] = 0;
             } else fmt_size(sz, sizeof sz, bd ? bd->size : 0);
             f32 fw = text_width(fs, sz, (int)strlen(sz));
-            if (!hover) draw_text(fs, r.x + r.w - S(8) - fw, text_y(fs, r.y, r.h), sz, (int)strlen(sz), C(COL_TEXT_FAINT));
+            if (!hover) draw_text(fs, r.x + r.w - S(8) - fw, text_y(fs, r.y, r.h), sz, (int)strlen(sz), C(sidebar_dim));
             else draw_text(fs, r.x + r.w - S(8) - text_width(fs, "Mount", 5), text_y(fs, r.y, r.h), "Mount", 5, C(COL_ACCENT));
             lmax -= fw + S(8);
         }
@@ -799,7 +886,7 @@ static void draw_sidebar(void) {
                 char fr[32];
                 fmt_size(fr, sizeof fr, du[k].avail);
                 f32 fw = text_width(fs, fr, (int)strlen(fr));
-                if (!show_eject) draw_text(fs, r.x + r.w - S(8) - fw, text_y(fs, r.y - S(3), r.h), fr, (int)strlen(fr), C(COL_TEXT_FAINT));
+                if (!show_eject) draw_text(fs, r.x + r.w - S(8) - fw, text_y(fs, r.y - S(3), r.h), fr, (int)strlen(fr), C(sidebar_dim));
                 lmax -= fw + S(8); // same room either way: the name doesn't jump when the button appears
                 f32 bw = MAX(S(10), bar_end - lx), by2 = r.y + r.h - roundf(S(7));
                 f32 bt = roundf(S(3));
@@ -817,7 +904,7 @@ static void draw_sidebar(void) {
             if (show_eject && !has_bar) lmax -= roundf(S(22)) + S(4); // button next to a plain name
             draw_text_fit(f, lx, text_y(f, r.y - (has_bar ? S(3) : 0), r.h), lmax, pl->label,
                           (int)strlen(pl->label), C(active ? surface_foreground_color(sidebar_surface_color(true), false, false) :
-                            pl->kind == PK_UNMOUNTED || phone_off ? COL_TEXT_DIM : COL_TEXT2), 0);
+                            pl->kind == PK_UNMOUNTED || phone_off ? sidebar_dim : COL_TEXT2), 0);
         }
         g_alpha = 1.f;
     }
@@ -839,6 +926,12 @@ static void draw_sidebar(void) {
         }
     }
     draw_clip_pop(cs);
+}
+
+static void draw_sidebar(void) {
+    u32 saved = g_icon_surface_bg; g_icon_surface_bg = COL_SIDEBAR;
+    draw_sidebar_content();
+    g_icon_surface_bg = saved;
 }
 
 static const char *owner_name(u32 uid) {
@@ -1030,7 +1123,7 @@ static void render_tex_fit(SDL_Texture *t, int tw, int th, f32 x, f32 y, f32 box
 static void draw_item_icon_big(Pane *p, Entry *e, f32 ix, f32 iy, f32 isz, bool cut) {
     bool hidden = e->flags & ENT_HIDDEN;
     if (e->flags & ENT_DIR) {
-        draw_dir_icon(ix, iy, isz, rel_base(e->name), hidden);
+        draw_entry_dir_icon(ix, iy, isz, p, e, hidden);
         return;
     }
     const char *name = rel_base(e->name);
@@ -1199,8 +1292,10 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
         if (p->view == VIEW_LIST) {
             f32 is = roundf(S(p->listv_px)), ix = r.x + S(10), iy = roundf(r.y + (r.h - is) * 0.5f);
             if (p->listv_px >= 32) draw_item_icon_big(p, e, ix, iy, is, cut); // (big enough for thumbnails)
-            else if (e->flags & ENT_DIR) draw_dir_icon(ix, iy, is, name, hidden);
+            else if (e->flags & ENT_DIR) draw_entry_dir_icon(ix, iy, is, p, e, hidden);
             else if (!draw_icon_for_name(ix, iy, is, name, e->mflags & MF_EXEC)) draw_file_icon(ix, iy, is, file_color(e));
+            if ((e->flags & ENT_LINK) && !(e->flags & ENT_DIR))
+                draw_folder_badge(ix, iy, is, "emblem-symbolic-link", hidden, 0);
             f32 tx = ix + is + S(8);
             if (renaming) {
                 Rect fr = {tx - S(4), r.y + S(3), r.x + r.w - S(6) - (tx - S(4)), r.h - S(6)};
@@ -1223,17 +1318,8 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
                 draw_rrect(gx - S(2), gy - S(2), gr2 * 2 + S(4), gr2 * 2 + S(4), gr2 + S(2), C(COL_BG));
                 draw_rrect(gx, gy, gr2 * 2, gr2 * 2, gr2, C(cmp_marked(cs) ? cmp_color(cs) : git_color(gs)));
             }
-            if (git_entry_sub(p, e)) { // a repository: a branch mark on the icon's bottom-left corner
-                f32 bs = roundf(MAX(S(18), isz * 0.3f)), bx = ix - S(2), by = iy + isz - bs + S(2);
-                draw_rrect(bx - S(2), by - S(2), bs + S(4), bs + S(4), (bs + S(4)) * 0.5f, C(COL_BG));
-                draw_rrect(bx, by, bs, bs, bs * 0.5f, C(COL_CHIP));
-                draw_branch_icon(bx + (bs - S(13)) * 0.5f, by + bs * 0.5f, C(COL_TEXT2));
-            }
-            if (e->flags & ENT_LINK) {
-                f32 bs = roundf(MAX(S(10), isz * 0.18f));
-                draw_rrect(ix + isz - bs, iy + isz - bs, bs, bs, bs * 0.5f, C(COL_BG));
-                draw_rrect(ix + isz - bs + S(2), iy + isz - bs + S(2), bs - S(4), bs - S(4), bs * 0.4f, C(0x7FB2FF));
-            }
+            if ((e->flags & ENT_LINK) && !(e->flags & ENT_DIR))
+                draw_folder_badge(ix, iy, isz, "emblem-symbolic-link", hidden, 0);
             f32 lyy = iy + isz + roundf(S(6)), lw = r.w - S(12), lh = roundf(f->line_h * 1.1f);
             if (renaming) {
                 Rect fr = {r.x + S(4), lyy - S(2), r.w - S(8), lh + S(6)};
@@ -2119,13 +2205,10 @@ static void draw_list(Pane *p, bool active) {
                 draw_rect(roundf(ly->col_name + roundf(S(16)) * (f32)k + roundf(S(7))), y, 1, rh, CA(COL_TEXT_FAINT, 0.35f));
         }
         if (p->list_px >= 32) draw_item_icon_big(p, e, icx, iy, is, cut); // (big enough for thumbnails)
-        else if (e->flags & ENT_DIR) draw_dir_icon(icx, iy, is, rel_base(e->name), hidden);
+        else if (e->flags & ENT_DIR) draw_entry_dir_icon(icx, iy, is, p, e, hidden);
         else if (!draw_icon_for_name(icx, iy, is, rel_base(e->name), e->mflags & MF_EXEC)) draw_file_icon(icx, iy, is, file_color(e));
-        if (e->flags & ENT_LINK) { // small link badge
-            f32 bs = roundf(S(7));
-            draw_rrect(icx + is - bs + S(2), iy + is - bs + S(1), bs, bs, bs * 0.5f, C(COL_BG));
-            draw_rrect(icx + is - bs + S(3), iy + is - bs + S(2), bs - S(2), bs - S(2), bs * 0.4f, C(0x7FB2FF));
-        }
+        if ((e->flags & ENT_LINK) && !(e->flags & ENT_DIR))
+            draw_folder_badge(icx, iy, is, "emblem-symbolic-link", hidden, 0);
 
         f32 ty = text_y(f, y, rh);
         f32 nx = icx + is + roundf(S(9));
@@ -2316,7 +2399,7 @@ static void draw_searchbar(Pane *p) {
     Rect field, toggle, close, cont, opt[3];
     search_bar_layout(p, &field, &toggle, &close, &cont, opt);
     bool focused = A.search_pane == p;
-    draw_rrect(field.x, field.y, field.w, field.h, S(7), C(focused ? COL_FIELD_HOVER : COL_FIELD));
+    draw_rrect(field.x, field.y, field.w, field.h, S(7), C(navigation_field_color()));
     if (focused) draw_rrect_outline(field.x, field.y, field.w, field.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
     // magnifier
     f32 r = roundf(S(5)), cx = field.x + S(15), cy = field.y + field.h * 0.5f - S(1);
@@ -3510,7 +3593,10 @@ static void draw_preview(void) {
         y += vh + S(16);
     } else if (!(pv && pv->kind == PV_TEXT)) {
         f32 is = roundf(MIN(S(96), vh * 0.7f)), ix = roundf(x + (w - is) * 0.5f);
-        if (is_dir) draw_dir_icon(ix, y + S(8), is, name, false);
+        if (is_dir) {
+            if (e) draw_entry_dir_icon(ix, y + S(8), is, p, e, false);
+            else draw_path_icon(ix, y + S(8), is, p->path);
+        }
         else if (!e || !draw_icon_for_name(ix, y + S(8), is, name, e->mflags & MF_EXEC))
             draw_file_icon(ix, y + S(8), is, e ? file_color(e) : 0x8C8F99);
         y += is + S(28);

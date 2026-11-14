@@ -425,6 +425,7 @@ typedef struct NSVGattrib
 	float xform[6];
 	unsigned int fillColor;
 	unsigned int strokeColor;
+	unsigned int currentColor; // File Explorer: inherited SVG/CSS color property
 	float opacity;
 	float fillOpacity;
 	float strokeOpacity;
@@ -652,6 +653,7 @@ static NSVGparser* nsvg__createParser(void)
 	memset(p->attr[0].id, 0, sizeof p->attr[0].id);
 	p->attr[0].fillColor = NSVG_RGB(0,0,0);
 	p->attr[0].strokeColor = NSVG_RGB(0,0,0);
+	p->attr[0].currentColor = NSVG_RGB(0,0,0);
 	p->attr[0].opacity = 1;
 	p->attr[0].fillOpacity = 1;
 	p->attr[0].strokeOpacity = 1;
@@ -1025,9 +1027,9 @@ static void nsvg__addShape(NSVGparser* p)
 	// Set fill
 	if (attr->hasFill == 0) {
 		shape->fill.type = NSVG_PAINT_NONE;
-	} else if (attr->hasFill == 1) {
+	} else if (attr->hasFill == 1 || attr->hasFill == 3) {
 		shape->fill.type = NSVG_PAINT_COLOR;
-		shape->fill.color = attr->fillColor;
+		shape->fill.color = attr->hasFill == 3 ? attr->currentColor : attr->fillColor;
 		shape->fill.color |= (unsigned int)(attr->fillOpacity*255) << 24;
 	} else if (attr->hasFill == 2) {
 		shape->fill.type = NSVG_PAINT_UNDEF;
@@ -1036,9 +1038,9 @@ static void nsvg__addShape(NSVGparser* p)
 	// Set stroke
 	if (attr->hasStroke == 0) {
 		shape->stroke.type = NSVG_PAINT_NONE;
-	} else if (attr->hasStroke == 1) {
+	} else if (attr->hasStroke == 1 || attr->hasStroke == 3) {
 		shape->stroke.type = NSVG_PAINT_COLOR;
-		shape->stroke.color = attr->strokeColor;
+		shape->stroke.color = attr->hasStroke == 3 ? attr->currentColor : attr->strokeColor;
 		shape->stroke.color |= (unsigned int)(attr->strokeOpacity*255) << 24;
 	} else if (attr->hasStroke == 2) {
 		shape->stroke.type = NSVG_PAINT_UNDEF;
@@ -1870,9 +1872,14 @@ static int nsvg__parseAttr(NSVGparser* p, const char* name, const char* value)
 			attr->visible = 0;
 		// Don't reset ->visible on display:inline, one display:none hides the whole subtree
 
+	} else if (strcmp(name, "color") == 0) {
+		if (strcmp(value, "inherit") != 0 && strcmp(value, "currentColor") != 0)
+			attr->currentColor = nsvg__parseColor(value);
 	} else if (strcmp(name, "fill") == 0) {
 		if (strcmp(value, "none") == 0) {
 			attr->hasFill = 0;
+		} else if (strcmp(value, "currentColor") == 0) {
+			attr->hasFill = 3; // resolve after CSS classes and inline declarations
 		} else if (strncmp(value, "url(", 4) == 0) {
 			attr->hasFill = 2;
 			nsvg__parseUrl(attr->fillGradient, value);
@@ -1887,6 +1894,8 @@ static int nsvg__parseAttr(NSVGparser* p, const char* name, const char* value)
 	} else if (strcmp(name, "stroke") == 0) {
 		if (strcmp(value, "none") == 0) {
 			attr->hasStroke = 0;
+		} else if (strcmp(value, "currentColor") == 0) {
+			attr->hasStroke = 3;
 		} else if (strncmp(value, "url(", 4) == 0) {
 			attr->hasStroke = 2;
 			nsvg__parseUrl(attr->strokeGradient, value);

@@ -2,7 +2,7 @@
 
 static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Integration", "Updates", "Advanced"};
 
-enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_COLOR, OK_TEXT };
+enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_COLOR, OK_TEXT, OK_APP_ICON };
 
 enum {
     OPT_THEME, OPT_ACCENT, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
@@ -12,8 +12,8 @@ enum {
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
     OPT_SYSTEM_ACCENT, OPT_SYSTEM_BACKGROUND, OPT_UNIFIED_SURFACES, OPT_SEPARATORS,
-    OPT_SIDEBAR_BRIGHTNESS, OPT_HEADER_BRIGHTNESS, OPT_MAIN_BRIGHTNESS, OPT_STATUS_BRIGHTNESS,
-    OPT_TAB_POSITION, OPT_TAB_STYLE, OPT_SCROLL_COLOR, OPT_NAV_SELECTION_OPACITY, OPT_HEADER_LABEL, OPT_HEADER_TEXT, OPT_WINDOW_CONTROLS,
+    OPT_SIDEBAR_BRIGHTNESS, OPT_HEADER_BRIGHTNESS, OPT_MAIN_BRIGHTNESS, OPT_STATUS_BRIGHTNESS, OPT_PREVIEW_BRIGHTNESS,
+    OPT_TAB_POSITION, OPT_TAB_STYLE, OPT_SCROLL_COLOR, OPT_NAV_SELECTION_OPACITY, OPT_HEADER_LABEL, OPT_HEADER_TEXT, OPT_WINDOW_CONTROLS, OPT_APP_ICON,
 };
 
 typedef struct {
@@ -27,6 +27,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_SYSTEM_BACKGROUND, "Follow system appearance", "Automatically select the System theme; turn off to restore your previous theme"},
     {OC_APPEARANCE, OK_BOOL, OPT_SYSTEM_ACCENT, "Match system highlight", "Follow the desktop portal accent; use the theme accent if unavailable"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders"},
+    {OC_APPEARANCE, OK_APP_ICON, OPT_APP_ICON, "Application icon", "Choose an SVG or PNG image; Use system restores the desktop icon"},
     {OC_APPEARANCE, OK_CHOICE, OPT_FONT, "Font", "Interface font family"},
     {OC_APPEARANCE, OK_INT, OPT_FONT_SIZE, "Font size", "Text size at 100% zoom"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ROW_SPACING, "Row spacing", "Height of rows in the details and list views"},
@@ -48,7 +49,8 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED_SURFACES, "Unified surfaces", "Use one base colour for the sidebar, header, file area and status bar"},
     {OC_APPEARANCE, OK_BOOL, OPT_SEPARATORS, "Show separator lines", "Panel edges, column dividers and header/status outlines (on by default)"},
     {OC_APPEARANCE, OK_INT, OPT_NAV_SELECTION_OPACITY, "Navigation selection opacity", "Sidebar, configuration navigation and pill tabs: 0-100%, default 40%; hover stays at 8%"},
-    {OC_APPEARANCE, OK_INT, OPT_SIDEBAR_BRIGHTNESS, "Side panels brightness", "Sidebar and preview: negative darkens, positive lightens, zero resets"},
+    {OC_APPEARANCE, OK_INT, OPT_SIDEBAR_BRIGHTNESS, "Sidebar brightness", "Left sidebar only: negative darkens, positive lightens, zero resets"},
+    {OC_APPEARANCE, OK_INT, OPT_PREVIEW_BRIGHTNESS, "Preview panel brightness", "Right preview panel only: -30% to +30%, independent of the sidebar"},
     {OC_APPEARANCE, OK_INT, OPT_HEADER_BRIGHTNESS, "Header brightness", "Label, navigation, tabs and window controls: -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_MAIN_BRIGHTNESS, "File area brightness", "Main central window: -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_STATUS_BRIGHTNESS, "Status bar brightness", "Lower status bar: -30% to +30%"},
@@ -115,7 +117,7 @@ static const char *g_transfer_labels[] = {"One at a time", "Two at a time", "Fou
 
 // hit parts recorded while drawing, tested on click
 enum { HP_NONE, HP_NAV, HP_TOGGLE, HP_SEG, HP_DROP, HP_MINUS, HP_PLUS, HP_SWATCH, HP_BUTTON, HP_DROPITEM, HP_SEARCH, HP_CLOSE,
-       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_EDIT_FIELD, HP_EDIT_APPLY, HP_EDIT_RESET };
+       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_EDIT_FIELD, HP_EDIT_APPLY, HP_EDIT_RESET, HP_ICON_CHOOSE };
 typedef struct { Rect r; int part, opt, arg; } OptHit;
 
 static struct {
@@ -143,6 +145,7 @@ static struct {
     bool scroll_color_focus;
     TextEdit header_text;
     bool header_text_focus;
+    TextEdit app_icon;
 } g_opt;
 
 // The description, with live state for the integration switches.
@@ -404,6 +407,7 @@ static void opt_bool_toggle(int id) {
 static int opt_int_get(int id) {
     switch (id) {
     case OPT_SIDEBAR_BRIGHTNESS: return g_surface_brightness[SURFACE_SIDEBAR];
+    case OPT_PREVIEW_BRIGHTNESS: return g_surface_brightness[SURFACE_PREVIEW];
     case OPT_HEADER_BRIGHTNESS: return g_surface_brightness[SURFACE_HEADER];
     case OPT_MAIN_BRIGHTNESS: return g_surface_brightness[SURFACE_MAIN];
     case OPT_STATUS_BRIGHTNESS: return g_surface_brightness[SURFACE_STATUS];
@@ -415,7 +419,7 @@ static int opt_int_get(int id) {
 }
 
 static void opt_int_step(int id, int dir) {
-    if (id >= OPT_SIDEBAR_BRIGHTNESS && id <= OPT_STATUS_BRIGHTNESS) {
+    if (id >= OPT_SIDEBAR_BRIGHTNESS && id <= OPT_PREVIEW_BRIGHTNESS) {
         int surface = id - OPT_SIDEBAR_BRIGHTNESS;
         g_surface_brightness[surface] = CLAMP(g_surface_brightness[surface] + dir * 5, -30, 30);
         theme_apply();
@@ -436,7 +440,7 @@ static void opt_int_step(int id, int dir) {
 }
 
 static void opt_int_fmt(int id, char *buf, size_t cap) {
-    if (id >= OPT_SIDEBAR_BRIGHTNESS && id <= OPT_STATUS_BRIGHTNESS)
+    if (id >= OPT_SIDEBAR_BRIGHTNESS && id <= OPT_PREVIEW_BRIGHTNESS)
         snprintf(buf, cap, "%+d%%", opt_int_get(id));
     else if (id == OPT_ZOOM || id == OPT_NAV_SELECTION_OPACITY) snprintf(buf, cap, "%d%%", opt_int_get(id));
     else snprintf(buf, cap, "%d px", opt_int_get(id));
@@ -474,6 +478,105 @@ static void opt_header_text_apply(void) {
     opt_header_text_sync();
     g_opt.header_text_focus = false;
     A.settings_dirty = true;
+}
+
+static unsigned g_opt_icon_session;
+static bool g_opt_icon_choosing;
+typedef struct {
+    unsigned session;
+    char location[PATH_MAX];
+    char *path, *error;
+} OptIconChoice;
+
+static void opt_app_icon_sync(void) {
+    te_set(&g_opt.app_icon, g_app_icon_path, (int)strlen(g_app_icon_path), 0);
+}
+static bool opt_app_icon_valid(const char *path) {
+    if (!*path) return true;
+    const char *ext = strrchr(path, '.');
+    return path[0] == '/' && !strpbrk(path, "\r\n") && ext &&
+           (!strcasecmp(ext, ".svg") || !strcasecmp(ext, ".png"));
+}
+static void opt_app_icon_apply(void) {
+    const char *path = g_opt.app_icon.buf;
+    if (!opt_app_icon_valid(path)) {
+        toast("Choose an SVG or PNG image");
+        return;
+    }
+    if (*path) {
+        u8 *pixels = system_icon_raster_path_colors(path, 64, 64, true);
+        if (!pixels) { toast("Couldn't load that icon image"); return; }
+        free(pixels);
+    }
+    snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", path);
+    g_app_icon_revision++;
+    opt_app_icon_sync();
+    A.settings_dirty = true;
+    if (!A.selftest && !A.screenshot) {
+        int result = app_icon_apply_now();
+        if (result == APP_DESKTOP_ERROR) toast("Window icon updated, but couldn't update the taskbar launcher");
+        else if (result == APP_DESKTOP_MISSING) toast("Window icon updated; export File Explorer to update its taskbar launcher");
+        else toast("Application icon updated");
+    }
+}
+
+static void opt_app_icon_chosen_main(void *userdata) {
+    OptIconChoice *choice = userdata;
+    g_opt_icon_choosing = false;
+    if (g_sheet.kind == SHEET_OPTIONS && choice->session == g_opt_icon_session) {
+        if (choice->error) toast("Couldn't open the image chooser: %s", choice->error);
+        else if (choice->path) {
+            te_set(&g_opt.app_icon, choice->path, (int)strlen(choice->path), 0);
+            opt_app_icon_apply();
+            opt_app_icon_sync();
+        }
+        A.redraw = true;
+    }
+    free(choice->path); free(choice->error); free(choice);
+}
+static void SDLCALL opt_app_icon_chosen(void *userdata, const char *const *files, int filter) {
+    (void)filter;
+    OptIconChoice *choice = userdata;
+    if (!files) choice->error = strdup(SDL_GetError());
+    else if (files[0]) choice->path = strdup(files[0]);
+    main_post(opt_app_icon_chosen_main, choice);
+}
+static void opt_app_icon_choose(void) {
+    if (g_opt_icon_choosing || A.selftest) return;
+    static const SDL_DialogFileFilter filters[] = {{"Icon images (SVG, PNG)", "svg;png"}};
+    OptIconChoice *choice = xcalloc(1, sizeof *choice);
+    choice->session = g_opt_icon_session;
+    if (g_app_icon_path[0]) snprintf(choice->location, sizeof choice->location, "%s", g_app_icon_path);
+    g_opt_icon_choosing = true;
+    SDL_ShowOpenFileDialog(opt_app_icon_chosen, choice, A.win, filters, (int)ARRAY_COUNT(filters),
+                           choice->location[0] ? choice->location : NULL, false);
+}
+
+static void opt_app_icon_preview(Rect r) {
+    static SDL_Texture *texture;
+    static unsigned revision = UINT_MAX;
+    static char theme[64];
+    static int size;
+    static u32 accent;
+    int px = MAX(1, (int)r.w);
+    if (!texture || revision != g_app_icon_revision || size != px || accent != COL_ACCENT ||
+        strcmp(theme, g_system_icon_current)) {
+        if (texture) SDL_DestroyTexture(texture);
+        texture = NULL;
+        revision = g_app_icon_revision; size = px; accent = COL_ACCENT;
+        snprintf(theme, sizeof theme, "%s", g_system_icon_current);
+        u8 *pixels = app_icon_raster(px, px);
+        SDL_Surface *surface = pixels ? SDL_CreateSurfaceFrom(px, px, SDL_PIXELFORMAT_RGBA32, pixels, px * 4) : NULL;
+        if (surface) {
+            texture = SDL_CreateTextureFromSurface(A.ren, surface);
+            SDL_DestroySurface(surface);
+        }
+        free(pixels);
+    }
+    if (texture) {
+        draw_flush();
+        SDL_RenderTexture(A.ren, texture, NULL, &(SDL_FRect){r.x, r.y, r.w, r.h});
+    }
 }
 
 static void opt_button(int id) {
@@ -546,6 +649,7 @@ static bool opt_matches(const OptDef *o, const char *q) {
 // --- open / close ----------------------------------------------------------------
 
 static void options_open(void) {
+    g_opt_icon_session++;
     if (g_sheet.kind) sheet_close();
     g_sheet.kind = SHEET_OPTIONS;
     int keep = g_opt.cat;
@@ -560,6 +664,7 @@ static void options_open(void) {
     g_opt.rec_def = -1;
     opt_scroll_color_sync();
     opt_header_text_sync();
+    opt_app_icon_sync();
     themes_scan(); // pick up new/edited theme files
     theme_apply();
     A.redraw = true;
@@ -608,6 +713,28 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     f32 y = roundf(cy - ch * 0.5f);
     char buf[64];
     switch (o->kind) {
+    case OK_APP_ICON: {
+        f32 preview = roundf(S(34)), gap = roundf(S(6)), bx = x + preview + gap;
+        opt_app_icon_preview((Rect){x, roundf(cy - preview * 0.5f), preview, preview});
+        const char *name = g_app_icon_path[0] ? strrchr(g_app_icon_path, '/') : NULL;
+        const char *status = g_app_icon_path[0] ? (name ? name + 1 : g_app_icon_path) : "System icon";
+        draw_text_fit(fs, bx, roundf(cy - S(23)), MAX(0.f, x + w - bx), status, (int)strlen(status), C(COL_TEXT_DIM), 0);
+        const char *label = g_opt_icon_choosing ? "Choosing..." : "Choose image";
+        f32 available = MAX(0.f, x + w - bx - gap);
+        f32 choose_w = MIN(ceilf(text_width(f, label, (int)strlen(label)) + S(18)), available * 0.55f);
+        f32 reset_w = MIN(ceilf(text_width(f, "Use system", 10) + S(18)), MAX(0.f, available - choose_w));
+        Rect choose = {bx, roundf(cy - S(2)), choose_w, roundf(S(26))};
+        Rect reset = {choose.x + choose.w + gap, choose.y, reset_w, choose.h};
+        ClipSave clip = draw_clip_push((SDL_Rect){(int)bx, (int)choose.y, (int)MAX(0.f, x + w - bx), (int)choose.h});
+        sheet_button(choose, label, false, !g_opt_icon_choosing);
+        sheet_button(reset, "Use system", false, !g_opt_icon_choosing && g_app_icon_path[0]);
+        draw_clip_pop(clip);
+        if (!g_opt_icon_choosing) {
+            opt_hit(choose, HP_ICON_CHOOSE, o->id, 0);
+            if (g_app_icon_path[0]) opt_hit(reset, HP_EDIT_RESET, o->id, 0);
+        }
+        break;
+    }
     case OK_COLOR: case OK_TEXT: {
         bool color = o->kind == OK_COLOR;
         TextEdit *edit = color ? &g_opt.scroll_color : &g_opt.header_text;
@@ -1131,6 +1258,7 @@ static void options_click(f32 x, f32 y, int clicks) {
         OptHit *hp = &g_opt.hits[k];
         if (hp->r.w <= 0 || !in_rect(hp->r, x, y)) continue;
         switch (hp->part) {
+        case HP_ICON_CHOOSE: opt_app_icon_choose(); return;
         case HP_EDIT_FIELD:
             if (hp->opt == OPT_HEADER_TEXT) g_opt.header_text_focus = true;
             else g_opt.scroll_color_focus = true;
@@ -1140,7 +1268,10 @@ static void options_click(f32 x, f32 y, int clicks) {
             else opt_scroll_color_apply();
             return;
         case HP_EDIT_RESET:
-            if (hp->opt == OPT_HEADER_TEXT) {
+            if (hp->opt == OPT_APP_ICON) {
+                te_set(&g_opt.app_icon, "", 0, 0);
+                opt_app_icon_apply();
+            } else if (hp->opt == OPT_HEADER_TEXT) {
                 header_label_defaults();
                 opt_header_text_sync();
                 A.settings_dirty = true;

@@ -2887,6 +2887,48 @@ static int run_selftest_m9(void) {
     ST_CHECK(g_header_label == HEADER_APP && !strcmp(header_label_text(), "File-Explorer"));
     sheet_close();
 
+    // Application icon chooser: apply/cancel, persistence, invalid images,
+    // stale callbacks, and Use system restoring desktop artwork.
+    {
+        const char *icon_path = M9_BASE "/custom app icon.svg";
+        ST_CHECK(write_file_atomic(icon_path,
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\">"
+            "<rect width=\"16\" height=\"16\" fill=\"#FF8040\"/></svg>"));
+        ST_CHECK(!g_app_icon_path[0]);
+        options_open();
+        te_set(&g_opt.search, "Application icon", 0, 0); st_frames(1);
+        ST_CHECK(st_opt_hit(HP_ICON_CHOOSE, OPT_APP_ICON, 0));
+        OptIconChoice *choice = xcalloc(1, sizeof *choice);
+        choice->session = g_opt_icon_session;
+        choice->path = strdup(icon_path);
+        opt_app_icon_chosen_main(choice); // same main-loop delivery as the native chooser
+        ST_CHECK(!strcmp(g_app_icon_path, icon_path));
+        u8 *pixels = app_icon_raster(16, 16);
+        ST_CHECK(pixels && pixels[(8 * 16 + 8) * 4] == 255 && pixels[(8 * 16 + 8) * 4 + 3] == 255);
+        free(pixels);
+        settings_save(); settings_load();
+        ST_CHECK(!strcmp(g_app_icon_path, icon_path));
+        choice = xcalloc(1, sizeof *choice);
+        choice->session = g_opt_icon_session;
+        opt_app_icon_chosen_main(choice); // cancel
+        ST_CHECK(!strcmp(g_app_icon_path, icon_path));
+        choice = xcalloc(1, sizeof *choice);
+        choice->session = g_opt_icon_session;
+        choice->path = strdup(M9_BASE "/missing.svg");
+        opt_app_icon_chosen_main(choice);
+        ST_CHECK(!strcmp(g_app_icon_path, icon_path) && !strcmp(g_opt.app_icon.buf, icon_path));
+        choice = xcalloc(1, sizeof *choice);
+        choice->session = g_opt_icon_session - 1;
+        choice->path = strdup(icon_path);
+        st_frames(1); st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_APP_ICON, 0));
+        ST_CHECK(!g_app_icon_path[0]);
+        opt_app_icon_chosen_main(choice); // result from a previous Configuration session
+        ST_CHECK(!g_app_icon_path[0]);
+        settings_save(); settings_load();
+        ST_CHECK(!g_app_icon_path[0]);
+        sheet_close();
+    }
+
     // Navigation opacity uses the existing numeric control and survives reload.
     ST_CHECK(g_navigation_selection_opacity == 40);
     opt_int_step(OPT_NAV_SELECTION_OPACITY, 1);

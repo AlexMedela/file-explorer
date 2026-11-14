@@ -14,12 +14,15 @@ static inline bool in_rect(Rect r, f32 x, f32 y) {
   return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
 }
 
+#include "text_caret.c"
+
 // --- single-line text editing (path bar, inline rename) --------------------
 
 typedef struct {
   char buf[PATH_MAX];
   int caret, anchor; // selection is [min, max) of the two
   f32 scroll;
+  TextCaret animation;
 } TextEdit;
 
 static void te_set(TextEdit *t, const char *s, int anchor, int caret) {
@@ -28,6 +31,7 @@ static void te_set(TextEdit *t, const char *s, int anchor, int caret) {
   t->anchor = CLAMP(anchor, 0, n);
   t->caret = CLAMP(caret, 0, n);
   t->scroll = 0;
+  memset(&t->animation, 0, sizeof t->animation);
 }
 
 static int te_prev(const TextEdit *t, int i) {
@@ -79,6 +83,7 @@ static void te_delete_sel(TextEdit *t) {
 }
 
 static void te_insert(TextEdit *t, const char *s) {
+  t->animation.input = now_ns();
   te_delete_sel(t);
   size_t n = strlen(t->buf), k = strlen(s);
   if (n + k + 1 > sizeof t->buf)
@@ -90,6 +95,7 @@ static void te_insert(TextEdit *t, const char *s) {
 }
 
 static bool te_key(TextEdit *t, SDL_Keycode key, SDL_Keymod mod) {
+  t->animation.input = now_ns();
   bool ctrl = mod & SDL_KMOD_CTRL, shift = mod & SDL_KMOD_SHIFT;
   int n = (int)strlen(t->buf), lo = MIN(t->anchor, t->caret),
       hi = MAX(t->anchor, t->caret);
@@ -5783,6 +5789,7 @@ static void sheet_draw(void);
 static bool sheet_busy(void);
 static void openwith_open(char **paths, int n);
 static void options_open(void);
+static int app_icon_apply_now(void);
 static void ipc_handle(char *msg);
 static bool exe_link_replaced(char *link);
 static bool options_is_open(void);
@@ -14449,6 +14456,7 @@ static void search_exit(Pane *p) {
 }
 
 #include "settings.c"
+#include "app_desktop_icon.c"
 
 // --- zoom / pins -----------------------------------------------------------
 
@@ -14697,6 +14705,7 @@ static void preview_update(void) {
   }
 }
 
+#include "text_pointer.c"
 #include "input.c"
 
 #include "render.c"
@@ -14867,7 +14876,7 @@ static void tray_sync(void) {
 static void tray_update(void) {
   bool want = (A.close_to_tray || g_bg_start) && tray_host_available();
   if (want && !g_tray) {
-    u8 *px = icon_raster(icon_find("folder"), 64, 64);
+    u8 *px = app_icon_raster(64, 64);
     SDL_Surface *ic =
         px ? SDL_CreateSurfaceFrom(64, 64, SDL_PIXELFORMAT_RGBA32, px, 64 * 4)
            : NULL;
@@ -14943,6 +14952,7 @@ static bool animating(void) {
 }
 
 static void frame_draw(void) {
+  g_text_field_count = 0;
   draw_clip(NULL);
   g_alpha = 1.f;
   if (A.shadow_px) { // transparent margin, opaque window (clearing ignores the
@@ -15014,6 +15024,8 @@ static void frame_draw(void) {
   draw_toast();
   draw_drag_badge();
   draw_tab_drop();
+  if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open)
+    g_text_field_count = 0;
   A.mouse_in = mouse_in; // overlays get the mouse
   draw_menu();
   draw_palette();
@@ -15032,7 +15044,7 @@ static void frame_draw(void) {
 
 static void window_icon_update(void) { // the logo in the accent colour (X11 /
                                        // taskbars without the .desktop icon)
-  u8 *logo = icon_raster(icon_find("folder"), 128, 128);
+  u8 *logo = app_icon_raster(128, 128);
   if (!logo)
     return;
   SDL_Surface *ic =
@@ -15087,61 +15099,75 @@ static bool app_icon_write(const char *dh, u32 accent) {
   return changed;
 }
 
-// Export the same raster used by the window as SVG runs so desktop launchers
-// also support installed themes whose source artwork is PNG or XPM.
-static bool app_theme_icon_write(const char *dh) {
-    const int size = 128;
-    u8 *pixels = icon_raster(icon_find("folder"), size, size);
-    if (!pixels) return false;
-    char *svg = NULL;
-    size_t length = 0;
-    FILE *f = open_memstream(&svg, &length);
-    if (!f) { free(pixels); return false; }
-    fprintf(f, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"128\" height=\"128\" viewBox=\"0 0 128 128\">\n");
-    for (int y = 0; y < size; y++) {
-        for (int x = 0; x < size;) {
-            u8 *p = pixels + (y * size + x) * 4;
-            int end = x + 1;
-            while (end < size && !memcmp(p, pixels + (y * size + end) * 4, 4)) end++;
-            if (p[3]) fprintf(f, "<path fill=\"#%02x%02x%02x\" fill-opacity=\"%.6f\" d=\"M%d %dh%dv1H%dz\"/>\n",
-                              p[0], p[1], p[2], p[3] / 255.0, x, y, end - x, x);
-            x = end;
-        }
+// Keep selected SVG/PNG artwork intact for the desktop's native renderer.
+// NanoSVG supports a subset of SVG and must not flatten taskbar artwork.
+static int app_taskbar_icon_write(void) {
+    char dh[PATH_MAX], path[PATH_MAX];
+    data_home(dh, sizeof dh);
+    if (app_icon_source_path(256, path, sizeof path)) {
+        size_t length;
+        u8 *source = app_desktop_read(path, &length);
+        if (!source) return APP_DESKTOP_ERROR;
+        const char *ext = strrchr(path, '.');
+        int result = app_desktop_install_icon(dh, source, length,
+                     ext && !strcasecmp(ext, ".png") ? "png" : "svg");
+        free(source);
+        return result;
     }
-    fputs("</svg>\n", f);
-    free(pixels);
-    if (fclose(f)) { free(svg); return false; }
-    char dir[PATH_MAX], apps[PATH_MAX + 32], path[PATH_MAX + 64];
-    snprintf(dir, sizeof dir, "%s/icons/hicolor", dh);
-    snprintf(apps, sizeof apps, "%s/scalable/apps", dir);
-    snprintf(path, sizeof path, "%s/dev.fileexplorer.svg", apps);
-    bool changed = !file_equals(path, svg);
-    if (changed) {
-        mkdir_p(apps, 0755);
-        changed = write_file_atomic(path, svg);
-        if (changed) utimensat(AT_FDCWD, dir, NULL, 0);
-    }
-    free(svg);
-    return changed;
+    char *source = strdup(g_logo_svg);
+    logo_recolor(source, COL_ACCENT);
+    int result = app_desktop_install_icon(dh, source, strlen(source), "svg");
+    free(source);
+    return result;
+}
+static int app_icon_apply_now(void) {
+    window_icon_update();
+    return app_taskbar_icon_write();
 }
 
 // Wait for appearance changes to settle before updating the desktop icon.
 static void app_icon_sync(void) {
-    static int last_theme = -1;
-    static u32 last_main, last_bg;
-    static u64 since;
+    static unsigned last_revision = UINT_MAX;
+    static char last_system_theme[64];
+    static u32 last_main, last_bg, last_accent;
+    static char last_launcher[PATH_MAX];
+    static struct timespec launcher_stamp;
+    static off_t launcher_size;
+    static u64 since, checked;
     static bool pending;
     if (A.selftest || A.screenshot) return;
-    if (last_theme != g_icon_theme || last_main != COL_TEXT2 || last_bg != COL_BG) {
-        last_theme = g_icon_theme; last_main = COL_TEXT2; last_bg = COL_BG;
+    u64 now = now_ns();
+    if (now - checked >= 2000000000ull) {
+        checked = now;
+        char current[64];
+        system_icon_detect(current, sizeof current);
+        if (strcmp(current, g_system_icon_current)) icon_themes_reload();
+        // Distrobox can recreate the launcher while this instance is running.
+        // Restore its icon reference without requiring another application restart.
+        AppDesktop desktop;
+        struct stat st;
+        char dh[PATH_MAX];
+        data_home(dh, sizeof dh);
+        if (app_desktop_find(dh, &desktop) && !stat(desktop.source, &st)) {
+            if (strcmp(last_launcher, desktop.source) || launcher_size != st.st_size ||
+                launcher_stamp.tv_sec != st.st_mtim.tv_sec || launcher_stamp.tv_nsec != st.st_mtim.tv_nsec) {
+                snprintf(last_launcher, sizeof last_launcher, "%s", desktop.source);
+                launcher_size = st.st_size; launcher_stamp = st.st_mtim;
+                since = now; pending = true;
+            }
+        } else last_launcher[0] = 0;
+    }
+    if (last_revision != g_app_icon_revision || strcmp(last_system_theme, g_system_icon_current) ||
+        last_main != COL_TEXT2 || last_bg != COL_BG || last_accent != COL_ACCENT) {
+        last_revision = g_app_icon_revision;
+        snprintf(last_system_theme, sizeof last_system_theme, "%s", g_system_icon_current);
+        last_main = COL_TEXT2; last_bg = COL_BG; last_accent = COL_ACCENT;
         window_icon_update();
         since = now_ns(); pending = true;
     }
     if (!pending || now_ns() - since < 1500000000ull) return;
     pending = false;
-    char dh[PATH_MAX];
-    data_home(dh, sizeof dh);
-    app_theme_icon_write(dh);
+    app_taskbar_icon_write();
 }
 
 #ifdef FE_DEMO
@@ -15795,6 +15821,12 @@ int main(int argc, char **argv) {
   theme_restore_selection(A.theme_name);
   theme_apply();
 
+    if (!picker_active() && !getenv("SDL_APP_ID")) {
+        char dh[PATH_MAX];
+        AppDesktop desktop;
+        data_home(dh, sizeof dh);
+        if (app_desktop_find(dh, &desktop)) SDL_SetHint(SDL_HINT_APP_ID, desktop.id);
+    }
   SDL_SetAppMetadata(
       APP_NAME, APP_VERSION,
       picker_active()
@@ -16094,6 +16126,8 @@ int main(int argc, char **argv) {
           &e, (loading || watch_pending() || A.search_due) ? 30
               : ops_moving()                               ? 16
                                                            : 100);
+    else if (g_text_field_count > 0 && !A.win_hidden)
+      got = SDL_WaitEventTimeout(&e, 33);
     else if (addon_wait_ms() > 0 || git_wait_ms() > 0 ||
              cloud_wait_ms() > 0) { // add-on / cloud status, .git polls
       int t = INT_MAX;

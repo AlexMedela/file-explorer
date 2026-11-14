@@ -40,3 +40,52 @@ source, `install.sh` puts it in place. GVfs (`gvfs-mtp`, `gvfs-gphoto2`) is used
 ## Administrator actions
 "Retry as administrator" runs a small helper through `pkexec`, so it needs polkit and an authentication agent.
 Full desktops start one; on tiling compositors start e.g. `hyprpolkitagent` or `polkit-gnome`.
+
+### Local shared folders
+
+Configured local share roots keep their base folder icon with protocol-specific badges in folder lists, grids,
+path headers, sidebar bookmarks, and previews. SMB uses `folder-remote-smb`,
+NFS uses `folder-remote-nfs`, and WebDAV/other shares use `folder-publicshare`,
+as small overlays at the lower right. Custom themes can supply SVGs with these names (see
+[Settings](settings.md)). Children keep their normal icons
+unless they are also shared explicitly. Detection reads these local files without
+running commands or requesting administrator access, and caches results for ten
+seconds:
+
+- SMB: `/etc/samba/smb.conf` (including absolute `include` files) and
+  `/var/lib/samba/usershares`, plus a configured `usershare path`.
+- NFS: `/etc/exports`, `/etc/exports.d/*.exports`, and `/var/lib/nfs/etab`
+  when readable.
+- WebDAV: explicit Apache `<Directory /absolute/path>` blocks containing
+  `Dav On` in `/etc/httpd/conf/httpd.conf`, `/etc/httpd/conf.d/*.conf`,
+  `/etc/apache2/sites-enabled/*.conf`, and `/etc/apache2/conf-enabled/*.conf`.
+
+When running in Distrobox, detection also reads the host configuration under
+`/run/host`, including host Samba include files.
+
+These icons indicate configuration, not live server availability. Unreadable
+files are skipped. Samba variable substitutions, registry-backed shares,
+nonstandard include layouts, and WebDAV configurations for other servers are
+not detected. Paths are matched directly; aliases through symbolic links are
+not resolved. No remote network requests are made.
+
+The parser regression checks run headlessly:
+
+```sh
+cc -std=gnu11 -Wno-unused-function tools/local-shares-selftest.c -o /tmp/fe-local-shares-test -pthread
+/tmp/fe-local-shares-test
+```
+
+### SVG previews and host applications
+
+SVG files render directly in grid thumbnails and the preview panel, without an
+external thumbnailer. Rendering preserves transparency and aspect ratio, with an
+8 MiB source limit and a bounded output size. The built-in renderer supports SVG
+paths, shapes, and gradients; advanced features such as text, filters, embedded
+images, and animation may not render fully. SVGZ still uses installed thumbnailers.
+
+When running through Distrobox, Open with also scans native host applications and
+host Flatpak exports under `/run/host`. Host-only handlers launch through
+`distrobox-host-exec` or `host-spawn`; they are added only when a host launcher is
+available. This allows SVG handlers such as Inkscape installed on the host to be
+offered even when their executables are absent from the container.

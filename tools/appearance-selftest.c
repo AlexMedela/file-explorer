@@ -26,7 +26,7 @@ static void test_surfaces(void) {
         assert(T.bg == T.sidebar && T.bg == T.preview_bg && T.bg == T.toolbar && T.bg == T.status);
         Theme base = T;
         u32 container = tab_container_color();
-        if (rgb_luma(T.toolbar) >= 0.025f) assert(rgb_luma(container) < rgb_luma(T.toolbar));
+        assert(container == navigation_field_color());
         u32 hover = tab_surface_color(false, true), focus = tab_surface_color(true, true);
         assert(hover != container && focus != container);
         assert(hover != T.toolbar && focus != hover);
@@ -39,6 +39,7 @@ static void test_surfaces(void) {
             theme_apply();
             assert(k == SURFACE_MAIN || T.bg == base.bg);
             assert(k == SURFACE_SIDEBAR || T.sidebar == base.sidebar);
+            assert(k == SURFACE_PREVIEW || T.preview_bg == base.preview_bg);
             assert(k == SURFACE_HEADER || T.toolbar == base.toolbar);
             assert(k == SURFACE_STATUS || T.status == base.status);
             g_surface_brightness[k] = 0;
@@ -148,6 +149,7 @@ static void test_theme_capture(void) {
     theme_select(theme_find("Dark"));
     g_unified_surfaces = true;
     g_surface_brightness[SURFACE_SIDEBAR] = -10;
+    g_surface_brightness[SURFACE_PREVIEW] = 20;
     g_surface_brightness[SURFACE_HEADER] = 5;
     g_surface_brightness[SURFACE_MAIN] = 10;
     g_surface_brightness[SURFACE_STATUS] = -5;
@@ -238,13 +240,15 @@ static void test_tab_highlight(void) {
         assert(tab_surface_color(true, true) == T.toolbar);
         assert(tab_surface_color(true, false) == T.toolbar);
         assert(classic_tab_color(true, false) == T.toolbar);
-        assert(rgb_luma(classic_tab_color(false, false)) < rgb_luma(T.toolbar));
-        assert(rgb_luma(classic_tab_color(false, true)) > rgb_luma(classic_tab_color(false, false)));
+        assert(classic_tab_color(false, false) == navigation_field_color());
+        assert(tab_container_color() == navigation_field_color());
+        assert(classic_tab_color(false, false) == container);
+        assert(classic_tab_color(false, true) != classic_tab_color(false, false));
     }
     // A changed header tint/brightness changes the enclosure, with no accent dependency.
     g_surface_brightness[SURFACE_HEADER] = 15;
     theme_apply();
-    assert(tab_container_color() != container && tab_container_color() == rgb_mix(T.toolbar, 0x000000, 0.28f));
+    assert(tab_container_color() != container && tab_container_color() == navigation_field_color());
     g_surface_brightness[SURFACE_HEADER] = 0;
     g_theme_cur = theme;
     g_accent_custom = manual;

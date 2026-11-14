@@ -73,6 +73,7 @@ static bool queue_mouse(f32 x, f32 y) {
 }
 
 static void on_key(SDL_KeyboardEvent *k) {
+    te_pointer_up();
     Pane *p = active_pane();
     bool ctrl = k->mod & SDL_KMOD_CTRL, shift = k->mod & SDL_KMOD_SHIFT;
     A.redraw = true;
@@ -613,6 +614,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         if (b->button == SDL_BUTTON_LEFT) dialog_mouse(x, y);
         return;
     }
+    if (!A.menu.open && te_pointer_down(b)) return;
     if (sheet_open()) { sheet_mouse(b); return; }
     if (A.qa_edit_g >= 0 && !in_rect(A.r_sidebar, x, y)) qa_edit_commit();
     if (A.pal_open) {
@@ -814,6 +816,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
 }
 
 static void on_mouse_up(void) {
+    if (te_pointer_up()) return;
     if (dragout_owns_pointer()) return; // (Wayland) SDL lets go of the buttons when the compositor takes the drag
     if (A.term_mouse) { term_mouse_up(A.term_mouse, A.term_mouse_btn); A.term_mouse = NULL; return; }
     if (sheet_scrollbar_release()) return;
@@ -904,6 +907,7 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     A.my = m->y;
     A.mouse_in = true;
     A.redraw = true;
+    if (te_pointer_motion(m)) return;
     if (A.term_mouse) { term_mouse_move(A.term_mouse, m->x, m->y, true); return; }
     if (sheet_scrollbar_motion(m->y)) return;
     if (A.menu.open) menu_motion(m->x, m->y);
@@ -1215,6 +1219,7 @@ static void handle_event(SDL_Event *e) {
         break;
     case SDL_EVENT_MOUSE_MOTION: on_mouse_motion(&e->motion); break;
     case SDL_EVENT_MOUSE_WHEEL: on_wheel(&e->wheel); break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST: te_pointer_up(); break;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE: A.mouse_in = false; A.redraw = true; break;
     case SDL_EVENT_WINDOW_MINIMIZED:
     case SDL_EVENT_WINDOW_HIDDEN:

@@ -66,6 +66,8 @@ static void settings_defaults(void) {
     A.view_per_folder = false;
     A.def_group = GROUP_NONE;
     snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "Material");
+    g_app_icon_path[0] = 0;
+    g_app_icon_revision++;
     A.alt_rows = false;
     A.size_bars = true;
     A.load_times = true;
@@ -273,6 +275,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v) != 0;
         else if (!strcmp(k, "show_separators")) g_show_separators = atoi(v) != 0;
         else if (!strcmp(k, "sidebar_brightness")) g_surface_brightness[SURFACE_SIDEBAR] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "preview_brightness")) g_surface_brightness[SURFACE_PREVIEW] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "header_brightness")) g_surface_brightness[SURFACE_HEADER] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "main_brightness")) g_surface_brightness[SURFACE_MAIN] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "status_brightness")) g_surface_brightness[SURFACE_STATUS] = CLAMP(atoi(v), -30, 30);
@@ -296,6 +299,10 @@ static void settings_load(void) {
         else if (!strcmp(k, "list_view_icon_size")) A.def_listv_icon = CLAMP(atoi(v), 16, 64);
         else if (!strcmp(k, "view_per_folder")) A.view_per_folder = atoi(v);
         else if (!strcmp(k, "group")) A.def_group = CLAMP(atoi(v), 0, GROUP_COUNT - 1);
+        else if (!strcmp(k, "app_icon")) {
+            snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", v);
+            g_app_icon_revision++;
+        }
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
         else if (!strcmp(k, "theme")) snprintf(A.theme_name, sizeof A.theme_name, "%s", v);
@@ -506,7 +513,7 @@ static void settings_write(FILE *f) {
     cloud_settings_save(f);
     fprintf(f, "term_look=%s\n", g_term_look_setting ? "app" : "match");
     for (int i = 0; i < A.nservers; i++) fprintf(f, "server=%s\t%s%s%s\n", A.servers[i].name, A.servers[i].uri, A.servers[i].icon[0] ? "\t" : "", A.servers[i].icon);
-    fprintf(f, "icon_theme=%s\n", icon_theme_name(g_icon_theme));
+    fprintf(f, "icon_theme=%s\napp_icon=%s\n", icon_theme_name(g_icon_theme), g_app_icon_path);
     fprintf(f, "theme=%s\nfont=%s\nfont_size=%d\nrow_spacing=%d\nsmooth_scroll=%d\n",
             g_nthemes ? g_themes[g_theme_cur].name : A.theme_name, A.ui_font, A.font_size, A.row_spacing, A.smooth_scroll);
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
@@ -520,10 +527,10 @@ static void settings_write(FILE *f) {
     else fprintf(f, "scrollbar_color=auto\n");
     fprintf(f, "match_system_background=%d\n", g_match_system_background);
     fprintf(f, "system_accent=%d\nunified_surfaces=%d\nshow_separators=%d\n"
-               "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\nstatus_brightness=%d\n",
+               "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\nstatus_brightness=%d\npreview_brightness=%d\n",
             g_accent_system, g_unified_surfaces, g_show_separators,
             g_surface_brightness[SURFACE_SIDEBAR], g_surface_brightness[SURFACE_HEADER],
-            g_surface_brightness[SURFACE_MAIN], g_surface_brightness[SURFACE_STATUS]);
+            g_surface_brightness[SURFACE_MAIN], g_surface_brightness[SURFACE_STATUS], g_surface_brightness[SURFACE_PREVIEW]);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
     fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",

@@ -1,5 +1,9 @@
 # UI revamp checkpoint — 2026-11-13
 
+Historical checkpoint. For the subsequent badge, preview and text-editing changes,
+see [Unreleased changes](../CHANGELOG.md#unreleased) and
+[Custom icons and folder badges](custom-icons.md).
+
 Local work is saved on branch `ui-revamp-checkpoint`. Nothing has been pushed.
 Upstream baseline: `06180f0f4ed9fb98e11d1415662f052234a2e3fb`.
 

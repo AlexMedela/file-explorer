@@ -8,6 +8,15 @@ DEST="${DESTDIR:-}"
 [ -x build/file-explorer ] || { echo "build/file-explorer missing: run ./build.sh first"; exit 1; }
 install -Dm755 build/file-explorer "$DEST$PREFIX/bin/file-explorer"
 install -Dm644 packaging/dev.fileexplorer.desktop "$DEST$PREFIX/share/applications/dev.fileexplorer.desktop"
+# Bind this launcher to this installation; another copy earlier in PATH must
+# not replace the binary selected by PREFIX (including Distrobox exports).
+FE_INSTALL_BINARY="$PREFIX/bin/file-explorer" awk '
+    /^Exec=file-explorer %F$/ {
+        printf "Exec=\"%s\" %%F\n", ENVIRON["FE_INSTALL_BINARY"]
+        next
+    }
+    { print }
+' packaging/dev.fileexplorer.desktop > "$DEST$PREFIX/share/applications/dev.fileexplorer.desktop"
 sed "s|@BINDIR@|$PREFIX/bin|" packaging/dev.fileexplorer.policy > /tmp/fe-policy.$$ # "Retry as administrator" (pkexec)
 install -Dm644 /tmp/fe-policy.$$ "$DEST$PREFIX/share/polkit-1/actions/dev.fileexplorer.policy"
 rm -f /tmp/fe-policy.$$

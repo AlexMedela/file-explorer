@@ -18,8 +18,8 @@ Build following [Building](building.md), then open Options > Appearance:
 - **File icons > System** follows the desktop's current icon theme, including
   Reversal. **System: Reversal** selects that installed theme explicitly. Missing
   icons fall back through theme inheritance, hicolor, then the bundled icon set.
-- **Unified surfaces** uses one background across the sidebar, header, file area
-  and status bar. Independent brightness controls go from -30% to +30% in 5% steps.
+- **Unified surfaces** uses one background across the sidebar, preview panel, header, file area
+  and status bar. Separate sidebar and preview brightness controls go from -30% to +30% in 5% steps.
 - **Show separator lines** is on by default; switch it off for the seamless look.
   Resize targets and focus feedback stay usable.
 - **Scrollbar colour** defaults to Auto: desktop highlight colors when available,
@@ -48,8 +48,8 @@ Options > Appearance > Tabs has two independent settings:
 - **Tab style:** Classic Explorer or Pills.
 
 The default remains Below navigation + Pills. Pill tabs center as a group within
-each pane, inside one rounded enclosure derived by darkening the effective
-navigation background. The enclosure follows desktop tint and header brightness;
+each pane, inside one rounded enclosure using the navigation path/search field
+background. The enclosure follows desktop tint and header brightness;
 it is independent of the selection color. They share the path field's 7-unit corner radius. Idle
 pills have no individual filled shape; hover uses a subtle highlight, and the
 focused pill uses the same accent/selection-strength preference as sidebar and
@@ -59,7 +59,7 @@ adapt to keep their contrast on the darker enclosure.
 Classic Explorer tabs start at the left and restore the original rounded cards
 with outward-curving bottom corners. The active card matches the navigation
 background exactly and uses a subtle neutral contour to retain its silhouette;
-inactive cards are slightly darker, with a lighter hover. The row background
+inactive cards share the path/search field background, with a subtle hover. The row background
 matches navigation too. Pill tabs share the configured accent and opacity for
 focus, including system highlight changes, with weaker fills in inactive panes.
 Both tab positions work with either style.
@@ -122,6 +122,32 @@ plugin. See the [icon naming specification](https://specifications.freedesktop.o
 text in **Custom header text** and Apply/Enter; Default restores File-Explorer.
 Hostname reflects the machine/container namespace in which the app runs. All
 preferences are saved; older title-bar settings stay compatible.
+
+## Folder badges, previews and editing
+
+Local Samba, NFS and WebDAV share roots retain their folder artwork and add a
+small protocol badge at the lower right. Symlinks use `emblem-symbolic-link.svg`;
+Git repositories use the classic orange Git logo, replaceable through
+`emblem-git.svg`. Simultaneous badges stack upward on the right. The full filename
+contract, theme layout and fallback rules are in
+[Custom icons and folder badges](custom-icons.md).
+
+Navigation, path, search and sidebar contrast adapts to the surface. Pale icons
+are darkened on light navigation/sidebar backgrounds, while text fields use a
+thicker text-colored caret with smooth movement and a gentle idle pulse. Text
+selection uses the accent softened by 5%, with contrasting selected text. Click,
+drag, Shift-click, double-click and triple-click edit/select text in focused
+fields. Clickable path segments show a pointer rather than the text cursor.
+
+SVG files render directly in grid thumbnails and the preview panel; advanced SVG
+features may need an external renderer. Distrobox Open with can discover host
+applications and launch them on the host. See [integration](integration.md).
+
+Sidebar and preview panel brightness have independent Appearance controls and
+saved keys, `sidebar_brightness` and `preview_brightness`. Path and search fields,
+the pill enclosure, and unfocused classic tabs share the path field background.
+The new-tab plus in pill mode uses a foreground color that contrasts with its
+actual surface in light and dark themes.
 
 ## Validation
 
