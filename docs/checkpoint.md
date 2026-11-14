@@ -94,5 +94,5 @@ split panes, preview on/off, hidden window controls, hostname/custom labels,
 Reversal icons and live desktop color changes on the actual desktop. Confirm
 window dragging, resizing and button actions on X11/Wayland before release.
 
-Settings and usage: [UI revamp](ui-revamp.md), [Settings](settings.md).
-Review findings and limits: [UI review](ui-review.md).
+Settings and usage: [PR details](PR-details.md), [Settings](settings.md).
+Review findings and limits: [PR details](PR-details.md).
