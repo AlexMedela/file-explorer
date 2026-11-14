@@ -59,13 +59,53 @@ fixes the context submenus and records the conflict review.
   the terminal cell grid and each cell's color. Font face and weight boundaries
   remain explicit. Visible terminals draw before folder, sidebar, and preview
   surfaces so new terminal glyphs cannot update their shared texture after
-  those surfaces have been queued. Vulkan also redraws a frame before presenting
-  when its shared glyph texture changed during that frame, so that a partial
-  folder or preview draw is not presented while typing.
+  those surfaces have been queued. See "Vulkan glyph atlas fix" below.
 - **Trash:** Empty Trash reads its own directory, including hidden and
   zero-byte items, regardless of the active pane. Confirmation and cancellation
   use the existing dialog. Full/empty icon caches follow measured contents and
   directory-watch events; custom artwork still takes precedence.
+
+## Vulkan glyph atlas fix
+
+Rapid terminal output kept folder and preview surfaces flickering on the Vulkan
+renderer. The shared glyph atlas was uploaded while geometry that sampled it was
+already queued or in flight. SDL's Vulkan renderer ends the current render pass
+for a texture upload, and an in-flight frame could still sample the texture
+being changed, so a frame could present partial folder or preview rows.
+
+Main changes:
+
+- The atlas is now a ring of textures, one per swapchain image. SDL presents by
+  waiting on the fence for the next command buffer, so a slot is idle when it
+  becomes current again and no frame samples the texture being uploaded. The
+  ring size follows `SDL_PROP_RENDERER_VULKAN_SWAPCHAIN_IMAGE_COUNT_NUMBER` and
+  is rebuilt if the count changes after a resize.
+- A frame that needs unknown glyphs first draws a discarded discovery pass.
+  That pass fills the CPU atlas and the glyph caches. The complete atlas is
+  then uploaded once to the current slot, and the presented pass is drawn
+  again without any texture update.
+- Frames without new glyphs take a single pass and no upload.
+- The Vulkan path no longer calls `SDL_FlushRenderer` or creates and destroys a
+  texture per frame; those actions submit work and wait for the GPU.
+- The non-Vulkan path keeps its incremental dirty-rectangle uploads.
+- `FE_VK_TARGET=1` remains an environment-gated diagnostic that renders the
+  frame to an offscreen texture before copying it to the swapchain, separating
+  rendering problems from presentation problems.
+
+Improvements:
+
+- Folder, sidebar, and preview surfaces no longer blink while terminal output
+  adds glyphs; the user confirmed no flicker after the change.
+- An atlas update is one full upload in a frame that needs new glyphs instead
+  of a render-pass break between queued surfaces.
+- No texture is created or destroyed in the steady-state frame path, removing
+  GPU idle stalls.
+- Costs stay bounded: one atlas per swapchain image (4 MB at 1024 squared,
+  16 MB at 2048 squared) and only frames with new glyphs pay for the discovery
+  pass and the upload.
+
+M10 checks that geometry queued before and after a publish survives and that
+drawing continues on the current ring slot.
 
 ## Review findings resolved
 
@@ -173,8 +213,12 @@ inspection is more useful than its raw whole-file diff when tracing behavior.
   clicking child actions without Escape, and keyboard close behavior.
 - Native M11 and M6 passed again after the terminal draw-order fix. The F4
   panel screenshot from M11 still shows the folder and sidebar correctly.
-- The Vulkan release build passed, as did native M11 and M10 on Vulkan after
-  the frame retry. M10 includes a glyph-upload check for pane rendering.
+- The Vulkan release build passed, as did native M6, M8, M9, M10, and M11 on
+  Vulkan after the frame-slotted atlas change. M10 checks pane rendering and
+  verifies that geometry queued before and after an atlas publish survives.
+  M10 passed on OpenGL too.
+- The user confirmed that folder and preview surfaces no longer flicker during
+  rapid terminal output after the change.
 - Standalone appearance and system-icon suites passed with GCC `-O2`,
   `-Wall -Wextra -Werror`; isolated terminal shaping/rendering checks passed.
 - Git whitespace and source ASCII checks passed; no conflict markers or
