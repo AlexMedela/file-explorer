@@ -61,8 +61,18 @@ enum { CN_HOST, CN_PORT, CN_PATH, CN_USER, CN_PASS, CN_DOMAIN, CN_COUNT, CN_NAME
 
 static Sheet g_sheet;
 
+// Scrollbars in sheets, as drawn in the last frame (sheet_scrollbar), so a press can grab the thumb and drag it
+typedef struct { f32 *scroll, maxs, y0, travel, th; Rect hit; } SheetBar;
+static struct {
+    SheetBar bar[4];
+    int n;
+    f32 *drag; // scroll offset whose thumb is held (NULL none)
+    f32 off;   // where on the thumb it was grabbed
+} g_sbar;
+
 static void sheet_close(void) {
     Sheet *s = &g_sheet;
+    g_sbar.n = 0, g_sbar.drag = NULL;
     if (s->kind == SHEET_SECRET && s->sec_job) { dev_net_answer(s->sec_job, -1); s->sec_job = NULL; } // closed: cancel the login
     explicit_bzero(s->cn[CN_PASS].buf, sizeof s->cn[CN_PASS].buf); // the typed password doesn't linger
     if (s->stats) { atomic_store(&s->stats->cancel, 1); stats_release(s->stats); }
@@ -167,6 +177,48 @@ static void sheet_frame(Rect r, const char *title, const char *subtitle) {
     draw_text_fit(tf, r.x + pad, r.y + pad - roundf(S(2)), r.w - pad * 2, title, (int)strlen(title), C(COL_TEXT_STRONG), 0);
     if (subtitle && subtitle[0])
         draw_text_fit(fs, r.x + pad, r.y + pad + roundf(S(24)), r.w - pad * 2, subtitle, (int)strlen(subtitle), C(COL_TEXT_DIM), 0);
+}
+
+// Records a scrollbar (thumb th tall moving over [y0, y0 + track], grabbed anywhere in hit) and returns the thumb's top;
+// *hot: hovered or being dragged.
+static f32 sheet_scrollbar(f32 *scroll, f32 maxs, Rect hit, f32 y0, f32 track, f32 th, bool *hot) {
+    if (g_sbar.n < (int)ARRAY_COUNT(g_sbar.bar))
+        g_sbar.bar[g_sbar.n++] = (SheetBar){scroll, maxs, y0, MAX(0.f, track - th), th, hit};
+    *hot = g_sbar.drag == scroll || (!g_sbar.drag && A.mouse_in && in_rect(hit, A.mx, A.my));
+    return y0 + (track - th) * (maxs > 0 ? *scroll / maxs : 0);
+}
+
+// A left press on a scrollbar: grabs the thumb, or pages towards the pointer (like the file list's).
+static bool sheet_scrollbar_press(f32 x, f32 y) {
+    for (int i = 0; i < g_sbar.n; i++) {
+        SheetBar *b = &g_sbar.bar[i];
+        if (b->maxs <= 0 || !in_rect(b->hit, x, y)) continue;
+        f32 ty = b->y0 + b->travel * (*b->scroll / b->maxs);
+        if (y >= ty && y < ty + b->th) g_sbar.drag = b->scroll, g_sbar.off = y - ty;
+        else *b->scroll = CLAMP(*b->scroll + (y < ty ? -1 : 1) * (b->travel + b->th) * 0.9f, 0.f, b->maxs);
+        A.redraw = true;
+        return true;
+    }
+    return false;
+}
+
+static bool sheet_scrollbar_motion(f32 y) {
+    if (!g_sbar.drag) return false;
+    for (int i = 0; i < g_sbar.n; i++) {
+        SheetBar *b = &g_sbar.bar[i];
+        if (b->scroll != g_sbar.drag) continue;
+        f32 t = b->travel > 0 ? (y - g_sbar.off - b->y0) / b->travel : 0;
+        *b->scroll = CLAMP(t, 0.f, 1.f) * b->maxs;
+    }
+    A.redraw = true;
+    return true;
+}
+
+static bool sheet_scrollbar_release(void) {
+    if (!g_sbar.drag) return false;
+    g_sbar.drag = NULL;
+    A.redraw = true;
+    return true;
 }
 
 static bool sheet_button(Rect r, const char *label, bool primary, bool enabled) {
@@ -342,8 +394,9 @@ static void openwith_draw(void) {
         draw_clip_pop(sc);
         draw_rect(sx, box.y, 1, box.h, C(rgb_mix(well, COL_TEXT, 0.12f))); // divider between list and strip
         f32 tm = roundf(S(3)), tw = sw - tm * 2, track = box.h - tm * 2;
-        f32 th = MAX(S(24), track * s->rlist.h / content), ty = box.y + tm + (track - th) * (s->ow_scroll / maxs);
-        bool sh = A.mouse_in && A.mx >= sx && in_rect(box, A.mx, A.my);
+        f32 th = MAX(S(24), track * s->rlist.h / content);
+        bool sh;
+        f32 ty = sheet_scrollbar(&s->ow_scroll, maxs, (Rect){sx, box.y, sw, box.h}, box.y + tm, track, th, &sh);
         draw_rrect(sx + tm, roundf(ty), tw, roundf(th), tw * 0.5f, C(sh ? COL_SCROLL_HOVER : COL_SCROLL));
     }
     draw_rrect_outline(box.x, box.y, box.w, box.h, brad, MAX(1.f, S(1)), C(rgb_mix(COL_POPUP, COL_TEXT, 0.16f)));
@@ -808,8 +861,9 @@ static void props_draw(void) {
     sheet_fade_edges(s->rbody, s->pv_scroll, MAX(0.f, s->pv_content - s->rbody.h), pad);
     if (s->pv_content > s->rbody.h) { // scrollbar along the dialog's right edge
         f32 maxs = s->pv_content - s->rbody.h, tw = roundf(S(4)), th = MAX(S(24), s->rbody.h * s->rbody.h / s->pv_content);
-        f32 ty = s->rbody.y + (s->rbody.h - th) * (s->pv_scroll / maxs);
-        draw_rrect(r.x + w - S(8) - tw * 0.5f, ty, tw, th, tw * 0.5f, C(COL_SCROLL));
+        bool sh;
+        f32 ty = sheet_scrollbar(&s->pv_scroll, maxs, (Rect){r.x + w - S(16), s->rbody.y, S(16), s->rbody.h}, s->rbody.y, s->rbody.h, th, &sh);
+        draw_rrect(r.x + w - S(8) - tw * 0.5f, ty, tw, th, tw * 0.5f, C(sh ? COL_SCROLL_HOVER : COL_SCROLL));
     }
     f32 bw = roundf(S(96));
     s->rclose = (Rect){r.x + w - pad - bw, r.y + h - pad - bh, bw, bh};
@@ -1573,6 +1627,7 @@ static void connect_focus_step(int dir) {
 // --- dispatch ----------------------------------------------------------------
 
 static void sheet_draw(void) {
+    g_sbar.n = 0; // (each draw records its scrollbars again)
     switch (g_sheet.kind) {
     case SHEET_OPENWITH: openwith_draw(); break;
     case SHEET_PROPS: props_draw(); break;
@@ -1671,6 +1726,7 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
         s->cn_pick = false;
         if (in_rect(s->cn_ricon, x, y)) return; // (the button toggles)
     }
+    if (sheet_scrollbar_press(x, y)) return;
     if (s->kind == SHEET_ADDON) { addon_sheet_click(x, y); return; }
     if (!in_rect(s->r, x, y)) { sheet_close(); return; }
     switch (s->kind) {

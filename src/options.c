@@ -954,8 +954,9 @@ static void options_draw(void) {
     sheet_fade_edges(list, g_opt.scroll, g_opt.max_scroll, S(8));
     if (g_opt.max_scroll > 0) { // scrollbar
         f32 content = list.h + g_opt.max_scroll, tw = roundf(S(4)), th = MAX(S(24), list.h * list.h / content);
-        f32 ty = list.y + (list.h - th) * (g_opt.scroll / g_opt.max_scroll);
-        draw_rrect(list.x + list.w - S(6) - tw * 0.5f, ty, tw, th, tw * 0.5f, C(COL_SCROLL));
+        bool sh;
+        f32 ty = sheet_scrollbar(&g_opt.scroll, g_opt.max_scroll, (Rect){list.x + list.w - S(14), list.y, S(14), list.h}, list.y, list.h, th, &sh);
+        draw_rrect(list.x + list.w - S(6) - tw * 0.5f, ty, tw, th, tw * 0.5f, C(sh ? COL_SCROLL_HOVER : COL_SCROLL));
     }
     // hits inside the list are only valid where the list is visible
     for (int k = 0; k < g_opt.nhits; k++) {
@@ -994,6 +995,7 @@ static void options_click(f32 x, f32 y, int clicks) {
         if (on_rec) return;
     }
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
+    if (sheet_scrollbar_press(x, y)) return;
     g_opt.lname_focus = false; // a click elsewhere gives the keyboard back to the search field
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];

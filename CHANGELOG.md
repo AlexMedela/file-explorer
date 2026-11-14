@@ -9,6 +9,7 @@
 
 **Fixed**
 - "Open in external terminal" opens in that folder with every terminal, also Ghostty and terminals that hand the window to one already running (the folder is passed with the terminal's own option, e.g. `--working-directory`).
+- The scrollbars in Options, Open with and Properties can be dragged (and clicking beside the thumb jumps a page), not only scrolled with the wheel. Thanks to @juangiler.
 
 ## 0.11.1
 

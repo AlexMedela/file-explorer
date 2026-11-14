@@ -2719,6 +2719,28 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.font_size == 13);
     st_opt_click(st_opt_hit(HP_SEG, OPT_ROW_SPACING, 0));
     ST_CHECK(A.row_spacing == 0);
+    { // the scrollbar's thumb can be dragged (not only the wheel); a press on its track pages
+        st_frames(1);
+        SheetBar *sb = NULL;
+        for (int k = 0; k < g_sbar.n; k++)
+            if (g_sbar.bar[k].scroll == &g_opt.scroll) sb = &g_sbar.bar[k];
+        ST_CHECK(sb && g_opt.max_scroll > 0 && g_opt.scroll == 0);
+        if (sb) {
+            f32 bx = sb->hit.x + sb->hit.w * 0.5f, by = sb->y0 + sb->th * 0.5f, end = sb->y0 + sb->travel;
+            st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, bx, by, SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+            ST_CHECK(g_sbar.drag == &g_opt.scroll);
+            st_mouse(SDL_EVENT_MOUSE_MOTION, bx, by + sb->travel * 0.5f, 0, 0, SDL_KMOD_NONE);
+            ST_CHECK(fabsf(g_opt.scroll - g_opt.max_scroll * 0.5f) < 1.f);
+            st_mouse(SDL_EVENT_MOUSE_MOTION, bx, end + S(200), 0, 0, SDL_KMOD_NONE); // past the end: clamped
+            ST_CHECK(g_opt.scroll == g_opt.max_scroll);
+            st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, bx, end + S(200), SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+            ST_CHECK(!g_sbar.drag && g_sheet.kind == SHEET_OPTIONS);
+            st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, bx, sb->y0 + S(2), SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE); // above the thumb
+            st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, bx, sb->y0 + S(2), SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+            ST_CHECK(!g_sbar.drag && g_opt.scroll < g_opt.max_scroll);
+            g_opt.scroll = 0;
+        }
+    }
     st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
     ST_CHECK(!sheet_open());
     layout();

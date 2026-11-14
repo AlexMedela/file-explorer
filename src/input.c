@@ -815,6 +815,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
 static void on_mouse_up(void) {
     if (dragout_owns_pointer()) return; // (Wayland) SDL lets go of the buttons when the compositor takes the drag
     if (A.term_mouse) { term_mouse_up(A.term_mouse, A.term_mouse_btn); A.term_mouse = NULL; return; }
+    if (sheet_scrollbar_release()) return;
     if (A.drag == DRAG_TAB) { tab_drop_apply(); return; }
     if (A.drag == DRAG_PLACE || A.drag == DRAG_PLACE_PENDING) {
         int r = A.qa_drag_row;
@@ -903,6 +904,7 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     A.mouse_in = true;
     A.redraw = true;
     if (A.term_mouse) { term_mouse_move(A.term_mouse, m->x, m->y, true); return; }
+    if (sheet_scrollbar_motion(m->y)) return;
     if (A.menu.open) menu_motion(m->x, m->y);
     if (A.pal_open && in_rect(A.pal_list, m->x, m->y)) {
         int i = A.pal_top + (int)((m->y - A.pal_list.y) / roundf(S(40)));

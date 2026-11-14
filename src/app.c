@@ -4312,6 +4312,8 @@ static void sheet_key(SDL_Keycode k, SDL_Keymod mod);
 static void sheet_text(const char *text);
 static void sheet_mouse(SDL_MouseButtonEvent *b);
 static void sheet_wheel(f32 dy);
+static bool sheet_scrollbar_motion(f32 y);
+static bool sheet_scrollbar_release(void);
 static void sheet_draw(void);
 static bool sheet_busy(void);
 static void openwith_open(char **paths, int n);
