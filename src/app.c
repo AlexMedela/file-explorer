@@ -226,8 +226,8 @@ static const struct {
 };
 
 typedef struct {
-  Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, sortbtn, header, list,
-      track, thumb, trashbar, rrestore, rempty;
+  Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, sortbtn,
+      header, list, track, thumb, trashbar, rrestore, rempty;
   bool has_trashbar;
   f32 col_name; // x of the icon inside the Name column
   f32 name_end; // right edge of the Name column
@@ -637,9 +637,9 @@ enum {
   ACT_TERM_FOCUS,  // the terminal panel under the folder: show / hide, move the
                    // keyboard
   ACT_FIRST_FREE_, // (keep below 100: shortcuts share ids with CMD_*)
-  ACT_COL_BASE = 200,   // + column id: toggle that column
-  ACT_VIEW_BASE = 300,  // + zoom level index
-  ACT_SORT_BASE = 320,  // + SORT_* key
+  ACT_COL_BASE = 200,  // + column id: toggle that column
+  ACT_VIEW_BASE = 300, // + zoom level index
+  ACT_SORT_BASE = 320, // + SORT_* key
   ACT_SORT_ASC = 330,
   ACT_SORT_DESC,
   ACT_MENU_VIEWS,
@@ -2572,8 +2572,8 @@ static bool titlebar_drag_at(f32 x, f32 y) {
     if (ly->toolbar.y < 0.5f && in_rect(ly->toolbar, x, y))
       return !in_rect(ly->pathbar, x, y) && !in_rect(ly->back, x, y) &&
              !in_rect(ly->fwd, x, y) && !in_rect(ly->up, x, y) &&
-             !in_rect(ly->filterbtn, x, y) &&
-             !in_rect(ly->morebtn, x, y) && !in_rect(ly->sortbtn, x, y);
+             !in_rect(ly->filterbtn, x, y) && !in_rect(ly->morebtn, x, y) &&
+             !in_rect(ly->sortbtn, x, y);
   }
   return false;
 }
@@ -6282,7 +6282,8 @@ static void trash_size_poll(void) {
   if (!A.trash_job || !atomic_load(&A.trash_job->done))
     return;
   A.trash_size = atomic_load(&A.trash_job->size);
-  icons_set_trash_full(atomic_load(&A.trash_job->files) > 0 || atomic_load(&A.trash_job->dirs) > 1);
+  icons_set_trash_full(atomic_load(&A.trash_job->files) > 0 ||
+                       atomic_load(&A.trash_job->dirs) > 1);
   A.trash_known = true;
   stats_release(A.trash_job);
   A.trash_job = NULL;
@@ -7138,24 +7139,28 @@ static bool ssh_target_for(const char *path, SshTarget *t) {
 }
 
 static bool find_terminal(char *exe, size_t cap, const char **name) {
-    if (g_external_terminal[0]) {
-        if (g_external_terminal[0] == '/') {
-            snprintf(exe, cap, "%s", g_external_terminal);
-            *name = path_basename(g_external_terminal);
-            struct stat st;
-            return !stat(exe, &st) && S_ISREG(st.st_mode) && access(exe, X_OK) == 0;
-        }
-        const char *paths = getenv("PATH");
-        char pe[8192];
-        snprintf(pe, sizeof pe, "%s", paths ? paths : "");
-        char *save = NULL;
-        for (char *d = strtok_r(pe, ":", &save); d; d = strtok_r(NULL, ":", &save)) {
-            snprintf(exe, cap, "%s/%s", d, g_external_terminal);
-            struct stat st;
-            if (!stat(exe, &st) && S_ISREG(st.st_mode) && !access(exe, X_OK)) { *name = path_basename(g_external_terminal); return true; }
-        }
-        return false;
+  if (g_external_terminal[0]) {
+    if (g_external_terminal[0] == '/') {
+      snprintf(exe, cap, "%s", g_external_terminal);
+      *name = path_basename(g_external_terminal);
+      struct stat st;
+      return !stat(exe, &st) && S_ISREG(st.st_mode) && access(exe, X_OK) == 0;
     }
+    const char *paths = getenv("PATH");
+    char pe[8192];
+    snprintf(pe, sizeof pe, "%s", paths ? paths : "");
+    char *save = NULL;
+    for (char *d = strtok_r(pe, ":", &save); d;
+         d = strtok_r(NULL, ":", &save)) {
+      snprintf(exe, cap, "%s/%s", d, g_external_terminal);
+      struct stat st;
+      if (!stat(exe, &st) && S_ISREG(st.st_mode) && !access(exe, X_OK)) {
+        *name = path_basename(g_external_terminal);
+        return true;
+      }
+    }
+    return false;
+  }
   // $TERMINAL, then xdg-terminal-exec (the user's preferred terminal, where set
   // up), then the desktops' own
   static const char *cands[] = {NULL,
@@ -7204,7 +7209,8 @@ static void spawn_terminal(const char *dir, char *const cmd[]) {
   char exe[PATH_MAX];
   const char *name;
   if (!find_terminal(exe, sizeof exe, &name)) {
-    toast("Terminal unavailable; choose an executable in Options > Integration");
+    toast(
+        "Terminal unavailable; choose an executable in Options > Integration");
     return;
   }
   char *argv[32];
@@ -7470,7 +7476,7 @@ static void dock_follow(Tab *t) {
   if (!t->dock_cwd[0]) {
     snprintf(t->dock_cwd, sizeof t->dock_cwd, "%s", cwd);
     return;
-  }                      // the shell's first folder
+  } // the shell's first folder
   if (t->dock_want[0]) { // our cd hasn't landed yet: don't take the folder it's
                          // leaving for a cd typed there
     if (strcmp(cwd, t->dock_want) && now_ns() - t->dock_want_t < 2000000000ull)
@@ -7539,10 +7545,13 @@ static void menu_terminal_items(Pane *p) {
   Tab *ct = A.ap ? A.ap->cur : NULL;
   menu_add(ct && ct->dock_on ? "Hide terminal panel" : "Show terminal panel",
            "F4", ACT_TERM_PANEL, ct && !ct->term);
-    static char label[NAME_MAX + 32];
-    if (g_external_terminal[0]) snprintf(label, sizeof label, "Open in %s", path_basename(g_external_terminal));
-    else snprintf(label, sizeof label, "Open in external shell");
-    menu_add(label, "", ACT_TERMINAL_EXTERNAL, true);
+  static char label[NAME_MAX + 32];
+  if (g_external_terminal[0])
+    snprintf(label, sizeof label, "Open in %s",
+             path_basename(g_external_terminal));
+  else
+    snprintf(label, sizeof label, "Open in external shell");
+  menu_add(label, "", ACT_TERMINAL_EXTERNAL, true);
 }
 
 // Where Ctrl+V puts things. Tree view: into the selected folder, or the
@@ -7723,8 +7732,10 @@ static void do_action(Pane *p, int act) {
     term_tab_open(p->path, NULL);
     break;
   case ACT_TERMINAL_EXTERNAL:
-    if (!g_external_terminal[0]) options_open_page(OC_INTEGRATION);
-    else ext_terminal(p->path);
+    if (!g_external_terminal[0])
+      options_open_page(OC_INTEGRATION);
+    else
+      ext_terminal(p->path);
     break;
   case ACT_TERM_COPY:
     if (active_term())
@@ -8067,8 +8078,7 @@ static void do_action(Pane *p, int act) {
       p->sort_desc = act == ACT_SORT_DESC;
       folder_view_remember(p);
       pane_resort(p);
-    }
-    else if (act >= ACT_SORT_BASE && act < ACT_SORT_BASE + SORT_COUNT)
+    } else if (act >= ACT_SORT_BASE && act < ACT_SORT_BASE + SORT_COUNT)
       pane_set_sort(p, act - ACT_SORT_BASE);
     else if (act >= ACT_GROUP_BASE && act < ACT_GROUP_BASE + GROUP_COUNT)
       pane_set_group(p, act - ACT_GROUP_BASE);
@@ -8604,8 +8614,8 @@ static void menu_sub_views(Pane *p) {
 
 static void menu_sub_sort(Pane *p) {
   static const char *labels[SORT_COUNT] = {
-      "Name", "Date modified", "Type", "Size", "Date created", "Extension",
-      "Permissions", "Owner"};
+      "Name",         "Date modified", "Type",        "Size",
+      "Date created", "Extension",     "Permissions", "Owner"};
   for (int i = 0; i < SORT_COUNT; i++)
     menu_add_check(labels[i], ACT_SORT_BASE + i, p->sort_key == i, true);
   menu_sep();
@@ -8907,72 +8917,97 @@ static void empty_trash_cb(int choice, bool check, void *ud) {
 
 // Delete items permanently (with their .trashinfo); all = empty the trash.
 static void trash_delete(Pane *p, bool all) {
-    char files[PATH_MAX], info[PATH_MAX];
-    trash_dirs(files, info, sizeof files);
-    int n = 0, cap = 64;
-    char **src = xmalloc((size_t)cap * sizeof(char *)), **aux = xmalloc((size_t)cap * sizeof(char *));
-    // Empty the actual trash directory, independent of the active pane, filters or scan state.
-    DIR *dir = all ? opendir(files) : NULL;
-    if (all && !dir && errno != ENOENT) {
-        int err = errno;
-        free(src); free(aux);
-        toast("Couldn't read the Trash: %s", strerror(err));
-        return;
+  char files[PATH_MAX], info[PATH_MAX];
+  trash_dirs(files, info, sizeof files);
+  int n = 0, cap = 64;
+  char **src = xmalloc((size_t)cap * sizeof(char *)),
+       **aux = xmalloc((size_t)cap * sizeof(char *));
+  // Empty the actual trash directory, independent of the active pane, filters
+  // or scan state.
+  DIR *dir = all ? opendir(files) : NULL;
+  if (all && !dir && errno != ENOENT) {
+    int err = errno;
+    free(src);
+    free(aux);
+    toast("Couldn't read the Trash: %s", strerror(err));
+    return;
+  }
+  Listing *L = p->L;
+  int read_error = 0;
+  for (u32 i = 0;; i++) {
+    const char *name;
+    if (all) {
+      if (!dir)
+        break;
+      errno = 0;
+      struct dirent *entry = readdir(dir);
+      if (!entry) {
+        read_error = errno;
+        break;
+      }
+      if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+        continue;
+      name = entry->d_name;
+    } else {
+      if (!L || !p->order || i >= p->count)
+        break;
+      u32 ei = p->order[i];
+      if (!p->sel[ei] && !(p->sel_count == 0 && (i64)i == p->cursor))
+        continue;
+      name = L->entries[ei].name;
     }
-    Listing *L = p->L;
-    int read_error = 0;
-    for (u32 i = 0;; i++) {
-        const char *name;
-        if (all) {
-            if (!dir) break;
-            errno = 0;
-            struct dirent *entry = readdir(dir);
-            if (!entry) { read_error = errno; break; }
-            if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
-            name = entry->d_name;
-        } else {
-            if (!L || !p->order || i >= p->count) break;
-            u32 ei = p->order[i];
-            if (!p->sel[ei] && !(p->sel_count == 0 && (i64)i == p->cursor)) continue;
-            name = L->entries[ei].name;
-        }
-        if (n == cap) {
-            cap *= 2;
-            src = xrealloc(src, (size_t)cap * sizeof(char *));
-            aux = xrealloc(aux, (size_t)cap * sizeof(char *));
-        }
-        char sp[PATH_MAX], ip[PATH_MAX + NAME_MAX + 16];
-        path_join(sp, sizeof sp, files, name);
-        snprintf(ip, sizeof ip, "%s/%s.trashinfo", info, name);
-        src[n] = strdup(sp);
-        aux[n] = strdup(ip);
-        n++;
+    if (n == cap) {
+      cap *= 2;
+      src = xrealloc(src, (size_t)cap * sizeof(char *));
+      aux = xrealloc(aux, (size_t)cap * sizeof(char *));
     }
-    if (dir) closedir(dir);
-    if (read_error) {
-        strv_free(src, n); strv_free(aux, n);
-        toast("Couldn't read the Trash: %s", strerror(read_error));
-        return;
-    }
-    if (!n) { free(src); free(aux); toast(all ? "The trash is already empty" : "Nothing selected"); return; }
-    icons_set_trash_full(true); // the confirmation dialog represents a non-empty Trash
-    Op *op = op_new(OP_DELETE, src, n, NULL);
-    op->aux_in = strv_dup(aux, n);
-    char msg[200];
-    snprintf(msg, sizeof msg, all ? "Permanently delete all %d items in the Trash? This can't be undone."
-                                  : "Permanently delete %d item%s from the Trash? This can't be undone.", n, n == 1 ? "" : "s");
-    static const char *b[] = {"Delete", "Cancel"};
-    dialog_open(all ? "Empty Trash" : "Delete permanently", msg, b, 2, 0, 1, NULL, empty_trash_cb, op);
-    A.dlg.icon = DI_DANGER;
-    A.dlg.danger = true;
-    { // list the trashed names (as they were), not their trash-internal paths
-        char **names = xmalloc((size_t)MIN(n, 5) * sizeof(char *));
-        for (int i = 0; i < n && i < 5; i++) names[i] = src[i];
-        dialog_items(names, n, false); // (their trash-internal paths would mean nothing)
-        free(names);
-    }
+    char sp[PATH_MAX], ip[PATH_MAX + NAME_MAX + 16];
+    path_join(sp, sizeof sp, files, name);
+    snprintf(ip, sizeof ip, "%s/%s.trashinfo", info, name);
+    src[n] = strdup(sp);
+    aux[n] = strdup(ip);
+    n++;
+  }
+  if (dir)
+    closedir(dir);
+  if (read_error) {
     strv_free(src, n);
     strv_free(aux, n);
+    toast("Couldn't read the Trash: %s", strerror(read_error));
+    return;
+  }
+  if (!n) {
+    free(src);
+    free(aux);
+    toast(all ? "The trash is already empty" : "Nothing selected");
+    return;
+  }
+  icons_set_trash_full(
+      true); // the confirmation dialog represents a non-empty Trash
+  Op *op = op_new(OP_DELETE, src, n, NULL);
+  op->aux_in = strv_dup(aux, n);
+  char msg[200];
+  snprintf(msg, sizeof msg,
+           all ? "Permanently delete all %d items in the Trash? This can't be "
+                 "undone."
+               : "Permanently delete %d item%s from the Trash? This can't be "
+                 "undone.",
+           n, n == 1 ? "" : "s");
+  static const char *b[] = {"Delete", "Cancel"};
+  dialog_open(all ? "Empty Trash" : "Delete permanently", msg, b, 2, 0, 1, NULL,
+              empty_trash_cb, op);
+  A.dlg.icon = DI_DANGER;
+  A.dlg.danger = true;
+  { // list the trashed names (as they were), not their trash-internal paths
+    char **names = xmalloc((size_t)MIN(n, 5) * sizeof(char *));
+    for (int i = 0; i < n && i < 5; i++)
+      names[i] = src[i];
+    dialog_items(names, n,
+                 false); // (their trash-internal paths would mean nothing)
+    free(names);
+  }
+  strv_free(src, n);
+  strv_free(aux, n);
 }
 
 // Right-click on a tab.
@@ -10101,7 +10136,7 @@ static void pane_load_content(Pane *p, const char *q) {
   if (p->view != VIEW_DETAILS) {
     p->cs_view = p->view + 1;
     p->view = VIEW_DETAILS;
-  }                       // lines need rows (restored after)
+  } // lines need rows (restored after)
   if (p->L && p->count) { // keep the results on screen until the new search
                           // finds something
     if (p->L_next) {
@@ -10501,38 +10536,48 @@ static bool pane_watches(const Pane *p, const char *path) {
 }
 
 static void watch_use(const char *path) {
-    int k = -1;
-    for (int i = 0; i < g_nw; i++)
-        if (!strcmp(g_w[i].path, path)) k = i;
-    if (k < 0 && g_nw < MAX_WATCHES) {
-        int wd = inotify_add_watch(g_ino, path, WATCH_MASK);
-        if (wd < 0) return;
-        k = g_nw++;
-        memset(&g_w[k], 0, sizeof g_w[k]);
-        snprintf(g_w[k].path, sizeof g_w[k].path, "%s", path);
-        g_w[k].wd = wd;
-    }
-    if (k >= 0) g_w[k].used = true;
+  int k = -1;
+  for (int i = 0; i < g_nw; i++)
+    if (!strcmp(g_w[i].path, path))
+      k = i;
+  if (k < 0 && g_nw < MAX_WATCHES) {
+    int wd = inotify_add_watch(g_ino, path, WATCH_MASK);
+    if (wd < 0)
+      return;
+    k = g_nw++;
+    memset(&g_w[k], 0, sizeof g_w[k]);
+    snprintf(g_w[k].path, sizeof g_w[k].path, "%s", path);
+    g_w[k].wd = wd;
+  }
+  if (k >= 0)
+    g_w[k].used = true;
 }
 
 static void watch_sync(void) {
-    if (g_ino < 0) return;
-    for (int i = 0; i < g_nw; i++) g_w[i].used = false;
-    char trash[PATH_MAX], info[PATH_MAX];
-    trash_dirs(trash, info, sizeof trash);
-    watch_use(trash); // keep the full/empty icon current even while browsing elsewhere
-    for (int t = 0; t < A.ntabs; t++)
-        for (int j = 0; j < A.tabs[t]->npanes; j++) {
-            Pane *p = &A.tabs[t]->pane[j];
-            if (!pane_watchable(p)) continue;
-            int nw = 1 + (p->L->tree ? p->nexpanded : 0); // tree view: expanded subfolders too
-            for (int x = 0; x < nw; x++) {
-                char path[PATH_MAX];
-                if (x == 0) snprintf(path, sizeof path, "%s", p->path);
-                else path_join(path, sizeof path, p->path, p->expanded[x - 1]);
-                watch_use(path);
-            }
-        }
+  if (g_ino < 0)
+    return;
+  for (int i = 0; i < g_nw; i++)
+    g_w[i].used = false;
+  char trash[PATH_MAX], info[PATH_MAX];
+  trash_dirs(trash, info, sizeof trash);
+  watch_use(
+      trash); // keep the full/empty icon current even while browsing elsewhere
+  for (int t = 0; t < A.ntabs; t++)
+    for (int j = 0; j < A.tabs[t]->npanes; j++) {
+      Pane *p = &A.tabs[t]->pane[j];
+      if (!pane_watchable(p))
+        continue;
+      int nw = 1 + (p->L->tree ? p->nexpanded
+                               : 0); // tree view: expanded subfolders too
+      for (int x = 0; x < nw; x++) {
+        char path[PATH_MAX];
+        if (x == 0)
+          snprintf(path, sizeof path, "%s", p->path);
+        else
+          path_join(path, sizeof path, p->path, p->expanded[x - 1]);
+        watch_use(path);
+      }
+    }
   int j = 0;
   for (int i = 0; i < g_nw; i++) {
     if (g_w[i].used) {
@@ -10549,42 +10594,58 @@ static void watch_sync(void) {
 }
 
 static void watch_process(void) {
-    if (g_ino < 0) return;
-    int wds[256];
-    int n = watch_take_dirty(wds, 256);
-    u64 now = now_ns();
-    for (int i = 0; i < g_nw && n; i++) {
-        bool hit = n < 0;
-        for (int k = 0; k < n && !hit; k++) hit = wds[k] == g_w[i].wd;
-        if (!hit) continue;
-        dscache_invalidate_up(g_w[i].path);
-        if (!g_w[i].dirty) { g_w[i].dirty = true; g_w[i].first = now; }
-        g_w[i].last = now;
+  if (g_ino < 0)
+    return;
+  int wds[256];
+  int n = watch_take_dirty(wds, 256);
+  u64 now = now_ns();
+  for (int i = 0; i < g_nw && n; i++) {
+    bool hit = n < 0;
+    for (int k = 0; k < n && !hit; k++)
+      hit = wds[k] == g_w[i].wd;
+    if (!hit)
+      continue;
+    dscache_invalidate_up(g_w[i].path);
+    if (!g_w[i].dirty) {
+      g_w[i].dirty = true;
+      g_w[i].first = now;
     }
-    for (int i = 0; i < g_nw; i++) {
-        Watch *w = &g_w[i];
-        if (!w->dirty) continue;
-        // Debounce bursts, and never rescan more often than the scan itself costs (x5).
-        u64 gap = 150000000ull;
-        bool blocked = false;
-        for (int t = 0; t < A.ntabs; t++)
-            for (int j = 0; j < A.tabs[t]->npanes; j++) {
-                Pane *p = &A.tabs[t]->pane[j];
-                if (!pane_watchable(p) || !pane_watches(p, w->path)) continue;
-                if (atomic_load(&p->L->state) == LST_COMPLETE) gap = MAX(gap, (p->L->t_meta - p->L->t_start) * 5);
-                if (A.ren_pane == p || p->L_next || (A.drag_pane == p && A.drag != DRAG_NONE)) blocked = true;
-            }
-        bool quiet = now - w->last > 120000000ull, overdue = now - w->first > 1000000000ull;
-        if (blocked || !(quiet || overdue) || now - w->last_refresh < gap) continue;
-        w->dirty = false;
-        w->last_refresh = now;
-        if (is_trash_dir(w->path)) trash_size_refresh();
-        for (int t = 0; t < A.ntabs; t++)
-            for (int j = 0; j < A.tabs[t]->npanes; j++) {
-                Pane *p = &A.tabs[t]->pane[j];
-                if (pane_watchable(p) && pane_watches(p, w->path)) pane_refresh(p);
-            }
-    }
+    g_w[i].last = now;
+  }
+  for (int i = 0; i < g_nw; i++) {
+    Watch *w = &g_w[i];
+    if (!w->dirty)
+      continue;
+    // Debounce bursts, and never rescan more often than the scan itself costs
+    // (x5).
+    u64 gap = 150000000ull;
+    bool blocked = false;
+    for (int t = 0; t < A.ntabs; t++)
+      for (int j = 0; j < A.tabs[t]->npanes; j++) {
+        Pane *p = &A.tabs[t]->pane[j];
+        if (!pane_watchable(p) || !pane_watches(p, w->path))
+          continue;
+        if (atomic_load(&p->L->state) == LST_COMPLETE)
+          gap = MAX(gap, (p->L->t_meta - p->L->t_start) * 5);
+        if (A.ren_pane == p || p->L_next ||
+            (A.drag_pane == p && A.drag != DRAG_NONE))
+          blocked = true;
+      }
+    bool quiet = now - w->last > 120000000ull,
+         overdue = now - w->first > 1000000000ull;
+    if (blocked || !(quiet || overdue) || now - w->last_refresh < gap)
+      continue;
+    w->dirty = false;
+    w->last_refresh = now;
+    if (is_trash_dir(w->path))
+      trash_size_refresh();
+    for (int t = 0; t < A.ntabs; t++)
+      for (int j = 0; j < A.tabs[t]->npanes; j++) {
+        Pane *p = &A.tabs[t]->pane[j];
+        if (pane_watchable(p) && pane_watches(p, w->path))
+          pane_refresh(p);
+      }
+  }
 }
 
 static bool watch_pending(void) {
@@ -14512,8 +14573,8 @@ static void search_exit(Pane *p) {
   A.redraw = true;
 }
 
-#include "settings.c"
 #include "app_desktop_icon.c"
+#include "settings.c"
 
 // --- zoom / pins -----------------------------------------------------------
 
@@ -15124,7 +15185,8 @@ static void window_icon_update(void) { // the logo in the accent colour (X11 /
       SDL_CreateSurfaceFrom(128, 128, SDL_PIXELFORMAT_RGBA32, logo, 128 * 4);
   if (ic) {
     SDL_SetWindowIcon(A.win, ic);
-    if (g_tray) SDL_SetTrayIcon(g_tray, ic);
+    if (g_tray)
+      SDL_SetTrayIcon(g_tray, ic);
     SDL_DestroySurface(ic);
   }
   free(logo);
@@ -15175,72 +15237,87 @@ static bool app_icon_write(const char *dh, u32 accent) {
 // Keep selected SVG/PNG artwork intact for the desktop's native renderer.
 // NanoSVG supports a subset of SVG and must not flatten taskbar artwork.
 static int app_taskbar_icon_write(void) {
-    char dh[PATH_MAX], path[PATH_MAX];
-    data_home(dh, sizeof dh);
-    if (app_icon_source_path(256, path, sizeof path)) {
-        size_t length;
-        u8 *source = app_desktop_read(path, &length);
-        if (!source) return APP_DESKTOP_ERROR;
-        const char *ext = strrchr(path, '.');
-        int result = app_desktop_install_icon(dh, source, length,
-                     ext && !strcasecmp(ext, ".png") ? "png" : "svg");
-        free(source);
-        return result;
-    }
-    char *source = strdup(g_logo_svg);
-    logo_recolor(source, COL_ACCENT);
-    int result = app_desktop_install_icon(dh, source, strlen(source), "svg");
+  char dh[PATH_MAX], path[PATH_MAX];
+  data_home(dh, sizeof dh);
+  if (app_icon_source_path(256, path, sizeof path)) {
+    size_t length;
+    u8 *source = app_desktop_read(path, &length);
+    if (!source)
+      return APP_DESKTOP_ERROR;
+    const char *ext = strrchr(path, '.');
+    int result = app_desktop_install_icon(
+        dh, source, length, ext && !strcasecmp(ext, ".png") ? "png" : "svg");
     free(source);
     return result;
+  }
+  char *source = strdup(g_logo_svg);
+  logo_recolor(source, COL_ACCENT);
+  int result = app_desktop_install_icon(dh, source, strlen(source), "svg");
+  free(source);
+  return result;
 }
 static int app_icon_apply_now(void) {
-    window_icon_update();
-    return app_taskbar_icon_write();
+  window_icon_update();
+  return app_taskbar_icon_write();
 }
 
 // Wait for appearance changes to settle before updating the desktop icon.
 static void app_icon_sync(void) {
-    static unsigned last_revision = UINT_MAX;
-    static char last_system_theme[64];
-    static u32 last_main, last_bg, last_accent;
-    static char last_launcher[PATH_MAX];
-    static struct timespec launcher_stamp;
-    static off_t launcher_size;
-    static u64 since, checked;
-    static bool pending;
-    if (A.selftest || A.screenshot) return;
-    u64 now = now_ns();
-    if (now - checked >= 2000000000ull) {
-        checked = now;
-        char current[64];
-        system_icon_detect(current, sizeof current);
-        if (strcmp(current, g_system_icon_current)) icon_themes_reload();
-        // Distrobox can recreate the launcher while this instance is running.
-        // Restore its icon reference without requiring another application restart.
-        AppDesktop desktop;
-        struct stat st;
-        char dh[PATH_MAX];
-        data_home(dh, sizeof dh);
-        if (app_desktop_find(dh, &desktop) && !stat(desktop.source, &st)) {
-            if (strcmp(last_launcher, desktop.source) || launcher_size != st.st_size ||
-                launcher_stamp.tv_sec != st.st_mtim.tv_sec || launcher_stamp.tv_nsec != st.st_mtim.tv_nsec) {
-                snprintf(last_launcher, sizeof last_launcher, "%s", desktop.source);
-                launcher_size = st.st_size; launcher_stamp = st.st_mtim;
-                since = now; pending = true;
-            }
-        } else last_launcher[0] = 0;
-    }
-    if (last_revision != g_app_icon_revision || strcmp(last_system_theme, g_system_icon_current) ||
-        last_main != COL_TEXT2 || last_bg != COL_BG || last_accent != COL_ACCENT) {
-        last_revision = g_app_icon_revision;
-        snprintf(last_system_theme, sizeof last_system_theme, "%s", g_system_icon_current);
-        last_main = COL_TEXT2; last_bg = COL_BG; last_accent = COL_ACCENT;
-        window_icon_update();
-        since = now_ns(); pending = true;
-    }
-    if (!pending || now_ns() - since < 1500000000ull) return;
-    pending = false;
-    app_taskbar_icon_write();
+  static unsigned last_revision = UINT_MAX;
+  static char last_system_theme[64];
+  static u32 last_main, last_bg, last_accent;
+  static char last_launcher[PATH_MAX];
+  static struct timespec launcher_stamp;
+  static off_t launcher_size;
+  static u64 since, checked;
+  static bool pending;
+  if (A.selftest || A.screenshot)
+    return;
+  u64 now = now_ns();
+  if (now - checked >= 2000000000ull) {
+    checked = now;
+    char current[64];
+    system_icon_detect(current, sizeof current);
+    if (strcmp(current, g_system_icon_current))
+      icon_themes_reload();
+    // Distrobox can recreate the launcher while this instance is running.
+    // Restore its icon reference without requiring another application restart.
+    AppDesktop desktop;
+    struct stat st;
+    char dh[PATH_MAX];
+    data_home(dh, sizeof dh);
+    if (app_desktop_find(dh, &desktop) && !stat(desktop.source, &st)) {
+      if (strcmp(last_launcher, desktop.source) ||
+          launcher_size != st.st_size ||
+          launcher_stamp.tv_sec != st.st_mtim.tv_sec ||
+          launcher_stamp.tv_nsec != st.st_mtim.tv_nsec) {
+        snprintf(last_launcher, sizeof last_launcher, "%s", desktop.source);
+        launcher_size = st.st_size;
+        launcher_stamp = st.st_mtim;
+        since = now;
+        pending = true;
+      }
+    } else
+      last_launcher[0] = 0;
+  }
+  if (last_revision != g_app_icon_revision ||
+      strcmp(last_system_theme, g_system_icon_current) ||
+      last_main != COL_TEXT2 || last_bg != COL_BG ||
+      last_accent != COL_ACCENT) {
+    last_revision = g_app_icon_revision;
+    snprintf(last_system_theme, sizeof last_system_theme, "%s",
+             g_system_icon_current);
+    last_main = COL_TEXT2;
+    last_bg = COL_BG;
+    last_accent = COL_ACCENT;
+    window_icon_update();
+    since = now_ns();
+    pending = true;
+  }
+  if (!pending || now_ns() - since < 1500000000ull)
+    return;
+  pending = false;
+  app_taskbar_icon_write();
 }
 
 #ifdef FE_DEMO
@@ -15280,13 +15357,15 @@ static void frame(void) {
     int width = 0, height = 0;
     SDL_GetWindowSizeInPixels(A.win, &width, &height);
     if (width > 0 && height > 0) {
-      if (g_vk_frame_target && (width != g_vk_frame_w || height != g_vk_frame_h)) {
+      if (g_vk_frame_target &&
+          (width != g_vk_frame_w || height != g_vk_frame_h)) {
         SDL_DestroyTexture(g_vk_frame_target);
         g_vk_frame_target = NULL;
       }
       if (!g_vk_frame_target) {
-        g_vk_frame_target = SDL_CreateTexture(A.ren, SDL_PIXELFORMAT_RGBA32,
-                                               SDL_TEXTUREACCESS_TARGET, width, height);
+        g_vk_frame_target =
+            SDL_CreateTexture(A.ren, SDL_PIXELFORMAT_RGBA32,
+                              SDL_TEXTUREACCESS_TARGET, width, height);
         if (g_vk_frame_target) {
           SDL_SetTextureBlendMode(g_vk_frame_target, SDL_BLENDMODE_NONE);
           g_vk_frame_w = width;
@@ -15434,8 +15513,10 @@ static void frame(void) {
   if (A.win_x11)
     x11_frame_begin(sync_ack);
   bool presented = SDL_RenderPresent(A.ren);
-  if (presented) atlas_end_frame();
-  if (target_frame) SDL_SetRenderViewport(A.ren, &window_viewport);
+  if (presented)
+    atlas_end_frame();
+  if (target_frame)
+    SDL_SetRenderViewport(A.ren, &window_viewport);
   if (A.win_x11)
     x11_frame_end(sync_ack);
   if (g_atlas_full) {
@@ -15966,12 +16047,13 @@ int main(int argc, char **argv) {
   theme_restore_selection(A.theme_name);
   theme_apply();
 
-    if (!picker_active() && !getenv("SDL_APP_ID")) {
-        char dh[PATH_MAX];
-        AppDesktop desktop;
-        data_home(dh, sizeof dh);
-        if (app_desktop_find(dh, &desktop)) SDL_SetHint(SDL_HINT_APP_ID, desktop.id);
-    }
+  if (!picker_active() && !getenv("SDL_APP_ID")) {
+    char dh[PATH_MAX];
+    AppDesktop desktop;
+    data_home(dh, sizeof dh);
+    if (app_desktop_find(dh, &desktop))
+      SDL_SetHint(SDL_HINT_APP_ID, desktop.id);
+  }
   SDL_SetAppMetadata(
       APP_NAME, APP_VERSION,
       picker_active()
