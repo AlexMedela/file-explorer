@@ -1238,7 +1238,9 @@ static void handle_event(SDL_Event *e) {
         shadow_on_resized(e->window.data1, e->window.data2);
         A.redraw = true;
         break;
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED: window_min_size_update(); break;
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: {
+        window_min_size_update();
         f32 s = SDL_GetWindowDisplayScale(A.win);
         if (s > 0 && s != A.dpi_scale) {
             A.dpi_scale = s;
