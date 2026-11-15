@@ -879,6 +879,14 @@ static void draw_sidebar_content(void) {
                 snprintf(du[k].path, sizeof du[k].path, "%s", pl->path);
                 du[k].t = now;
                 if (statvfs(pl->path, &vs) == 0 && vs.f_blocks) {
+                    // On ostree systems / can be a read-only composefs overlay
+                    // whose statvfs reports zero available blocks. /sysroot is
+                    // the backing filesystem used for the writable home/var.
+                    if (!strcmp(pl->path, "/") && !vs.f_bavail) {
+                        struct statvfs backing;
+                        if (statvfs("/sysroot", &backing) == 0 && backing.f_blocks && backing.f_bavail)
+                            vs = backing;
+                    }
                     du[k].used = 1.0 - (f64)vs.f_bavail / (f64)vs.f_blocks;
                     du[k].avail = (u64)vs.f_bavail * vs.f_frsize;
                 } else du[k].used = -1;

@@ -449,7 +449,10 @@ static u8 *system_icon_raster(int id, int w, int h) {
                 if (pixels) return pixels;
             }
     }
-    if (system_icon_lookup(theme, name, MAX(w, h), path, sizeof path)) {
+    // Pick one installed share emblem at every view size. Icon themes can
+    // contain different artwork for 16, 32 and 48 px requests.
+    int lookup_size = id >= ICON_SHARE_BASE && id < ICON_SHARE_BASE + 3 ? 32 : MAX(w, h);
+    if (system_icon_lookup(theme, name, lookup_size, path, sizeof path)) {
         u8 *pixels = system_icon_raster_path(path, w, h);
         if (pixels) return pixels;
     }
@@ -459,7 +462,7 @@ static u8 *system_icon_raster(int id, int w, int h) {
     }
     if (trash || id >= ICON_SHARE_BASE + 3) return NULL; // preserve the bundled bin/emblem when the desktop has none
     const char *fallback = (id >= ICON_SHARE_BASE || !strncmp(g_icon_names[id], "folder", 6)) ? "folder" : "text-x-generic";
-    if (strcmp(name, fallback) && system_icon_lookup(theme, fallback, MAX(w, h), path, sizeof path))
+    if (strcmp(name, fallback) && system_icon_lookup(theme, fallback, lookup_size, path, sizeof path))
         return system_icon_raster_path(path, w, h);
     return NULL;
 }
