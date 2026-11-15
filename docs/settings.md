@@ -105,7 +105,8 @@ each area from -30% to +30% in 5% steps; 0 restores its original brightness. The
 pill tabs and the app-drawn title strip. Sidebar and preview brightness are independent. Turning off unified surfaces
 restores the selected theme's original surface differences. Terminal content keeps its terminal palette.
 
-"Show separator lines" is **on by default**. Turn it off to hide panel/header/status borders and column dividers.
+"Show separator lines" is **on by default**. The sidebar separator runs continuously from the integrated header
+through the sidebar. Turn the option off to hide panel/header/status borders and column dividers.
 Resize targets still work and show a highlight on hover; focus and interactive-control outlines stay visible.
 
 "Match system highlight" uses the standard XDG Settings portal's `org.freedesktop.appearance/accent-color` and

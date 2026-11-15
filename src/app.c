@@ -15145,6 +15145,7 @@ static void frame_draw(void) {
   draw_preview();
   draw_sidebar();
   draw_brand();
+  draw_sidebar_edge();
   draw_window_controls();
   draw_status();
   draw_ops();
@@ -15345,14 +15346,16 @@ static void frame(void) {
     x11_tiled_update();
   if (A.win_shadow)
     window_size_update(); // (maximised or not: the shadow comes and goes)
-  // Diagnostic: render the whole frame to a texture, then make a single copy
-  // to the Vulkan swapchain. This isolates in-frame texture updates from the
-  // window buffer and helps distinguish rendering from presentation flicker.
+  // Keep Vulkan's discovery/redraw passes off the swapchain. A tab switch can
+  // add glyphs and redraw the frame; only the finished image should reach the
+  // window, including the one-pixel boundaries between panels. Set
+  // FE_VK_TARGET=0 to compare the direct swapchain path when diagnosing.
   bool target_frame = false;
   SDL_Rect window_viewport;
   SDL_GetRenderViewport(A.ren, &window_viewport);
   const char *renderer_name = SDL_GetRendererName(A.ren);
-  if (getenv("FE_VK_TARGET") && renderer_name &&
+  const char *vk_target = getenv("FE_VK_TARGET");
+  if ((!vk_target || strcmp(vk_target, "0")) && renderer_name &&
       (!strcmp(renderer_name, "vulkan") || !strcmp(renderer_name, "gpu"))) {
     int width = 0, height = 0;
     SDL_GetWindowSizeInPixels(A.win, &width, &height);

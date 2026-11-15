@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Vulkan now composes each frame offscreen before presenting it, so redraw passes and
+  sidebar boundaries reach the window together. The sidebar separator spans the
+  integrated header and sidebar; tab icons adapt to their tab background.
 - Trash icons now follow the selected file icon theme, including bundled and custom sets.
   Long file names in deletion confirmation dialogs end with an ellipsis inside their rows.
 - Nerd Font action icons, compact Views / Sort by / Group by context submenus,

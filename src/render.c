@@ -421,7 +421,12 @@ static void draw_panel_bar(Panel *pn) {
             draw_line(ix + is * 0.25f, iy + is * 0.35f, ix + is * 0.42f, iy + is * 0.5f, lt, tcc);
             draw_line(ix + is * 0.42f, iy + is * 0.5f, ix + is * 0.25f, iy + is * 0.65f, lt, tcc);
             draw_rect(roundf(ix + is * 0.5f), roundf(iy + is * 0.62f), roundf(is * 0.26f), lt, tcc);
-        } else draw_path_icon(ix, iy, is, p->path);
+        } else {
+            u32 saved = g_icon_surface_bg;
+            g_icon_surface_bg = surface;
+            draw_path_icon(ix, iy, is, p->path);
+            g_icon_surface_bg = saved;
+        }
         f32 csz = roundf(S(18));
         bool show_close = A.ntabs > 1 && (cur || hover) && r.w > S(90);
         f32 tx = ix + is + roundf(S(8));
@@ -666,8 +671,6 @@ static void draw_brand(void) {
     const char *label = header_label_text();
     draw_text_fit(&A.font, r.x + S(16), text_y(&A.font, r.y, r.h), MAX(0.f, r.w - S(32)),
                   label, (int)strlen(label), C(COL_TEXT), 0);
-    if (g_show_separators || sidebar_edge_hot())
-        draw_rect(r.x + r.w - 1, r.y, 1, r.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
 }
 
 // Input method: the text being composed, in a box under the focused field (underlined, like other apps show it).
@@ -741,8 +744,6 @@ static void draw_sidebar_content(void) {
     u32 sidebar_dim = light_sidebar ? surface_foreground_color(COL_SIDEBAR, false, true) : COL_TEXT_DIM;
     u32 sidebar_faint = light_sidebar ? sidebar_dim : COL_TEXT_FAINT;
     draw_rect(sb.x, sb.y, sb.w, sb.h, C(COL_SIDEBAR));
-    if (g_show_separators || sidebar_edge_hot())
-        draw_rect(sb.x + sb.w - 1, sb.y, 1, sb.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
     Font *fs = &A.font_small, *f = &A.font;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)sb.x, (int)sb.y, (int)sb.w - 1, (int)sb.h});
     bool dragging_place = A.drag == DRAG_PLACE;
@@ -942,6 +943,12 @@ static void draw_sidebar(void) {
     u32 saved = g_icon_surface_bg; g_icon_surface_bg = COL_SIDEBAR;
     draw_sidebar_content();
     g_icon_surface_bg = saved;
+}
+
+static void draw_sidebar_edge(void) {
+    if (!g_show_separators && !sidebar_edge_hot()) return;
+    draw_rect(A.r_content.x - 1, 0, 1, A.r_sidebar.y + A.r_sidebar.h,
+              C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
 }
 
 static const char *owner_name(u32 uid) {

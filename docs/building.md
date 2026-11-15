@@ -41,6 +41,8 @@ For release preparation and package version maintenance, see [MAINTENANCE.md](..
 
 `FE_DEBUG_DND=1` logs what dragging files out to other apps does (X11 / Wayland protocol steps) on stderr, for drags
 that misbehave on some desktop.
+With Vulkan, `FE_VK_TARGET=0` draws directly to the swapchain for comparison. The default draws to an offscreen
+target and copies the completed frame to the window. This setting has no effect with OpenGL or software rendering.
 ## Tools and self-tests
 - `./build/file-explorer --bench DIR [QUERY]` – headless listing benchmark; with QUERY also a recursive search (time, CPU, peak memory)
 Self-tests and screenshots run headless (SDL's offscreen video driver + software renderer): no window appears,

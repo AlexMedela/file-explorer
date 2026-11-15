@@ -95,15 +95,20 @@ Main changes:
   texture per frame, avoiding that per-frame texture lifecycle and its
   synchronization cost.
 - The non-Vulkan path keeps its incremental dirty-rectangle uploads.
-- `FE_VK_TARGET=1` remains an environment-gated diagnostic that renders the
-  frame to an offscreen texture before copying it to the swapchain. It changes
-  the render-target path for comparison; by itself it does not prove whether a
-  problem is in rendering or presentation.
+- Vulkan now draws the frame to a reusable offscreen target before copying the
+  finished image to the swapchain. Discovery and redraw passes therefore do not
+  reach the window, including a redraw that adds glyphs after switching tabs.
+  The target is recreated when the window changes size. If it cannot be created,
+  drawing falls back to the direct path. `FE_VK_TARGET=0` selects that direct
+  path explicitly for comparison; it does not change the OpenGL path.
 
 Improvements:
 
 - Folder, sidebar, and preview surfaces no longer blink while terminal output
   adds glyphs; the user confirmed no flicker after the change.
+- The sidebar separator is drawn once after the header and sidebar, keeping its
+  one-pixel edge continuous across both. Tab icons use the tab's surface color
+  for contrast adjustments.
 - An atlas update is one full upload in a frame that needs new glyphs instead
   of a render-pass break between queued surfaces.
 - No texture is created or destroyed in the steady-state frame path, avoiding
@@ -226,7 +231,8 @@ inspection is more useful than its raw whole-file diff when tracing behavior.
   panel screenshot from M11 still shows the folder and sidebar correctly.
 - The Fedora `fedora-build` release build passed on the frame-slotted atlas
   commit. Native M6, M8, M9, M10, and M11 passed with the Vulkan renderer;
-  M10 also passed with `FE_VK_TARGET=1` and with OpenGL. M10 checks geometry
+  M10 also passed with `FE_VK_TARGET=1` and with OpenGL before offscreen rendering
+  became the default. M10 checks geometry
   queued across an atlas publish and captures folder-row text after atlas
   resets. The latter is a timing-sensitive smoke check, not a deterministic
   reproduction of rapid terminal output.
