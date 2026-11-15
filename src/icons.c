@@ -429,17 +429,15 @@ static const char *system_icon_name(int id) {
 static u8 *system_icon_raster(int id, int w, int h) {
     bool trash = id >= 0 && id < ICON_COUNT && (!strcmp(g_icon_names[id], "trash") || !strcmp(g_icon_names[id], "folder-trash"));
     bool window = id >= ICON_SYSTEM_BASE + SYS_WINDOW_MINIMIZE && id <= ICON_SYSTEM_BASE + SYS_WINDOW_CLOSE;
-    if ((!window && !trash && !icon_system_selected()) || id < 0) return NULL;
+    if ((!window && !icon_system_selected()) || id < 0) return NULL;
     if (id >= ICON_SYSTEM_BASE && id < ICON_SYSTEM_BASE + (int)ARRAY_COUNT(g_system_symbols)) {
         const char *theme = window ? g_system_icon_current : icon_system_theme();
         return system_action_raster(theme, g_system_symbols[id - ICON_SYSTEM_BASE], w, h, window);
     }
     if (id >= ICON_COUNT && (id < ICON_SHARE_BASE || id >= ICON_EXT_BASE)) return NULL;
     if (id == ICON_SHARE_BASE + 4) return NULL; // preserve the classic Git logo across desktop themes
-    CustomIconTheme *custom = trash ? icon_custom() : NULL;
-    if (custom && custom->svg[id]) return NULL; // explicit custom Trash artwork wins
     const char *name = system_icon_name(id);
-    const char *theme = trash && !icon_system_selected() ? g_system_icon_current : icon_system_theme();
+    const char *theme = icon_system_theme();
     char path[PATH_MAX];
     if (trash && g_trash_full) {
         const char *full_names[] = {"user-trash-full", "user-trash-full-symbolic"};

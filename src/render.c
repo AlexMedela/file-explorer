@@ -3078,7 +3078,7 @@ static void draw_dialog(void) {
             else if (!draw_icon_for_name(ix, iy, is, d->items[i], false)) draw_file_icon(ix, iy, is, 0x8C8F99);
             f32 tx1 = ix + is + S(10), tw = cw - is - S(34), ty = text_y(fs, ry, irh);
             const char *nm = d->items[i], *fp = d->item_sub[i];
-            f32 nw = text_width(fs, nm, (int)strlen(nm));
+            f32 nw = MIN(text_width(fs, nm, (int)strlen(nm)), tw);
             if (fp) nw = MIN(nw, roundf(tw * 0.5f)); // the name keeps up to half; the full path, dimmed, gets the rest
             draw_text_fit(fs, tx1, ty, nw, nm, (int)strlen(nm), C(COL_TEXT), 0);
             f32 px = tx1 + nw + roundf(S(12)), pw = tx1 + tw - px;

@@ -1814,7 +1814,7 @@ static int run_selftest_m7(void) {
         icon_set_theme(t);
         ST_CHECK(icon_glyph(folder_icon_for_name("src"), 16) != NULL && big_icon_tex(icon_find("folder"), 96) != NULL);
     }
-    { // Trash follows the live desktop icon theme even with bundled icons / Nerd Font override.
+    { // Trash follows the selected icon theme, including the chosen system theme.
         char root[PATH_MAX], path[PATH_MAX + 128];
         snprintf(root, sizeof root, "%s/desktop-icons", M7_BASE);
         system_icon_root(root);
@@ -1836,18 +1836,18 @@ static int run_selftest_m7(void) {
                 snprintf(theme->name, sizeof theme->name, "%s", names[k]);
             }
         }
-        icon_set_theme(0);
         icons_set_trash_full(false);
         for (int k = 0; k < 2; k++) {
             snprintf(g_system_icon_current, sizeof g_system_icon_current, "%s", names[k]);
+            icon_set_theme(k);
             icons_flush();
             u8 *pixels = system_icon_raster(icon_find("trash"), 16, 16);
+            ST_CHECK(pixels == NULL);
+            ST_CHECK(icon_src(icon_find("trash")) == g_icon_svg[k][icon_find("trash")]);
+            free(pixels);
+            pixels = icon_raster(icon_find("trash"), 16, 16);
             ST_CHECK(pixels != NULL);
-            if (pixels) {
-                int center = (8 * 16 + 8) * 4;
-                ST_CHECK(pixels[center] == (k ? 0 : 255) && pixels[center + 1] == (k ? 255 : 0));
-                free(pixels);
-            }
+            free(pixels);
             // Explicit system selection takes precedence over the desktop's default.
             int chosen = system_icon_theme_find(names[1 - k]);
             icon_set_theme(icon_system_base() + 1 + chosen);
@@ -1858,8 +1858,8 @@ static int run_selftest_m7(void) {
                 ST_CHECK(pixels[center] == (k ? 255 : 0) && pixels[center + 1] == (k ? 0 : 255));
                 free(pixels);
             }
-            icon_set_theme(0);
         }
+        icon_set_theme(icon_system_base()); // System follows the current desktop theme.
         snprintf(path, sizeof path, "%s/TrashThemeA/16x16/places/user-trash-full.svg", root);
         FILE *full = fopen(path, "w");
         if (full) {
@@ -1878,6 +1878,7 @@ static int run_selftest_m7(void) {
         icons_set_trash_full(false);
         system_icons_scan();
         icons_flush();
+        icon_set_theme(0);
     }
     { // custom icon themes: <config>/icons/<Name>/ - overrides, ext-*.svg, base fallback, Options list, persistence
         char dir[PATH_MAX], path[PATH_MAX + 64];
