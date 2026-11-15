@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Trash icons now follow the selected file icon theme, including bundled and custom sets.
+  Long file names in deletion confirmation dialogs end with an ellipsis inside their rows.
 - Nerd Font action icons, compact Views / Sort by / Group by context submenus,
   and a navigation sort button with eight fields and explicit direction.
 - One external-terminal executable setting with validation, Apply/reset feedback,

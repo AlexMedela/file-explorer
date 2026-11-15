@@ -270,15 +270,18 @@ share one neutral background. Focus is indicated by the accent outline.
 In Open with, the default-app label uses a 15% lighter accent on dark list
 backgrounds. Selected rows retain their contrasting selection text color.
 
-Trash in Quick Access has an **Empty Trash** action in its right-click menu. It asks for confirmation and empties
-the Trash independently of the current folder or active filters. Trash icons follow the current desktop icon
-theme across the sidebar, tabs, previews and confirmation dialogs. An explicitly selected system icon theme,
-custom Trash artwork or `FE_NERD_FONT` override takes precedence. Both the Quick Access action and the bottom-right
-Empty Trash button use the same confirmation dialog.
+Trash in Quick Access has an **Empty Trash** action in its right-click menu. It empties the Trash independently of the
+current folder and active filters. The button at the bottom of the Trash view opens the same confirmation dialog.
+The dialog lists up to four names and an additional-item count. Long names end with an ellipsis inside the dialog;
+hover over an elided name to see it in full.
 
-Trash uses `user-trash-full` (or its symbolic variant) when it contains items, and `user-trash` when empty.
-Zero-byte files and empty folders count as contents. The icon updates after trashing, restoring or emptying;
-the Empty Trash confirmation shows the full version. Themes without a full variant fall back to their normal bin.
+The Trash icon in the sidebar, tabs, previews and confirmation dialog uses the selected **File icons** theme. Built-in
+sets use their bundled Trash artwork, and a custom theme can supply `trash.svg` (otherwise it uses its bundled base).
+**System** follows the desktop icon theme; **System: Theme name** uses that installed theme explicitly. System themes
+use `user-trash-full` (or `user-trash-full-symbolic`) when Trash contains items, and `user-trash` when empty. A theme
+without a full variant uses its normal bin. Zero-byte files and empty folders count as contents. The system icon's
+full/empty state updates after trashing, restoring or emptying; the Empty Trash confirmation shows the full version.
+An optional `FE_NERD_FONT` can override built-in and custom theme artwork, but a selected system theme takes precedence.
 
 Terminal ligatures can span foreground-colour changes in Fish syntax highlighting. Shaping keeps operators
 together and paints each part in its cell colour; font-weight changes still start a separate shaping run.

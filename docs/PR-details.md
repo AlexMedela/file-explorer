@@ -62,8 +62,11 @@ fixes the context submenus and records the conflict review.
   those surfaces have been queued. See "Vulkan glyph atlas fix" below.
 - **Trash:** Empty Trash reads its own directory, including hidden and
   zero-byte items, regardless of the active pane. Confirmation and cancellation
-  use the existing dialog. Full/empty icon caches follow measured contents and
-  directory-watch events; custom artwork still takes precedence.
+  use the existing dialog, which elides long names within each row. Trash artwork
+  follows the selected file icon theme across the app: bundled and custom sets
+  use their own icons, while system themes use `user-trash` and, when available,
+  `user-trash-full`. Full/empty icon caches follow measured contents and
+  directory-watch events.
 
 ## Vulkan glyph atlas fix
 

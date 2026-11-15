@@ -14,6 +14,7 @@ that variable is set. Create a subdirectory for your theme:
 icons/MyTheme/
   theme.conf
   folder.svg
+  trash.svg
   folder-remote-smb.svg
   folder-remote-nfs.svg
   folder-publicshare.svg
@@ -28,9 +29,10 @@ base=Material
 ```
 
 Other supported bases are `Catppuccin`, `Symbols`, and `Monokai`. Missing ordinary
-icons come from the base set. SVG filenames such as `folder.svg`, `folder-src.svg`
-and `python.svg` replace the corresponding artwork. `ext-<extension>.svg` supplies
-an icon for any file extension. The generated `README.txt` in the icon themes
+icons come from the base set. SVG filenames such as `folder.svg`, `folder-src.svg`,
+`trash.svg` and `python.svg` replace the corresponding artwork. `trash.svg` is the
+Trash icon throughout the app when this theme is selected. `ext-<extension>.svg`
+supplies an icon for any file extension. The generated `README.txt` in the icon themes
 folder lists the built-in names and badge filenames.
 
 Reopen **Icon themes folder** after editing files to reload the theme, then select
