@@ -3450,6 +3450,41 @@ static void draw_toast(void) {
     g_alpha = 1.f;
 }
 
+static void draw_fit_tooltip(void) {
+    if (!fit_tip_ready()) return;
+    Font *f = &A.font_small;
+    f32 pad = roundf(S(10)), maxw = MAX(S(80), MIN(S(620), A.W - S(40)) - pad * 2);
+    f32 lh = roundf(f->line_h + S(3));
+    int starts[128], lens[128], n = 0, pos = 0;
+    while (pos < g_fit_tip_len && n < (int)ARRAY_COUNT(starts)) {
+        int start = pos, end = start, space = -1;
+        while (end < g_fit_tip_len && g_fit_tip[end] != '\n') {
+            int next = end + 1;
+            while (next < g_fit_tip_len && ((u8)g_fit_tip[next] & 0xC0) == 0x80) next++;
+            if (end > start && text_width(f, g_fit_tip + start, next - start) > maxw) break;
+            if (g_fit_tip[end] == ' ') space = next;
+            end = next;
+        }
+        if (end < g_fit_tip_len && g_fit_tip[end] != '\n' && space > start) end = space;
+        starts[n] = start;
+        lens[n++] = end - start;
+        pos = end < g_fit_tip_len && g_fit_tip[end] == '\n' ? end + 1 : end;
+        while (pos < g_fit_tip_len && g_fit_tip[pos] == ' ') pos++;
+    }
+    if (!n) return;
+    f32 tw = 0;
+    for (int i = 0; i < n; i++) tw = MAX(tw, text_width(f, g_fit_tip + starts[i], lens[i]));
+    f32 w = MIN(A.W - S(16), tw + pad * 2), h = n * lh + pad * 2;
+    f32 x = CLAMP(g_fit_tip_mx + S(12), S(8), MAX(S(8), A.W - w - S(8)));
+    f32 y = g_fit_tip_my + S(18);
+    if (y + h > A.H - S(8)) y = g_fit_tip_my - h - S(8);
+    y = MAX(S(8), y);
+    draw_rrect(x, y, w, h, S(6), C(COL_POPUP));
+    draw_rrect_outline(x, y, w, h, S(6), 1, C(COL_POPUP_BORDER));
+    for (int i = 0; i < n; i++)
+        draw_text(f, x + pad, y + pad + i * lh, g_fit_tip + starts[i], lens[i], C(COL_TEXT));
+}
+
 // Text with matched characters highlighted; pos are byte offsets into the full string,
 // s starts at byte `base` of it. Elides with "..." past maxw. Returns the end x.
 static f32 draw_text_hl(Font *f, f32 x, f32 y, f32 maxw, const char *s, int len, int base, const u16 *pos, int npos,

@@ -15011,6 +15011,7 @@ static bool animating(void) {
 static void frame_draw(void) {
   g_text_field_count = 0;
   draw_clip(NULL);
+  fit_tip_begin(A.mx, A.my);
   g_alpha = 1.f;
   if (A.shadow_px) { // transparent margin, opaque window (clearing ignores the
                      // viewport)
@@ -15028,6 +15029,7 @@ static void frame_draw(void) {
   bool mouse_in = A.mouse_in;
   if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open)
     A.mouse_in = false;
+  fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
   bool multi = A.npanels > 1;
   // Terminal output can add glyphs to the shared atlas. Draw visible terminals
   // first so their texture uploads happen before folder, sidebar and preview
@@ -15092,16 +15094,21 @@ static void frame_draw(void) {
   if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open)
     g_text_field_count = 0;
   A.mouse_in = mouse_in; // overlays get the mouse
+  fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
   draw_menu();
   draw_palette();
   A.mouse_in = mouse_in && !A.dlg.open;
+  fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
   sheet_draw();
   draw_toast(); // Keep feedback visible above the Options sheet.
   A.mouse_in = mouse_in;
+  fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
   draw_dialog();
   draw_preedit();
   if (A.show_overlay)
     draw_overlay();
+  fit_tip_mouse(false);
+  draw_fit_tooltip();
   draw_flush();
   corners_mask();
   shadow_draw();
@@ -16258,6 +16265,8 @@ int main(int argc, char **argv) {
           SDL_WaitEventTimeout(&e, hold_ms); // the listing's progress wakes us
     else if ((A.redraw || animating()) && !A.win_hidden)
       got = SDL_PollEvent(&e);
+    else if (fit_tip_wait_ms() > 0 && !A.win_hidden)
+      got = SDL_WaitEventTimeout(&e, fit_tip_wait_ms());
     else if (loading || A.screenshot || ops_busy() || watch_pending() ||
              A.search_due || A.pal_pending || sheet_busy())
       got = SDL_WaitEventTimeout(
@@ -16340,6 +16349,8 @@ int main(int argc, char **argv) {
   recent_save();
   if (!A.screenshot)
     settings_save();
+  free(g_fit_tip);
+  free(g_fit_tip_prev);
   SDL_DestroyRenderer(A.ren);
   SDL_DestroyWindow(A.win);
   SDL_Quit();
