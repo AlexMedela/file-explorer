@@ -39,16 +39,28 @@ window-action shapes when available, with built-in vector fallbacks, independent
 Older `title_bar=auto` settings remain readable; the UI no longer exposes Automatic or "Explorer's own" choices.
 `FE_TITLE_BAR=app|system` still overrides the mode for one run.
 
-**Header label** chooses File-Explorer (default), Hostname, Custom or Hidden. **Custom header text** applies a custom
-single-line label; Default restores File-Explorer without changing window-control visibility. Hostname uses the
-machine/container hostname visible to the running app. Saved keys are `header_label=app|hostname|custom|hidden`,
-`header_text=...`, and `show_window_controls=1|0`.
+**Header label** chooses File-Explorer (default), Hostname, Custom or Hidden. Hidden gives the label row's height to
+the sidebar. **Custom header text** applies a custom single-line label; Default restores File-Explorer. Hostname uses
+the machine/container hostname visible to the running app. **Show header icon** places the original File-Explorer
+logo beside any visible label, tinted by the active accent colour. It can be hidden independently. Saved keys are
+`header_label=app|hostname|custom|hidden`, `header_text=...`, `show_header_icon=1|0`, and
+`show_window_controls=1|0`.
 
 `round_corners=1` (Options > Appearance > Rounded corners, off by default) rounds the window's corners
-and draws a drop shadow with the integrated header. It stays square without a shadow when maximized or snapped.
+and draws a continuous theme-coloured outline and a drop shadow with the integrated header. It stays square
+without a shadow when maximized or snapped.
 On X11 this needs a compositor and the OpenGL renderer; the shadow needs a window manager that reads
-`_GTK_FRAME_EXTENTS`. Changing this setting takes a restart. `FE_SQUARE_CORNERS=1` and `FE_NO_SHADOW=1`
-disable corners and the shadow for one run.
+`_GTK_FRAME_EXTENTS`. Changing this setting takes a restart in either direction: disabling it then creates an
+opaque, square window without an app-drawn shadow or shadow margin, leaving window effects to the desktop.
+`FE_SQUARE_CORNERS=1` disables both corners and the shadow for one run; `FE_NO_SHADOW=1` disables only the shadow.
+
+With a desktop corner effect, leave Rounded corners off so the desktop owns the window edge. On KDE Wayland,
+the integrated header uses a borderless window, which has no native KWin frame or shadow. If a KWin effect leaves
+an uneven edge, use a window rule for `dev.fileexplorer` to request a server-side frame and shadow, then hide the
+title bar with a window-specific override in a decoration that supports it. The effect and decoration settings
+determine the resulting outline; the app cannot draw a missing portion of a compositor-owned edge.
+For KDE-Rounded-Corners, keep its **Mark windows translucent** option on; disabling it can leave stale pixels in
+transparent corners ([upstream explanation](https://github.com/matinlotfali/KDE-Rounded-Corners/pull/434)).
 
 **Dropping files** (Options > Behaviour > Mouse): a drop moves (copies onto another drive or from another app) unless
 Ctrl / Shift / Ctrl+Shift say copy / move / link. `drop_ask=1` ("Ask what to do when dropping files") opens a menu
@@ -131,6 +143,7 @@ previous_theme=Dark
 scrollbar_color=auto
 header_label=app
 header_text=
+show_header_icon=1
 show_window_controls=1
 ```
 
@@ -148,12 +161,26 @@ uninstalling). Docks and launchers may only pick up a new colour once they reloa
 
 Changed shortcuts are stored as `key=<command>=<keys>|<keys>` lines (only the ones that differ from the defaults).
 
-Remote servers: **Connect to server** (palette, or type `sftp://` / `smb://` ... in the path bar) mounts SFTP, SMB,
-FTP/FTPS, WebDAV(S) and NFS through GVfs. Passwords are passed to GVfs only when it asks (SSH key
+Remote servers: **Connect to server** (palette, or type `sftp://` / `smb://` ... in the path bar) lets you choose a
+connection method for each server. **GVfs** uses the installed protocol backend and exposes its mounts through FUSE.
+**KDE KIO** uses KIO Fuse and the installed worker for that protocol; KDE handles its authentication prompts.
+**System mount** uses an existing matching NFS or SMB mount from `/etc/fstab` or the current mount table. It calls
+`mount` with the configured mount point when disconnected, so your system's mount permissions and options apply.
+You can select any method to see what it needs; Connect stays disabled until the selected method is available.
+A saved server keeps its chosen method. KIO support requires KIO Fuse and its
+matching KIO worker; installing KIO alone does not make every protocol available. NFS does not require a GVfs NFS
+backend when a matching system mount or KIO worker is available.
+System NFS and SMB mounts appear in Network automatically. NFS, SMB and rclone entries in `/etc/fstab` remain there
+after unmount so they can be reconnected. The Network context menu can rescan locations. When a GVfs backend is
+missing, the connection form points to system NFS/SMB mounts or configured rclone WebDAV remotes as appropriate.
+The Connect to server form scrolls within a fixed-size dialog; the connection buttons stay visible at the bottom.
+Local NFS exports from `/etc/exports` and Samba shares from system configuration also appear in Network as folders
+marked with their sharing protocol. These rows open the local folder; they do not mount the share through the network.
+Passwords entered in this form are passed to GVfs only when it asks (SSH key
 passphrases too) and are not stored unless you tick "Remember password", which keeps them in the system keyring
 (Secret Service: gnome-keyring, KWallet, KeePassXC) - never in the app's files. Questions such as an unknown SSH host
-key are shown to you. Saved servers appear in the sidebar's Network section: a click connects (asking for a password
-only if the server wants one), right-click to edit or forget them (forgetting also removes the stored password). Protocols whose GVfs backend isn't installed are marked as unavailable.
+key are shown to you. Saved servers appear in the sidebar's Network section: a click connects using the selected
+method, right-click to edit or forget them (forgetting also removes a stored GVfs password).
 Phones and cameras plugged in with a cable show under Devices (dim until connected; click to connect, ⏏ when done).
 The app talks to them itself - no usbmuxd, libimobiledevice or GVfs needed: iPhones and iPads (usbmux, lockdown,
 AFC; the first time, unlock the iPhone and tap Trust - the pairing is kept in `~/.local/share/file-explorer/lockdown`,
@@ -178,9 +205,11 @@ the icon themes folder.
 
 The system file chooser, default file manager and phone access are in [Integration](integration.md).
 
-Cloud (sidebar → Cloud, shown when [rclone](https://rclone.org) is installed): every remote `rclone listremotes`
-reports - Google Drive, OneDrive, Dropbox, S3, WebDAV... - is a place. The + runs `rclone config` in a terminal tab to
-add one; the list follows rclone's configuration by itself. A click connects and opens it: `rclone mount` runs as a
+Cloud (sidebar → Network, shown when [rclone](https://rclone.org) is installed): every remote `rclone listremotes`
+reports - Google Drive, OneDrive, Dropbox, S3, WebDAV... - is a place. Right-click Network to run `rclone config` in a
+terminal tab or refresh remotes; each remote also has an edit button beside its disconnect button that opens the
+interactive rclone configuration in a terminal tab. The list follows rclone's configuration by itself. A click connects
+and opens it: `rclone mount` runs as a
 systemd user service (`~/.config/systemd/user/file-explorer-cloud-*.service`, `--vfs-cache-mode full`) mounted at
 `~/.local/share/file-explorer/cloud/<remote>`, so it stays mounted when the app is closed and, with "Connect at login"
 (right-click), comes up without the app. The eject button disconnects; the dot shows connecting / retrying. When a

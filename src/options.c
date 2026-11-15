@@ -13,7 +13,7 @@ enum {
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
     OPT_SYSTEM_ACCENT, OPT_SYSTEM_BACKGROUND, OPT_UNIFIED_SURFACES, OPT_SEPARATORS,
     OPT_SIDEBAR_BRIGHTNESS, OPT_HEADER_BRIGHTNESS, OPT_MAIN_BRIGHTNESS, OPT_STATUS_BRIGHTNESS, OPT_PREVIEW_BRIGHTNESS,
-    OPT_TAB_POSITION, OPT_TAB_STYLE, OPT_SCROLL_COLOR, OPT_NAV_SELECTION_OPACITY, OPT_HEADER_LABEL, OPT_HEADER_TEXT, OPT_WINDOW_CONTROLS, OPT_APP_ICON,
+    OPT_TAB_POSITION, OPT_TAB_STYLE, OPT_SCROLL_COLOR, OPT_NAV_SELECTION_OPACITY, OPT_HEADER_LABEL, OPT_HEADER_TEXT, OPT_WINDOW_CONTROLS, OPT_HEADER_ICON, OPT_APP_ICON,
 };
 
 typedef struct {
@@ -39,7 +39,8 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_SMOOTH, "Smooth scrolling", "Animate scrolling instead of jumping"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Integrated header shares the first row with tabs/navigation; Desktop title bar uses native decorations"},
     {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_CONTROLS, "Show window controls", "Minimize, maximize and close in the integrated header; hiding them frees the row"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_HEADER_LABEL, "Header label", "Show File-Explorer, this machine's hostname, custom text, or no label"},
+    {OC_APPEARANCE, OK_BOOL, OPT_HEADER_ICON, "Show header icon", "Show the original File-Explorer logo in the accent colour beside the header label"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_HEADER_LABEL, "Header label", "Show File-Explorer, hostname, custom text, or hide the header and use its space for the sidebar"},
     {OC_APPEARANCE, OK_TEXT, OPT_HEADER_TEXT, "Custom header text", "Apply a custom label on the left; Default restores File-Explorer"},
     {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Colours, padding and cursor of terminal tabs; font always follows Explorer"},
@@ -124,6 +125,7 @@ typedef struct { Rect r; int part, opt, arg; } OptHit;
 static struct {
     int cat;
     TextEdit search;
+    bool search_focus;
     f32 scroll, max_scroll;
     OptHit hits[256];
     int nhits;
@@ -290,7 +292,7 @@ static void opt_choice_set(int id, int i) {
     case OPT_ICON_THEME: icon_set_theme(i); system_accent_start(); break;
     case OPT_TERM_LOOK: g_term_look_setting = i; tc_reload_all(); break;
     case OPT_TITLE_BAR: A.title_bar = i == 1 ? TITLEBAR_SYSTEM : TITLEBAR_APP; titlebar_apply(); break;
-    case OPT_HEADER_LABEL: g_header_label = CLAMP(i, HEADER_APP, HEADER_HIDDEN); break;
+    case OPT_HEADER_LABEL: g_header_label = CLAMP(i, HEADER_APP, HEADER_HIDDEN); layout(); break;
     case OPT_FONT:
         if (!apply_ui_font(i == 0 ? "" : g_opt.families[i - 1])) toast("Couldn't load that font");
         break;
@@ -313,6 +315,7 @@ static void opt_choice_set(int id, int i) {
 static bool opt_bool_get(int id) {
     switch (id) {
     case OPT_WINDOW_CONTROLS: return g_show_window_controls;
+    case OPT_HEADER_ICON: return g_show_header_icon;
     case OPT_SYSTEM_BACKGROUND: return g_match_system_background;
     case OPT_SYSTEM_ACCENT: return g_accent_system;
     case OPT_UNIFIED_SURFACES: return g_unified_surfaces;
@@ -350,6 +353,7 @@ static bool opt_bool_get(int id) {
 static void opt_bool_toggle(int id) {
     switch (id) {
     case OPT_WINDOW_CONTROLS: g_show_window_controls = !g_show_window_controls; layout(); break;
+    case OPT_HEADER_ICON: g_show_header_icon = !g_show_header_icon; break;
     case OPT_SYSTEM_BACKGROUND:
         theme_follow_system(!g_match_system_background);
         if (g_match_system_background) system_accent_start();
@@ -365,7 +369,9 @@ static void opt_bool_toggle(int id) {
     case OPT_DIM_INACTIVE: A.dim_inactive = !A.dim_inactive; break;
     case OPT_ROUND_CORNERS:
         A.round_corners = !A.round_corners;
-        if (A.round_corners && !A.win_alpha && A.csd) toast("Rounded corners: after a restart");
+        // Window transparency is fixed when SDL creates the window. Keep the
+        // current mask, shadow and geometry together until the next launch.
+        toast("Rounded corners: restart to apply");
         A.redraw = true;
         break;
     case OPT_ALT_ROWS: A.alt_rows = !A.alt_rows; break;
@@ -714,6 +720,7 @@ static void opt_drop_filter(void) {
 }
 
 static void opt_drop_open(int id, Rect r) {
+    g_opt.search_focus = false;
     g_opt.drop_opt = id;
     g_opt.drop_r = r;
     te_set(&g_opt.drop_filter, "", 0, 0);
@@ -1139,7 +1146,7 @@ static void options_draw(void) {
     // search field
     f32 sw = MIN(roundf(S(300)), w * 0.45f), sh = roundf(S(30));
     Rect sr = {cr.x - S(10) - sw, r.y + pad - S(6), sw, sh};
-    bool sfocus = g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.scroll_color_focus && !g_opt.header_text_focus && !g_opt.terminal_path_focus;
+    bool sfocus = g_opt.drop_opt < 0 && g_opt.search_focus;
     sheet_field(sr, &g_opt.search, sfocus, "Search settings");
     opt_hit(sr, HP_SEARCH, -1, 0);
     // Options navigation shares the sidebar's flat, subdued accent treatment.
@@ -1269,6 +1276,21 @@ static void options_draw(void) {
 
 // --- input -----------------------------------------------------------------------
 
+static bool options_text_focus(TextEdit *edit) {
+    if (g_sheet.kind != SHEET_OPTIONS) return true;
+    if (edit != &g_opt.search && edit != &g_opt.lname && edit != &g_opt.scroll_color &&
+        edit != &g_opt.header_text && edit != &g_opt.terminal_path && edit != &g_opt.drop_filter)
+        return false;
+    if (edit == &g_opt.drop_filter) return g_opt.drop_opt >= 0;
+    if (g_opt.drop_opt >= 0) return false;
+    g_opt.search_focus = edit == &g_opt.search;
+    g_opt.lname_focus = edit == &g_opt.lname;
+    g_opt.scroll_color_focus = edit == &g_opt.scroll_color;
+    g_opt.header_text_focus = edit == &g_opt.header_text;
+    g_opt.terminal_path_focus = edit == &g_opt.terminal_path;
+    return true;
+}
+
 static void options_click(f32 x, f32 y, int clicks) {
     if (g_opt.drop_opt >= 0) { // dropdown is modal: pick, or close when clicking elsewhere
         for (int k = g_opt.nhits - 1; k >= 0; k--) {
@@ -1293,13 +1315,15 @@ static void options_click(f32 x, f32 y, int clicks) {
         if (on_rec) return;
     }
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
+    g_opt.search_focus = false;
     if (sheet_scrollbar_press(x, y)) return;
-    g_opt.lname_focus = g_opt.scroll_color_focus = g_opt.header_text_focus = g_opt.terminal_path_focus = false; // other controls return keyboard focus to search
+    g_opt.search_focus = g_opt.lname_focus = g_opt.scroll_color_focus = g_opt.header_text_focus = g_opt.terminal_path_focus = false;
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];
         if (hp->r.w <= 0 || !in_rect(hp->r, x, y)) continue;
         switch (hp->part) {
         case HP_ICON_CHOOSE: opt_app_icon_choose(); return;
+        case HP_SEARCH: g_opt.search_focus = true; return;
         case HP_EDIT_FIELD:
             if (hp->opt == OPT_TERMINAL_PATH) g_opt.terminal_path_focus = true;
             else if (hp->opt == OPT_HEADER_TEXT) g_opt.header_text_focus = true;
@@ -1428,12 +1452,12 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
         else sheet_close();
         return;
     case SDLK_TAB:
-        if (!g_opt.search.buf[0]) { g_opt.cat = (g_opt.cat + (mod & SDL_KMOD_SHIFT ? OC_COUNT - 1 : 1)) % OC_COUNT; g_opt.scroll = 0; g_opt.lname_focus = g_opt.cat == OC_LAYOUTS; }
+        if (!g_opt.search.buf[0]) { g_opt.cat = (g_opt.cat + (mod & SDL_KMOD_SHIFT ? OC_COUNT - 1 : 1)) % OC_COUNT; g_opt.scroll = 0; g_opt.lname_focus = g_opt.cat == OC_LAYOUTS; g_opt.search_focus = false; }
         return;
     case SDLK_PAGEDOWN: g_opt.scroll += S(300); return;
     case SDLK_PAGEUP: g_opt.scroll -= S(300); return;
     default:
-        if (te_key(&g_opt.search, k, mod)) g_opt.scroll = 0;
+        if (te_key(&g_opt.search, k, mod)) { g_opt.search_focus = true; g_opt.scroll = 0; }
     }
 }
 
@@ -1449,6 +1473,7 @@ static void options_text(const char *text) {
         return;
     }
     te_insert(&g_opt.search, text);
+    g_opt.search_focus = true;
     g_opt.scroll = 0;
 }
 

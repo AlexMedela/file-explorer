@@ -790,6 +790,11 @@ static int run_selftest_ops(void) {
         drag_card_build(&dc);
         ST_CHECK(A.drag == DRAG_ITEMS && total > 3 && dc.n == 3 && dc.more == total - 3);
         ST_CHECK(dc.e[0] == &p->L->entries[p->order[0]]); // (in list order)
+        int old_view = p->view, old_icon = p->icon_px;
+        p->view = VIEW_GRID; p->icon_px = 128;
+        drag_card_build(&dc);
+        ST_CHECK(dc.n == 1 && dc.more == total - 1 && dc.icon_size == roundf(S(128)) && dc.row_h > dc.icon_size);
+        p->view = old_view; p->icon_px = old_icon;
         st_shot("drag-many");
         st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
         sel_clear(p);
@@ -1886,11 +1891,11 @@ static int run_selftest_m7(void) {
         snprintf(path, sizeof path, "%s/TestIcons", dir);
         mkdir_p(path, 0700);
         const char *svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><rect width=\"16\" height=\"16\" fill=\"#ff00ff\"/></svg>";
-        const char *files[3] = {"python.svg", "ext-xyz.svg", "theme.conf"};
-        for (int k = 0; k < 3; k++) {
+        const char *files[4] = {"python.svg", "ext-xyz.svg", "net-webdav.svg", "theme.conf"};
+        for (int k = 0; k < 4; k++) {
             snprintf(path, sizeof path, "%s/TestIcons/%s", dir, files[k]);
             FILE *f = fopen(path, "w");
-            if (f) { fputs(k == 2 ? "base=Symbols\n" : svg, f); fclose(f); }
+            if (f) { fputs(k == 3 ? "base=Symbols\n" : svg, f); fclose(f); }
         }
         icon_themes_reload();
         int t = icon_theme_find("TestIcons");
@@ -1903,6 +1908,8 @@ static int run_selftest_m7(void) {
         int xi = icon_for_name("scene.XYZ", false);
         ST_CHECK(xi >= ICON_EXT_BASE && icon_glyph(xi, 16) && big_icon_tex(xi, 96)); // any extension
         ST_CHECK(icon_glyph(py, 16) != NULL);
+        ST_CHECK(cloud_theme_icon("some remote", "webdav", "network") &&
+                 !strcmp(cloud_theme_icon("some remote", "webdav", "network"), "custom/TestIcons/webdav"));
         settings_save();
         settings_load();
         ST_CHECK(!strcmp(A.icon_theme_name, "TestIcons"));
@@ -3030,7 +3037,24 @@ static int run_selftest_m9(void) {
     opt_bool_toggle(OPT_SYSTEM_BACKGROUND);
     ST_CHECK(!g_match_system_background && g_theme_cur == theme_find("Nord"));
     options_open();
+    ST_CHECK(!g_opt.search_focus);
+    st_frames(1);
+    st_opt_click(st_opt_hit(HP_SEARCH, -1, 0));
+    ST_CHECK(g_opt.search_focus);
+    st_opt_click(st_opt_hit(HP_NAV, -1, OC_APPEARANCE));
+    ST_CHECK(!g_opt.search_focus);
     te_set(&g_opt.search, "Scrollbar colour", 0, 0); st_frames(1);
+    te_set(&g_opt.scroll_color, "#C040A0", 0, 0); st_frames(1);
+    OptHit *field_hit = st_opt_hit(HP_EDIT_FIELD, OPT_SCROLL_COLOR, 0);
+    ST_CHECK(field_hit && !g_opt.scroll_color_focus);
+    if (field_hit) {
+        Rect fr = field_hit->r;
+        f32 fx = fr.x + roundf(S(8)), fy = fr.y + fr.h * 0.5f;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, fx + text_caret_x(&A.font, g_opt.scroll_color.buf, 7, 1), fy, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, fx + text_caret_x(&A.font, g_opt.scroll_color.buf, 7, 4), fy, 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, fx + text_caret_x(&A.font, g_opt.scroll_color.buf, 7, 4), fy, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(g_opt.scroll_color_focus && g_opt.scroll_color.anchor == 1 && g_opt.scroll_color.caret == 4);
+    }
     st_opt_click(st_opt_hit(HP_EDIT_FIELD, OPT_SCROLL_COLOR, 0));
     st_key(SDLK_A, SDL_KMOD_CTRL); st_type("#C040A0");
     st_key(SDLK_RETURN, SDL_KMOD_NONE);
@@ -3052,6 +3076,18 @@ static int run_selftest_m9(void) {
     st_frames(1); st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_HEADER_TEXT, 0));
     ST_CHECK(g_header_label == HEADER_APP && !strcmp(header_label_text(), "File-Explorer"));
     sheet_close();
+
+    f32 brand_h = A.r_brand.h, sidebar_h = A.r_sidebar.h;
+    ST_CHECK(g_show_header_icon && brand_h > 0);
+    opt_bool_toggle(OPT_HEADER_ICON);
+    opt_choice_set(OPT_HEADER_LABEL, HEADER_HIDDEN);
+    ST_CHECK(!g_show_header_icon && A.r_brand.h == 0 && A.r_sidebar.y == 0 &&
+             A.r_sidebar.h == sidebar_h + brand_h);
+    settings_save(); settings_load(); layout();
+    ST_CHECK(!g_show_header_icon && g_header_label == HEADER_HIDDEN && A.r_sidebar.y == 0);
+    opt_choice_set(OPT_HEADER_LABEL, HEADER_APP);
+    opt_bool_toggle(OPT_HEADER_ICON);
+    ST_CHECK(g_show_header_icon && A.r_brand.h == brand_h);
 
     // Application icon chooser: apply/cancel, persistence, invalid images,
     // stale callbacks, and Use system restoring desktop artwork.
@@ -3661,6 +3697,12 @@ static int run_selftest_m9(void) {
         titlebar_apply();
         st_frames(1);
         ST_CHECK(A.csd && A.r_wctl.w > 0 && fabsf(A.r_wctl.x + A.r_wctl.w - (f32)A.W) < 1);
+        ST_CHECK(window_control_ink(0xFFFFFF) == 0x000000 && window_control_ink(0x000000) == 0xFFFFFF &&
+                 window_control_ink(0xC42B1C) == 0xFFFFFF && window_control_ink(0xFFD400) == 0x000000);
+        Rect hover_ctl = wctl_button(0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, hover_ctl.x + hover_ctl.w * 0.5f, hover_ctl.y + hover_ctl.h * 0.5f, 0, 0, 0);
+        st_frames(1);
+        st_shot("m9-window-controls-hover");
         Panel *tr = NULL; // the panel at the top right
         for (int i = 0; i < A.npanels; i++)
             if (fabsf(A.panels[i]->area.y - A.r_content.y) < 1 &&
@@ -4459,6 +4501,100 @@ static int run_selftest_m10(void) {
         ST_CHECK(!strcmp(lbl, "me@box"));
     }
     ST_CHECK(st_wait_cond(c_devs, 5000));
+    { // system NFS/SMB entries stay in Network even after unmount
+        st_write_text(M10_BASE "/fstab", "nas:/exports/team " M10_BASE "/nfs nfs defaults 0 0\n//nas/share " M10_BASE "/smb cifs user 0 0\n"
+                      "cerberus-webdav: " M10_BASE "/webdav fuse.rclone user 0 0\n");
+        setenv("FE_FSTAB", M10_BASE "/fstab", 1);
+        NetMount listed[16];
+        int nl = network_mounts(listed, 16), missing = 0;
+        for (int i = 0; i < nl; i++)
+            missing += !listed[i].mounted && (!strcmp(listed[i].path, M10_BASE "/nfs") || !strcmp(listed[i].path, M10_BASE "/smb") ||
+                                              !strcmp(listed[i].path, M10_BASE "/webdav"));
+        ST_CHECK(missing == 3);
+        NetMount old_nets[16];
+        int old_nnets = A.nnets;
+        memcpy(old_nets, A.nets, sizeof old_nets);
+        memcpy(A.nets, listed, (size_t)nl * sizeof listed[0]);
+        A.nnets = nl;
+        init_places();
+        ST_CHECK(st_place_row(PK_NETSYSTEM, "nas:/exports/team") >= 0 && st_place_row(PK_NETSYSTEM, "//nas/share") >= 0);
+        NetAddr na;
+        char target[PATH_MAX], folder[PATH_MAX];
+        bool mounted = true;
+        ST_CHECK(net_parse("nfs://nas/exports/team", &na) &&
+                 net_method_available(na.proto, NET_METHOD_SYSTEM, &na, target, sizeof target) &&
+                 net_system_target(&na, target, sizeof target, &mounted) && !mounted &&
+                 !strcmp(target, M10_BASE "/nfs"));
+        ST_CHECK(net_parse("smb://nas/share/subfolder", &na) &&
+                 net_method_available(na.proto, NET_METHOD_SYSTEM, &na, target, sizeof target));
+        net_system_folder(&na, target, folder, sizeof folder);
+        ST_CHECK(!strcmp(folder, M10_BASE "/smb/subfolder"));
+        ST_CHECK(net_parse("sftp://nas/", &na) &&
+                 !net_method_available(na.proto, NET_METHOD_SYSTEM, &na, target, sizeof target));
+        memcpy(A.nets, old_nets, sizeof old_nets);
+        A.nnets = old_nnets;
+        init_places();
+        st_write_text(M10_BASE "/exports", "/var/mnt/ha-backups 192.168.1.0/24(rw,fsid=0,sync)\n");
+        g_local_shares.count = 0;
+        shares_read_at(&g_local_shares, M10_BASE "/exports", SHARE_NFS, 0, "");
+        g_local_shares_checked = now_ns();
+        init_places();
+        ST_CHECK(st_place_row(PK_LOCALSHARE, "ha-backups (NFS)") >= 0);
+        local_shares_refresh();
+        init_places();
+        unsetenv("FE_FSTAB");
+    }
+    { // KIO Fuse is selected only with its service and matching worker; its returned path opens directly.
+        mkdir(M10_BASE "/kio", 0755);
+        mkdir(M10_BASE "/kio/ftp", 0755);
+        mkdir(M10_BASE "/kio-workers", 0755);
+        st_write_text(M10_BASE "/kio-workers/kio_ftp.so", "fake worker");
+        st_write_text(M10_BASE "/kio-workers/kio_http.so", "fake worker");
+        st_write_text(M10_BASE "/kio-service", "fake service");
+        st_write_text(M10_BASE "/tools/dbus-send", "#!/bin/sh\n"
+                      "echo \"dbus-send $@\" >> " M10_BASE "/tools/log\n"
+                      "echo 'method return sender=:1.1 -> destination=:1.2'\n"
+                      "echo '   string \"" M10_BASE "/kio/ftp\"'\n");
+        chmod(M10_BASE "/tools/dbus-send", 0755);
+        setenv("FE_DBUS_SEND", M10_BASE "/tools/dbus-send", 1);
+        setenv("FE_KIO_SERVICE", M10_BASE "/kio-service", 1);
+        setenv("FE_KIO_WORKER_DIR", M10_BASE "/kio-workers", 1);
+        NetAddr na;
+        ST_CHECK(net_parse("ftp://example.test/", &na) && net_method_available(na.proto, NET_METHOD_KIO, &na, NULL, 0));
+        ST_CHECK(net_parse("smb://example.test/share", &na) && !net_method_available(na.proto, NET_METHOD_KIO, &na, NULL, 0));
+        ST_CHECK(net_parse("davs://example.test/share", &na) && net_method_available(na.proto, NET_METHOD_KIO, &na, NULL, 0));
+        ST_CHECK(net_parse("ftps://example.test/", &na) && !net_method_available(na.proto, NET_METHOD_KIO, &na, NULL, 0));
+        int ns0 = A.nservers;
+        connect_open(-1);
+        g_sheet.cn_proto = 2;
+        st_frames(1);
+        Rect method = g_sheet.cn_rmethod[NET_METHOD_KIO];
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, method.x + method.w * 0.5f, method.y + method.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, method.x + method.w * 0.5f, method.y + method.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(g_sheet.cn_method == NET_METHOD_KIO);
+        te_set(&g_sheet.cn[CN_HOST], "example.test", 12, 12);
+        connect_go();
+        ST_CHECK(st_wait_cond(c_dev_idle, 5000));
+        st_wait();
+        ST_CHECK(A.nservers == ns0 + 1 && A.servers[ns0].method == NET_METHOD_KIO &&
+                 !strcmp(A.servers[ns0].mount, M10_BASE "/kio/ftp") &&
+                 !strcmp(active_pane()->path, M10_BASE "/kio/ftp") &&
+                 st_log_has("org.kde.KIOFuse.VFS.mountUrl string:ftp://example.test/"));
+        ST_CHECK(st_place_row(PK_NETSAVED, "example.test") >= 0);
+        connect_open(ns0);
+        ST_CHECK(g_sheet.cn_method == NET_METHOD_KIO && !cn_field_visible(CN_PASS));
+        sheet_close();
+        dev_start_kio("davs://example.test/share");
+        ST_CHECK(st_wait_cond(c_dev_idle, 5000));
+        ST_CHECK(st_log_has("org.kde.KIOFuse.VFS.mountUrl string:webdavs://example.test/share"));
+        settings_save();
+        char sp[PATH_MAX];
+        settings_file(sp, sizeof sp, false);
+        ST_CHECK(st_file_has(sp, "server=example.test\tftp://example.test/\t\tkio\n"));
+        unsetenv("FE_DBUS_SEND");
+        unsetenv("FE_KIO_SERVICE");
+        unsetenv("FE_KIO_WORKER_DIR");
+    }
     ST_CHECK(A.devs.n == 1 && !strcmp(A.devs.d[0].dev, "/dev/sdz1") && !strcmp(A.devs.d[0].label, "MY STICK") &&
              A.devs.d[0].removable && !A.devs.d[0].mount[0] && !strcmp(A.devs.d[0].disk, "sdz")); // EFI + swap hidden
     int ur = st_place_row(PK_UNMOUNTED, "MY STICK");
@@ -4523,7 +4659,102 @@ static int run_selftest_m10(void) {
         st_frames(2);
         st_shot("toast-long");
     }
+    // Missing backends explain the available mount alternatives without clipping their messages.
+    {
+        static const struct { int proto; const char *message, *shot; } missing[] = {
+            {6, "GVfs NFS backend not installed for direct connection. System NFS mounts still appear in Network; configure new mounts in your system settings.", "connect-nfs-unavailable"},
+            {1, "GVfs SMB backend not installed for direct connection. Existing system SMB mounts still appear in Network; configure new mounts in your system settings.", "connect-smb-unavailable"},
+            {4, "GVfs WebDAV backend not installed for direct connection. Configured rclone WebDAV remotes still appear in Network; add one with rclone config.", "connect-webdav-unavailable"},
+            {5, "GVfs WebDAV backend not installed for direct connection. Configured rclone WebDAV remotes still appear in Network; add one with rclone config.", "connect-webdavs-unavailable"},
+        };
+        char gio_path[PATH_MAX];
+        snprintf(gio_path, sizeof gio_path, "%s", getenv("FE_GIO"));
+        unsetenv("FE_GIO");
+        setenv("FE_GVFS_LIBEXEC", M10_BASE "/missing-libexec", 1);
+        for (int k = 0; k < (int)ARRAY_COUNT(missing); k++) {
+            connect_open(-1);
+            g_sheet.cn_proto = missing[k].proto;
+            st_frames(1);
+            f32 unavailable_y = g_sheet.cn_rremember.y, dialog_h = g_sheet.r.h;
+            const char *msg = missing[k].message;
+            int starts[8], lens[8], nlines = wrap_text(&A.font_small, msg, g_sheet.cn_body.w - S(4), starts, lens, 8);
+            ST_CHECK(nlines >= 2 && nlines <= 3 && starts[nlines - 1] + lens[nlines - 1] == (int)strlen(msg));
+            st_shot(missing[k].shot);
+            setenv("FE_GIO", gio_path, 1);
+            st_frames(1);
+            ST_CHECK(g_sheet.r.h == dialog_h && unavailable_y >= g_sheet.cn_rremember.y + A.font_small.line_h);
+            sheet_close();
+            unsetenv("FE_GIO");
+        }
+        setenv("FE_GIO", gio_path, 1);
+        unsetenv("FE_GVFS_LIBEXEC");
+    }
+    { // An unavailable method can still be selected to see why it cannot connect yet.
+        setenv("FE_KIO_SERVICE", M10_BASE "/missing-kio-service", 1);
+        connect_open(-1);
+        g_sheet.cn_proto = 6; // NFS, without a configured matching export in the form
+        st_frames(1);
+        Rect mr = g_sheet.cn_rmethod[NET_METHOD_SYSTEM];
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, mr.x + mr.w * 0.5f, mr.y + mr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, mr.x + mr.w * 0.5f, mr.y + mr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(g_sheet.cn_method == NET_METHOD_SYSTEM && !cn_field_visible(CN_PASS));
+        connect_go();
+        ST_CHECK(g_sheet.kind == SHEET_CONNECT); // disabled until a matching mount is entered
+        st_frames(1);
+        mr = g_sheet.cn_rmethod[NET_METHOD_KIO];
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, mr.x + mr.w * 0.5f, mr.y + mr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, mr.x + mr.w * 0.5f, mr.y + mr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(g_sheet.cn_method == NET_METHOD_KIO);
+        st_frames(1);
+        st_shot("connect-method-unavailable");
+        sheet_close();
+        unsetenv("FE_KIO_SERVICE");
+    }
     // network: a URI in the path bar opens Connect to server prefilled; Enter mounts it with GVfs and opens it
+    connect_open(-1);
+    g_sheet.cn_proto = 1; // SMB has the longest form
+    st_frames(1);
+    f32 connect_height = g_sheet.r.h;
+    ST_CHECK(g_sheet.cn_max_scroll > 0);
+    sheet_wheel(-20);
+    st_frames(1);
+    ST_CHECK(g_sheet.cn_scroll > 0 && g_sheet.cn_scroll <= g_sheet.cn_max_scroll);
+    ST_CHECK(g_sheet.cn_rremember.y + g_sheet.cn_rremember.h + S(5) <= g_sheet.cn_rremember_pw.y);
+    ST_CHECK(g_sheet.cn_rremember_pw.y + g_sheet.cn_rremember_pw.h <= g_sheet.cn_body.y + g_sheet.cn_body.h);
+    ST_CHECK(g_sheet.cn_body.y + g_sheet.cn_body.h < g_sheet.rcancel.y);
+    g_sheet.cn_scroll = 0;
+    st_frames(1);
+    Rect host_field = g_sheet.cn_rf[CN_HOST];
+    te_set(&g_sheet.cn[CN_HOST], "nas.local", 0, 0);
+    g_sheet.cn_focus = CN_USER;
+    st_frames(1);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, host_field.x + host_field.w * 0.5f, host_field.y + host_field.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, host_field.x + host_field.w * 0.5f, host_field.y + host_field.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+    ST_CHECK(g_sheet.cn_focus == CN_HOST && g_sheet.cn[CN_HOST].caret > 0);
+    te_set(&g_sheet.cn[CN_PASS], "secret", 0, 0);
+    g_sheet.cn_scroll = MIN(g_sheet.cn_max_scroll, S(80));
+    st_frames(1);
+    Rect pass_field = g_sheet.cn_rf[CN_PASS];
+    f32 step = roundf(S(3)) * 2 + S(4);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, pass_field.x + S(10) + 2 * step, pass_field.y + pass_field.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+    st_mouse(SDL_EVENT_MOUSE_MOTION, pass_field.x + S(10) + 4 * step, pass_field.y + pass_field.h * 0.5f, 0, 0, 0);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, pass_field.x + S(10) + 4 * step, pass_field.y + pass_field.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+    ST_CHECK(g_sheet.cn_focus == CN_PASS && g_sheet.cn[CN_PASS].anchor == 2 && g_sheet.cn[CN_PASS].caret == 4);
+    g_sheet.cn_focus = CN_NAME;
+    g_sheet.cn_scroll = 0;
+    st_frames(1);
+    for (int k = 0; k < CN_ALL - 1; k++) {
+        st_key(SDLK_TAB, SDL_KMOD_NONE);
+        st_frames(1);
+        Rect focused = g_sheet.cn_rf[g_sheet.cn_focus];
+        ST_CHECK(focused.y >= g_sheet.cn_body.y - 0.5f &&
+                 focused.y + focused.h <= g_sheet.cn_body.y + g_sheet.cn_body.h + 0.5f);
+    }
+    g_sheet.cn_proto = NET_PROTO_COUNT - 1;
+    ST_CHECK(!cn_field_visible(CN_PORT) && !cn_field_visible(CN_PASS) && cn_field_visible(CN_PATH));
+    st_frames(1);
+    ST_CHECK(g_sheet.r.h == connect_height);
+    sheet_close();
     Pane *p = active_pane();
     begin_edit(p, "sftp://me@box/");
     st_key(SDLK_RETURN, SDL_KMOD_NONE);
@@ -4976,6 +5207,8 @@ static int run_selftest_m10(void) {
             int nn = A.nnets, nsv = A.nservers;
             A.nnets = 0;
             A.nservers = 0;
+            g_local_shares.count = 0;
+            g_local_shares_checked = now_ns();
             init_places();
             int hdr = st_place_row(PK_NETHDR, NULL);
             ST_CHECK(hdr >= 0 && st_place_row(PK_NETEMPTY, NULL) == hdr + 1);
@@ -4990,6 +5223,7 @@ static int run_selftest_m10(void) {
             st_shot("network-empty");
             A.nnets = nn;
             A.nservers = nsv;
+            local_shares_refresh();
             init_places();
         }
         // right password: mounted, opened, remembered (without the password)
@@ -5122,6 +5356,18 @@ static int run_selftest_m10(void) {
                      !strcmp(t.user, "al") && !strcmp(t.port, "2222") && !strcmp(t.path, "/srv/my app's dir"));
             ST_CHECK(ssh_target_for(M10_BASE "/gvfs/sftp:host=vm1.lan,user=al", &t) && !strcmp(t.path, "/"));
             ST_CHECK(!ssh_target_for(M10_BASE "/gvfs/smb-share:server=nas,share=media/x", &t) && !ssh_target_for("/home", &t));
+            if (A.nnets < (int)ARRAY_COUNT(A.nets)) {
+                int old_nnets = A.nnets;
+                NetMount *mount = &A.nets[A.nnets++];
+                snprintf(mount->path, sizeof mount->path, "%s", M10_BASE "/webdav-mount");
+                snprintf(mount->label, sizeof mount->label, "cerberus-webdav:");
+                mount->sshfs = false;
+                ST_CHECK(!ssh_target_for(mount->path, &t));
+                snprintf(mount->label, sizeof mount->label, "me@sshbox:/srv");
+                mount->sshfs = true;
+                ST_CHECK(ssh_target_for(mount->path, &t) && !strcmp(t.host, "sshbox"));
+                A.nnets = old_nnets;
+            }
             char d[PATH_MAX];
             snprintf(d, sizeof d, "%s", M10_BASE "/gvfs/sftp:host=vm1.lan,user=al,port=2222/srv/my app's dir");
             ext_terminal(d);
@@ -5211,7 +5457,7 @@ static int run_selftest_m10(void) {
                 settings_file(sp, sizeof sp, false);
                 FILE *sf = fopen(sp, "r");
                 bool found = false;
-                while (sf && fgets(line, sizeof line, sf)) found |= strstr(line, "server=office.lan\t") && strstr(line, "\taws\n");
+                while (sf && fgets(line, sizeof line, sf)) found |= strstr(line, "server=office.lan\t") && strstr(line, "\taws\tgvfs\n");
                 if (sf) fclose(sf);
                 ST_CHECK(found);
                 // custom icons: net-<name>.svg in any icon themes folder, offered without making it a file icon theme
@@ -5415,16 +5661,17 @@ static int run_selftest_m10(void) {
         g_ncloud = 0;
         g_rclone = -1;
         g_cloud_relist = true;
-        g_cloud_collapsed = false;
         st_cloud_settle();
         int gr = st_place_row(PK_CLOUD, "gdrive");
-        ST_CHECK(g_rclone == 1 && g_ncloud == 2 && st_place_row(PK_CLOUDHDR, "Cloud") >= 0 && gr >= 0 && st_place_row(PK_CLOUD, "work s3") >= 0);
+        ST_CHECK(g_rclone == 1 && g_ncloud == 2 && st_place_row(PK_NETHDR, "Network") >= 0 && gr >= 0 && st_place_row(PK_CLOUD, "work s3") >= 0);
         ST_CHECK(!strcmp(cloud_icon(&g_cloud[0]), "gdrive") && !strcmp(cloud_icon(&g_cloud[1]), "aws") && !A.places[gr].path[0]);
         char un[160];
         cloud_unit_name("work s3", un, sizeof un);
         ST_CHECK(!strcmp(un, "file-explorer-cloud-work_20s3.service"));
         // click: the unit written and started; connected once the mount shows up, then opened
         Rect rr = place_rect(gr);
+        A.side_scroll = A.side_scroll_target = MAX(0.f, rr.y + rr.h - A.r_sidebar.y - A.r_sidebar.h + S(8));
+        rr = place_rect(gr);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, rr.x + S(40), rr.y + rr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, rr.x + S(40), rr.y + rr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
         ST_CHECK(g_cloud[0].state == CS_STARTING && g_cloud[0].open_after == 1);
@@ -5436,6 +5683,22 @@ static int run_selftest_m10(void) {
                  st_file_has(up, "Description=Files cloud: gdrive (Google Drive)"));
         ST_CHECK(access(M10_BASE "/sd/file-explorer-cloud-gdrive.service.active", F_OK) == 0 && access(gdir, F_OK) == 0);
         ST_CHECK(g_cloud[0].state == CS_STARTING && g_cloud[0].unit && path_is_remote(gdir)); // active, not mounted yet
+        if (A.nnets < (int)ARRAY_COUNT(A.nets)) { // mount discovery can precede rclone's status poll
+            int old_nnets = A.nnets;
+            snprintf(A.nets[A.nnets].path, sizeof A.nets[A.nnets].path, "%s", gdir);
+            snprintf(A.nets[A.nnets].label, sizeof A.nets[A.nnets].label, "gdrive:");
+            A.nnets++;
+            init_places();
+            int duplicates = 0;
+            for (int i = 0; i < A.nplaces; i++)
+                duplicates += A.places[i].kind == PK_NETWORK && !strcmp(A.places[i].path, gdir);
+            ST_CHECK(!duplicates && st_place_row(PK_CLOUD, "gdrive") >= 0);
+            snprintf(A.nets[A.nnets - 1].path, sizeof A.nets[0].path, "%s", M10_BASE "/external-rclone");
+            init_places();
+            ST_CHECK(st_place_row(PK_NETWORK, "gdrive:") < 0 && st_place_row(PK_CLOUD, "gdrive") >= 0);
+            A.nnets = old_nnets;
+            init_places();
+        }
         st_frames(2);
         st_shot("cloud-connecting");
         snprintf(mline, sizeof mline, "gdrive: %s fuse.rclone rw,nosuid,nodev 0 0\n", gdir);
@@ -5447,6 +5710,14 @@ static int run_selftest_m10(void) {
         ST_CHECK(cloud_for_mount(gdir) == &g_cloud[0]);
         st_frames(2);
         st_shot("cloud-sidebar");
+        st_mouse(SDL_EVENT_MOUSE_MOTION, place_rect(gr).x + S(40), place_rect(gr).y + place_rect(gr).h * 0.5f, 0, 0, 0);
+        st_frames(2);
+        Rect config = A.places[gr].config;
+        ST_CHECK(config.w > 0 && A.places[gr].eject.w > 0 && config.x + config.w <= A.places[gr].eject.x);
+        g_cloud_term_cmd[0] = 0;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, config.x + config.w * 0.5f, config.y + config.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, config.x + config.w * 0.5f, config.y + config.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!strcmp(g_cloud_term_cmd, M10_BASE "/tools/rclone config") && g_cloud[0].state == CS_UP);
         // connect at login: enabled, kept in the settings
         A.menu_place = gr;
         do_action(active_pane(), ACT_CLOUD_LOGIN);
@@ -5464,6 +5735,13 @@ static int run_selftest_m10(void) {
         gr = st_place_row(PK_CLOUD, "gdrive");
         ST_CHECK(g_cloud[0].state == CS_OFF && !g_cloud[0].mount[0] && gr >= 0 && !A.places[gr].path[0] &&
                  access(M10_BASE "/sd/file-explorer-cloud-gdrive.service.active", F_OK) != 0);
+        st_write_text(M10_BASE "/rc/remotes", ""); // a transient empty list must not remove the reconnect row
+        g_cloud_relist = true;
+        st_cloud_settle();
+        ST_CHECK(st_place_row(PK_CLOUD, "gdrive") >= 0);
+        st_write_text(M10_BASE "/rc/remotes", "gdrive:      drive\nwork s3:     s3\n");
+        g_cloud_relist = true;
+        st_cloud_settle();
         // a connect that fails: the reason from the log; an expired sign-in offers rclone's reconnect
         st_write_text(M10_BASE "/sd/next-start", "activating\n");
         st_write_text(M10_BASE "/sd/journal", "2026/11/03 17:00:00 NOTICE: starting\n2026/11/03 17:00:01 CRITICAL: Failed to create file system: "
@@ -5491,14 +5769,11 @@ static int run_selftest_m10(void) {
         cloud_disconnect(1);
         st_cloud_settle();
         ST_CHECK(st_file_has(M10_BASE "/rc/log", "fusermount -u " M10_BASE "/a") && !g_cloud[1].mount[0]);
-        // the header's +: rclone config in a terminal
-        int ch = st_place_row(PK_CLOUDHDR, NULL);
-        st_frames(2);
-        Rect plus = A.places[ch].eject;
-        ST_CHECK(plus.w > 0);
+        // The Network header's menu exposes rclone configuration.
+        int ch = st_place_row(PK_NETHDR, NULL);
         g_cloud_term_cmd[0] = 0;
-        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, plus.x + plus.w * 0.5f, plus.y + plus.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
-        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, plus.x + plus.w * 0.5f, plus.y + plus.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        A.menu_place = ch;
+        do_action(active_pane(), ACT_CLOUD_NEW);
         ST_CHECK(!strcmp(g_cloud_term_cmd, M10_BASE "/tools/rclone config"));
         // a remote deleted from rclone's config (seen by its time stamp): gone from the sidebar, its unit removed
         st_write_text(M10_BASE "/rc/remotes", "work s3:     s3\n");
@@ -5506,19 +5781,19 @@ static int run_selftest_m10(void) {
         utimensat(AT_FDCWD, "/tmp/fe-selftest-config/rclone/rclone.conf", ts, 0);
         st_cloud_settle();
         ST_CHECK(g_ncloud == 1 && !cloud_find("gdrive") && st_place_row(PK_CLOUD, "gdrive") < 0 && access(up, F_OK) != 0);
-        // collapse
-        ch = st_place_row(PK_CLOUDHDR, NULL);
+        // Collapsing Network also hides remotes.
+        ch = st_place_row(PK_NETHDR, NULL);
         Rect hr = place_rect(ch);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, hr.x + S(30), hr.y + hr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, hr.x + S(30), hr.y + hr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
-        ST_CHECK(g_cloud_collapsed && st_place_row(PK_CLOUD, NULL) < 0);
-        g_cloud_collapsed = false;
-        // no rclone: no Cloud section
+        ST_CHECK(A.nets_collapsed && st_place_row(PK_CLOUD, NULL) < 0);
+        A.nets_collapsed = false;
+        // no rclone: the Network section remains
         st_write_text(M10_BASE "/rc/remotes", "");
         unlink(M10_BASE "/tools/rclone");
         g_cloud_relist = true;
         st_cloud_settle();
-        ST_CHECK(g_rclone == 0 && st_place_row(PK_CLOUDHDR, NULL) < 0);
+        ST_CHECK(g_rclone == 0 && st_place_row(PK_NETHDR, NULL) >= 0);
         unsetenv("FE_RCLONE");
         unsetenv("FE_PROC_MOUNTS");
         g_ncloud = 0;

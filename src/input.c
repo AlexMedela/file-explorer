@@ -748,13 +748,9 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         if (idx < 0) return;
         Place *pl = &A.places[idx];
         if (b->button == SDL_BUTTON_RIGHT) { menu_open_place(idx, x, y); return; }
-        if (pl->kind == PK_NETEMPTY || pl->kind == PK_ADDONEMPTY || pl->kind == PK_CLOUDEMPTY) return;
-        if (pl->kind == PK_CLOUDHDR && b->button == SDL_BUTTON_LEFT) {
-            if (pl->eject.w > 0 && in_rect(pl->eject, x, y)) cloud_config_terminal();
-            else { g_cloud_collapsed = !g_cloud_collapsed; init_places(); A.settings_dirty = true; }
-            return;
-        }
+        if (pl->kind == PK_NETEMPTY || pl->kind == PK_ADDONEMPTY) return;
         if (pl->kind == PK_CLOUD && pl->item < g_ncloud) { // not connected: connect, then open; connected: a folder row
+            if (b->button == SDL_BUTTON_LEFT && pl->config.w > 0 && in_rect(pl->config, x, y)) { cloud_config_terminal(); return; }
             if (b->button == SDL_BUTTON_LEFT && pl->removable && pl->eject.w > 0 && in_rect(pl->eject, x, y)) { cloud_disconnect(pl->item); return; }
             if (!pl->path[0]) {
                 if (b->button == SDL_BUTTON_LEFT || b->button == SDL_BUTTON_MIDDLE) cloud_connect(pl->item, b->button == SDL_BUTTON_MIDDLE ? 2 : 1);
@@ -788,6 +784,10 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         }
         if (pl->kind == PK_NETSAVED) {
             if (b->button == SDL_BUTTON_LEFT) net_connect_saved(pl->item);
+            return;
+        }
+        if (pl->kind == PK_NETSYSTEM) {
+            if (b->button == SDL_BUTTON_LEFT) place_dev_action(idx, ACT_DEV_MOUNT);
             return;
         }
         if (pl->kind == PK_UNMOUNTED || (pl->kind == PK_PHONE && !pl->path[0])) {

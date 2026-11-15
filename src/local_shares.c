@@ -3,6 +3,7 @@
 enum { LOCAL_SHARE_SMB = 1, LOCAL_SHARE_NFS = 2, LOCAL_SHARE_OTHER = 4 };
 typedef struct { char paths[512][PATH_MAX]; unsigned kinds[512]; int count; } LocalShares;
 static LocalShares g_local_shares;
+static u64 g_local_shares_checked;
 
 static char *share_trim(char *s) {
     while (*s && isspace((unsigned char)*s)) s++;
@@ -131,15 +132,18 @@ static void shares_scan_root(LocalShares *s, const char *root) {
     }
 }
 
+static void local_shares_refresh(void) {
+    g_local_shares_checked = now_ns();
+    g_local_shares.count = 0;
+    shares_scan_root(&g_local_shares, "");
+    // Distrobox exposes host configuration here. Share paths themselves
+    // remain host paths (the user's home is shared with the container).
+    if (!access("/run/host/etc", F_OK)) shares_scan_root(&g_local_shares, "/run/host");
+}
+
 static unsigned local_share_path(const char *path) {
-    static u64 checked;
     u64 now = now_ns();
-    if (!checked || now - checked > 10ull * 1000000000ull) {
-        checked = now; g_local_shares.count = 0;
-        shares_scan_root(&g_local_shares, "");
-        // Distrobox exposes host configuration here. Share paths themselves
-        // remain host paths (the user's home is shared with the container).
-        if (!access("/run/host/etc", F_OK)) shares_scan_root(&g_local_shares, "/run/host");
-    }
+    if (!g_local_shares_checked || now - g_local_shares_checked > 10ull * 1000000000ull)
+        local_shares_refresh();
     return local_share_kind(&g_local_shares, path);
 }

@@ -20,8 +20,8 @@ static f32 text_caret_animate(TextCaret *s, f32 target, int caret, int anchor, u
         s->moved = now; s->valid = true;
     }
     s->seen = now;
-    // Stay solid after input; then gently dim rather than disappearing entirely.
+    // Stay solid while typing; at rest breathe through a slow, soft blink.
     f32 elapsed = (f32)((now - MAX(s->moved, s->input)) / 1000000.0);
-    *alpha = elapsed < 650.f || snap ? 1.f : 0.86f + 0.14f * cosf((elapsed - 650.f) * (2.f * (f32)M_PI / 1100.f));
+    *alpha = elapsed < 650.f || snap ? 1.f : 0.525f + 0.475f * cosf((elapsed - 650.f) * (2.f * (f32)M_PI / 1900.f));
     return snap ? target : text_caret_position(s, now);
 }

@@ -62,6 +62,7 @@ static NetIconCustom *g_net_custom;
 static int g_nnet_custom;
 static NSVGimage **g_net_img; // parsed, per index (sized for net_icon_count())
 static int g_net_img_n;
+static CustomIconTheme *icon_custom(void);
 
 static int net_icon_count(void) { return NET_ICON_BUILTIN + g_nnet_custom; }
 static const char *net_icon_key(int i) { return i < NET_ICON_BUILTIN ? g_net_icons[i].key : g_net_custom[i - NET_ICON_BUILTIN].key; }
@@ -73,6 +74,20 @@ static int net_icon_find(const char *key) {
         for (int i = 0; i < net_icon_count(); i++)
             if (!strcmp(net_icon_key(i), key)) return i;
     return 0;
+}
+// A cloud remote can use artwork from the selected custom file theme. More
+// specific names take precedence over its backend and the generic icon key.
+static const char *cloud_theme_icon(const char *name, const char *type, const char *fallback) {
+    CustomIconTheme *theme = icon_custom();
+    if (!theme) return NULL;
+    const char *parts[] = {name, type, fallback};
+    for (size_t p = 0; p < ARRAY_COUNT(parts); p++) {
+        char key[160];
+        snprintf(key, sizeof key, "custom/%s/%s", theme->name, parts[p]);
+        for (int i = NET_ICON_BUILTIN; i < net_icon_count(); i++)
+            if (!strcmp(net_icon_key(i), key)) return net_icon_key(i);
+    }
+    return NULL;
 }
 static void net_icons_free_images(void) {
     for (int i = 0; i < g_net_img_n; i++)
@@ -549,25 +564,49 @@ static f32 icon_glyph_tint(int id, int px) {
 // Optional Nerd Font file/folder glyphs. Use an explicit font file so a random
 // font's private-use characters can never silently stand in for these icons.
 // Missing glyphs keep the selected SVG theme. The font shares the GPU atlas.
-static bool draw_nerd_icon(f32 x, f32 y, f32 size, int id, bool hidden) {
-    static Font font;
-    static bool checked, ready;
-    if (icon_system_selected()) return false;
-    if (id < 0 || id >= ICON_COUNT) return false; // logos/network keep their own art
-    if (!checked) {
-        checked = true;
+static Font g_nerd_font;
+static bool g_nerd_checked, g_nerd_ready;
+static bool nerd_font_ready(void) {
+    if (!g_nerd_checked) {
+        g_nerd_checked = true;
         const char *path = getenv("FE_NERD_FONT");
         if (path && *path && g_nfonts < (int)ARRAY_COUNT(g_fonts))
-            ready = font_init(&font, path, 16);
+            g_nerd_ready = font_init(&g_nerd_font, path, 16);
     }
-    if (!ready) return false;
+    return g_nerd_ready;
+}
+
+static bool draw_nerd_symbol(f32 x, f32 y, f32 size, u32 cp, u32 col) {
+    Font *font = &g_nerd_font;
+    if (!nerd_font_ready() || !FT_Get_Char_Index(font->faces[0], cp)) return false;
+    int px = MAX(1, (int)roundf(size * 0.85f));
+    u32 key = cp | ((u32)px << 21), slot;
+    Glyph *g = glyph_find(font, key, &slot);
+    if (!g) {
+        if (font->px != px) {
+            if (FT_Set_Pixel_Sizes(font->faces[0], 0, (FT_UInt)px)) return false;
+            font->px = px;
+        }
+        g = glyph_make(font, slot, key, 0, FT_Get_Char_Index(font->faces[0], cp));
+    }
+    if (!g || !g->w || !g->h) return false;
+    draw_glyph(g, roundf(x + (size - g->w) * 0.5f),
+               roundf(y + (size - g->h) * 0.5f), C(col));
+    return true;
+}
+
+static bool draw_nerd_icon(f32 x, f32 y, f32 size, int id, bool hidden) {
+    if (icon_system_selected()) return false;
+    if (id < 0 || id >= ICON_COUNT) return false; // logos/network keep their own art
+    if (!nerd_font_ready()) return false;
+    Font *font = &g_nerd_font;
     const char *name = g_icon_names[id];
     bool folder = !strncmp(name, "folder", 6);
     u32 cp = folder ? 0xf07b : 0xf15b;
     if (!strcmp(name, "folder-home")) cp = 0xf015;
     else if (!strcmp(name, "trash") || !strcmp(name, "folder-trash")) {
         cp = g_trash_full ? 0xf0a79 : 0xf0a7a; // nf-md-trash_can / trash_can_outline
-        if (!FT_Get_Char_Index(font.faces[0], cp)) cp = 0xf1f8;
+        if (!FT_Get_Char_Index(font->faces[0], cp)) cp = 0xf1f8;
     } else if (!strcmp(name, "image") || !strcmp(name, "svg")) cp = 0xf1c5;
     else if (!strcmp(name, "audio")) cp = 0xf1c7;
     else if (!strcmp(name, "video")) cp = 0xf1c8;
@@ -575,18 +614,18 @@ static bool draw_nerd_icon(f32 x, f32 y, f32 size, int id, bool hidden) {
     else if (!strcmp(name, "pdf")) cp = 0xf1c1;
     else if (!strcmp(name, "git")) cp = 0xf1d3;
     else if (!folder && strcmp(name, "document")) cp = 0xf1c9;
-    if (!FT_Get_Char_Index(font.faces[0], cp)) return false;
+    if (!FT_Get_Char_Index(font->faces[0], cp)) return false;
     int px = MAX(1, (int)roundf(size * 0.85f));
     // Include size in the cache key: tab, sidebar and grid sizes coexist without
     // invalidating each other's glyphs every frame.
     u32 key = cp | ((u32)px << 21), slot;
-    Glyph *g = glyph_find(&font, key, &slot);
+    Glyph *g = glyph_find(font, key, &slot);
     if (!g) {
-        if (font.px != px) {
-            if (FT_Set_Pixel_Sizes(font.faces[0], 0, (FT_UInt)px)) return false;
-            font.px = px;
+        if (font->px != px) {
+            if (FT_Set_Pixel_Sizes(font->faces[0], 0, (FT_UInt)px)) return false;
+            font->px = px;
         }
-        g = glyph_make(&font, slot, key, 0, FT_Get_Char_Index(font.faces[0], cp));
+        g = glyph_make(font, slot, key, 0, FT_Get_Char_Index(font->faces[0], cp));
     }
     if (!g || !g->w || !g->h) return false;
     u32 col = folder ? COL_ACCENT : COL_TEXT_DIM;

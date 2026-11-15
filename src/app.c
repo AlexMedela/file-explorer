@@ -442,13 +442,13 @@ enum {
   PK_DEVICES,
   PK_UNMOUNTED,
   PK_NETWORK,
+  PK_NETSYSTEM,
+  PK_LOCALSHARE,
   PK_NETHDR,
   PK_NETSAVED,
   PK_NETEMPTY,
   PK_PHONE,
-  PK_CLOUDHDR,
   PK_CLOUD,
-  PK_CLOUDEMPTY,
   PK_ADDONHDR,
   PK_ADDON,
   PK_ADDONEMPTY
@@ -466,6 +466,7 @@ typedef struct { // one sidebar row
   bool removable; // can be ejected / disconnected
   f32 y, h;       // content-space position (see places_layout)
   Rect eject;     // eject button (hover), set while drawing
+  Rect config;    // rclone configuration button (hover)
 } Place;
 
 enum {
@@ -679,6 +680,7 @@ enum {
   ACT_NET_FORGET,
   ACT_NET_EDIT_SAVED,
   ACT_NET_NEW,
+  ACT_NET_REFRESH,
   ACT_OW_APP_BASE = 520,   // + index of an app in the Open with submenu (up to
                            // OW_MENU_APPS, below 540)
   ACT_CMP_PICK_BASE = 560, // + "Compare with..." folder index (up to 12)
@@ -686,7 +688,6 @@ enum {
   ACT_ADDON_LAST = 599, // add-ons' actions (addons.c)
   ACT_CLOUD_NEW = 540,
   ACT_CLOUD_REFRESH,
-  ACT_CLOUD_SECTION_TOGGLE,
   ACT_CLOUD_CONNECT,
   ACT_CLOUD_CONNECT_TAB,
   ACT_CLOUD_DISCONNECT,
@@ -1040,6 +1041,8 @@ static struct {
     char name[64];
     char uri[1024];
     char icon[160];
+    int method; // NET_METHOD_*; persisted with the saved server
+    char mount[PATH_MAX]; // KIO FUSE path in this session (never persisted)
   } servers[32];       // saved servers (Connect to server; never passwords)
   StatsJob *trash_job; // measuring the trash (sidebar shows its size)
   Term *term_mouse; // the terminal a mouse button went down in (gets the drag
@@ -1605,7 +1608,8 @@ static void layout(void) {
   f32 st = picker_active() ? picker_bar_h() : roundf(S(28));
   f32 sb =
       roundf(MIN(S(CLAMP(A.side_w, 150.f, 480.f)), MAX(S(150), W - S(520))));
-  f32 header = roundf(S(46));
+  f32 title_row = roundf(S(46));
+  f32 header = g_header_label == HEADER_HIDDEN ? 0 : title_row;
   A.r_brand = (Rect){0, 0, sb, header};
   A.r_sidebar = (Rect){0, header, sb, H - st - header};
   if (picker_active())
@@ -1625,12 +1629,12 @@ static void layout(void) {
   A.r_wctl = A.r_wstrip = (Rect){0};
   if (A.csd && g_show_window_controls) {
     f32 bw = roundf(S(46));
-    A.r_wctl = (Rect){W - 3 * bw, 0, 3 * bw, header};
+    A.r_wctl = (Rect){W - 3 * bw, 0, 3 * bw, title_row};
     A.r_wstrip = A.r_wctl;
     if (A.preview_on) {
-      A.r_wstrip = (Rect){A.r_preview.x, 0, A.r_preview.w, header};
-      A.r_preview.y += header;
-      A.r_preview.h -= header;
+      A.r_wstrip = (Rect){A.r_preview.x, 0, A.r_preview.w, title_row};
+      A.r_preview.y += title_row;
+      A.r_preview.h -= title_row;
     }
   }
   A.side_row_h = roundf(S(30));
@@ -1681,7 +1685,7 @@ static bool window_maximized(void) {
 // quarter-circle mask. Only with our own title bar, and square when maximised
 // or full screen. Radius in pixels, 0 = square.
 static f32 window_corner_radius(void) {
-  if (!A.win_alpha || !A.round_corners || !A.csd || A.win_tiled ||
+  if (!A.win_alpha || !A.csd || A.win_tiled ||
       window_maximized())
     return 0;
   return roundf(12.f * A.dpi_scale);
@@ -1761,7 +1765,7 @@ static void corners_mask(void) {
 #define SHADOW_MARGIN 24 // window (logical) units
 
 static bool shadow_wanted(void) {
-  return A.win_shadow && A.round_corners && A.csd && !window_maximized();
+  return A.win_shadow && A.csd && !window_maximized();
 }
 // (X11: the margin stays when maximised or tiled - the window manager fits the
 // window inside it to the screen, the margin hangs off the edges, transparent
@@ -1771,7 +1775,7 @@ static bool shadow_wanted(void) {
 static bool shadow_shown(void) { return shadow_wanted() && !A.win_tiled; }
 static int shadow_margin_log(void) {
   if (A.win_x11)
-    return A.win_shadow && A.round_corners && A.csd ? SHADOW_MARGIN : 0;
+    return A.win_shadow && A.csd ? SHADOW_MARGIN : 0;
   return shadow_shown() ? SHADOW_MARGIN : 0;
 }
 
@@ -1957,7 +1961,7 @@ static void toplevel_configure(void *data, void *top, i32 w, i32 h,
     A.win_tiled = tiled;
     A.redraw = true;
   }
-  if (w > 0 && h > 0 && A.win_shadow && A.round_corners && A.csd && !tiled &&
+  if (w > 0 && h > 0 && A.win_shadow && A.csd && !tiled &&
       !full) {
     w += 2 * SHADOW_MARGIN, h += 2 * SHADOW_MARGIN;
     A.shadow_req_w = w,
@@ -3179,7 +3183,9 @@ static void place_dev_action(int row, int act) {
   switch (act) {
   case ACT_DEV_MOUNT:
   case ACT_DEV_OPEN_TAB:
-    if (ph && !ph->mount[0]) {
+    if (pl->kind == PK_NETSYSTEM) {
+      dev_start(DEV_NET_SYSTEM_MOUNT, pl->path, NULL, true);
+    } else if (ph && !ph->mount[0]) {
       if (ph->need[0]) {
         toast(
             "To open an iPhone, install %s, then unplug it and plug it back in",
@@ -3386,7 +3392,8 @@ static void dev_job_done(void *arg) {
           hint);
   } else if (j->rc != 0) {
     const char *what =
-        j->kind == DEV_MOUNT || j->kind == DEV_NET_MOUNT ? "mount" : "unmount";
+        j->kind == DEV_MOUNT || j->kind == DEV_NET_MOUNT || j->kind == DEV_NET_SYSTEM_MOUNT ||
+        j->kind == DEV_NET_KIO_MOUNT ? "mount" : "unmount";
     if (j->rc == -1 && !first[0])
       toast("Couldn't %s: the helper tool isn't installed", what);
     else
@@ -3404,6 +3411,19 @@ static void dev_job_done(void *arg) {
       tab_new(j->mount, A.cur + 1, true);
     else
       open_folder(j->mount);
+  }
+  if (j->rc == 0 && j->kind == DEV_NET_SYSTEM_MOUNT) {
+    if (j->open_after) open_folder(j->open_path[0] ? j->open_path : j->target);
+  }
+  if (j->rc == 0 && j->kind == DEV_NET_KIO_MOUNT) {
+    for (int i = 0; i < A.nservers; i++)
+      if (A.servers[i].method == NET_METHOD_KIO && !strcmp(A.servers[i].uri, j->target))
+        snprintf(A.servers[i].mount, sizeof A.servers[i].mount, "%s", j->mount);
+    if (j->open_after && j->mount[0]) {
+      if (A.dev_open_tab) tab_new(j->mount, A.cur + 1, true);
+      else open_folder(j->mount);
+    }
+    init_places();
   }
   if (j->rc == 0 && j->kind == DEV_NET_MOUNT &&
       j->phone) { // a phone: its folder in the FUSE bridge
@@ -3517,6 +3537,7 @@ static void dev_edit_begin(const Place *p);
 static void connect_open(int saved);
 typedef struct NetAddr NetAddr;
 static void connect_open_addr(const NetAddr *a);
+static bool tool_abs(const char *s, char *out, size_t cap); // units.c
 static void dialog_open(const char *title, const char *msg,
                         const char **buttons, int nb, int def, int cancel,
                         const char *check_label, DialogFn fn, void *ud);
@@ -3639,6 +3660,101 @@ static bool net_parse(const char *uri, NetAddr *a) {
   return a->host[0] != 0;
 }
 
+static bool net_system_target(const NetAddr *a, char *target, size_t cap, bool *mounted) {
+  if (target && cap) target[0] = 0;
+  if (mounted) *mounted = false;
+  if (!a || !a->host[0]) return false;
+  const char *sch = g_net_protos[a->proto].scheme;
+  char source[PATH_MAX];
+  if (!strcmp(sch, "nfs")) {
+    if (!a->path[0]) return false;
+    snprintf(source, sizeof source, "%s:%s%s", a->host, a->path[0] == '/' ? "" : "/", a->path);
+  } else if (!strcmp(sch, "smb")) {
+    if (!a->path[0]) return false;
+    snprintf(source, sizeof source, "//%s/%.*s", a->host, (int)strcspn(a->path, "/"), a->path);
+  } else return false;
+  for (int k = 0; k < A.nnets; k++) {
+    bool same = !strcmp(sch, "smb") ? !strcasecmp(A.nets[k].label, source) : !strcmp(A.nets[k].label, source);
+    if (!same) continue;
+    if (target && cap) snprintf(target, cap, "%s", A.nets[k].path);
+    if (mounted) *mounted = A.nets[k].mounted;
+    return true;
+  }
+  return false;
+}
+
+static void net_system_folder(const NetAddr *a, const char *target, char *out, size_t cap) {
+  const char *rel = "";
+  if (!strcmp(g_net_protos[a->proto].scheme, "smb")) {
+    rel = a->path + strcspn(a->path, "/");
+    while (*rel == '/') rel++;
+  }
+  if (*rel) snprintf(out, cap, "%s/%s", target, rel);
+  else snprintf(out, cap, "%s", target);
+}
+
+static bool net_kio_available(int proto) {
+  const char *sch = g_net_protos[proto].scheme;
+  if (!strcmp(sch, "ftps")) return false; // KIO's FTP worker does not advertise FTPS here
+  char bin[PATH_MAX];
+  if (!tool_abs(tool("FE_DBUS_SEND", "dbus-send"), bin, sizeof bin) || access(bin, X_OK)) return false;
+  const char *svc = getenv("FE_KIO_SERVICE");
+  bool service = svc ? access(svc, R_OK) == 0 : false;
+  if (!svc) {
+    const char *home = getenv("XDG_DATA_HOME");
+    char path[PATH_MAX];
+    if (home && *home) {
+      snprintf(path, sizeof path, "%s/dbus-1/services/org.kde.KIOFuse.service", home);
+      service = access(path, R_OK) == 0;
+    }
+    const char *dirs = getenv("XDG_DATA_DIRS");
+    if (!dirs || !*dirs) dirs = "/usr/local/share:/usr/share";
+    for (const char *p = dirs; *p && !service;) {
+      const char *end = strchr(p, ':');
+      if (!end) end = p + strlen(p);
+      if (end > p && (size_t)(end - p) < sizeof path - 48) {
+        snprintf(path, sizeof path, "%.*s/dbus-1/services/org.kde.KIOFuse.service", (int)(end - p), p);
+        service = access(path, R_OK) == 0;
+      }
+      p = *end ? end + 1 : end;
+    }
+  }
+  if (!service) return false;
+  const char *worker = !strcmp(sch, "dav") || !strcmp(sch, "davs") ? "http" : sch;
+  static const char *dirs[] = {"/usr/lib64/qt6/plugins/kf6/kio", "/usr/lib64/qt5/plugins/kf5/kio",
+                               "/usr/lib/qt6/plugins/kf6/kio", "/usr/lib/qt5/plugins/kf5/kio"};
+  char path[PATH_MAX];
+  const char *override = getenv("FE_KIO_WORKER_DIR");
+  if (override) {
+    snprintf(path, sizeof path, "%s/kio_%s.so", override, worker);
+    return access(path, R_OK) == 0;
+  }
+  for (int k = 0; k < (int)ARRAY_COUNT(dirs); k++) {
+    snprintf(path, sizeof path, "%s/kio_%s.so", dirs[k], worker);
+    if (access(path, R_OK) == 0) return true;
+  }
+  return false;
+}
+
+static bool net_method_available(int proto, int method, const NetAddr *a, char *target, size_t cap) {
+  if (target && cap) target[0] = 0;
+  if (method == NET_METHOD_GVFS) return net_proto_available(proto);
+  if (method == NET_METHOD_KIO) return net_kio_available(proto);
+  if (method == NET_METHOD_SYSTEM) {
+    bool mounted = false;
+    if (!net_system_target(a, target, cap, &mounted)) return false;
+    char bin[PATH_MAX];
+    return mounted || (tool_abs(tool("FE_MOUNT", "mount"), bin, sizeof bin) && access(bin, X_OK) == 0);
+  }
+  return false;
+}
+
+static int net_best_method(int proto, const NetAddr *a) {
+  for (int m = 0; m < NET_METHOD_COUNT; m++)
+    if (net_method_available(proto, m, a, NULL, 0)) return m;
+  return NET_METHOD_GVFS;
+}
+
 static bool ssh_target_uri(const char *uri, SshTarget *t) {
   NetAddr a;
   memset(t, 0, sizeof *t);
@@ -3672,8 +3788,18 @@ static bool net_server_is_mount(const char *uri, const char *mount) {
 }
 
 static bool net_server_connected(const char *uri) {
+  for (int i = 0; i < A.nservers; i++) if (!strcmp(A.servers[i].uri, uri)) {
+    if (A.servers[i].method == NET_METHOD_KIO) return false; // its saved row remains the way back in
+    if (A.servers[i].method == NET_METHOD_SYSTEM) {
+      NetAddr a;
+      bool mounted = false;
+      if (net_parse(uri, &a)) net_system_target(&a, NULL, 0, &mounted);
+      return mounted;
+    }
+    break;
+  }
   for (int k = 0; k < A.nnets; k++)
-    if (net_server_is_mount(uri, A.nets[k].path))
+    if (A.nets[k].mounted && net_server_is_mount(uri, A.nets[k].path))
       return true;
   return false;
 }
@@ -3706,19 +3832,29 @@ static void net_server_folder(const char *uri, const char *mount, char *out,
 static const char *place_open_path(const Place *p, char *buf, size_t cap) {
   if (p->kind != PK_NETWORK || p->server < 0 || p->server >= A.nservers)
     return p->path;
+  if (A.servers[p->server].method == NET_METHOD_SYSTEM) {
+    NetAddr a;
+    if (net_parse(A.servers[p->server].uri, &a)) {
+      net_system_folder(&a, p->path, buf, cap);
+      return buf;
+    }
+    return p->path;
+  }
   net_server_folder(A.servers[p->server].uri, p->path, buf, cap);
   return buf;
 }
 
 // icon: a network icon key (icons.c; "" = the default globe)
-static void net_server_save(const char *name, const char *uri,
-                            const char *icon) {
+static void net_server_save_method(const char *name, const char *uri,
+                                   const char *icon, int method) {
   if (!icon || strpbrk(icon, "\t\n"))
     icon = "";
   for (int i = 0; i < A.nservers; i++)
     if (!strcmp(A.servers[i].uri, uri)) {
       snprintf(A.servers[i].name, sizeof A.servers[i].name, "%s", name);
       snprintf(A.servers[i].icon, sizeof A.servers[i].icon, "%s", icon);
+      if (A.servers[i].method != method) A.servers[i].mount[0] = 0;
+      A.servers[i].method = method;
       A.settings_dirty = true;
       return;
     }
@@ -3728,8 +3864,14 @@ static void net_server_save(const char *name, const char *uri,
   snprintf(A.servers[A.nservers].name, sizeof A.servers[0].name, "%s", name);
   snprintf(A.servers[A.nservers].uri, sizeof A.servers[0].uri, "%s", uri);
   snprintf(A.servers[A.nservers].icon, sizeof A.servers[0].icon, "%s", icon);
+  A.servers[A.nservers].method = method;
+  A.servers[A.nservers].mount[0] = 0;
   A.nservers++;
   A.settings_dirty = true;
+}
+
+static void net_server_save(const char *name, const char *uri, const char *icon) {
+  net_server_save_method(name, uri, icon, NET_METHOD_GVFS);
 }
 
 static void secret_clear_job(void *arg) {
@@ -3773,13 +3915,15 @@ static void secret_put_async(const char *uri, const char *pw) {
   pool_submit(secret_put_job, m);
 }
 
-static void net_server_update(int i, const char *name, const char *uri,
-                              const char *icon) {
+static void net_server_update_method(int i, const char *name, const char *uri,
+                                     const char *icon, int method) {
   if (i < 0 || i >= A.nservers || strpbrk(uri, "\t\n") || strpbrk(name, "\t\n"))
     return;
   if (!icon || strpbrk(icon, "\t\n"))
     icon = "";
   snprintf(A.servers[i].icon, sizeof A.servers[i].icon, "%s", icon);
+  if (A.servers[i].method != method || strcmp(A.servers[i].uri, uri)) A.servers[i].mount[0] = 0;
+  A.servers[i].method = method;
   if (strcmp(A.servers[i].uri, uri) && secret_available()) {
     SecretMove *m = xcalloc(1, sizeof *m);
     snprintf(m->from, sizeof m->from, "%s", A.servers[i].uri);
@@ -3789,6 +3933,10 @@ static void net_server_update(int i, const char *name, const char *uri,
   snprintf(A.servers[i].name, sizeof A.servers[i].name, "%s", name);
   snprintf(A.servers[i].uri, sizeof A.servers[i].uri, "%s", uri);
   A.settings_dirty = true;
+}
+
+static void net_server_update(int i, const char *name, const char *uri, const char *icon) {
+  net_server_update_method(i, name, uri, icon, NET_METHOD_GVFS);
 }
 
 static void net_server_forget(int i) {
@@ -3820,6 +3968,25 @@ static void dev_start_net(const char *uri, const char *user, const char *domain,
   pool_submit(dev_job, j);
 }
 
+static void dev_start_kio(const char *uri) {
+  DevJob *j = xcalloc(1, sizeof *j);
+  j->kind = DEV_NET_KIO_MOUNT;
+  snprintf(j->target, sizeof j->target, "%s", uri);
+  j->open_after = true;
+  A.dev_busy++;
+  pool_submit(dev_job, j);
+}
+
+static void dev_start_system_server(const char *target, const char *open_path) {
+  DevJob *j = xcalloc(1, sizeof *j);
+  j->kind = DEV_NET_SYSTEM_MOUNT;
+  snprintf(j->target, sizeof j->target, "%s", target);
+  snprintf(j->open_path, sizeof j->open_path, "%s", open_path);
+  j->open_after = true;
+  A.dev_busy++;
+  pool_submit(dev_job, j);
+}
+
 static void secret_prompt_open(DevJob *j); // ui_tools.c
 
 // A saved server: connect straight away (keyring password if one was
@@ -3828,6 +3995,26 @@ static void net_connect_saved(int i) {
   NetAddr a;
   if (i < 0 || i >= A.nservers || !net_parse(A.servers[i].uri, &a))
     return;
+  int method = A.servers[i].method;
+  char target[PATH_MAX];
+  if (!net_method_available(a.proto, method, &a, target, sizeof target)) {
+    toast("The selected connection method is unavailable. Edit this server to choose another.");
+    return;
+  }
+  if (method == NET_METHOD_KIO) {
+    if (A.servers[i].mount[0] && access(A.servers[i].mount, F_OK) == 0) open_folder(A.servers[i].mount);
+    else { toast("Connecting to %s\xE2\x80\xA6", A.servers[i].name); dev_start_kio(A.servers[i].uri); }
+    return;
+  }
+  if (method == NET_METHOD_SYSTEM) {
+    bool mounted = false;
+    net_system_target(&a, target, sizeof target, &mounted);
+    char folder[PATH_MAX];
+    net_system_folder(&a, target, folder, sizeof folder);
+    if (mounted) open_folder(folder);
+    else { toast("Mounting %s\xE2\x80\xA6", A.servers[i].name); dev_start_system_server(target, folder); }
+    return;
+  }
   toast("Connecting to %s\xE2\x80\xA6", A.servers[i].name);
   dev_start_net(A.servers[i].uri, a.user, a.domain, "", true, false);
 }
@@ -4027,21 +4214,35 @@ static void init_places(void) {
     int first_net = A.nplaces;
     for (int k = 0; k < A.nnets && !A.nets_collapsed; k++) {
       if (path_in_cloud(A.nets[k].path) || cloud_for_mount(A.nets[k].path))
-        continue; // listed under Cloud
+        continue; // rclone mounts have their own row below
+      // Mount discovery can beat the rclone status poll, including for an
+      // external mount. Match the source name in both mounted and fstab rows.
+      const char *sep = strchr(A.nets[k].label, ':');
+      if (sep && sep > A.nets[k].label && (size_t)(sep - A.nets[k].label) < sizeof g_cloud[0].name) {
+        char remote[sizeof g_cloud[0].name];
+        snprintf(remote, sizeof remote, "%.*s", (int)(sep - A.nets[k].label), A.nets[k].label);
+        Cloud *c = cloud_find(remote);
+        if (c && c->listed && g_rclone == 1) continue; // one row per configured remote
+      }
       Place *p = place_row();
       if (!p)
         break;
-      p->kind = PK_NETWORK;
-      p->removable = true;
+      p->kind = A.nets[k].mounted ? PK_NETWORK : PK_NETSYSTEM;
+      p->item = k;
+      p->removable = A.nets[k].mounted;
       snprintf(p->path, sizeof p->path, "%s", A.nets[k].path);
       snprintf(p->label, sizeof p->label, "%s", A.nets[k].label);
-      for (int sv = 0; sv < A.nservers;
-           sv++) // a saved server: its display name
-        if (net_server_is_mount(A.servers[sv].uri, p->path)) {
+      for (int sv = 0; sv < A.nservers; sv++) { // a saved server: its display name
+        NetAddr sa;
+        char starget[PATH_MAX];
+        bool native = A.servers[sv].method == NET_METHOD_SYSTEM && net_parse(A.servers[sv].uri, &sa) &&
+                      net_system_target(&sa, starget, sizeof starget, NULL) && !strcmp(starget, p->path);
+        if (native || (A.servers[sv].method == NET_METHOD_GVFS && net_server_is_mount(A.servers[sv].uri, p->path))) {
           snprintf(p->label, sizeof p->label, "%s", A.servers[sv].name);
           p->server = sv;
           break;
         }
+      }
       const char *nm = dev_name_get(p->path);
       if (nm)
         snprintf(p->label, sizeof p->label, "%s", nm);
@@ -4058,23 +4259,9 @@ static void init_places(void) {
       p->server = k;
       snprintf(p->label, sizeof p->label, "%s", A.servers[k].name);
     }
-    if (A.nplaces == first_net && !A.nets_collapsed) { // nothing yet: say so
-      Place *p = place_row();
-      if (p) {
-        p->kind = PK_NETEMPTY;
-        snprintf(p->label, sizeof p->label, "No network locations");
-      }
-    }
-  }
-  if (g_rclone == 1) { // Cloud: rclone remotes (rclone.c); + runs rclone
-                       // config, a click connects and opens one
-    Place *ch = place_row();
-    if (ch) {
-      ch->kind = PK_CLOUDHDR;
-      snprintf(ch->label, sizeof ch->label, "Cloud");
-    }
-    int first = A.nplaces;
-    for (int k = 0; k < g_ncloud && !g_cloud_collapsed; k++) {
+    // Keep configured remotes here in every connection state. The mount scan
+    // above may see a newly mounted remote before rclone's status poll does.
+    for (int k = 0; k < g_ncloud && !A.nets_collapsed && g_rclone == 1; k++) {
       Cloud *c = &g_cloud[k];
       if (!c->listed)
         continue;
@@ -4087,11 +4274,22 @@ static void init_places(void) {
       snprintf(p->path, sizeof p->path, "%s", c->mount);
       snprintf(p->label, sizeof p->label, "%s", c->name);
     }
-    if (A.nplaces == first && !g_cloud_collapsed) {
+    local_share_path(NULL); // update the cached local export list when due
+    for (int k = 0; k < g_local_shares.count && !A.nets_collapsed; k++) {
+      unsigned kind = g_local_shares.kinds[k] & (LOCAL_SHARE_SMB | LOCAL_SHARE_NFS);
+      if (!kind) continue;
+      Place *p = place_row();
+      if (!p) break;
+      p->kind = PK_LOCALSHARE;
+      snprintf(p->path, sizeof p->path, "%s", g_local_shares.paths[k]);
+      snprintf(p->label, sizeof p->label, "%s (%s)", path_basename(p->path),
+               kind == (LOCAL_SHARE_SMB | LOCAL_SHARE_NFS) ? "SMB, NFS" : kind == LOCAL_SHARE_SMB ? "SMB" : "NFS");
+    }
+    if (A.nplaces == first_net && !A.nets_collapsed) {
       Place *p = place_row();
       if (p) {
-        p->kind = PK_CLOUDEMPTY;
-        snprintf(p->label, sizeof p->label, "No rclone remotes yet");
+        p->kind = PK_NETEMPTY;
+        snprintf(p->label, sizeof p->label, "No network locations");
       }
     }
   }
@@ -4102,7 +4300,7 @@ static void init_places(void) {
 
 static bool place_is_header(const Place *p) {
   return p->kind == PK_GROUP || p->kind == PK_DEVICES || p->kind == PK_NETHDR ||
-         p->kind == PK_CLOUDHDR || p->kind == PK_ADDONHDR;
+         p->kind == PK_ADDONHDR;
 }
 
 // Row positions (content space; the sidebar scrolls by A.side_scroll).
@@ -5797,6 +5995,8 @@ static void sheet_draw(void);
 static bool sheet_busy(void);
 static void openwith_open(char **paths, int n);
 static void options_open(void);
+static bool options_text_focus(TextEdit *edit);
+static bool sheet_text_focus(TextEdit *edit);
 static int app_icon_apply_now(void);
 static void ipc_handle(char *msg);
 static bool exe_link_replaced(char *link);
@@ -7119,6 +7319,7 @@ static bool ssh_target_for(const char *path, SshTarget *t) {
     return true;
   for (int k = 0; k < A.nnets;
        k++) { // sshfs: label is the source "user@host:/dir"
+    if (!A.nets[k].sshfs) continue;
     const char *mp = A.nets[k].path, *src = A.nets[k].label,
                *colon = strchr(src, ':');
     size_t ml = strlen(mp);
@@ -7844,17 +8045,18 @@ static void do_action(Pane *p, int act) {
   case ACT_NET_NEW:
     connect_open(-1);
     break;
+  case ACT_NET_REFRESH:
+    local_shares_refresh();
+    devices_refresh();
+    g_cloud_relist = true;
+    cloud_poll_now();
+    break;
   case ACT_CLOUD_NEW:
     cloud_config_terminal();
     break;
   case ACT_CLOUD_REFRESH:
     g_cloud_relist = true;
     cloud_poll_now();
-    break;
-  case ACT_CLOUD_SECTION_TOGGLE:
-    g_cloud_collapsed = !g_cloud_collapsed;
-    init_places();
-    A.settings_dirty = true;
     break;
   case ACT_CLOUD_CONNECT:
   case ACT_CLOUD_CONNECT_TAB:
@@ -9073,11 +9275,6 @@ static void menu_open_place(int idx, f32 x, f32 y) {
     menu_add("Delete group", "", ACT_QA_GROUP_DELETE, A.nqa > 1);
   } else if (pl->kind == PK_NETEMPTY || pl->kind == PK_ADDONEMPTY) {
     return;
-  } else if (pl->kind == PK_CLOUDHDR || pl->kind == PK_CLOUDEMPTY) {
-    menu_add(g_cloud_collapsed ? "Expand" : "Collapse", "Click",
-             ACT_CLOUD_SECTION_TOGGLE, true);
-    menu_add("New remote (rclone config)\xE2\x80\xA6", "", ACT_CLOUD_NEW, true);
-    menu_add("Refresh", "", ACT_CLOUD_REFRESH, true);
   } else if (pl->kind == PK_CLOUD && pl->item < g_ncloud) {
     Cloud *c = &g_cloud[pl->item];
     if (c->mount[0]) {
@@ -9105,19 +9302,32 @@ static void menu_open_place(int idx, f32 x, f32 y) {
     bool col = pl->kind == PK_DEVICES ? A.devs_collapsed : A.nets_collapsed;
     menu_add(col ? "Expand" : "Collapse", "Click", ACT_DEV_SECTION_TOGGLE,
              true);
-    if (pl->kind == PK_NETHDR)
+    if (pl->kind == PK_NETHDR) {
       menu_add("Connect to server\xE2\x80\xA6", "", ACT_NET_NEW, true);
+      menu_add("Refresh network locations", "", ACT_NET_REFRESH, true);
+      if (g_rclone == 1) {
+        menu_add("New remote (rclone config)\xE2\x80\xA6", "", ACT_CLOUD_NEW, true);
+        menu_add("Refresh remotes", "", ACT_CLOUD_REFRESH, true);
+      }
+    }
   } else if (pl->kind == PK_NETSAVED) {
     NetAddr na;
     bool sftp = pl->item < A.nservers &&
                 net_parse(A.servers[pl->item].uri, &na) &&
                 !strcmp(g_net_protos[na.proto].scheme, "sftp");
-    menu_add("Connect", "Click", ACT_NET_CONNECT_SAVED, true);
+    bool kio_open = pl->item < A.nservers && A.servers[pl->item].method == NET_METHOD_KIO &&
+                    A.servers[pl->item].mount[0] && access(A.servers[pl->item].mount, F_OK) == 0;
+    menu_add(kio_open ? "Open" : "Connect", "Click", ACT_NET_CONNECT_SAVED, true);
     if (sftp)
       menu_add("Open SSH terminal", "", ACT_SSH_TERMINAL, true);
     menu_add("Edit\xE2\x80\xA6", "", ACT_NET_EDIT_SAVED, true);
     menu_sep();
     menu_add("Forget server", "", ACT_NET_FORGET, true);
+  } else if (pl->kind == PK_NETSYSTEM) {
+    menu_add("Connect", "Click", ACT_DEV_MOUNT, true);
+  } else if (pl->kind == PK_LOCALSHARE) {
+    menu_add("Open in new tab", "Middle-click", ACT_PLACE_NEW_TAB, true);
+    menu_add("Pin to Quick Access", "", ACT_PIN, true);
   } else if (pl->kind == PK_UNMOUNTED) {
     menu_add("Mount and open", "Click", ACT_DEV_MOUNT, true);
     menu_add("Mount and open in new tab", "Middle-click", ACT_DEV_OPEN_TAB,
@@ -15171,6 +15381,14 @@ static void frame_draw(void) {
     draw_overlay();
   fit_tip_mouse(false);
   draw_fit_tooltip();
+  // The corner mask and the soft shadow do not form a window border. Draw one
+  // continuous ring on the content edge so all four sides have the same line.
+  f32 corner_r = window_corner_radius();
+  if (corner_r > 0 && !g_corner_failed) {
+    draw_clip(NULL);
+    draw_rrect_outline(0, 0, (f32)A.W, (f32)A.H, corner_r, 1.f,
+                       C(COL_BORDER));
+  }
   draw_flush();
   corners_mask();
   shadow_draw();

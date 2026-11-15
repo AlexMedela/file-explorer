@@ -1,6 +1,6 @@
 // Pointer input shared by every focused single-line editor. Geometry comes from
 // te_draw, so padding, scrolling, font and scale agree with the visible caret.
-typedef struct { TextEdit *edit; Font *font; Rect rect; f32 pad; int layer; } TextFieldHit;
+typedef struct { TextEdit *edit; Font *font; Rect rect; f32 pad; int layer; bool masked; } TextFieldHit;
 static TextFieldHit g_text_fields[32], g_text_drag;
 static int g_text_field_count;
 static bool g_text_selecting;
@@ -9,13 +9,28 @@ static int te_pointer_layer(void) { return sheet_open() ? 2 : A.pal_open ? 1 : 0
 
 static void te_register(TextEdit *edit, Font *font, Rect rect, f32 pad) {
     if (g_text_field_count < (int)ARRAY_COUNT(g_text_fields))
-        g_text_fields[g_text_field_count++] = (TextFieldHit){edit, font, rect, pad, te_pointer_layer()};
+        g_text_fields[g_text_field_count++] = (TextFieldHit){edit, font, rect, pad, te_pointer_layer(), false};
+}
+
+static void te_register_masked(TextEdit *edit, Font *font, Rect rect, f32 pad) {
+    if (g_text_field_count < (int)ARRAY_COUNT(g_text_fields))
+        g_text_fields[g_text_field_count++] = (TextFieldHit){edit, font, rect, pad, te_pointer_layer(), true};
 }
 
 static int te_hit(const TextFieldHit *field, f32 x) {
     TextEdit *t = field->edit;
     int n = (int)strlen(t->buf), best = 0;
     f32 at = x - field->rect.x - field->pad + t->scroll, dist = INFINITY;
+    if (field->masked) {
+        f32 step = roundf(S(3)) * 2 + S(4);
+        for (int off = 0, k = 0;; k++) {
+            f32 d = fabsf(k * step - at);
+            if (d < dist) { dist = d; best = off; }
+            if (off >= n) break;
+            off = te_next(t, off);
+        }
+        return best;
+    }
     bool complex = text_complex(t->buf, n);
     f32 width = 0; int ng = complex ? text_shape(field->font, t->buf, n, &width) : 0;
     f32 pos = 0;
@@ -45,6 +60,7 @@ static bool te_pointer_down(SDL_MouseButtonEvent *b) {
         // A queued key event may have closed one of these editors since drawing.
         if ((t == &A.edit && !A.edit_pane) || (t == &A.ren_te && !A.ren_pane) ||
             (t == &A.search_te && !A.search_pane)) continue;
+        if (sheet_open() && !sheet_text_focus(t)) continue;
         t->animation.input = now_ns();
         int at = te_hit(field, b->x), n = (int)strlen(t->buf);
         if (b->clicks >= 3) { t->anchor = 0; t->caret = n; }

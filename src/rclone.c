@@ -1,6 +1,6 @@
 // rclone.c - cloud storage (rclone remotes: Google Drive, OneDrive, S3, Dropbox...) as sidebar places.
 //
-// The remotes are what `rclone listremotes --long` reports; they're set up with `rclone config` (the section's +
+// The remotes are what `rclone listremotes --long` reports; they're set up with `rclone config` (a remote's edit button
 // runs it in a terminal tab). Connecting one writes a systemd user unit
 // ~/.config/systemd/user/file-explorer-cloud-<name>.service running `rclone mount <name>: <folder>` (units.c):
 // it keeps running when the app is closed, restarts after failures and can start at login.
@@ -29,7 +29,6 @@ typedef struct {
 
 static Cloud g_cloud[MAX_CLOUDS];
 static int g_ncloud;
-static bool g_cloud_collapsed;
 static int g_rclone = -1;          // rclone installed: -1 not known yet, 0 no, 1 yes
 static atomic_int g_cloud_job;     // status / command jobs in flight
 static u64 g_cloud_polled, g_cloud_fast_until;
@@ -119,7 +118,7 @@ static bool cloud_busy(const Cloud *c) { return c->state == CS_STARTING || c->st
 // --- settings: cloud=name \t flags ----------------------------------------------------------------------------
 
 static bool cloud_settings_line(const char *k, const char *v) {
-    if (!strcmp(k, "cloud_collapsed")) { g_cloud_collapsed = atoi(v); return true; }
+    if (!strcmp(k, "cloud_collapsed")) return true; // old settings: Network now owns collapse
     if (strcmp(k, "cloud")) return false;
     char nm[96];
     snprintf(nm, sizeof nm, "%.*s", (int)strcspn(v, "\t"), v);
@@ -131,7 +130,6 @@ static bool cloud_settings_line(const char *k, const char *v) {
 }
 
 static void cloud_settings_save(FILE *f) {
-    fprintf(f, "cloud_collapsed=%d\n", g_cloud_collapsed);
     for (int i = 0; i < g_ncloud; i++)
         if (g_cloud[i].login) fprintf(f, "cloud=%s\tlogin\n", g_cloud[i].name);
 }
@@ -575,6 +573,10 @@ static void cloud_status_done(void *arg) {
     atomic_fetch_sub(&g_cloud_job, 1);
     bool rows = false; // the sidebar rows change (remotes, connected or not)
     bool installed = s->have_rclone && g_rclone != 1; // (just installed: list its remotes next)
+    // An empty list without a config change can be transient while a remote is
+    // being unmounted. Keep its disconnected row so it can be reconnected.
+    if (s->listed && !s->nr && g_ncloud && s->conf_mtime == g_cloud_conf_mtime)
+        s->listed = false;
     if (g_rclone != s->have_rclone) { g_rclone = s->have_rclone; rows = true; }
     g_cloud_conf_mtime = s->conf_mtime;
     if (s->no_systemd) g_units_systemd = false;

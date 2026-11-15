@@ -43,11 +43,13 @@ typedef struct {
     Rect rfield[3], rcase[4], rmatch, rapply, rnum_minus, rnum_plus;
     // connect to server
     TextEdit cn[7]; // CN_* fields (+ CN_NAME)
-    int cn_focus, cn_proto;
+    int cn_focus, cn_proto, cn_method;
     bool cn_remember, cn_remember_pw;
     int cn_edit; // editing saved server i (-1: a new connection)
     Rect cn_rsave;
-    Rect cn_rf[7], cn_rproto[8], cn_rremember, cn_rremember_pw, cn_rconnect, cn_rsaved[8], cn_rforget[8];
+    Rect cn_rf[7], cn_rproto[8], cn_rmethod[NET_METHOD_COUNT], cn_rremember, cn_rremember_pw, cn_rconnect, cn_rsaved[8], cn_rforget[8];
+    Rect cn_body;
+    f32 cn_scroll, cn_max_scroll;
     DevJob *sec_job; // password prompt: the connection waiting for it
     // connect: the location's icon (network icon key, "" = default) and its picker popover
     char cn_icon[160];
@@ -245,15 +247,22 @@ static void sheet_check(Rect r, const char *label, bool on) {
     draw_text_fit(fs, r.x + cb + S(8), text_y(fs, r.y, r.h), r.w - cb - S(8), label, (int)strlen(label), C(COL_TEXT2), 0);
 }
 
-static void sheet_field(Rect r, TextEdit *te, bool focused, const char *placeholder) {
+static void sheet_field_ex(Rect r, TextEdit *te, bool focused, const char *placeholder, bool show_caret) {
     if (A.mouse_in && in_rect(r, A.mx, A.my)) A.ptr_text = true;
     draw_rrect(r.x, r.y, r.w, r.h, S(6), C(focused ? COL_FIELD_HOVER : COL_FIELD));
     if (focused) draw_rrect_outline(r.x, r.y, r.w, r.h, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
-    if (focused) te_draw(te, &A.font, r, roundf(S(8)), C(COL_TEXT));
-    else draw_text_fit(&A.font, r.x + S(8), text_y(&A.font, r.y, r.h), r.w - S(16), te->buf, (int)strlen(te->buf), C(COL_TEXT), 0);
+    if (focused) te_draw_ex(te, &A.font, r, roundf(S(8)), C(COL_TEXT), show_caret);
+    else {
+        te_register(te, &A.font, r, roundf(S(8)));
+        draw_text_fit(&A.font, r.x + S(8), text_y(&A.font, r.y, r.h), r.w - S(16), te->buf, (int)strlen(te->buf), C(COL_TEXT), 0);
+    }
     if (!te->buf[0] && placeholder)
         draw_text_fit(&A.font, r.x + S(10), text_y(&A.font, r.y, r.h), r.w - S(20), placeholder, (int)strlen(placeholder),
                       C(COL_TEXT_FAINT), 0);
+}
+
+static void sheet_field(Rect r, TextEdit *te, bool focused, const char *placeholder) {
+    sheet_field_ex(r, te, focused, placeholder, true);
 }
 
 // --- Open with ---------------------------------------------------------------
@@ -1134,8 +1143,11 @@ static void rename_draw(void) {
 static bool cn_field_visible(int f) {
     if (f == CN_NAME) return true;
     const char *sch = g_net_protos[g_sheet.cn_proto].scheme;
-    if (f == CN_DOMAIN) return !strcmp(sch, "smb");
-    if (f == CN_USER || f == CN_PASS) return strcmp(sch, "nfs") != 0; // NFS: access by host
+    int method = g_sheet.cn_method;
+    if (f == CN_PORT) return method != NET_METHOD_SYSTEM && strcmp(sch, "nfs") != 0;
+    if (f == CN_DOMAIN) return method != NET_METHOD_SYSTEM && !strcmp(sch, "smb");
+    if (f == CN_USER) return method != NET_METHOD_SYSTEM && strcmp(sch, "nfs") != 0;
+    if (f == CN_PASS) return method == NET_METHOD_GVFS && strcmp(sch, "nfs") != 0;
     return true;
 }
 
@@ -1144,7 +1156,7 @@ static void cn_addr(NetAddr *a) {
     memset(a, 0, sizeof *a);
     a->proto = s->cn_proto;
     snprintf(a->host, sizeof a->host, "%s", s->cn[CN_HOST].buf);
-    snprintf(a->port, sizeof a->port, "%s", s->cn[CN_PORT].buf);
+    if (cn_field_visible(CN_PORT)) snprintf(a->port, sizeof a->port, "%s", s->cn[CN_PORT].buf);
     snprintf(a->path, sizeof a->path, "%s", s->cn[CN_PATH].buf);
     if (cn_field_visible(CN_USER)) snprintf(a->user, sizeof a->user, "%s", s->cn[CN_USER].buf);
     if (cn_field_visible(CN_DOMAIN)) snprintf(a->domain, sizeof a->domain, "%s", s->cn[CN_DOMAIN].buf);
@@ -1176,6 +1188,7 @@ static void connect_open(int saved) {
     s->cn_edit = -1;
     s->cn_icon[0] = 0;
     s->cn_pick = false;
+    s->cn_method = net_best_method(0, NULL);
     for (int f = 0; f < CN_ALL; f++) te_set(&s->cn[f], "", 0, 0);
     NetAddr a;
     if (saved >= 0 && saved < A.nservers && net_parse(A.servers[saved].uri, &a)) { // edit a saved server
@@ -1187,6 +1200,7 @@ static void connect_open(int saved) {
         if (strcmp(nm, auto_name)) te_set(&s->cn[CN_NAME], nm, (int)strlen(nm), (int)strlen(nm));
         snprintf(s->cn_icon, sizeof s->cn_icon, "%s", A.servers[saved].icon);
         s->cn_edit = saved;
+        s->cn_method = A.servers[saved].method;
         s->cn_focus = CN_HOST;
     }
     A.redraw = true;
@@ -1196,6 +1210,7 @@ static void connect_open(int saved) {
 static void connect_open_addr(const NetAddr *a) {
     connect_open(-1);
     cn_fill(a);
+    g_sheet.cn_method = net_best_method(a->proto, a);
     g_sheet.cn_remember = false;
     g_sheet.cn_focus = cn_field_visible(CN_PASS) ? CN_PASS : CN_HOST;
 }
@@ -1218,7 +1233,7 @@ static bool connect_save_edit(void) {
     char uri[1024], name[64];
     net_uri(&a, uri, sizeof uri);
     cn_name(&a, name, sizeof name);
-    net_server_update(s->cn_edit, name, uri, s->cn_icon);
+    net_server_update_method(s->cn_edit, name, uri, s->cn_icon, s->cn_method);
     if (s->cn_remember_pw && s->cn[CN_PASS].buf[0] && secret_available() && cn_field_visible(CN_PASS))
         secret_put_async(uri, s->cn[CN_PASS].buf);
     return true;
@@ -1228,7 +1243,8 @@ static void connect_go(void) {
     Sheet *s = &g_sheet;
     NetAddr a;
     cn_addr(&a);
-    if (!a.host[0] || !net_proto_available(s->cn_proto)) return;
+    char target[PATH_MAX];
+    if (!a.host[0] || !net_method_available(s->cn_proto, s->cn_method, &a, target, sizeof target)) return;
     char uri[1024];
     net_uri(&a, uri, sizeof uri);
     if (s->cn_edit >= 0) { // a saved server: update it, connect with its keyring password (or the one typed now)
@@ -1240,7 +1256,15 @@ static void connect_go(void) {
         s->cn_remember_pw = false; // stored after a successful login instead
         connect_save_edit();
         toast("Connecting to %s\xE2\x80\xA6", A.servers[i].name);
-        dev_start_net(A.servers[i].uri, a.user, a.domain, pw, !typed, keep);
+        if (s->cn_method == NET_METHOD_KIO) dev_start_kio(A.servers[i].uri);
+        else if (s->cn_method == NET_METHOD_SYSTEM) {
+            bool mounted = false;
+            net_system_target(&a, target, sizeof target, &mounted);
+            char folder[PATH_MAX];
+            net_system_folder(&a, target, folder, sizeof folder);
+            if (mounted) open_folder(folder);
+            else dev_start_system_server(target, folder);
+        } else dev_start_net(A.servers[i].uri, a.user, a.domain, pw, !typed, keep);
         explicit_bzero(pw, sizeof pw);
         sheet_close();
         init_places();
@@ -1249,11 +1273,19 @@ static void connect_go(void) {
     if (s->cn_remember || s->cn_remember_pw) {
         char name[64];
         cn_name(&a, name, sizeof name);
-        net_server_save(name, uri, s->cn_icon);
+        net_server_save_method(name, uri, s->cn_icon, s->cn_method);
     }
     toast("Connecting to %s\xE2\x80\xA6", a.host);
     bool keep = s->cn_remember_pw && cn_field_visible(CN_PASS) && secret_available();
-    dev_start_net(uri, a.user, a.domain, cn_field_visible(CN_PASS) ? s->cn[CN_PASS].buf : "", false, keep);
+    if (s->cn_method == NET_METHOD_KIO) dev_start_kio(uri);
+    else if (s->cn_method == NET_METHOD_SYSTEM) {
+        bool mounted = false;
+        net_system_target(&a, target, sizeof target, &mounted);
+        char folder[PATH_MAX];
+        net_system_folder(&a, target, folder, sizeof folder);
+        if (mounted) open_folder(folder);
+        else dev_start_system_server(target, folder);
+    } else dev_start_net(uri, a.user, a.domain, cn_field_visible(CN_PASS) ? s->cn[CN_PASS].buf : "", false, keep);
     sheet_close();
     init_places();
 }
@@ -1362,16 +1394,55 @@ static void connect_draw(void) {
     int nsv = 0, nvis = 0; // (saved servers are edited from the sidebar: right-click > Edit)
     for (int k = 0; k < CN_COUNT; k++) nvis += cn_field_visible(k) && k != CN_PORT; // port shares the server row
     f32 pad = roundf(S(20)), rh = roundf(S(44)), srh = roundf(S(40)), gap = roundf(S(16)), hh = roundf(fs->line_h + S(6));
-    f32 h = pad + roundf(S(62)) + (nsv ? hh + nsv * srh + gap : 0) + hh + roundf(S(32)) + gap + hh + nvis * rh + gap +
-            roundf(S(48)) + (cn_field_visible(CN_PASS) && s->cn_edit < 0 ? roundf(S(28)) : 0) + roundf(S(32)) + pad +
-            hh + rh * 2 + gap; // Name block (display name + icon)
+    f32 h = roundf(MIN(S(640), A.H - S(40)));
     f32 w = roundf(MIN(S(560), A.W - S(40)));
-    h = MIN(h, A.H - S(40));
+    f32 cw = w - pad * 2;
+    const char *sch = g_net_protos[s->cn_proto].scheme;
+    NetAddr a;
+    cn_addr(&a);
+    char uri[1024], line[1100];
+    char target[PATH_MAX];
+    bool ok = net_method_available(s->cn_proto, s->cn_method, &a, target, sizeof target);
+    if (!ok && s->cn_method == NET_METHOD_KIO)
+        snprintf(line, sizeof line, "KDE KIO for %s needs kio-fuse and the matching KIO worker. Choose another available method or install them.",
+                 g_net_protos[s->cn_proto].label);
+    else if (!ok && s->cn_method == NET_METHOD_SYSTEM)
+        snprintf(line, sizeof line, !strcmp(sch, "nfs") || !strcmp(sch, "smb") ?
+                 "Enter a server and share matching a configured NFS or SMB mount. Check /etc/fstab if it is not found." :
+                 "System mounts in this dialog are available for configured NFS and SMB shares only.");
+    else if (!ok && !strcmp(sch, "nfs"))
+        snprintf(line, sizeof line, "GVfs NFS backend not installed for direct connection. System NFS mounts still appear in Network; configure new mounts in your system settings.");
+    else if (!ok && !strcmp(sch, "smb"))
+        snprintf(line, sizeof line, "GVfs SMB backend not installed for direct connection. Existing system SMB mounts still appear in Network; configure new mounts in your system settings.");
+    else if (!ok && (!strcmp(sch, "dav") || !strcmp(sch, "davs")))
+        snprintf(line, sizeof line, "GVfs WebDAV backend not installed for direct connection. Configured rclone WebDAV remotes still appear in Network; add one with rclone config.");
+    else if (!ok)
+        snprintf(line, sizeof line, "Direct connection requires the GVfs %s backend (gvfsd-%s), which is not installed.",
+                 g_net_protos[s->cn_proto].label, g_net_protos[s->cn_proto].backend);
+    else if (a.host[0]) { net_uri(&a, uri, sizeof uri); snprintf(line, sizeof line, "%s", uri); }
+    else snprintf(line, sizeof line, "Enter a server name or address");
+    int status_starts[8], status_lens[8];
+    int status_lines = ok ? 1 : wrap_text(fs, line, cw - S(4), status_starts, status_lens, 8);
+    f32 status_h = roundf(status_lines * (fs->line_h + S(2)) + S(8));
     Rect r = {roundf((A.W - w) * 0.5f), roundf((A.H - h) * 0.42f), w, h};
     s->r = r;
     if (s->cn_edit >= 0 && s->cn_edit < A.nservers) sheet_frame(r, "Edit server", A.servers[s->cn_edit].name);
     else sheet_frame(r, "Connect to server", "Files on another computer, NAS or server");
-    f32 x = r.x + pad, cw = w - pad * 2, y = r.y + pad + roundf(S(62));
+    f32 x = r.x + pad;
+    f32 bh = roundf(S(32)), bw = roundf(S(110));
+    s->cn_body = (Rect){x, r.y + pad + roundf(S(62)), cw,
+                        h - pad * 2 - roundf(S(62)) - bh - roundf(S(16))};
+    f32 chh = roundf(S(30)), cgap = roundf(S(6));
+    f32 content = (nsv ? hh + nsv * srh + gap : 0) + 4 * hh + (2 + nvis) * rh +
+                  3 * gap + 2 * chh + roundf(S(10)) + status_h +
+                  (s->cn_edit < 0 ? roundf(S(22)) : 0) +
+                  (cn_field_visible(CN_PASS) ? (s->cn_edit < 0 ? roundf(S(28)) : 0) + roundf(S(22)) : 0) + roundf(S(12));
+    s->cn_max_scroll = MAX(0.f, content - s->cn_body.h);
+    s->cn_scroll = CLAMP(s->cn_scroll, 0.f, s->cn_max_scroll);
+    f32 y = s->cn_body.y - s->cn_scroll;
+    int first_hit = g_text_field_count;
+    ClipSave cs = draw_clip_push((SDL_Rect){(int)floorf(s->cn_body.x), (int)floorf(s->cn_body.y),
+                                            (int)ceilf(s->cn_body.w), (int)ceilf(s->cn_body.h)});
     // saved servers
     for (int k = 0; k < 8; k++) s->cn_rsaved[k] = s->cn_rforget[k] = (Rect){0, 0, 0, 0};
     if (nsv) {
@@ -1420,27 +1491,44 @@ static void connect_draw(void) {
     }
     // protocol chips
     y = props_heading(x, y, "Protocol");
-    f32 chh = roundf(S(30)), cgap = roundf(S(6)), chw = roundf((cw - cgap * (NET_PROTO_COUNT - 1)) / NET_PROTO_COUNT);
+    f32 chw = roundf((cw - cgap * (NET_PROTO_COUNT - 1)) / NET_PROTO_COUNT);
     for (int i = 0; i < NET_PROTO_COUNT; i++) {
         Rect cr = {x + i * (chw + cgap), y, chw, chh};
         s->cn_rproto[i] = cr;
-        bool on = s->cn_proto == i, hv = A.mouse_in && in_rect(cr, A.mx, A.my), ok = net_proto_available(i);
-        hand_if(hv && ok);
+        bool on = s->cn_proto == i, hv = A.mouse_in && in_rect(cr, A.mx, A.my);
+        hand_if(hv);
         draw_rrect(cr.x, cr.y, cr.w, cr.h, S(7), C(on ? COL_ACCENT : hv ? COL_CONTROL_HOVER : COL_CONTROL));
         const char *l = g_net_protos[i].label;
         f32 tw = text_width(fs, l, (int)strlen(l));
-        draw_text(fs, cr.x + (cr.w - tw) * 0.5f, text_y(fs, cr.y, cr.h), l, (int)strlen(l), C(on ? COL_ON_ACCENT : ok ? COL_TEXT : COL_TEXT_FAINT));
+        draw_text(fs, cr.x + (cr.w - tw) * 0.5f, text_y(fs, cr.y, cr.h), l, (int)strlen(l), C(on ? COL_ON_ACCENT : COL_TEXT));
+    }
+    y += chh + gap;
+    y = props_heading(x, y, "Connection method");
+    static const char *methods[NET_METHOD_COUNT] = {"GVfs", "KDE KIO", "System mount"};
+    f32 mw = roundf((cw - cgap * (NET_METHOD_COUNT - 1)) / NET_METHOD_COUNT);
+    for (int i = 0; i < NET_METHOD_COUNT; i++) {
+        Rect mr = {x + i * (mw + cgap), y, mw, chh};
+        s->cn_rmethod[i] = mr;
+        bool available = net_method_available(s->cn_proto, i, &a, NULL, 0);
+        bool on = s->cn_method == i, hv = A.mouse_in && in_rect(mr, A.mx, A.my);
+        hand_if(hv);
+        draw_rrect(mr.x, mr.y, mr.w, mr.h, S(7), C(on && available ? COL_ACCENT : hv || on ? COL_CONTROL_HOVER : COL_CONTROL));
+        if (on && !available)
+            draw_rrect_outline(mr.x, mr.y, mr.w, mr.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
+        const char *label = methods[i];
+        f32 tw = text_width(fs, label, (int)strlen(label));
+        draw_text(fs, mr.x + (mr.w - tw) * 0.5f, text_y(fs, mr.y, mr.h), label, (int)strlen(label),
+                  C(on && available ? COL_ON_ACCENT : on || hv || available ? COL_TEXT : COL_TEXT_DIM));
     }
     y += chh + gap;
     // fields
     y = props_heading(x, y, "Server");
     props_card(x, y, cw, nvis, rh, 0);
-    const char *sch = g_net_protos[s->cn_proto].scheme;
     const char *labels[CN_COUNT] = {"Server", "Port", !strcmp(sch, "smb") ? "Share" : !strcmp(sch, "nfs") ? "Export" : "Folder", "User",
                                     "Password", "Domain"};
     char portph[16];
     snprintf(portph, sizeof portph, "%d", g_net_protos[s->cn_proto].port);
-    const char *ph[CN_COUNT] = {"nas.local or 192.168.1.10", portph, !strcmp(sch, "smb") ? "share name (optional)" : "/ (optional)",
+    const char *ph[CN_COUNT] = {"nas.local or 192.168.1.10", portph, !strcmp(sch, "smb") ? "share name (optional)" : !strcmp(sch, "nfs") ? "/export/path" : "/ (optional)",
                                 "username (optional)", "", "WORKGROUP (optional)"};
     for (int k = 0; k < CN_COUNT; k++) s->cn_rf[k] = (Rect){0, 0, 0, 0};
     f32 lw = roundf(S(110)), fh = roundf(S(30));
@@ -1450,7 +1538,7 @@ static void connect_draw(void) {
         f32 ry = y + row * rh, fy = roundf(ry + (rh - fh) * 0.5f);
         draw_text(fs, x + S(14), text_y(fs, ry, rh), labels[k], (int)strlen(labels[k]), C(COL_TEXT_DIM));
         f32 fx = x + lw, fw = cw - lw - S(10);
-        if (k == CN_HOST) { // server + port on one row
+        if (k == CN_HOST && cn_field_visible(CN_PORT)) { // server + port on one row
             f32 pw = roundf(S(72));
             Rect pr = {x + cw - S(10) - pw, fy, pw, fh};
             s->cn_rf[CN_PORT] = pr;
@@ -1461,31 +1549,31 @@ static void connect_draw(void) {
         s->cn_rf[k] = fr;
         if (k == CN_PASS) { // masked: one dot per character
             bool foc = s->cn_focus == CN_PASS;
+            te_register_masked(&s->cn[CN_PASS], f, fr, roundf(S(10)));
             draw_rrect(fr.x, fr.y, fr.w, fr.h, S(6), C(foc ? COL_FIELD_HOVER : COL_FIELD));
             if (foc) draw_rrect_outline(fr.x, fr.y, fr.w, fr.h, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
             int nc = 0;
             for (const char *c = s->cn[CN_PASS].buf; *c; c++) nc += ((u8)*c & 0xC0) != 0x80;
             f32 dr = roundf(S(3)), dx = fr.x + S(10), dcy = fr.y + fr.h * 0.5f;
+            f32 step = dr * 2 + S(4);
+            int lo = utf8_index(s->cn[CN_PASS].buf, MIN(s->cn[CN_PASS].anchor, s->cn[CN_PASS].caret));
+            int hi = utf8_index(s->cn[CN_PASS].buf, MAX(s->cn[CN_PASS].anchor, s->cn[CN_PASS].caret));
+            if (foc && lo != hi) draw_rect(dx + lo * step, fr.y + S(4), (hi - lo) * step, fr.h - S(8), CA(COL_ACCENT, 0.35f));
             for (int i = 0; i < nc && dx + dr * 2 < fr.x + fr.w - S(8); i++, dx += dr * 2 + S(4))
                 draw_rrect(dx, dcy - dr, dr * 2, dr * 2, dr, C(COL_TEXT));
-            if (foc) draw_rect(roundf(dx), fr.y + S(6), MAX(1.f, roundf(S(1.2f))), fr.h - S(12), C(COL_ACCENT));
+            if (foc && lo == hi) draw_rect(roundf(fr.x + S(10) + utf8_index(s->cn[CN_PASS].buf, s->cn[CN_PASS].caret) * step),
+                                           fr.y + S(6), MAX(1.f, roundf(S(1.2f))), fr.h - S(12), C(COL_ACCENT));
             if (!nc && !foc) draw_text(f, fr.x + S(10), text_y(f, fr.y, fr.h), "asked when needed", 17, C(COL_TEXT_FAINT));
         } else sheet_field(fr, &s->cn[k], s->cn_focus == k, ph[k]);
         row++;
     }
     y += nvis * rh + roundf(S(10));
     // address preview / availability, remember, buttons
-    NetAddr a;
-    cn_addr(&a);
-    char uri[1024], line[1100];
-    bool ok = net_proto_available(s->cn_proto);
-    if (!ok) snprintf(line, sizeof line, "Not available: GVfs's %s backend (gvfsd-%s) isn't installed", g_net_protos[s->cn_proto].label,
-                      g_net_protos[s->cn_proto].backend);
-    else if (a.host[0]) { net_uri(&a, uri, sizeof uri); snprintf(line, sizeof line, "%s", uri); }
-    else snprintf(line, sizeof line, "Enter a server name or address");
     Font *fm = A.mono_path ? &A.font_mono : fs;
-    draw_text_fit(ok && a.host[0] ? fm : fs, x + S(2), y, cw, line, (int)strlen(line), C(ok ? COL_TEXT_DIM : COL_DANGER), 0);
-    y += roundf(fs->line_h + S(10));
+    if (ok) draw_text_fit(a.host[0] ? fm : fs, x + S(2), y, cw, line, (int)strlen(line), C(COL_TEXT_DIM), 0);
+    else for (int i = 0; i < status_lines; i++)
+        draw_text(fs, x + S(2), y + i * (fs->line_h + S(2)), line + status_starts[i], status_lens[i], C(COL_DANGER));
+    y += status_h;
     s->cn_rremember = (Rect){0, 0, 0, 0};
     if (s->cn_edit < 0) {
         s->cn_rremember = (Rect){x, y, roundf(S(340)), roundf(S(22))};
@@ -1498,7 +1586,24 @@ static void connect_draw(void) {
         sheet_check(s->cn_rremember_pw, secret_available() ? "Remember password in the system keyring" : "Remember password (no system keyring found)",
                     s->cn_remember_pw && secret_available());
     }
-    f32 bh = roundf(S(32)), bw = roundf(S(110));
+    draw_clip_pop(cs);
+    if (!in_rect(s->cn_body, A.mx, A.my)) A.ptr_text = false;
+    // Text hit boxes must follow the visible portion of the scrolling form.
+    for (int i = first_hit; i < g_text_field_count; i++) {
+        Rect *hit = &g_text_fields[i].rect;
+        f32 top = MAX(hit->y, s->cn_body.y), bottom = MIN(hit->y + hit->h, s->cn_body.y + s->cn_body.h);
+        hit->y = top;
+        hit->h = MAX(0.f, bottom - top);
+    }
+    sheet_fade_edges(s->cn_body, s->cn_scroll, s->cn_max_scroll, pad);
+    if (s->cn_max_scroll > 0) {
+        f32 tw = roundf(S(4)), th = MAX(S(24), s->cn_body.h * s->cn_body.h / content);
+        bool sh;
+        f32 ty = sheet_scrollbar(&s->cn_scroll, s->cn_max_scroll,
+                                 (Rect){r.x + w - S(16), s->cn_body.y, S(16), s->cn_body.h},
+                                 s->cn_body.y, s->cn_body.h, th, &sh);
+        draw_rrect(r.x + w - S(8) - tw * 0.5f, ty, tw, th, tw * 0.5f, C(sh ? COL_SCROLL_HOVER : COL_SCROLL));
+    }
     s->cn_rconnect = (Rect){r.x + w - pad - bw, r.y + h - pad - bh, bw, bh};
     s->cn_rsave = (Rect){0, 0, 0, 0};
     f32 lx = s->cn_rconnect.x;
@@ -1621,11 +1726,32 @@ static void connect_focus_step(int dir) {
     for (int k = 0; k < CN_ALL; k++) if (order[k] == s->cn_focus) i = k;
     for (int step = 0; step < CN_ALL; step++) {
         i = (i + dir + CN_ALL) % CN_ALL;
-        if (cn_field_visible(order[i])) { s->cn_focus = order[i]; return; }
+        if (cn_field_visible(order[i])) {
+            s->cn_focus = order[i];
+            Rect field = s->cn_rf[s->cn_focus];
+            if (field.w > 0) {
+                f32 top = s->cn_body.y + S(8), bottom = s->cn_body.y + s->cn_body.h - S(8);
+                if (field.y < top) s->cn_scroll -= top - field.y;
+                else if (field.y + field.h > bottom) s->cn_scroll += field.y + field.h - bottom;
+                s->cn_scroll = CLAMP(s->cn_scroll, 0.f, s->cn_max_scroll);
+            }
+            return;
+        }
     }
 }
 
 #include "options.c"
+
+static bool sheet_text_focus(TextEdit *edit) {
+    Sheet *s = &g_sheet;
+    if (s->kind == SHEET_OPTIONS) return options_text_focus(edit);
+    if (s->kind == SHEET_CONNECT) {
+        for (int k = 0; k < CN_ALL; k++)
+            if (edit == &s->cn[k] && cn_field_visible(k)) { s->cn_focus = k; return true; }
+        return false;
+    }
+    return true;
+}
 
 // --- dispatch ----------------------------------------------------------------
 
@@ -1739,13 +1865,14 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
         if (s->cn_rremember_pw.w > 0 && in_rect(s->cn_rremember_pw, x, y)) { s->cn_remember_pw = !s->cn_remember_pw; return; }
         break;
     case SHEET_CONNECT:
-        if (in_rect(s->cn_ricon, x, y)) { s->cn_pick = true; s->cn_pick_scroll = 0; return; }
+        if (in_rect(s->cn_body, x, y) && in_rect(s->cn_ricon, x, y)) { s->cn_pick = true; s->cn_pick_scroll = 0; return; }
         if (in_rect(s->cn_rconnect, x, y)) { connect_go(); return; }
         if (s->cn_rsave.w > 0 && in_rect(s->cn_rsave, x, y)) {
             if (connect_save_edit()) { toast("Saved"); sheet_close(); init_places(); }
             return;
         }
         if (in_rect(s->rcancel, x, y)) { sheet_close(); return; }
+        if (!in_rect(s->cn_body, x, y)) return;
         if (s->cn_rremember.w > 0 && in_rect(s->cn_rremember, x, y)) { s->cn_remember = !(s->cn_remember || s->cn_remember_pw); if (!s->cn_remember) s->cn_remember_pw = false; return; }
         if (s->cn_rremember_pw.w > 0 && in_rect(s->cn_rremember_pw, x, y) && secret_available()) {
             s->cn_remember_pw = !s->cn_remember_pw;
@@ -1755,6 +1882,15 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
         for (int i = 0; i < NET_PROTO_COUNT; i++)
             if (in_rect(s->cn_rproto[i], x, y)) {
                 s->cn_proto = i;
+                NetAddr a;
+                cn_addr(&a);
+                s->cn_method = net_best_method(i, &a);
+                if (!cn_field_visible(s->cn_focus)) s->cn_focus = CN_HOST;
+                return;
+            }
+        for (int i = 0; i < NET_METHOD_COUNT; i++)
+            if (in_rect(s->cn_rmethod[i], x, y)) {
+                s->cn_method = i;
                 if (!cn_field_visible(s->cn_focus)) s->cn_focus = CN_HOST;
                 return;
             }
@@ -1851,6 +1987,7 @@ static void sheet_wheel(f32 dy) {
     Sheet *s = &g_sheet;
     if (s->kind == SHEET_OPTIONS) options_wheel(dy);
     else if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON) && s->cn_pick) s->cn_pick_scroll -= dy * S(48); // clamped when drawn
+    else if (s->kind == SHEET_CONNECT) s->cn_scroll = CLAMP(s->cn_scroll - dy * S(48), 0.f, s->cn_max_scroll);
     else if (s->kind == SHEET_OPENWITH) s->ow_scroll -= dy * s->row_h * 1.5f; // clamped when drawn
     else if (s->kind == SHEET_PROPS) s->pv_scroll -= dy * S(48);
     else if (s->kind == SHEET_RENAME) s->top = MAX(0, s->top - (int)dy * 3);

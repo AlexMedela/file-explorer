@@ -57,7 +57,6 @@ static void settings_defaults(void) {
     g_external_terminal[0] = 0;
     A.nservers = 0;
     addon_settings_defaults();
-    g_cloud_collapsed = false;
     for (int i = 0; i < g_ncloud; i++) g_cloud[i].login = false;
     A.close_to_tray = false;
     cols_default();
@@ -224,13 +223,17 @@ static void settings_load(void) {
                 snprintf(key, sizeof key, "%.*s", (int)(tab - v), v);
                 dev_name_set(key, tab + 1);
             }
-        } else if (!strcmp(k, "server")) { // saved server: name\turi[\ticon]
+        } else if (!strcmp(k, "server")) { // saved server: name\turi[\ticon[\tmethod]]
             const char *tab = strchr(v, '\t');
             if (tab && A.nservers < (int)ARRAY_COUNT(A.servers)) {
                 const char *tab2 = strchr(tab + 1, '\t');
+                const char *tab3 = tab2 ? strchr(tab2 + 1, '\t') : NULL;
                 snprintf(A.servers[A.nservers].name, sizeof A.servers[0].name, "%.*s", (int)MIN(63, tab - v), v);
                 snprintf(A.servers[A.nservers].uri, sizeof A.servers[0].uri, "%.*s", (int)(tab2 ? tab2 - tab - 1 : (ptrdiff_t)strlen(tab + 1)), tab + 1);
-                snprintf(A.servers[A.nservers].icon, sizeof A.servers[0].icon, "%s", tab2 ? tab2 + 1 : "");
+                snprintf(A.servers[A.nservers].icon, sizeof A.servers[0].icon, "%.*s",
+                         tab2 ? (int)(tab3 ? tab3 - tab2 - 1 : (ptrdiff_t)strlen(tab2 + 1)) : 0, tab2 ? tab2 + 1 : "");
+                A.servers[A.nservers].method = tab3 && !strcmp(tab3 + 1, "kio") ? NET_METHOD_KIO :
+                                               tab3 && !strcmp(tab3 + 1, "system") ? NET_METHOD_SYSTEM : NET_METHOD_GVFS;
                 A.nservers++;
             }
         } else if (!strcmp(k, "term_look")) g_term_look_setting = !strcmp(v, "app");
@@ -515,7 +518,9 @@ static void settings_write(FILE *f) {
     cloud_settings_save(f);
     fprintf(f, "external_terminal=%s\n", g_external_terminal);
     fprintf(f, "term_look=%s\n", g_term_look_setting ? "app" : "match");
-    for (int i = 0; i < A.nservers; i++) fprintf(f, "server=%s\t%s%s%s\n", A.servers[i].name, A.servers[i].uri, A.servers[i].icon[0] ? "\t" : "", A.servers[i].icon);
+    for (int i = 0; i < A.nservers; i++)
+        fprintf(f, "server=%s\t%s\t%s\t%s\n", A.servers[i].name, A.servers[i].uri, A.servers[i].icon,
+                A.servers[i].method == NET_METHOD_KIO ? "kio" : A.servers[i].method == NET_METHOD_SYSTEM ? "system" : "gvfs");
     fprintf(f, "icon_theme=%s\napp_icon=%s\n", icon_theme_name(g_icon_theme), g_app_icon_path);
     fprintf(f, "theme=%s\nfont=%s\nfont_size=%d\nrow_spacing=%d\nsmooth_scroll=%d\n",
             g_nthemes ? g_themes[g_theme_cur].name : A.theme_name, A.ui_font, A.font_size, A.row_spacing, A.smooth_scroll);

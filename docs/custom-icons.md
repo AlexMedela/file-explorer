@@ -81,7 +81,12 @@ surfaces may darken pale icons while preserving their hue and shading; the sourc
 SVGs are unchanged. Grid and preview artwork retain their normal rendering.
 
 `net-<name>.svg` has a separate purpose: it adds artwork to the **Connect to
-server > Icon** selector. It does not define a local folder's share badge.
+server > Icon** selector. It can also override an rclone remote's sidebar icon
+when the custom theme is selected. Name it after the remote (`net-my-drive.svg`),
+its backend (`net-webdav.svg`), or its default icon key (`net-network.svg`), in
+that order of preference. Without an override, generic rclone remotes use the
+current theme's `folder-shared.svg`; provider logos keep their bundled artwork.
+These files do not define a local folder's share badge.
 
 See [local share detection](integration.md#local-shared-folders) for supported
 configuration files and detection limits, and [settings](settings.md) for the

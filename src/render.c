@@ -289,7 +289,7 @@ static void draw_xfer_icon(f32 cx, f32 cy, f32 s, Color c) {
 #undef GY
 }
 
-static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
+static void te_draw_ex(TextEdit *t, Font *f, Rect r, f32 pad, Color tc, bool show_caret) {
     te_register(t, f, r, pad);
     if (A.mouse_in && in_rect(r, A.mx, A.my)) A.ptr_text = true;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x + 1, (int)r.y, (int)r.w - 2, (int)r.h});
@@ -343,8 +343,12 @@ static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
     caret_color.a *= alpha;
     f32 caret_width = MAX(2.f, roundf(S(2.4f)));
     f32 caret_x = CLAMP(roundf(r.x + pad + cursor), r.x + 1, MAX(r.x + 1, r.x + r.w - caret_width - 1));
-    draw_rect(caret_x, r.y + roundf(S(4)), caret_width, r.h - roundf(S(8)), caret_color);
+    if (show_caret) draw_rect(caret_x, r.y + roundf(S(4)), caret_width, r.h - roundf(S(8)), caret_color);
     draw_clip_pop(cs);
+}
+
+static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
+    te_draw_ex(t, f, r, pad, tc, true);
 }
 
 static void draw_split_icon(Rect sr, bool down, Color ic) {
@@ -669,7 +673,16 @@ static void draw_brand(void) {
     if (r.h <= 0) return;
     draw_rect(r.x, r.y, r.w, r.h, C(COL_SIDEBAR));
     const char *label = header_label_text();
-    draw_text_fit(&A.font, r.x + S(16), text_y(&A.font, r.y, r.h), MAX(0.f, r.w - S(32)),
+    f32 tx = r.x + S(16);
+    if (g_show_header_icon) {
+        f32 size = roundf(S(28));
+        u32 saved = g_icon_surface_bg;
+        g_icon_surface_bg = COL_SIDEBAR;
+        draw_icon_id(tx, roundf(r.y + (r.h - size) * 0.5f), size, ICON_LOGO_SMALL, false);
+        g_icon_surface_bg = saved;
+        tx += size + S(8);
+    }
+    draw_text_fit(&A.font, tx, text_y(&A.font, r.y, r.h), MAX(0.f, r.x + r.w - S(16) - tx),
                   label, (int)strlen(label), C(COL_TEXT), 0);
 }
 
@@ -688,7 +701,14 @@ static void draw_preedit(void) {
     draw_rect(x + pad, y + h - roundf(S(5)), w - pad * 2, MAX(1.f, roundf(S(1))), C(COL_ACCENT));
 }
 
-// Own title bar: minimise / maximise / close at the top right (Windows-sized, red close on hover), the strip above
+static u32 window_control_ink(u32 fill) {
+    f32 c[3] = {(f32)((fill >> 16) & 255) / 255.f, (f32)((fill >> 8) & 255) / 255.f, (f32)(fill & 255) / 255.f};
+    for (int i = 0; i < 3; i++) c[i] = c[i] <= 0.04045f ? c[i] / 12.92f : powf((c[i] + 0.055f) / 1.055f, 2.4f);
+    f32 luminance = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+    return luminance > 0.179f ? 0x000000 : 0xFFFFFF;
+}
+
+// Own title bar: minimise / maximise / close at the top right, the strip above
 // the preview, and a hairline round the window (borderless windows get no shadow from some compositors).
 static void draw_window_controls(void) {
     if (!A.csd) return;
@@ -701,8 +721,12 @@ static void draw_window_controls(void) {
     for (int i = 0; A.r_wctl.w > 0 && i < 3; i++) {
         Rect b = wctl_button(i);
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(b, A.mx, A.my));
-        if (hover) draw_rect(b.x, b.y, b.w, b.h, i == 2 ? (Color){0xC4 / 255.f, 0x2B / 255.f, 0x1C / 255.f, 1} : C(COL_TAB_HOVER));
-        Color ic = hover ? (i == 2 ? (Color){1, 1, 1, 1} : C(COL_TEXT)) : C(COL_TEXT2);
+        u32 fill = i == 2 ? 0xC42B1C : COL_ACCENT;
+        if (hover) {
+            f32 inset = roundf(S(5));
+            draw_rrect(b.x + inset, b.y + inset, b.w - inset * 2, b.h - inset * 2, S(6), C(fill));
+        }
+        Color ic = hover ? C(window_control_ink(fill)) : C(COL_TEXT2);
         f32 cx = roundf(b.x + b.w * 0.5f), cy = roundf(b.y + b.h * 0.5f), x0 = cx - is * 0.5f, y0 = cy - is * 0.5f;
         int symbol = i == 0 ? SYS_WINDOW_MINIMIZE : i == 2 ? SYS_WINDOW_CLOSE : max ? SYS_WINDOW_RESTORE : SYS_WINDOW_MAXIMIZE;
         int px = MAX(1, (int)roundf(S(16)));
@@ -763,7 +787,7 @@ static void draw_sidebar_content(void) {
             }
             f32 tx = r.x + S(10), tmax = r.x + r.w - S(6);
             pl->eject = (Rect){0, 0, 0, 0};
-            if (pl->kind == PK_NETHDR || pl->kind == PK_CLOUDHDR || pl->kind == PK_ADDONHDR) { // + : connect to a server / rclone config / add-on
+            if (pl->kind == PK_NETHDR || pl->kind == PK_ADDONHDR) { // + : connect to a server / add-on
                 f32 bs = roundf(S(20));
                 Rect pr = {roundf(r.x + r.w - bs - S(4)), roundf(r.y + (r.h - bs) * 0.5f), bs, bs};
                 pl->eject = pr;
@@ -774,7 +798,7 @@ static void draw_sidebar_content(void) {
             }
             { // collapse chevron
                 bool col = pl->kind == PK_GROUP ? A.qa[pl->group].collapsed : pl->kind == PK_DEVICES ? A.devs_collapsed
-                         : pl->kind == PK_ADDONHDR ? addon_section_collapsed(pl) : pl->kind == PK_CLOUDHDR ? g_cloud_collapsed : A.nets_collapsed;
+                         : pl->kind == PK_ADDONHDR ? addon_section_collapsed(pl) : A.nets_collapsed;
                 draw_chevron(r.x + S(9), r.y + r.h * 0.5f, S(4), col ? 1 : 3, MAX(1.f, S(1.3f)), C(hover ? sidebar_dim : sidebar_faint));
                 tx = r.x + S(18);
             }
@@ -790,7 +814,7 @@ static void draw_sidebar_content(void) {
             continue;
         }
         if (pl->kind == PK_ADDON) { addon_place_draw(pl, r, hover); continue; }
-        if (pl->kind == PK_NETEMPTY || pl->kind == PK_ADDONEMPTY || pl->kind == PK_CLOUDEMPTY) { // placeholder text, not a row you can use
+        if (pl->kind == PK_NETEMPTY || pl->kind == PK_ADDONEMPTY) { // placeholder text, not a row you can use
             draw_text_fit(fs, r.x + S(12), text_y(fs, r.y, r.h), r.w - S(18), pl->label, (int)strlen(pl->label), C(sidebar_dim), 0);
             continue;
         }
@@ -809,20 +833,28 @@ static void draw_sidebar_content(void) {
         Cloud *cl = pl->kind == PK_CLOUD && pl->item < g_ncloud ? &g_cloud[pl->item] : NULL;
         bool cloud_off = cl && !pl->path[0];
         if (pl->kind == PK_HOME) draw_local_dir_icon(ix, iy, is, pl->path, "home", false);
+        else if (pl->kind == PK_LOCALSHARE) draw_local_dir_icon(ix, iy, is, pl->path, path_basename(pl->path), false);
         else if (pl->kind == PK_DRIVE) draw_drive_icon(ix, iy, is);
         else if (pl->kind == PK_UNMOUNTED) draw_drive_icon_ex(ix, iy, is, true);
         else if (pl->kind == PK_PHONE)
             draw_phone_icon(ix, iy, is, pl->phone >= 0 && pl->phone < A.devs.nph && A.devs.ph[pl->phone].kind == 'c', phone_off);
-        else if (pl->kind == PK_NETWORK || pl->kind == PK_NETSAVED) // the server's chosen icon (saved, not connected: faded)
+        else if (pl->kind == PK_NETWORK || pl->kind == PK_NETSAVED || pl->kind == PK_NETSYSTEM) // the server's chosen icon (disconnected: faded)
             draw_net_icon(ix, iy, is, pl->server >= 0 && pl->server < A.nservers ? A.servers[pl->server].icon : "",
-                          pl->kind == PK_NETSAVED ? 0.5f : 1.f);
-        else if (cl) { // the service's icon (not connected: faded) + a status dot while connecting / failing
-            draw_net_icon(ix, iy, is, cloud_icon(cl), cloud_off && cl->state != CS_FAILED && cl->state != CS_RETRY ? 0.5f : 1.f);
+                          pl->kind == PK_NETSAVED || pl->kind == PK_NETSYSTEM ? 0.5f : 1.f);
+        else if (cl) { // current theme, with an optional per-remote/backend SVG
+            const char *key = cloud_icon(cl);
+            const char *custom = cloud_theme_icon(cl->name, cl->type, key);
+            bool dim = cloud_off && cl->state != CS_FAILED && cl->state != CS_RETRY;
+            if (custom) draw_net_icon(ix, iy, is, custom, dim ? 0.5f : 1.f);
+            else if (!strcmp(key, "network") || !strcmp(key, "cloud"))
+                draw_icon_id(ix, iy, is, icon_find("folder-shared"), dim);
+            else draw_net_icon(ix, iy, is, key, dim ? 0.5f : 1.f);
             draw_status_dot(ix, iy, is, cloud_busy(cl) && cl->state != CS_RETRY ? 0xE8B04B : cl->state == CS_RETRY || cl->state == CS_FAILED ? 0xE5534B : 0, hover);
         } else if (pl->kind == PK_TRASH) draw_path_icon(ix, iy, is, pl->path);
         else draw_path_icon(ix, iy, is, pl->path);
         f32 lx = ix + is + S(10), lmax = r.x + r.w - lx - S(6);
         f32 bar_end = r.x + r.w - S(8); // usage bar's right end (shortened when the eject button shows)
+        pl->config = (Rect){0, 0, 0, 0};
         if (show_eject) { // eject / disconnect button: takes the free-space text's place, nothing else moves
             f32 bs = roundf(S(22));
             Rect er = {r.x + r.w - bs - S(4), roundf(r.y + (r.h - bs) * 0.5f), bs, bs};
@@ -836,6 +868,25 @@ static void draw_sidebar_content(void) {
                 draw_rect(roundf(cx - w2 * (k / S(5))), roundf(cy - S(4) + k), roundf(w2 * 2 * (k / S(5))), 1, ec);
             draw_rect(roundf(cx - w2), roundf(cy + S(3)), roundf(w2 * 2), MAX(1.f, roundf(S(1.6f))), ec);
         }
+        if (cl && hover && A.drag == DRAG_NONE) {
+            f32 bs = roundf(S(22));
+            Rect cr = {show_eject ? pl->eject.x - bs - S(4) : r.x + r.w - bs - S(4),
+                       roundf(r.y + (r.h - bs) * 0.5f), bs, bs};
+            pl->config = cr;
+            bool ch = in_rect(cr, A.mx, A.my);
+            if (ch) draw_rrect(cr.x, cr.y, cr.w, cr.h, S(5), C(COL_CHIP));
+            f32 cx = cr.x + bs * 0.5f, cy = cr.y + bs * 0.5f;
+            Color ec = C(ch ? COL_TEXT : sidebar_dim);
+            if (!draw_nerd_symbol(cr.x + S(2), cr.y + S(2), bs - S(4), 0xf044, ch ? COL_TEXT : sidebar_dim)) {
+                f32 t = MAX(1.f, S(1.5f));
+                draw_line(cx - S(4), cy + S(3), cx + S(2), cy - S(3), t, ec);
+                draw_line(cx - S(2), cy + S(5), cx + S(4), cy - S(1), t, ec);
+                draw_line(cx + S(2), cy - S(3), cx + S(4), cy - S(1), t, ec);
+                draw_line(cx - S(4), cy + S(3), cx - S(5), cy + S(5), t, ec);
+                draw_line(cx - S(5), cy + S(5), cx - S(2), cy + S(5), t, ec);
+            }
+            lmax -= bs + S(4);
+        }
         if (pl->kind == PK_TRASH && A.trash_known && A.trash_size > 0) { // how much is in it
             char sz[32];
             fmt_size(sz, sizeof sz, A.trash_size);
@@ -846,12 +897,18 @@ static void draw_sidebar_content(void) {
         if (cloud_off && (hover || cloud_busy(cl))) { // "Connect" on hover, "Connecting..." while it does
             const char *t = cloud_busy(cl) ? "Connecting\xE2\x80\xA6" : "Connect";
             f32 tw = text_width(fs, t, (int)strlen(t));
-            draw_text(fs, r.x + r.w - S(8) - tw, text_y(fs, r.y, r.h), t, (int)strlen(t), C(cloud_busy(cl) ? sidebar_dim : COL_ACCENT));
+            f32 right = pl->config.w > 0 ? pl->config.x - S(6) : r.x + r.w - S(8);
+            draw_text(fs, right - tw, text_y(fs, r.y, r.h), t, (int)strlen(t), C(cloud_busy(cl) ? sidebar_dim : COL_ACCENT));
             lmax -= tw + S(8);
         }
-        if ((pl->kind == PK_NETSAVED || phone_off) && hover) { // saved server, phone: "Connect" on hover
-            draw_text(fs, r.x + r.w - S(8) - text_width(fs, "Connect", 7), text_y(fs, r.y, r.h), "Connect", 7, C(COL_ACCENT));
-            lmax -= text_width(fs, "Connect", 7) + S(8);
+        if ((pl->kind == PK_NETSAVED || pl->kind == PK_NETSYSTEM || phone_off) && hover) { // saved server, system mount, phone
+            bool kio_open = pl->kind == PK_NETSAVED && pl->item < A.nservers &&
+                            A.servers[pl->item].method == NET_METHOD_KIO && A.servers[pl->item].mount[0] &&
+                            access(A.servers[pl->item].mount, F_OK) == 0;
+            const char *action = kio_open ? "Open" : "Connect";
+            int alen = (int)strlen(action);
+            draw_text(fs, r.x + r.w - S(8) - text_width(fs, action, alen), text_y(fs, r.y, r.h), action, alen, C(COL_ACCENT));
+            lmax -= text_width(fs, action, alen) + S(8);
         }
         if (pl->kind == PK_UNMOUNTED) { // not mounted: dim, size on the right
             char sz[32]; // unlabelled volumes already show their size: show the filesystem instead
@@ -1144,13 +1201,15 @@ static void draw_item_icon_big(Pane *p, Entry *e, f32 ix, f32 iy, f32 isz, bool 
         return;
     }
     const char *name = rel_base(e->name);
+    char ext[24];
+    path_ext_lower(name, ext, sizeof ext);
     if (!pane_is_archive(p) && thumb_capable(name) && atomic_load_explicit(&e->meta, memory_order_acquire) == META_READY) {
         char full[PATH_MAX];
         path_join(full, sizeof full, p->path, e->name);
         SDL_Texture *t;
         int tw, th;
         if (thumb_get(full, e->mtime, (int)isz, &t, &tw, &th)) {
-            render_tex_fit(t, tw, th, ix, iy, isz, true, cut);
+            render_tex_fit(t, tw, th, ix, iy, isz, strcmp(ext, "svg") != 0, cut);
             return;
         }
     }
@@ -3338,14 +3397,15 @@ typedef struct {
     u32 more;       // items not shown
     char act[NAME_MAX + 64];
     bool strong;    // there's a drop target (the action line is shown)
-    f32 w, h, row_h, pad;
+    f32 w, h, row_h, pad, icon_size;
 } DragCard;
 
 static void drag_card_build(DragCard *c) {
     memset(c, 0, sizeof *c);
     Pane *p = A.drag_pane;
+    int limit = p && p->view == VIEW_GRID && p->icon_px >= 128 ? 1 : DRAG_CARD_ROWS;
     if (p && p->order && p->L)
-        for (u32 i = 0; i < p->count && c->n < DRAG_CARD_ROWS; i++)
+        for (u32 i = 0; i < p->count && c->n < limit; i++)
             if (p->sel[p->order[i]]) c->e[c->n++] = &p->L->entries[p->order[i]];
     u32 total = p ? p->sel_count : 0;
     c->more = total > (u32)c->n ? total - (u32)c->n : 0;
@@ -3359,47 +3419,50 @@ static void drag_card_build(DragCard *c) {
     }
     c->strong = c->act[0] != 0;
     Font *f = &A.font_small;
-    c->row_h = roundf(S(24));
+    c->icon_size = roundf(S(p && p->view == VIEW_GRID ? p->icon_px : p && p->view == VIEW_LIST ? p->listv_px : 16));
+    c->row_h = MAX(roundf(S(24)), c->icon_size + roundf(S(8)));
     c->pad = roundf(S(6));
     f32 tw = 0;
     for (int i = 0; i < c->n; i++) {
         const char *nm = rel_base(c->e[i]->name);
-        tw = MAX(tw, text_width(f, nm, (int)strlen(nm)) + S(24));
+        tw = MAX(tw, text_width(f, nm, (int)strlen(nm)) + c->icon_size + S(8));
     }
     if (c->act[0]) tw = MAX(tw, text_width(f, c->act, (int)strlen(c->act)));
-    c->w = roundf(CLAMP(tw + S(20), S(120), S(320)));
-    int rows = c->n + (c->more ? 1 : 0) + (c->act[0] ? 1 : 0);
-    c->h = roundf(c->pad * 2 + c->row_h * MAX(rows, 1) + (c->act[0] ? S(5) : 0));
+    c->w = roundf(CLAMP(tw + S(20), MAX(S(120), c->icon_size + S(32)), MAX(S(320), c->icon_size + S(160))));
+    f32 small_row = roundf(S(24));
+    c->h = roundf(c->pad * 2 + c->row_h * c->n + small_row * ((c->more ? 1 : 0) + (c->act[0] ? 1 : 0)) +
+                  (c->act[0] ? S(5) : 0));
+    if (!c->n && !c->more && !c->act[0]) c->h += small_row;
 }
 
-// square: no rounded corners or shadow (X11's card outside the window is a plain window: no transparency)
+// X11's card outside the window is square because its window has no transparency.
 static void drag_card_paint(const DragCard *c, f32 x, f32 y, bool square) {
     Font *f = &A.font_small;
     f32 r = square ? 0 : S(8);
-    if (!square) draw_rrect(x + S(1), y + S(3), c->w, c->h, r, CA(0x000000, 0.35f));
-    draw_rrect(x, y, c->w, c->h, r, C(c->strong ? COL_SEL_FOCUS : COL_BORDER));
-    draw_rrect(x + 1, y + 1, c->w - 2, c->h - 2, MAX(0.f, r - 1), C(COL_POPUP));
-    f32 is = roundf(S(16)), lx = x + roundf(S(10)), ty = y + c->pad;
+    draw_rrect(x, y, c->w, c->h, r, C(COL_POPUP));
+    draw_rrect_outline(x, y, c->w, c->h, r, MAX(1.f, S(1)), CA(COL_ACCENT, c->strong ? 0.4f : 0.24f));
+    f32 is = c->icon_size, lx = x + roundf(S(10)), ty = y + c->pad;
     for (int i = 0; i < c->n; i++, ty += c->row_h) {
         Entry *e = c->e[i];
         const char *nm = rel_base(e->name);
         f32 iy = roundf(ty + (c->row_h - is) * 0.5f);
-        if (e->flags & ENT_DIR) draw_dir_icon(lx, iy, is, nm, e->flags & ENT_HIDDEN);
-        else if (!draw_icon_for_name(lx, iy, is, nm, e->mflags & MF_EXEC)) draw_file_icon(lx, iy, is, file_color(e));
+        draw_item_icon_big(A.drag_pane, e, lx, iy, is, false);
         f32 nx = lx + is + roundf(S(8));
         draw_text_fit(f, nx, text_y(f, ty, c->row_h), x + c->w - roundf(S(10)) - nx, nm, (int)strlen(nm), C(COL_TEXT), 0);
     }
     if (c->more) {
         char m[48];
         snprintf(m, sizeof m, "+ %u item%s", c->more, c->more == 1 ? "" : "s");
-        draw_text(f, lx, text_y(f, ty, c->row_h), m, (int)strlen(m), C(COL_TEXT_DIM));
-        ty += c->row_h;
+        draw_text(f, lx, text_y(f, ty, roundf(S(24))), m, (int)strlen(m), C(COL_TEXT_DIM));
+        ty += roundf(S(24));
     }
     if (c->act[0]) { // what the drop does, under a line
         ty += S(2);
         if (g_show_separators) draw_rect(x + S(8), ty, c->w - S(16), 1, C(COL_BORDER));
         ty += S(3);
-        draw_text_fit(f, lx, text_y(f, ty, c->row_h), c->w - S(20), c->act, (int)strlen(c->act), C(COL_ACCENT), 0);
+        u32 action_text = rgb_luma(COL_POPUP) > 0.55f ? COL_ACCENT :
+                          rgb_mix(COL_ACCENT, surface_foreground_color(COL_POPUP, false, false), 0.55f);
+        draw_text_fit(f, lx, text_y(f, ty, roundf(S(24))), c->w - S(20), c->act, (int)strlen(c->act), C(action_text), 0);
     }
 }
 
@@ -3416,8 +3479,8 @@ static void draw_drag_badge(void) {
 static u32 *drag_badge_pixels(bool square, int *w, int *h) {
     DragCard dc;
     drag_card_build(&dc);
-    *w = (int)ceilf(dc.w + (square ? 0 : S(2)));
-    *h = (int)ceilf(dc.h + (square ? 0 : S(4)));
+    *w = (int)ceilf(dc.w);
+    *h = (int)ceilf(dc.h);
     SDL_Texture *t = SDL_CreateTexture(A.ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, *w, *h);
     if (!t) return NULL;
     SDL_Texture *prev = SDL_GetRenderTarget(A.ren);
@@ -3700,7 +3763,9 @@ static void draw_preview(void) {
         f32 tw = (f32)pv->w, th = (f32)pv->h, sc = MIN(w / tw, vh / th);
         sc = MIN(sc, 2.f * A.scale); // don't blow up tiny icons too much
         SDL_FRect dst = {roundf(x + (w - tw * sc) * 0.5f), roundf(y + (vh - th * sc) * 0.5f), roundf(tw * sc), roundf(th * sc)};
-        draw_rect(dst.x - 1, dst.y - 1, dst.w + 2, dst.h + 2, C(COL_FIELD));
+        char ext[24];
+        path_ext_lower(name, ext, sizeof ext);
+        if (strcmp(ext, "svg")) draw_rect(dst.x - 1, dst.y - 1, dst.w + 2, dst.h + 2, C(COL_FIELD));
         draw_flush();
         SDL_RenderTexture(A.ren, A.pv_tex, NULL, &dst);
         y += vh + S(16);
