@@ -1,6 +1,6 @@
 # File Explorer - RPM package for Fedora and openSUSE (built on OBS: home:AlexMedela/file-explorer, see _service).
 Name:           file-explorer
-Version:        0.9.0
+Version:        0.11.2
 Release:        0
 Summary:        Just another file explorer: fast, keyboard-first, GPU-rendered
 License:        MIT
@@ -54,3 +54,5 @@ DESTDIR=%{buildroot} PREFIX=%{_prefix} ./install.sh
 %{_datadir}/licenses/file-explorer/
 
 %changelog
+* Sat Nov 14 2026 AlexMedela <70584290+AlexMedela@users.noreply.github.com> - 0.11.2-0
+- Release 0.11.2.

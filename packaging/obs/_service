@@ -1,11 +1,11 @@
-<!-- OBS (build.opensuse.org, home:AlexMedela/file-explorer): takes the source from GitHub, named after the latest
-     release tag (v0.9.0 -> 0.9.0; the release workflow triggers it), makes the source tarball on the server (the build
+<!-- OBS (build.opensuse.org, home:AlexMedela/file-explorer): checks out the latest release tag from GitHub,
+     names the archive from that tag (v0.11.2 -> 0.11.2), makes the source tarball on the server (the build
      roots of Debian / Ubuntu / Fedora have no obs-service-* tools) and builds the RPM (spec) and Debian (debian.*) packages. -->
 <services>
   <service name="tar_scm">
     <param name="url">https://github.com/AlexMedela/file-explorer.git</param>
     <param name="scm">git</param>
-    <param name="revision">main</param>
+    <param name="revision">@PARENT_TAG@</param>
     <param name="versionformat">@PARENT_TAG@</param>
     <param name="versionrewrite-pattern">v(.*)</param>
     <param name="filename">file-explorer</param>

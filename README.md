@@ -63,7 +63,7 @@ Installing never replaces your current file manager or file picker: switch those
 All keys: [docs/keys.md](docs/keys.md)
 
 ## Docs
-[Install](docs/install.md) · [Keys](docs/keys.md) · [Settings](docs/settings.md) · [Integration](docs/integration.md) · [Building](docs/building.md) · [Architecture](docs/architecture.md)
+[Install](docs/install.md) · [Keys](docs/keys.md) · [Settings](docs/settings.md) · [Integration](docs/integration.md) · [Building](docs/building.md) · [Maintenance](MAINTENANCE.md) · [Architecture](docs/architecture.md)
 
 ## Thanks
 To everyone who sent code, reported bugs or asked for features:

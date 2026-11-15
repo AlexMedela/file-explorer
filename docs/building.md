@@ -36,6 +36,8 @@ At runtime:
 
 `file-explorer --version` prints the version and the SDL it runs on (include it in bug reports).
 
+For release preparation and package version maintenance, see [MAINTENANCE.md](../MAINTENANCE.md).
+
 
 `FE_DEBUG_DND=1` logs what dragging files out to other apps does (X11 / Wayland protocol steps) on stderr, for drags
 that misbehave on some desktop.

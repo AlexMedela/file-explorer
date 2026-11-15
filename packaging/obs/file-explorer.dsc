@@ -2,7 +2,7 @@ Format: 1.0
 Source: file-explorer
 Binary: file-explorer
 Architecture: any
-Version: 0.9.0-1
+Version: 0.11.2-1
 Maintainer: AlexMedela <70584290+AlexMedela@users.noreply.github.com>
 Homepage: https://github.com/AlexMedela/file-explorer
 Standards-Version: 4.7.0
