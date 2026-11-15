@@ -30,8 +30,12 @@ fixes the context submenus and records the conflict review.
   height back to file content; split panes decide this independently.
 - **Integrated header:** Tabs or navigation share the first row with themed
   window controls. Hiding those controls releases their width. The label can
-  show File-Explorer, the hostname, custom text, or nothing. Desktop title-bar
-  mode remains available, and older title-bar settings remain compatible.
+  show File-Explorer, the hostname, custom text, or nothing. The original app
+  logo appears beside a visible label in the active accent colour and has its
+  own visibility switch. Hiding the label gives its row's height to the left
+  sidebar while keeping window controls on the content's top row. Desktop
+  title-bar mode remains available, and older title-bar settings remain
+  compatible.
 
 ### Icons, files, menus, terminal, and Trash
 
@@ -48,7 +52,10 @@ fixes the context submenus and records the conflict review.
   icons follow the selected artwork while preserving the appropriate fallback.
 - **Text editing:** Path, search, and other focused fields have a visible
   animated caret, accent selection, and click, drag, Shift-click, double-click,
-  and triple-click editing. Clickable path segments keep a pointer cursor.
+  and triple-click editing. Settings fields show a caret only while focused;
+  opening Options leaves search unfocused, and clicking another control clears
+  its caret. After input stops, focused carets use a slow, soft blink. Clickable
+  path segments keep a pointer cursor.
 - **Context menus:** Views, Sort by, and Group by now use the same connected
   submenu path as Open With. Their rounded joins, mouse travel, click handling,
   keyboard navigation, and side selection near a window edge share one model.
@@ -67,6 +74,27 @@ fixes the context submenus and records the conflict review.
   use their own icons, while system themes use `user-trash` and, when available,
   `user-trash-full`. Full/empty icon caches follow measured contents and
   directory-watch events.
+
+### Network locations
+
+- Network now contains saved servers, detected system mounts, local SMB/NFS
+  exports, and configured rclone remotes in one section. The Network menu can
+  rescan locations and open rclone configuration. Configured NFS, SMB, and
+  rclone mount entries remain available after unmounting.
+- Connect to server offers GVfs, KDE KIO Fuse, or an existing system NFS/SMB
+  mount when the required backend is available. The selected method is saved
+  per server; older saved entries default to GVfs. The form scrolls within a
+  fixed dialog while keeping its action buttons visible.
+- rclone mounts and configured remotes share one sidebar row even when mount
+  discovery runs before the rclone status poll. A transient empty remote list
+  during unmount does not remove the reconnect row. The edit action uses a
+  Nerd Font pencil when available, with a drawn pencil fallback.
+- Generic rclone icons follow the selected file icon theme. Custom themes can
+  override a remote's icon with `net-<remote>.svg`, `net-<backend>.svg`, or
+  `net-<default-icon>.svg`, in that priority order; provider logos remain.
+- The old immutable-distros guide was removed; the active connection-method
+  and mount behavior is documented in `docs/settings.md` and
+  `docs/integration.md`.
 
 ## Vulkan glyph atlas fix
 
@@ -220,6 +248,11 @@ inspection is more useful than its raw whole-file diff when tracing behavior.
 
 ## Verification
 
+- The Fedora `fedora-build` release build and offscreen M9/M10 self-tests
+  passed after follow-up commit `9830b2b`, including the rclone
+  mount-transition, settings focus, and hidden-header layout checks. M7
+  passed after the network/icon changes. The standalone text-caret animation
+  test passed, and `git diff --check` found no whitespace errors.
 - Fedora `fedora-build` Distrobox completed a release `bash build.sh` after
   the connected-submenu fix and after the terminal draw-order fix.
 - Offscreen native M6, M8, M9, and M11 self-tests passed after that fix.
