@@ -13,7 +13,7 @@ export DEBIAN_FRONTEND=noninteractive
 echo "== packages"
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends build-essential cmake ninja-build pkg-config git curl ca-certificates file \
-  libtool-bin desktop-file-utils \
+  libtool-bin desktop-file-utils librsvg2-bin \
   libfreetype-dev libharfbuzz-dev libfontconfig1-dev libarchive-dev libfuse3-dev libssl-dev \
   libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxtst-dev libxkbcommon-dev \
   libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libvulkan-dev libdrm-dev libgbm-dev \
@@ -43,6 +43,12 @@ export PKG_CONFIG_PATH=$DEPS/lib/pkgconfig
 rm -rf build AppDir
 CFLAGS_PKG="-O2 -g0" LDFLAGS_PKG="-Wl,-rpath,\$ORIGIN/../lib" ./build.sh package
 DESTDIR=$PWD/AppDir PREFIX=/usr ./install.sh >/dev/null
+# The AppImage icon (.DirIcon) must be a PNG: appimagetool only makes it from <Icon>.png in the AppDir root, and
+# linuxdeploy puts the SVG there whenever there is one, so the AppImage ships a 256x256 PNG instead of the SVG.
+ICON=AppDir/usr/share/icons/hicolor/256x256/apps/dev.fileexplorer.png
+mkdir -p "$(dirname "$ICON")"
+rsvg-convert -w 256 -h 256 -o "$ICON" packaging/dev.fileexplorer.svg
+rm -r AppDir/usr/share/icons/hicolor/scalable
 
 echo "== AppImage"
 curl -fsSLo /tmp/linuxdeploy "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$ARCH.AppImage"
@@ -54,7 +60,7 @@ export LDAI_UPDATE_INFORMATION="gh-releases-zsync|AlexMedela|file-explorer|lates
 cd "$OUT"
 /tmp/linuxdeploy --appdir "$OLDPWD/AppDir" -e "$OLDPWD/AppDir/usr/bin/file-explorer" \
   -d "$OLDPWD/AppDir/usr/share/applications/dev.fileexplorer.desktop" \
-  -i "$OLDPWD/AppDir/usr/share/icons/hicolor/scalable/apps/dev.fileexplorer.svg" --output appimage >/tmp/linuxdeploy.log 2>&1 ||
+  -i "$OLDPWD/$ICON" --output appimage >/tmp/linuxdeploy.log 2>&1 ||
   { tail -30 /tmp/linuxdeploy.log; exit 1; }
 sha256sum "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256"
 ls -la "$OUT"
