@@ -66,8 +66,9 @@ When running in Distrobox, detection also reads the host configuration under
 These icons indicate configuration, not live server availability. Unreadable
 files are skipped. Samba variable substitutions, registry-backed shares,
 nonstandard include layouts, and WebDAV configurations for other servers are
-not detected. Paths are matched directly; aliases through symbolic links are
-not resolved. No remote network requests are made.
+not detected. Paths are matched directly, with a fallback for parent-directory
+symbolic links when the folder name matches a configured share. No remote
+network requests are made.
 
 The parser regression checks run headlessly:
 

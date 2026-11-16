@@ -39,6 +39,22 @@ int main(void) {
     // A root exported by several protocols retains every detected kind.
     share_add(&shares, "/srv/media", LOCAL_SHARE_NFS);
     assert(local_share_kind(&shares, "/srv/media") == (LOCAL_SHARE_SMB | LOCAL_SHARE_NFS));
+    // An export configured via the real path also badges the same folder
+    // when its parent is reached through a symlink.
+    char actual[PATH_MAX], alias[PATH_MAX], exported[PATH_MAX], via_alias[PATH_MAX];
+    path_join(actual, sizeof actual, dir, "actual"); assert(!mkdir(actual, 0700));
+    path_join(alias, sizeof alias, dir, "alias"); assert(!symlink(actual, alias));
+    path_join(exported, sizeof exported, actual, "backups"); assert(!mkdir(exported, 0700));
+    path_join(via_alias, sizeof via_alias, alias, "backups");
+    share_add(&shares, exported, LOCAL_SHARE_NFS);
+    assert(local_share_kind(&shares, via_alias) == LOCAL_SHARE_NFS);
+    char via_alias_slash[PATH_MAX]; size_t alias_len = strlen(via_alias);
+    assert(alias_len + 1 < sizeof via_alias_slash);
+    memcpy(via_alias_slash, via_alias, alias_len);
+    via_alias_slash[alias_len] = '/'; via_alias_slash[alias_len + 1] = 0;
+    assert(local_share_kind(&shares, via_alias_slash) == LOCAL_SHARE_NFS);
+    assert(!local_share_contains(&shares, alias));
+    assert(!local_share_contains(&shares, actual));
     // Cyclic Samba includes terminate, and re-reading never duplicates roots.
     int before = shares.count;
     snprintf(config, sizeof config, "[global]\ninclude=%s\n", file);
@@ -63,6 +79,6 @@ int main(void) {
     shares_read_at(&shares, file, SHARE_SAMBA, 0, dir);
     assert(local_share_contains(&shares, "/home/me/custom-user-share"));
     unlink(userfile); rmdir(users); unlink(hostinc);
-    unlink(file); unlink(inc); rmdir(dir);
+    unlink(file); unlink(inc); rmdir(exported); unlink(alias); rmdir(actual); rmdir(dir);
     puts("local shares: passed");
 }

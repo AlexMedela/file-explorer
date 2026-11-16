@@ -102,6 +102,22 @@ static unsigned local_share_kind(const LocalShares *s, const char *path) {
     size_t n = strlen(path); while (n > 1 && path[n - 1] == '/') n--;
     for (int i = 0; i < s->count; i++)
         if (strlen(s->paths[i]) == n && !strncmp(s->paths[i], path, n)) return s->kinds[i];
+    // A parent directory can be a symlink (for example /mnt -> /var/mnt).
+    // Only resolve plausible share roots, since this lookup runs while drawing
+    // folders and resolving arbitrary network paths could stall the window.
+    const char *name = path + n;
+    while (name > path && name[-1] != '/') name--;
+    size_t name_len = (size_t)(path + n - name);
+    bool candidate = false;
+    for (int i = 0; i < s->count; i++)
+        if (strlen(path_basename(s->paths[i])) == name_len &&
+            !strncmp(path_basename(s->paths[i]), name, name_len)) { candidate = true; break; }
+    if (candidate) {
+        char resolved[PATH_MAX];
+        if (realpath(path, resolved))
+            for (int i = 0; i < s->count; i++)
+                if (!strcmp(s->paths[i], resolved)) return s->kinds[i];
+    }
     return false;
 }
 

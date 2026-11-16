@@ -25,6 +25,8 @@
   exposed by Distrobox, with protocol badges on the base folder icon.
 - Consistent lower-right share, symlink and Git repository badges; custom themes
   can replace each badge SVG. See [the customization guide](docs/custom-icons.md).
+- A shared folder keeps its share badge when its parent is reached through a
+  symbolic link (for example /mnt -> /var/mnt).
 - Built-in SVG grid thumbnails and preview rendering, plus host application
   discovery and launching for Open with in Distrobox.
 - Mouse caret placement and drag/word selection in text fields; thicker
