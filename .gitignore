@@ -4,3 +4,4 @@ __pycache__/
 AppDir/
 dist/
 docs/checkpoint.md
+AGENTS.md
