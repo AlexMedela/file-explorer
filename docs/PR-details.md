@@ -6,7 +6,10 @@ This branch updates the native C/SDL3 file explorer's appearance and desktop
 integration while retaining its file operations, split panes, and keyboard
 navigation. It was rebased from `06180f0` onto `7698368`; all nine commits
 were replayed without skipping or aborting. A follow-up commit, `e8da701`,
-fixes the context submenus and records the conflict review.
+fixes the context submenus and records the conflict review. Four later commits
+add the follow-up work described below: canceled operations keep their
+progress, compression reports its errors, share badges survive a symlinked
+parent, and the local agent instructions stay out of the repository.
 
 ### Appearance and navigation
 
@@ -246,6 +249,47 @@ git range-diff 06180f0..94d0110 7698368..469bc0b
 The original UI checkpoint extensively reformatted `src/app.c`; function-level
 inspection is more useful than its raw whole-file diff when tracing behavior.
 
+## Follow-up work
+
+Three fixes landed after the UI revamp, each in its own commit:
+
+| Commit | Change |
+| --- | --- |
+| `b19b559` | A canceled operation keeps its progress and says so, in red |
+| `1791a8f` | Compression reports what went wrong and keeps UTF-8 entry names |
+| `67a2940` | A shared folder keeps its badge when its parent is a symlink |
+| `c79f3b8` | The local agent instructions stay out of the repository |
+
+**Canceled operations.** Canceling a copy, move, delete, extraction or compression
+used to move the card to 100% and report it as finished. `op_cancelled()` takes a
+`const Op *` now (`src/ops.c`), so the drawing code can ask a finished operation
+whether it was canceled. `op_frac()` in `src/app.c` returns the fraction the
+operation reached instead of 1.0 for a canceled one, and `op_detail()` prints
+"Canceled · N% · <last item>", reading the item under `op->mtx`. `op_title()` in
+`src/render.c` says "Canceled: Copied 3 items" (or "Canceled after N errors"), and
+both the progress card and the transfer queue draw the bar in `COL_DANGER` and the
+detail line in `COL_DANGER_TEXT`. `docs/keys.md` and the changelog describe the
+new state.
+
+**Compression errors.** `compress_add()` in `src/archive.c` reports an unreadable
+file, an unreadable folder and a failed write through `op_error()`, and
+`run_compress()` reports a failing `archive_write_close()`; the partial archive is
+removed instead of being renamed into place. `op_finished()` in `src/app.c` shows
+the message in a toast, so the error is not only on the card. `main()` sets
+`LC_CTYPE` to `C.UTF-8` (`src/main.c` includes `<locale.h>`), so libarchive writes
+entry names with their accents and spaces. The M8 self-test now drives compression
+through the real menu (`menu_open()` + `menu_activate()`), compresses a folder with
+an accented name and one with a space, and checks that a source that disappears
+after the selection fails instead of producing an empty archive.
+
+**Share badges through a symlinked parent.** `local_share_kind()` in
+`src/local_shares.c` matched the folder path exactly, so an export configured as
+`/var/mnt/media` lost its badge when it was reached through `/mnt/media`. It now
+also tries the resolved path, but only when the folder name matches a configured
+share first, so the lookup stays cheap while drawing. `tools/local-shares-selftest.c`
+covers the symlinked parent, the trailing slash, and the case where the alias and
+the real path are not shares themselves.
+
 ## Verification
 
 - The Fedora `fedora-build` release build and offscreen M9/M10 self-tests
@@ -276,6 +320,16 @@ inspection is more useful than its raw whole-file diff when tracing behavior.
 - Git whitespace and source ASCII checks passed; no conflict markers or
   unmerged paths remained. The user confirmed that a submenu near a window
   edge opens on the side with space.
+- The follow-up commits were built one by one in the Fedora `fedora-build`
+  Distrobox: every commit compiles on its own with no compiler warnings.
+  The working tree passes the plain `--selftest` and the git, grep, cmp and
+  M4-M11 suites; M8 covers the new compression checks. The standalone
+  `tools/local-shares-selftest.c` and `tools/appearance-selftest.c` pass.
+- `--selftest-ops` fails on three drag-and-drop assertions (the file name
+  press does not start a drag), `--selftest-admin` on one snapshot-permission
+  assertion and `--selftest-du` on one disk-usage menu assertion. The same
+  failures happen on the branch point, so they are pre-existing and not
+  caused by this work.
 
 M6's tab-drop fixture now opens a second tab because the only tab is hidden.
 M9 clears Options search before checking the full scrollable list and restores
