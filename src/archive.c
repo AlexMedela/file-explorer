@@ -241,7 +241,10 @@ static void run_extract(Op *op) {
 static void compress_add(Op *op, struct archive *w, const char *path, const char *rel, char *buf) {
     if (op_cancelled(op)) return;
     struct stat st;
-    if (lstat(path, &st)) return;
+    if (lstat(path, &st)) {
+        op_error(op, "Can't read \"%s\": %s", rel, strerror(errno));
+        return;
+    }
     struct archive_entry *e = archive_entry_new();
     archive_entry_copy_stat(e, &st);
     archive_entry_set_pathname_utf8(e, rel);
@@ -255,12 +258,19 @@ static void compress_add(Op *op, struct archive *w, const char *path, const char
         op_error(op, "Can't add \xE2\x80\x9C%s\xE2\x80\x9D: %s", rel, archive_error_string(w));
     } else if (S_ISREG(st.st_mode)) {
         int fd = open(path, O_RDONLY | O_CLOEXEC);
-        if (fd >= 0) {
+        if (fd < 0) op_error(op, "Can't read \"%s\": %s", rel, strerror(errno));
+        else {
             ssize_t n;
             while ((n = read(fd, buf, 1 << 18)) > 0 && !op_cancelled(op)) {
-                archive_write_data(w, buf, (size_t)n);
+                la_ssize_t written = archive_write_data(w, buf, (size_t)n);
+                if (written != n) {
+                    const char *reason = archive_error_string(w);
+                    op_error(op, "Can't add \"%s\": %s", rel, reason ? reason : "short write");
+                    break;
+                }
                 atomic_fetch_add(&op->bytes_done, (u64)n);
             }
+            if (n < 0) op_error(op, "Can't read \"%s\": %s", rel, strerror(errno));
             close(fd);
         }
     }
@@ -268,7 +278,10 @@ static void compress_add(Op *op, struct archive *w, const char *path, const char
     atomic_fetch_add(&op->files_done, 1);
     if (S_ISDIR(st.st_mode)) {
         DIR *d = opendir(path);
-        if (!d) return;
+        if (!d) {
+            op_error(op, "Can't open folder \"%s\": %s", rel, strerror(errno));
+            return;
+        }
         struct dirent *de;
         while ((de = readdir(d)) && !op_cancelled(op)) {
             if (is_dot_or_dotdot(de->d_name)) continue;
@@ -299,7 +312,10 @@ static void run_compress(Op *op) {
     char *buf = xmalloc(1 << 18);
     for (int i = 0; i < op->nsrc && !op_cancelled(op); i++) compress_add(op, w, op->src[i], path_basename(op->src[i]), buf);
     free(buf);
-    archive_write_close(w);
+    if (archive_write_close(w) != ARCHIVE_OK) {
+        const char *reason = archive_error_string(w);
+        op_error(op, "Can't finish \"%s\": %s", path_basename(op->arc), reason ? reason : "write failed");
+    }
     archive_write_free(w);
     if (op_cancelled(op) || op->nerr) { unlink(tmp); return; }
     if (rename_noreplace(AT_FDCWD, tmp, AT_FDCWD, op->arc)) {

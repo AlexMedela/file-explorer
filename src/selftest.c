@@ -2636,13 +2636,43 @@ static int run_selftest_m8(void) {
     st_write(M8_BASE "/proj/readme.md", 77);
     pane_refresh(p); st_wait();
     st_select(p, "proj");
-    do_action(p, ACT_COMPRESS_ZIP);
+    menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+    int zip_item = -1;
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].act == ACT_COMPRESS_ZIP) zip_item = i;
+    ST_CHECK(zip_item >= 0);
+    if (zip_item >= 0) menu_activate(zip_item);
     st_wait_ops();
     ST_CHECK(st_size(M8_BASE "/proj.zip") > 0);
     st_select(p, "proj");
-    do_action(p, ACT_COMPRESS_TGZ);
+    menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+    int tgz_item = -1;
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].act == ACT_COMPRESS_TGZ) tgz_item = i;
+    ST_CHECK(tgz_item >= 0);
+    if (tgz_item >= 0) menu_activate(tgz_item);
     st_wait_ops();
     ST_CHECK(st_size(M8_BASE "/proj.tar.gz") > 0);
+    mkdir(M8_BASE "/unicode", 0755);
+    st_write(M8_BASE "/unicode/caf\xC3\xA9.txt", 10);
+    st_write(M8_BASE "/unicode/my file.txt", 10);
+    char *unicode[] = {M8_BASE "/unicode"};
+    for (int fmt = 0; fmt < 2; fmt++) {
+        Op *op = op_new(OP_COMPRESS, unicode, 1, M8_BASE);
+        op->arc = strdup(fmt ? M8_BASE "/unicode.tar.gz" : M8_BASE "/unicode.zip");
+        run_compress(op);
+        ST_CHECK(!op->nerr && st_size(op->arc) > 0);
+        if (op->nerr) fprintf(stderr, "SELFTEST unicode archive: %s\n", op->err);
+        op_free(op);
+    }
+    { // A source disappearing after selection must fail instead of producing an empty archive.
+        char *missing[] = {M8_BASE "/missing-source"};
+        Op *op = op_new(OP_COMPRESS, missing, 1, M8_BASE);
+        op->arc = strdup(M8_BASE "/missing-source.zip");
+        run_compress(op);
+        ST_CHECK(op->nerr && strstr(op->err, "missing-source") && !st_exists(op->arc));
+        op_free(op);
+    }
     st_select(p, "proj.zip");
     st_key(SDLK_RETURN, SDL_KMOD_NONE); // Enter browses the archive
     st_wait();

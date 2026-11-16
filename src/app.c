@@ -6497,6 +6497,8 @@ static void trash_size_poll(void) {
 static void op_finished(void *arg) {
   Op *op = arg;
   op->finished = true;
+  if (op->kind == OP_COMPRESS && op->nerr)
+    toast("%s", op->err);
   trash_size_refresh(); // trashed, deleted, restored, emptied...
   du_after_op(op);
   cmp_after_op(op);
@@ -16056,6 +16058,9 @@ static bool resolve_dir(const char *in, char *out) {
 static bool app_selftest(void) { return A.selftest; }
 
 int main(int argc, char **argv) {
+  // The UI and filesystem paths use UTF-8; libarchive converts entry names
+  // through LC_CTYPE when writing ZIP and tar headers.
+  if (!setlocale(LC_CTYPE, "C.UTF-8")) setlocale(LC_CTYPE, "");
   if (argc == 2 && getenv("FE_ASKPASS_FILE"))
     return askpass_main(argv[1]); // ssh wants a password (devices.c)
   if (argc == 4 && !strcmp(argv[1], "--admin-op") &&

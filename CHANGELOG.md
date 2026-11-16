@@ -34,6 +34,9 @@
 - Independent sidebar and preview-panel brightness controls.
 - Configurable application icon and improved Distrobox launcher identity,
   artwork preservation and installation-path handling.
+- Compressing to zip or tar.gz now says what went wrong (a file that vanished, an
+  unreadable folder, a failed write) instead of leaving an empty archive behind,
+  and entry names keep their accents and spaces.
 
 ## 0.11.2
 

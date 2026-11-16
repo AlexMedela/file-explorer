@@ -1,6 +1,7 @@
 // main.c - unity build entry point
 #include "base.h"
 #include <ctype.h>
+#include <locale.h>
 #include <regex.h>
 #include <dlfcn.h>
 #include <SDL3/SDL.h>
