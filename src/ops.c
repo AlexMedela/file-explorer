@@ -114,7 +114,7 @@ static void op_free(Op *op) {
     free(op);
 }
 
-static bool op_cancelled(Op *op) { return atomic_load_explicit(&op->cancel, memory_order_relaxed); }
+static bool op_cancelled(const Op *op) { return atomic_load_explicit(&op->cancel, memory_order_relaxed); }
 
 static void op_error(Op *op, const char *fmt, ...) {
     char buf[512];

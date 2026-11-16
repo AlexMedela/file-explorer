@@ -2834,9 +2834,16 @@ static void op_title(const Op *op, char *title, size_t cap) {
     static const char *dverbs[] = {"Copied", "Moved", "Moved to Trash", "Deleted", "Restored", "Extracted", "Compressed", "Synced",
                                    "Renamed", "Created", "Created"};
     bool done = atomic_load(&op->phase) == OPS_DONE;
+    bool cancelled = done && op_cancelled(op);
     int n = op->nsrc;
     const char *as = op->admin ? "As administrator: " : !done && atomic_load(&op->paused) ? "Paused: " : "";
-    if (done && op->nerr) snprintf(title, cap, "%sFinished with %d error%s", as, op->nerr, op->nerr == 1 ? "" : "s");
+    if (cancelled && op->nerr)
+        snprintf(title, cap, "%sCanceled after %d error%s", as, op->nerr, op->nerr == 1 ? "" : "s");
+    else if (cancelled && op->dst_dir)
+        snprintf(title, cap, "%sCanceled: %s %d item%s to \xE2\x80\x9C%s\xE2\x80\x9D", as, verbs[op->kind], n,
+                 n == 1 ? "" : "s", op->dst_dir[1] ? path_basename(op->dst_dir) : "/");
+    else if (cancelled) snprintf(title, cap, "%sCanceled: %s %d item%s", as, verbs[op->kind], n, n == 1 ? "" : "s");
+    else if (done && op->nerr) snprintf(title, cap, "%sFinished with %d error%s", as, op->nerr, op->nerr == 1 ? "" : "s");
     else if (done) snprintf(title, cap, "%s%s %d item%s", as, dverbs[op->kind], n, n == 1 ? "" : "s");
     else if (op->dst_dir) snprintf(title, cap, "%s%s %d item%s to \xE2\x80\x9C%s\xE2\x80\x9D", as, verbs[op->kind], n,
                                    n == 1 ? "" : "s", op->dst_dir[1] ? path_basename(op->dst_dir) : "/");
@@ -2851,12 +2858,12 @@ static void op_bar_draw(Op *op, u64 now, f32 bx, f32 by, f32 bw) {
     f64 frac = op_frac(op);
     f64 dt = op->bar_t ? (now - op->bar_t) / 1e9 : 0;
     op->bar_t = now;
-    if (done || frac < op->bar) op->bar = frac; // totals can grow (a move that had to copy): don't ease backwards
+    if (done || frac < op->bar) op->bar = frac; // done: full (or where a canceled one stopped); totals can grow (a move that had to copy): don't ease backwards
     else op->bar += (frac - op->bar) * (1.0 - exp(-dt * 12.0));
     f32 bh = roundf(S(5));
     draw_rrect(bx, by, bw, bh, bh * 0.5f, C(COL_CONTROL));
     bool idle = atomic_load(&op->paused) || (ph == OPS_QUEUED && !op->go);
-    u32 bar = done ? (op->nerr ? COL_DANGER : COL_OK) : idle ? COL_TEXT_FAINT : COL_ACCENT;
+    u32 bar = done ? (op->nerr || op_cancelled(op) ? COL_DANGER : COL_OK) : idle ? COL_TEXT_FAINT : COL_ACCENT;
     if (ph == OPS_COUNTING) {
         f32 t = (f32)fmod((f64)(now - op->t_start) / 1e9, 1.2) / 1.2f;
         draw_rrect(bx + (bw * 0.75f) * t, by, bw * 0.25f, bh, bh * 0.5f, C(bar));
@@ -2888,6 +2895,7 @@ static void draw_ops(void) {
         Op *op = A.ops[i];
         if (!op_card_visible(op, now) || op->dismissed) continue;
         bool done = atomic_load(&op->phase) == OPS_DONE;
+        bool cancelled = done && op_cancelled(op);
         bool retry = done && op->nerr && op->perm_errs && !op->admin && op_admin_ok(op->kind); // permission denied
         f32 h = roundf(S(retry ? 110 : 74));
         y -= h;
@@ -2906,7 +2914,7 @@ static void draw_ops(void) {
         op_bar_draw(op, now, x + pad, y + S(36), w - pad * 2);
         char det[600];
         op_detail(op, now, det, sizeof det);
-        draw_text_fit(fs, x + pad, y + S(48), w - pad * 2, det, (int)strlen(det), C(done && op->nerr ? COL_DANGER_TEXT : COL_TEXT_DIM), 0);
+        draw_text_fit(fs, x + pad, y + S(48), w - pad * 2, det, (int)strlen(det), C(done && (op->nerr || cancelled) ? COL_DANGER_TEXT : COL_TEXT_DIM), 0);
         if (retry) { // the same again with the administrator's rights (pkexec asks for the password)
             const char *lb = op->kind == OP_TRASH ? "Delete as administrator\xE2\x80\xA6" : "Retry as administrator";
             f32 rbw = roundf(text_width(f, lb, (int)strlen(lb)) + S(28)), rbh = roundf(S(28));
@@ -2976,6 +2984,7 @@ static void draw_queue(void) {
         A.q_row[i] = rr;
         if (i == A.q_sel) draw_rrect(rr.x, rr.y, rr.w, rr.h, S(8), C(COL_SEL_FOCUS));
         bool done = atomic_load(&op->phase) == OPS_DONE, paused = atomic_load(&op->paused);
+        bool cancelled = done && op_cancelled(op);
         // buttons, right to left: cancel / dismiss, pause / resume, down, up
         f32 bxr = rr.x + rr.w - S(6) - cs, byr = rr.y + S(6);
         A.q_close[i] = op_icon_button(bxr, byr, cs, 0, false, true);
@@ -2992,7 +3001,7 @@ static void draw_queue(void) {
         op_bar_draw(op, now, tx, rr.y + S(33), rr.x + rr.w - S(10) - tx);
         char det[600];
         op_detail(op, now, det, sizeof det);
-        draw_text_fit(fs, tx, rr.y + S(43), rr.x + rr.w - S(10) - tx, det, (int)strlen(det), C(done && op->nerr ? COL_DANGER_TEXT : COL_TEXT_DIM), 0);
+        draw_text_fit(fs, tx, rr.y + S(43), rr.x + rr.w - S(10) - tx, det, (int)strlen(det), C(done && (op->nerr || cancelled) ? COL_DANGER_TEXT : COL_TEXT_DIM), 0);
     }
     if (A.nops > nshow) { // more than fit: say where we are
         char m[48];

@@ -6753,9 +6753,11 @@ static void op_work(const Op *op, u64 *done, u64 *total) {
 }
 
 // How far along an op is, 0..1: by bytes (copy + verify), or by items when
-// there are no bytes to count (deleting).
+// there are no bytes to count (deleting). A canceled op keeps the fraction it
+// reached, so its bar stops there instead of jumping to full.
 static f64 op_frac(const Op *op) {
-  if (atomic_load(&op->phase) == OPS_DONE)
+  bool done = atomic_load(&op->phase) == OPS_DONE;
+  if (done && !op_cancelled(op))
     return 1.0;
   u32 ft = atomic_load(&op->files_total), fd = atomic_load(&op->files_done);
   u64 wd, wt;
@@ -6816,6 +6818,7 @@ static void fmt_eta(char *out, size_t cap, f64 s) {
 static void op_detail(Op *op, u64 now, char *det, size_t cap) {
   int ph = atomic_load(&op->phase);
   bool done = ph == OPS_DONE;
+  bool cancelled = done && op_cancelled(op);
   u64 bt = atomic_load(&op->bytes_total), bd = atomic_load(&op->bytes_done);
   u32 ft = atomic_load(&op->files_total), fd = atomic_load(&op->files_done);
   bool by_items = op->kind == OP_DELETE || !bt;
@@ -6826,7 +6829,16 @@ static void op_detail(Op *op, u64 now, char *det, size_t cap) {
   fmt_size(a, sizeof a, bd);
   fmt_size(b, sizeof b, bt);
   u32 nv = atomic_load(&op->files_verified);
-  if (done && op->nerr)
+  if (cancelled) { // it stopped where it was: keep that progress, and the last item in view
+    char cur[NAME_MAX + 1];
+    pthread_mutex_lock(&op->mtx);
+    snprintf(cur, sizeof cur, "%s", op->cur);
+    pthread_mutex_unlock(&op->mtx);
+    if (cur[0])
+      snprintf(det, cap, "Canceled  \xC2\xB7  %d%%  \xC2\xB7  %s", pct, cur);
+    else
+      snprintf(det, cap, "Canceled  \xC2\xB7  %d%%", pct);
+  } else if (done && op->nerr)
     snprintf(det, cap, "%s", op->err);
   else if (done && nv)
     snprintf(det, cap, "Done in %.1f s  \xC2\xB7  %u file%s verified",

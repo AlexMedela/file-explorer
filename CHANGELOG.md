@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Canceling a running operation (× on its card, or Del in the transfer queue)
+  now leaves its bar where it stopped, in red, and says "Canceled", keeping the
+  last item it was working on. This applies to copies, moves, deletes,
+  extraction and compression.
 - Vulkan now composes each frame offscreen before presenting it, so redraw passes and
   sidebar boundaries reach the window together. The sidebar separator spans the
   integrated header and sidebar; tab icons adapt to their tab background.
