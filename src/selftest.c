@@ -3064,7 +3064,7 @@ static int run_selftest_m8(void) {
         mkdir(M8_BASE "/run", 0755);
         static const struct { const char *name, *data; mode_t mode; } rf[] = {
             {"prog.AppImage", "\x7f" "ELF\x02\x01", 0755}, {"dl.AppImage", "\x7f" "ELF\x02\x01", 0644},
-            {"tool.sh", "#!/bin/sh\necho hi\n", 0755}, {"notes.sh", "#!/bin/sh\necho hi\n", 0644}, {"plain.txt", "just text\n", 0755}};
+            {"tool.sh", "#!/bin/sh\necho hi\n", 0755}, {"notes.sh", "#!/bin/sh\necho hi\n", 0644}, {"plain.txt", "just text\n", 0755}, {"bare.sh", "echo hi\n", 0755}};
         for (size_t i = 0; i < ARRAY_COUNT(rf); i++) {
             char fp[PATH_MAX];
             path_join(fp, sizeof fp, M8_BASE "/run", rf[i].name);
@@ -3113,6 +3113,12 @@ static int run_selftest_m8(void) {
         do_action(p, ACT_OPEN);
         ST_CHECK(!A.dlg.open && !strcmp(A.last_opened, M8_BASE "/run/tool.sh"));
         A.exec_open = EXEC_ASK;
+        // a .sh without #!: a script all the same, run by the shell
+        st_select(p, "bare.sh");
+        do_action(p, ACT_OPEN);
+        ST_CHECK(A.dlg.open && A.dlg.nbuttons == 4);
+        dialog_choose(0);
+        ST_CHECK(!strcmp(A.last_opened, "run:/bin/sh " M8_BASE "/run/bare.sh"));
         // a script without the executable bit, an executable text file without #!: documents, no question
         st_select(p, "notes.sh");
         do_action(p, ACT_OPEN);
