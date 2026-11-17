@@ -323,6 +323,31 @@ static void draw_glyph(const Glyph *g, f32 x, f32 y, Color c) {
     di4(a, b, d, e);
 }
 
+static void draw_glyph_scale_xy(const Glyph *g, f32 x, f32 y, f32 sx, f32 sy, Color c) {
+    draw_reserve(4, 6);
+    f32 u0 = g->x / (f32)ATLAS_SIZE, v0 = g->y / (f32)ATLAS_SIZE;
+    f32 u1 = (g->x + g->w) / (f32)ATLAS_SIZE, v1 = (g->y + g->h) / (f32)ATLAS_SIZE;
+    int a = dv(x, y, c, u0, v0), b = dv(x + g->w * sx, y, c, u1, v0);
+    int d = dv(x + g->w * sx, y + g->h * sy, c, u1, v1), e = dv(x, y + g->h * sy, c, u0, v1);
+    di4(a, b, d, e);
+}
+
+// Crop a stretched glyph horizontally without changing the GPU clip. A shaped
+// terminal glyph may cross cell colours; each slice retains its cell's colour.
+static void draw_glyph_slice_x(const Glyph *g, f32 x, f32 y, f32 sx, f32 left, f32 right, Color c) {
+    f32 width = g->w * sx;
+    if (width <= 0 || right <= left) return;
+    left = MAX(left, x); right = MIN(right, x + width);
+    if (right <= left) return;
+    draw_reserve(4, 6);
+    f32 u0 = (g->x + (left - x) / sx) / (f32)ATLAS_SIZE;
+    f32 u1 = (g->x + (right - x) / sx) / (f32)ATLAS_SIZE;
+    f32 v0 = g->y / (f32)ATLAS_SIZE, v1 = (g->y + g->h) / (f32)ATLAS_SIZE;
+    int a = dv(left, y, c, u0, v0), b = dv(right, y, c, u1, v0);
+    int d = dv(right, y + g->h, c, u1, v1), e = dv(left, y + g->h, c, u0, v1);
+    di4(a, b, d, e);
+}
+
 // Draw text with its line box top at y. Returns pen x after the text.
 static f32 draw_text(Font *f, f32 x, f32 y, const char *s, int len, Color c) {
     f32 bl = roundf(y + f->ascent);

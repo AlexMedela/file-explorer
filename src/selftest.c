@@ -4063,6 +4063,65 @@ static bool st_term_wait(Term *t, const char *needle) {
 
 static int run_selftest_m11(void) {
     st_wait();
+    // Exercise the same calt shaping used by the renderer with patched JetBrains
+    // families when installed; Fira Code is a useful independent ligature fixture.
+    {
+        const char *families[] = {"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "JetBrainsMono NF", "Fira Code"};
+        for (size_t family = 0; family < ARRAY_COUNT(families); family++) {
+            char *path = font_family_file(families[family]);
+            if (!path) continue;
+            FT_Face face;
+            if (!FT_New_Face(g_ft, path, 0, &face)) {
+                FT_Set_Pixel_Sizes(face, 0, 16);
+                hb_font_t *font = hb_ft_font_create_referenced(face);
+                const char *sequences[] = {"->", "!=", "==="};
+                for (size_t seq = 0; seq < ARRAY_COUNT(sequences); seq++) {
+                    hb_buffer_t *buf = hb_buffer_create();
+                    const char *text = sequences[seq];
+                    int len = (int)strlen(text);
+                    hb_buffer_add_utf8(buf, text, len, 0, len);
+                    term_shape_buffer(font, buf);
+                    unsigned count;
+                    hb_glyph_info_t *glyphs = hb_buffer_get_glyph_infos(buf, &count);
+                    bool changed = count != (unsigned)len;
+                    for (unsigned i = 0; i < count; i++) {
+                        ST_CHECK(glyphs[i].codepoint != 0 && glyphs[i].cluster < (unsigned)len);
+                        if (glyphs[i].cluster < (unsigned)len)
+                            changed |= glyphs[i].codepoint != FT_Get_Char_Index(face, (unsigned char)text[glyphs[i].cluster]);
+                    }
+                    ST_CHECK(changed);
+                    hb_buffer_destroy(buf);
+                }
+                hb_font_destroy(font);
+                FT_Done_Face(face);
+            }
+            free(path);
+        }
+    }
+    { // Fish can change colour between operator characters; that must not break shaping.
+        Term sample = {0};
+        sample.rows = 2; sample.cols = 8; sample.cw = 10; sample.ch = 20;
+        sample.vt = vterm_new(sample.rows, sample.cols);
+        sample.scr = vterm_obtain_screen(sample.vt);
+        vterm_screen_reset(sample.scr, 1);
+        const char *ansi = "\033[31m=\033[32m=\033[0m\r\nM";
+        vterm_input_write(sample.vt, ansi, strlen(ansi));
+        vterm_screen_flush_damage(sample.scr);
+        TCell first, second;
+        ST_CHECK(term_cell(&sample, 0, 0, &first) && term_cell(&sample, 0, 1, &second));
+        ST_CHECK(first.fg != second.fg);
+        term_fonts();
+        ST_CHECK(term_draw_run(&sample, 0, 0, 0, 14, &g_term_font) == 1);
+        ST_CHECK(term_cell_foreground(&sample, 0, 0, &first) == first.fg);
+        ST_CHECK(term_cell_foreground(&sample, 0, 1, &second) == second.fg);
+        // a glyph alone in its cell is drawn as it is: not fitted to the cell, nor cut at the run's ends
+        sample.cw = 2; // cells narrower than the glyph
+        int nv0 = g_nv;
+        ST_CHECK(term_draw_run(&sample, 1, 0, 20, 14, &g_term_font) == 0);
+        Glyph *mg = font_glyph(&g_term_font, 'M');
+        ST_CHECK(g_nv == nv0 + 4 && mg->w > 2 && fabsf((g_v[nv0 + 1].position.x - g_v[nv0].position.x) - mg->w) < 0.01f);
+        vterm_free(sample.vt);
+    }
     const char *cfg = "/tmp/fe-selftest-config";
     // --- the default terminal's config: foot (include + [colors-dark]), kitty, Alacritty (import), Ghostty (theme)
     st_write_text("/tmp/fe-selftest-config/xdg-terminals.list", "# preference\nfoot.desktop\n");
