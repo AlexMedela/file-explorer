@@ -54,6 +54,7 @@ static void settings_defaults(void) {
     A.ndev_names = 0;
     A.devs_collapsed = A.nets_collapsed = false;
     g_term_look_setting = 0;
+    g_external_terminal[0] = 0;
     A.nservers = 0;
     addon_settings_defaults();
     g_cloud_collapsed = false;
@@ -223,6 +224,7 @@ static void settings_load(void) {
                 A.nservers++;
             }
         } else if (!strcmp(k, "term_look")) g_term_look_setting = !strcmp(v, "app");
+        else if (!strcmp(k, "external_terminal")) snprintf(g_external_terminal, sizeof g_external_terminal, "%s", v);
         else if (!strcmp(k, "devices_collapsed")) A.devs_collapsed = atoi(v);
         else if (!strcmp(k, "network_collapsed")) A.nets_collapsed = atoi(v);
         else if (!strcmp(k, "close_to_tray")) A.close_to_tray = atoi(v);
@@ -485,6 +487,7 @@ static void settings_write(FILE *f) {
     fputs(g_settings_other, f);
     cloud_settings_save(f);
     fprintf(f, "term_look=%s\n", g_term_look_setting ? "app" : "match");
+    fprintf(f, "external_terminal=%s\n", g_external_terminal);
     for (int i = 0; i < A.nservers; i++) fprintf(f, "server=%s\t%s%s%s\n", A.servers[i].name, A.servers[i].uri, A.servers[i].icon[0] ? "\t" : "", A.servers[i].icon);
     fprintf(f, "icon_theme=%s\n", icon_theme_name(g_icon_theme));
     fprintf(f, "theme=%s\nfont=%s\nfont_size=%d\nrow_spacing=%d\nsmooth_scroll=%d\n",

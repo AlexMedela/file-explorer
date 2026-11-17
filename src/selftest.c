@@ -3520,6 +3520,55 @@ static int run_selftest_m9(void) {
     st_wait();
     ST_CHECK(!strcmp(active_pane()->path, M9_BASE));
 
+    // --- the external terminal (Options > Integration): empty = found as before; a chosen one is checked on Apply ---
+    ST_CHECK(!g_external_terminal[0]);
+    A.menu.n = 0;
+    menu_terminal_items(p);
+    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in external terminal"));
+    do_action(p, ACT_TERMINAL_EXTERNAL); // (recorded, not started)
+    ST_CHECK(!strncmp(A.last_opened, "terminal:", 9) && !options_is_open());
+    options_open_page(OC_INTEGRATION);
+    st_frames(1);
+    Rect tfield = {0}, tapply = {0};
+    for (int k = 0; k < g_opt.nhits; k++) {
+        if (g_opt.hits[k].part == HP_EDIT_FIELD) tfield = g_opt.hits[k].r;
+        if (g_opt.hits[k].part == HP_EDIT_APPLY) tapply = g_opt.hits[k].r;
+    }
+    ST_CHECK(tfield.w > 0 && tapply.w > 0);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tfield.x + S(10), tfield.y + tfield.h * 0.5f, SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tfield.x + S(10), tfield.y + tfield.h * 0.5f, SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+    ST_CHECK(g_opt.terminal_path_focus);
+    options_text("/proc/self/exe");
+    ST_CHECK(!g_opt.search.buf[0]); // typed into the field, not the search
+    st_key(SDLK_RETURN, SDL_KMOD_NONE);
+    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe") && strstr(A.toast, "Terminal applied: Open in exe") && !g_opt.terminal_path_focus);
+    settings_save();
+    settings_load();
+    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe"));
+    A.menu.n = 0;
+    menu_terminal_items(p);
+    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in exe"));
+    A.menu.n = 0;
+    te_set(&g_opt.terminal_path, "/nonexistent/terminal", 21, 0);
+    opt_terminal_path_apply();
+    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe") && strstr(A.toast, "not found"));
+    te_set(&g_opt.terminal_path, "/tmp", 4, 0); // a folder
+    opt_terminal_path_apply();
+    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe") && strstr(A.toast, "not executable"));
+    te_set(&g_opt.terminal_path, "sh", 2, 0); // a name on $PATH
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tapply.x + S(4), tapply.y + S(4), SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tapply.x + S(4), tapply.y + S(4), SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+    char texe[PATH_MAX];
+    const char *tname = NULL;
+    ST_CHECK(!strcmp(g_external_terminal, "sh") && find_terminal(texe, sizeof texe, &tname) && !strcmp(tname, "sh") && texe[0] == '/');
+    opt_terminal_path_sync();
+    st_shot("m9-terminal-option");
+    te_set(&g_opt.terminal_path, "", 0, 0); // Default
+    opt_terminal_path_apply();
+    ST_CHECK(!g_external_terminal[0] && strstr(A.toast, "Terminal cleared"));
+    sheet_close();
+    g_opt.cat = OC_APPEARANCE;
+
     // --- named layouts ---
     st_wait();
     st_key(SDLK_BACKSLASH, SDL_KMOD_CTRL);

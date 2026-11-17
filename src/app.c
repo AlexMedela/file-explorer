@@ -295,6 +295,7 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
 static int term_shint_cd(Term *t, const char *dir);
 static void term_tick(void);
 static int g_term_look_setting; // Options: 0 match the default terminal, 1 the app's own theme
+static char g_external_terminal[PATH_MAX]; // Options > Integration: the external terminal (empty: found as below)
 static void term_clear_scrollback(Term *t);
 static bool term_wants_mouse(Term *t, SDL_Keymod mod);
 static bool term_has_sel(Term *t);
@@ -5362,6 +5363,22 @@ static bool ssh_target_for(const char *path, SshTarget *t) {
 }
 
 static bool find_terminal(char *exe, size_t cap, const char **name) {
+    if (g_external_terminal[0]) { // the one chosen in Options (an absolute path or a name on $PATH), and only that
+        struct stat st;
+        if (g_external_terminal[0] == '/') {
+            snprintf(exe, cap, "%s", g_external_terminal);
+            *name = path_basename(g_external_terminal);
+            return !stat(exe, &st) && S_ISREG(st.st_mode) && access(exe, X_OK) == 0;
+        }
+        const char *paths = getenv("PATH");
+        char pe[8192], *save = NULL;
+        snprintf(pe, sizeof pe, "%s", paths ? paths : "");
+        for (char *d = strtok_r(pe, ":", &save); d; d = strtok_r(NULL, ":", &save)) {
+            snprintf(exe, cap, "%s/%s", d, g_external_terminal);
+            if (!stat(exe, &st) && S_ISREG(st.st_mode) && access(exe, X_OK) == 0) { *name = path_basename(g_external_terminal); return true; }
+        }
+        return false;
+    }
     // $TERMINAL, then xdg-terminal-exec (the user's preferred terminal, where set up), then the desktops' own
     static const char *cands[] = {NULL, "xdg-terminal-exec", "ptyxis", "kgx", "gnome-terminal", "konsole", "cosmic-term",
                                   "xfce4-terminal", "mate-terminal", "qterminal", "lxterminal", "tilix", "terminator",
@@ -5384,7 +5401,7 @@ static bool find_terminal(char *exe, size_t cap, const char **name) {
 static void spawn_terminal(const char *dir, char *const cmd[]) {
     char exe[PATH_MAX];
     const char *name;
-    if (!find_terminal(exe, sizeof exe, &name)) { toast("No terminal found (set $TERMINAL)"); return; }
+    if (!find_terminal(exe, sizeof exe, &name)) { toast("Terminal unavailable; choose an executable in Options > Integration"); return; }
     char *argv[32];
     int n = 0;
     argv[n++] = exe;
@@ -5624,7 +5641,10 @@ static void menu_terminal_items(Pane *p) {
     } else menu_add("Open terminal tab here", "Shift+F4", ACT_TERMINAL, true);
     Tab *ct = A.ap ? A.ap->cur : NULL;
     menu_add(ct && ct->dock_on ? "Hide terminal panel" : "Show terminal panel", "F4", ACT_TERM_PANEL, ct && !ct->term);
-    menu_add("Open in external terminal", "", ACT_TERMINAL_EXTERNAL, true);
+    static char label[NAME_MAX + 32]; // the chosen terminal by name
+    if (g_external_terminal[0]) snprintf(label, sizeof label, "Open in %s", path_basename(g_external_terminal));
+    else snprintf(label, sizeof label, "Open in external terminal");
+    menu_add(label, "", ACT_TERMINAL_EXTERNAL, true);
 }
 
 // Where Ctrl+V puts things. Tree view: into the selected folder, or the subfolder a selected file sits in (rows are
