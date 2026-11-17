@@ -4,4 +4,5 @@ __pycache__/
 AppDir/
 dist/
 docs/checkpoint.md
+/docs/PR-details.md
 AGENTS.md

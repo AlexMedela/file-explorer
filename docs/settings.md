@@ -88,7 +88,7 @@ selects that theme explicitly. Themes are discovered from `~/.local/share/icons`
 locations. Distrobox also checks `/run/host/usr/share/icons` when available. PNG/SVG files, sizes/scales and theme
 inheritance are supported; missing icons use hicolor, then bundled icons. XPM is unsupported. Install Reversal in the
 container or the shared `~/.local/share/icons` if it is not visible. Restart or open "Icon themes folder" to rescan.
-System icon choices take precedence over `FE_NERD_FONT`. See [PR details](PR-details.md) for details.
+System icon choices take precedence over `FE_NERD_FONT`. See [Custom icons](custom-icons.md) for customization details.
 
 Options > Appearance > Tabs offers **Tab position** (Above navigation / Below navigation) and **Tab style**
 (Classic Explorer / Pills). Defaults are below + pills. Pills center inside a shared rounded enclosure made from
