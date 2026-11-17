@@ -688,6 +688,13 @@ static int run_selftest_ops(void) {
     // drag "a (copy).txt" by its name onto the "dst" folder row -> move
     pane_refresh(p);
     st_wait();
+    // A debounced filesystem event can otherwise replace the listing mid-drag.
+    for (int k = 0; k < 500 && (watch_pending() || p->L_next || p->sort_pending); k++) {
+        st_frames(1);
+        SDL_Delay(2);
+    }
+    st_wait();
+    ST_CHECK(!watch_pending() && !p->L_next && !p->sort_pending);
     f32 sy = st_row_y(p, "a (copy).txt"), dy = st_row_y(p, "dst");
     f32 nx = p->ly.col_name + S(40);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, nx, sy, SDL_BUTTON_LEFT, 1, 0);
