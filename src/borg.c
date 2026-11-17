@@ -65,15 +65,6 @@ static bool borg_mount_of(const char *path, char *mp, size_t cap) {
     return true;
 }
 
-// "Backups: home" for the sidebar, from a mount folder's name.
-static void borg_mount_label(const char *mp, char *out, size_t cap) {
-    char n[PATH_MAX];
-    snprintf(n, sizeof n, "%s", path_basename(mp));
-    char *dash = strrchr(n, '-');
-    if (dash) *dash = 0;
-    snprintf(out, cap, "Backups: %s", n);
-}
-
 // Inside an archive of one of our mounts: "<mp>/<archive>[/rest]". Borg keeps absolute paths without their leading
 // '/', so rest is where the item lives on this computer. Plain string work (every frame), like snap_where.
 static bool borg_where(const char *path, char *root, size_t rcap, char *live, size_t lcap, char *name, size_t ncap) {
@@ -124,8 +115,9 @@ typedef struct BorgOpen {
     bool retry;             // asked again after a wrong one
     bool remote_tried;      // ssh:// failed for want of borg on the server: went through the folder instead
     bool sftp;              // dir is in an SFTP folder on server t (filled by the main thread, which knows the mounts)
+    bool quiet;             // mounted in the background (kept mounted): no prompt, no messages
     SshTarget t;
-    void *pane;             // where it opens (app.c checks it's still there)
+    void *pane;             // where it opens (app.c checks it's still there; NULL: nowhere)
 } BorgOpen;
 
 static bool tool_abs(const char *s, char *out, size_t cap); // units.c
@@ -207,15 +199,19 @@ static int borg_classify(const char *out, char *err, size_t cap) {
 
 // A Borg 1 repository in an SFTP folder: borg on the server ("borg serve") reads it, much faster than through the
 // mounted folder. The shared connection (devices.c) or an agent / key logs in; never a password prompt.
-static bool borg_remote_url(const BorgOpen *o, char *url, size_t cap, char *rsh, size_t rcap) {
-    if (!o->sftp) return false;
-    const SshTarget *t = &o->t;
+static void borg_rsh(char *rsh, size_t rcap) {
     char ctl[PATH_MAX], q[PATH_MAX + 16];
     ssh_control_path(ctl, sizeof ctl);
     borg_quote(ctl, q, sizeof q);
     char sshq[PATH_MAX + 8];
     borg_quote(tool("FE_SSH", "ssh"), sshq, sizeof sshq);
     snprintf(rsh, rcap, "%s -o BatchMode=yes -o ConnectTimeout=10 -o ControlMaster=auto -o %s -o ControlPersist=60", sshq, q);
+}
+
+static bool borg_remote_url(const BorgOpen *o, char *url, size_t cap, char *rsh, size_t rcap) {
+    if (!o->sftp) return false;
+    const SshTarget *t = &o->t;
+    borg_rsh(rsh, rcap);
     // ssh://user@host:port/abs/path (Borg 1: "/./x" is relative to the home folder)
     snprintf(url, cap, "ssh://%s%s%s%s%s%s%s", t->user, t->user[0] ? "@" : "", t->host, t->port[0] ? ":" : "", t->port,
              t->path[0] == '/' ? "" : "/./", t->path);
@@ -275,13 +271,15 @@ static int borg_mount_run(BorgOpen *o, const char *repo, const char *rsh) {
 static void borg_open_job(void *arg) {
     BorgOpen *o = arg;
     o->err[0] = 0;
-    if (!o->kind) o->kind = borg_repo_kind(o->dir);
+    bool url = !strncmp(o->dir, "ssh://", 6); // a saved remote one: its address (the kind was saved with it)
+    if (!o->kind && !url) o->kind = borg_repo_kind(o->dir);
     if (!o->kind) { o->rc = BORG_E_OTHER; snprintf(o->err, sizeof o->err, "This folder isn't a Borg repository"); goto done; }
     if (!borg_program(o->kind, o->prog, sizeof o->prog)) { o->rc = BORG_E_NOBORG; goto done; }
     if (!o->key[0]) snprintf(o->key, sizeof o->key, "borg:%s", o->dir);
     char rsh[PATH_MAX * 2];
     bool remote = o->kind == BORG_V1 && !o->remote_tried && borg_remote_url(o, o->repo, sizeof o->repo, rsh, sizeof rsh);
     if (!remote) snprintf(o->repo, sizeof o->repo, "%s", o->dir);
+    if (url) borg_rsh(rsh, sizeof rsh);
     borg_mount_point(o->repo, o->mp, sizeof o->mp);
     if (borg_is_mounted(o->mp)) { o->rc = BORG_OK; goto done; } // open already (another tab)
     mkdir_p(o->mp, 0700);
@@ -290,7 +288,7 @@ static void borg_open_job(void *arg) {
         if (l && o->pass[l - 1] == '\n') o->pass[l - 1] = 0;
         o->from_keyring = true;
     }
-    o->rc = borg_mount_run(o, o->repo, remote ? rsh : NULL);
+    o->rc = borg_mount_run(o, o->repo, remote || url ? rsh : NULL);
     if (remote && (o->rc == BORG_E_NOREMOTE || o->rc == BORG_E_LOGIN)) { // no borg on the server: through the folder
         rmdir(o->mp);
         o->remote_tried = true;

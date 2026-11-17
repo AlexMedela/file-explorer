@@ -61,6 +61,8 @@ static void settings_defaults(void) {
     g_term_look_setting = 0;
     g_external_terminal[0] = 0;
     A.nservers = 0;
+    A.nborgs = 0;
+    A.borgs_collapsed = false;
     addon_settings_defaults();
     g_cloud_collapsed = false;
     for (int i = 0; i < g_ncloud; i++) g_cloud[i].login = false;
@@ -233,10 +235,29 @@ static void settings_load(void) {
                 snprintf(A.servers[A.nservers].icon, sizeof A.servers[0].icon, "%s", tab2 ? tab2 + 1 : "");
                 A.nservers++;
             }
+        } else if (!strcmp(k, "borg")) { // saved Borg backup: name\trepo\ticon\tkind\tkeep
+            char f[5][PATH_MAX] = {{0}};
+            int nf = 0;
+            for (const char *c = v; nf < 5; nf++) {
+                const char *t = strchr(c, '\t');
+                snprintf(f[nf], sizeof f[nf], "%.*s", (int)(t ? t - c : (ptrdiff_t)strlen(c)), c);
+                if (!t) { nf++; break; }
+                c = t + 1;
+            }
+            int kind = atoi(f[3]);
+            if (nf >= 4 && f[1][0] && (kind == 1 || kind == 2) && A.nborgs < (int)ARRAY_COUNT(A.borgs)) {
+                snprintf(A.borgs[A.nborgs].name, sizeof A.borgs[0].name, "%s", f[0]);
+                snprintf(A.borgs[A.nborgs].repo, sizeof A.borgs[0].repo, "%s", f[1]);
+                snprintf(A.borgs[A.nborgs].icon, sizeof A.borgs[0].icon, "%s", f[2]);
+                A.borgs[A.nborgs].kind = kind;
+                A.borgs[A.nborgs].keep = kind == 2 && atoi(f[4]);
+                A.nborgs++;
+            }
         } else if (!strcmp(k, "term_look")) g_term_look_setting = !strcmp(v, "app");
         else if (!strcmp(k, "external_terminal")) snprintf(g_external_terminal, sizeof g_external_terminal, "%s", v);
         else if (!strcmp(k, "devices_collapsed")) A.devs_collapsed = atoi(v);
         else if (!strcmp(k, "network_collapsed")) A.nets_collapsed = atoi(v);
+        else if (!strcmp(k, "backups_collapsed")) A.borgs_collapsed = atoi(v);
         else if (!strcmp(k, "close_to_tray")) A.close_to_tray = atoi(v);
         else if (addon_settings_line(k, v)) {}
         else if (cloud_settings_line(k, v)) {}
@@ -505,7 +526,9 @@ static void settings_write(FILE *f) {
                 fprintf(f, "qa=%s\t%s\n", A.qa[g].items[i].label, A.qa[g].items[i].path);
     }
     for (int i = 0; i < A.ndev_names; i++) fprintf(f, "dev_name=%s\t%s\n", A.dev_names[i].key, A.dev_names[i].name);
-    fprintf(f, "devices_collapsed=%d\nnetwork_collapsed=%d\n", A.devs_collapsed, A.nets_collapsed);
+    fprintf(f, "devices_collapsed=%d\nnetwork_collapsed=%d\nbackups_collapsed=%d\n", A.devs_collapsed, A.nets_collapsed, A.borgs_collapsed);
+    for (int i = 0; i < A.nborgs; i++)
+        fprintf(f, "borg=%s\t%s\t%s\t%d\t%d\n", A.borgs[i].name, A.borgs[i].repo, A.borgs[i].icon, A.borgs[i].kind, A.borgs[i].keep);
     fprintf(f, "close_to_tray=%d\n", A.close_to_tray);
     addon_settings_save(f);
     fputs(g_settings_other, f);

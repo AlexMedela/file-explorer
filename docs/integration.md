@@ -45,9 +45,15 @@ into `$XDG_RUNTIME_DIR/fe-borg/`. That needs `borg` and borg's FUSE support for 
 or as a `borg` that says it's 2.x. An encrypted repository asks for its passphrase (it can be kept in the system
 keyring), keyfile repositories use your keys as usual, and `BORG_PASSPHRASE` / `BORG_PASSCOMMAND` from your session are
 honoured. Inside a backup the bar has **Compare with now** and **Restore…** (back to where it lives on this
-computer), copying or dragging out works as anywhere. **Close backups** (or Eject in the sidebar) unmounts them;
-unused ones are unmounted after two minutes and when the app quits. "Open as folder" (or a new tab) shows the
-repository's own files. A Borg 1 repository in an SFTP folder is read by borg on the server (`ssh://`, over the
+computer), copying or dragging out works as anywhere. Open backups show under **Backups** in the sidebar;
+**Close backups** (or Eject there) unmounts them. Unused ones are unmounted by themselves - Borg 1 after 20 seconds,
+because borg locks a mounted Borg 1 repository and backups to it would fail meanwhile, Borg 2 after two minutes - and
+all of them when the app quits. "Open as folder" (or a new tab) shows the repository's own files.
+
+**Add to sidebar** (right-click the repository, or inside its backups) keeps it under Backups: a click opens it,
+right-click > **Edit…** sets its name and icon, and for Borg 2 **Keep mounted while the app runs** mounts it in the
+background (its passphrase from the keyring; Borg 2 doesn't lock it, so backups go on). Saved backups are stored in
+the settings file as `borg=` lines. A Borg 1 repository in an SFTP folder is read by borg on the server (`ssh://`, over the
 connection the folder uses, or your ssh keys / agent); without borg there it is read through the folder, slower.
 
 ## Administrator actions

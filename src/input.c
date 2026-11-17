@@ -761,6 +761,22 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
                 return;
             }
         }
+        if (pl->kind == PK_BORGHDR) {
+            if (b->button == SDL_BUTTON_LEFT) { A.borgs_collapsed = !A.borgs_collapsed; init_places(); A.settings_dirty = true; }
+            return;
+        }
+        if (pl->kind == PK_BORG) { // a saved backup: opened (mounted first); eject: closed
+            if (b->button == SDL_BUTTON_LEFT && pl->removable && pl->eject.w > 0 && in_rect(pl->eject, x, y)) { borg_close_mount(pl->path); return; }
+            if (b->button != SDL_BUTTON_LEFT && b->button != SDL_BUTTON_MIDDLE) return;
+            if (pl->path[0]) {
+                if (b->button == SDL_BUTTON_MIDDLE) tab_new(pl->path, A.cur + 1, true);
+                else pane_navigate(active_pane(), pl->path, true);
+            } else if (pl->item >= 0 && pl->item < A.nborgs) {
+                if (pl->item < (int)ARRAY_COUNT(g_borg_keep_tried)) g_borg_keep_tried[pl->item] = 0;
+                borg_open(active_pane(), A.borgs[pl->item].repo, A.borgs[pl->item].kind);
+            }
+            return;
+        }
         if (pl->kind == PK_NETHDR && b->button == SDL_BUTTON_LEFT && pl->eject.w > 0 && in_rect(pl->eject, x, y)) {
             connect_open(-1);
             return;

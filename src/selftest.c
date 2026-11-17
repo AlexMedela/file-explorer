@@ -8458,9 +8458,6 @@ static int run_selftest_borg(void) {
     ST_CHECK(!borg_where(mp, r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !borg_where("/home/me", r, sizeof r, lv, sizeof lv, nm, sizeof nm));
     snprintf(want, sizeof want, "%s/2026-11-01/etc", mp);
     ST_CHECK(snap_where(want, r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !strcmp(lv, "/etc")); // the snapshot bar knows them too
-    char label[64];
-    borg_mount_label(mp, label, sizeof label);
-    ST_CHECK(!strcmp(label, "Backups: repo1"));
     char err[400];
     ST_CHECK(borg_classify("{\"type\": \"log_message\", \"levelname\": \"ERROR\", \"message\": \"Passphrase \\\"x\\\" wrong\", \"msgid\": \"PassphraseWrong\"}\n",
                            err, sizeof err) == BORG_E_PASS && !strcmp(err, "Passphrase \"x\" wrong"));
@@ -8543,11 +8540,11 @@ static int run_selftest_borg(void) {
     // unused for a while: unmounted
     pane_navigate(p, BORG_BASE "/home", true);
     st_wait();
-    u64 idle = g_borg_idle_ns;
-    g_borg_idle_ns = 0;
+    u64 idle = g_borg_idle_ns, idle1 = g_borg1_idle_ns;
+    g_borg1_idle_ns = 0;
     st_frames(2);
     for (int k = 0; k < 500 && st_exists(mp); k++) { st_frames(1); SDL_Delay(2); }
-    g_borg_idle_ns = idle;
+    g_borg1_idle_ns = idle1;
     ST_CHECK(g_borg_n == 0 && !borg_is_mounted(mp));
 
     // --- encrypted: asked for the passphrase (a wrong one: asked again), it goes through our askpass, never argv
@@ -8607,6 +8604,69 @@ static int run_selftest_borg(void) {
     st_borg_settle();
     ST_CHECK(strstr(A.toast, "Borg 2") && !strcmp(p->path, BORG_BASE "/home"));
     setenv("FE_BORG2", BORG_BASE "/tools/borg2", 1);
+
+    // --- saved in the sidebar: name and icon kept in the settings, opened with a click; Borg 2 can stay mounted
+    pane_navigate(p, BORG_BASE "/home", true);
+    st_borg_settle();
+    for (int k = 0; k < g_borg_n; k++) pool_submit(borg_umount_job, strdup(g_borg[k].mp));
+    g_borg_n = 0;
+    st_borg_settle();
+    st_select(p, "repo2");
+    do_action(p, ACT_BORG_SAVE);
+    st_select(p, "repo1");
+    do_action(p, ACT_BORG_SAVE);
+    do_action(p, ACT_BORG_SAVE); // (once)
+    ST_CHECK(A.nborgs == 2 && !strcmp(A.borgs[0].name, "repo2") && A.borgs[0].kind == BORG_V2 && !strcmp(A.borgs[1].repo, BORG_BASE "/home/repo1"));
+    int brow = -1;
+    for (int i = 0; i < A.nplaces; i++) if (A.places[i].kind == PK_BORG && A.places[i].item == 0) brow = i;
+    ST_CHECK(brow >= 0 && !A.places[brow].path[0] && !strcmp(A.places[brow].label, "repo2"));
+    borg_edit_open(0);
+    ST_CHECK(g_sheet.kind == SHEET_BORG && !strcmp(g_sheet.cn[CN_NAME].buf, "repo2"));
+    te_set(&g_sheet.cn[CN_NAME], "Server nightly", 14, 14);
+    snprintf(g_sheet.cn_icon, sizeof g_sheet.cn_icon, "nas");
+    g_sheet.cn_remember = true;
+    st_shot("borg-edit");
+    borg_edit_save();
+    ST_CHECK(g_sheet.kind != SHEET_BORG && !strcmp(A.borgs[0].name, "Server nightly") && !strcmp(A.borgs[0].icon, "nas") && A.borgs[0].keep);
+    borg_saved_update(1, "Laptop", "", true); // Borg 1: never kept mounted (it would be locked)
+    ST_CHECK(!strcmp(A.borgs[1].name, "Laptop") && !A.borgs[1].keep);
+    settings_save();
+    {
+        char sp[PATH_MAX], sbuf[1 << 16];
+        snprintf(sp, sizeof sp, "%s/file-explorer/settings.conf", getenv("XDG_CONFIG_HOME"));
+        st_read_text(sp, sbuf, sizeof sbuf);
+        ST_CHECK(strstr(sbuf, "\nborg=Server nightly\t" BORG_BASE "/home/repo2\tnas\t2\t1\n") && strstr(sbuf, "\nborg=Laptop\t" BORG_BASE "/home/repo1\t\t1\t0\n"));
+    }
+    // kept mounted: mounted in the background (no tab moves), never unmounted for being unused
+    for (int k = 0; k < 1000 && !g_borg_n; k++) { st_frames(1); SDL_Delay(2); }
+    st_borg_settle();
+    borg_mount_point(BORG_BASE "/home/repo2", mp, sizeof mp);
+    ST_CHECK(g_borg_n == 1 && borg_is_mounted(mp) && !strcmp(p->path, BORG_BASE "/home"));
+    g_borg_idle_ns = 0;
+    st_frames(3);
+    ST_CHECK(g_borg_n == 1 && borg_is_mounted(mp));
+    g_borg_idle_ns = idle;
+    for (int i = 0; i < A.nplaces; i++) if (A.places[i].kind == PK_BORG && A.places[i].item == 0) brow = i;
+    ST_CHECK(!strcmp(A.places[brow].path, mp) && A.places[brow].removable && !strcmp(A.places[brow].label, "Server nightly"));
+    st_shot("borg-sidebar");
+    // a click on the saved Borg 1 one: opened in the pane
+    for (int i = 0; i < A.nplaces; i++) if (A.places[i].kind == PK_BORG && A.places[i].item == 1) brow = i;
+    st_click_rect(place_rect(brow));
+    st_borg_settle();
+    char mp1[PATH_MAX];
+    borg_mount_point(BORG_BASE "/home/repo1", mp1, sizeof mp1);
+    ST_CHECK(!strcmp(p->path, mp1) && g_borg_n == 2 && p->ly.has_snapbar);
+    // closed by hand: the kept one stays closed this run; removed from the sidebar
+    borg_close_mount(mp);
+    st_borg_settle();
+    for (int k = 0; k < 500 && borg_is_mounted(mp); k++) { st_frames(1); SDL_Delay(2); }
+    st_frames(3);
+    ST_CHECK(!borg_is_mounted(mp) && g_borg_n == 1);
+    borg_forget(0);
+    ST_CHECK(A.nborgs == 1 && !strcmp(A.borgs[0].name, "Laptop"));
+    borg_forget(0);
+    borg_close(p);
+    st_borg_settle();
 
     // --- in an SFTP folder: borg on the server first (ssh://, the shared connection), no borg there: through the folder
     st_write_text(BORG_BASE "/tools/log", "");

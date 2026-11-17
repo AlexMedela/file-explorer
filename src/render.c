@@ -712,7 +712,8 @@ static void draw_sidebar(void) {
             }
             { // collapse chevron
                 bool col = pl->kind == PK_GROUP ? A.qa[pl->group].collapsed : pl->kind == PK_DEVICES ? A.devs_collapsed
-                         : pl->kind == PK_ADDONHDR ? addon_section_collapsed(pl) : pl->kind == PK_CLOUDHDR ? g_cloud_collapsed : A.nets_collapsed;
+                         : pl->kind == PK_ADDONHDR ? addon_section_collapsed(pl) : pl->kind == PK_CLOUDHDR ? g_cloud_collapsed
+                         : pl->kind == PK_BORGHDR ? A.borgs_collapsed : A.nets_collapsed;
                 draw_chevron(r.x + S(9), r.y + r.h * 0.5f, S(4), col ? 1 : 3, MAX(1.f, S(1.3f)), C(hover ? COL_TEXT_DIM : COL_TEXT_FAINT));
                 tx = r.x + S(18);
             }
@@ -759,7 +760,11 @@ static void draw_sidebar(void) {
         else if (pl->kind == PK_NETWORK || pl->kind == PK_NETSAVED) // the server's chosen icon (saved, not connected: faded)
             draw_net_icon(ix, iy, is, pl->server >= 0 && pl->server < A.nservers ? A.servers[pl->server].icon : "",
                           pl->kind == PK_NETSAVED ? 0.5f : 1.f);
-        else if (cl) { // the service's icon (not connected: faded) + a status dot while connecting / failing
+        else if (pl->kind == PK_BORG) { // a saved backup: its icon (not open: faded); one open now: the default
+            const char *repo = pl->item >= 0 && pl->item < A.nborgs ? A.borgs[pl->item].repo : pl->item < 0 && -1 - pl->item < g_borg_n ? g_borg[-1 - pl->item].dir : "";
+            const char *ic = pl->item >= 0 && pl->item < A.nborgs && A.borgs[pl->item].icon[0] ? A.borgs[pl->item].icon : borg_default_icon(repo);
+            draw_net_icon(ix, iy, is, ic, pl->path[0] ? 1.f : 0.5f);
+        } else if (cl) { // the service's icon (not connected: faded) + a status dot while connecting / failing
             draw_net_icon(ix, iy, is, cloud_icon(cl), cloud_off && cl->state != CS_FAILED && cl->state != CS_RETRY ? 0.5f : 1.f);
             draw_status_dot(ix, iy, is, cloud_busy(cl) && cl->state != CS_RETRY ? 0xE8B04B : cl->state == CS_RETRY || cl->state == CS_FAILED ? 0xE5534B : 0, hover);
         } else if (pl->kind == PK_TRASH) draw_path_icon(ix, iy, is, pl->path);
@@ -2055,8 +2060,9 @@ static void draw_snapbar(Pane *p) {
     if (!in) { // a Borg repository's own files, or the list of its backups: one button
         if (repo) snprintf(msg, sizeof msg, "%s repository  \xC2\xB7  these are borg's own files", repo == BORG_V2 ? "Borg 2 backup" : "Borg backup");
         else {
-            int k = borg_mount_index(mp);
-            tilde_path(k >= 0 ? g_borg[k].dir : mp, tl, sizeof tl);
+            int k = borg_mount_index(mp), si = k >= 0 ? borg_saved_of_mount(k) : -1;
+            if (si >= 0) snprintf(tl, sizeof tl, "%s", A.borgs[si].name);
+            else tilde_path(k >= 0 ? g_borg[k].dir : mp, tl, sizeof tl);
             snprintf(msg, sizeof msg, "Backups in %s  \xC2\xB7  read-only  \xC2\xB7  one folder per backup", tl);
         }
         draw_text_fit(fs, tx, text_y(fs, b.y, b.h), ba.x - tx - S(8), msg, (int)strlen(msg), C(COL_TEXT2), 0);

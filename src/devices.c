@@ -316,8 +316,6 @@ static bool gvfs_fuse_ensure(void) {
 
 static char phone_kind(const char *s);
 
-static void borg_mount_label(const char *mp, char *out, size_t cap); // borg.c
-
 static int network_mounts(NetMount *out, int max) {
     int n = 0;
     char gdir[PATH_MAX];
@@ -340,13 +338,11 @@ static int network_mounts(NetMount *out, int max) {
         char line[PATH_MAX * 2], src[PATH_MAX], mp[PATH_MAX], type[64];
         while (n < max && fgets(line, sizeof line, f)) {
             if (sscanf(line, "%4095s %4095s %63s", src, mp, type) != 3) continue;
-            bool borg = !strcmp(src, "borgfs") && !strncmp(type, "fuse", 4); // a Borg repository's backups (borg mount)
             if (strcmp(type, "fuse.sshfs") && strcmp(type, "cifs") && strcmp(type, "smb3") && strcmp(type, "nfs") &&
-                strcmp(type, "nfs4") && strcmp(type, "fuse.rclone") && !borg)
+                strcmp(type, "nfs4") && strcmp(type, "fuse.rclone"))
                 continue;
             mount_unescape(mp, out[n].path, sizeof out[n].path);
             mount_unescape(src, out[n].label, sizeof out[n].label); // (sshfs: user@host:/dir, which can have spaces too)
-            if (borg) borg_mount_label(out[n].path, out[n].label, sizeof out[n].label);
             out[n].sshfs = !strcmp(type, "fuse.sshfs");
             n++;
         }
