@@ -1855,8 +1855,8 @@ static int run_selftest_m7(void) {
         snprintf(path, sizeof path, "%s/TestIcons", dir);
         mkdir_p(path, 0700);
         const char *svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><rect width=\"16\" height=\"16\" fill=\"#ff00ff\"/></svg>";
-        const char *files[3] = {"python.svg", "ext-xyz.svg", "theme.conf"};
-        for (int k = 0; k < 3; k++) {
+        const char *files[4] = {"python.svg", "ext-xyz.svg", "theme.conf", "trash.svg"};
+        for (int k = 0; k < 4; k++) {
             snprintf(path, sizeof path, "%s/TestIcons/%s", dir, files[k]);
             FILE *f = fopen(path, "w");
             if (f) { fputs(k == 2 ? "base=Symbols\n" : svg, f); fclose(f); }
@@ -1869,6 +1869,7 @@ static int run_selftest_m7(void) {
         int py = icon_find("python"), fo = icon_find("folder");
         ST_CHECK(icon_src(py) && strstr(icon_src(py), "#ff00ff"));                    // override
         ST_CHECK(icon_src(fo) == g_icon_svg[2][fo]);                                   // missing: base (Symbols)
+        ST_CHECK(trash_icon(true) == icon_find("trash"));                              // own bin, no full one: keeps it
         int xi = icon_for_name("scene.XYZ", false);
         ST_CHECK(xi >= ICON_EXT_BASE && icon_glyph(xi, 16) && big_icon_tex(xi, 96)); // any extension
         ST_CHECK(icon_glyph(py, 16) != NULL);
@@ -1883,6 +1884,7 @@ static int run_selftest_m7(void) {
         if (system(path)) {}
         icon_themes_reload();
         ST_CHECK(icon_theme_find("TestIcons") < 0 && g_icon_theme == 0);
+        ST_CHECK(trash_icon(true) == icon_find("trash-full") && trash_icon(false) == icon_find("trash")); // built in: both bins
     }
     { // the logo follows the accent colour (Blue = the artwork as drawn)
         u32 saved = g_accent_custom;
@@ -2635,12 +2637,12 @@ static int run_selftest_m8(void) {
         ST_CHECK(trash_info("abc.txt", orig, sizeof orig, date, sizeof date) && !strcmp(orig, M8_BASE "/abc.txt"));
     }
     for (int k = 0; k < 300 && (A.trash_job || !A.trash_known); k++) { st_frames(1); SDL_Delay(5); }
-    ST_CHECK(A.trash_known && A.trash_size == 3); // abc.txt ("abc") is in it: the sidebar shows its size
+    ST_CHECK(A.trash_known && A.trash_size == 3 && !A.trash_empty); // abc.txt ("abc") is in it: the sidebar shows its size
     st_shot("trash");
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, p->ly.rrestore.x + 5, p->ly.rrestore.y + 5, SDL_BUTTON_LEFT, 1, 0);
     st_wait_ops();
     for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
-    ST_CHECK(A.trash_known && A.trash_size == 0); // restored: empty again
+    ST_CHECK(A.trash_known && A.trash_size == 0 && A.trash_empty); // restored: empty again (the empty bin)
     ST_CHECK(st_exists(M8_BASE "/abc.txt") && !st_exists(M8_BASE "/xdg/Trash/info/abc.txt.trashinfo") && p->count == 0);
     pane_navigate(p, M8_BASE, true); st_wait();
     st_select(p, "abc.txt");
@@ -2676,9 +2678,8 @@ static int run_selftest_m8(void) {
     st_write(M8_BASE "/xdg/Trash/info/.hidden-trash.trashinfo", 1);
     st_write(M8_BASE "/xdg/Trash/files/photo1.jpg", 5); // the same name as a file in the open folder
     st_write(M8_BASE "/xdg/Trash/info/photo1.jpg.trashinfo", 1);
-    trash_size_refresh();
-    for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
-    ST_CHECK(A.trash_known && !A.trash_empty);
+    for (int k = 0; k < 400 && (A.trash_job || A.trash_empty); k++) { st_frames(1); SDL_Delay(5); } // seen by the trash's watch
+    ST_CHECK(A.trash_known && !A.trash_empty); // (another program filled it while we were elsewhere)
     menu_open_place(ti, A.r_sidebar.x + S(40), S(200));
     te = -1;
     for (int i = 0; i < A.menu.n; i++)

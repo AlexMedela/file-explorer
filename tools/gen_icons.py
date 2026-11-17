@@ -56,7 +56,7 @@ def monokai_trash(svg):  # keeps the theme-dependent colours (#FEFEFE / #FDFDFD)
 
 # #FEFEFE marks an icon's main colour that follows the UI theme (light grey on dark themes, dark grey on
 # light ones), #FDFDFD a darker shade of it (details on a filled shape); icons.c substitutes them when parsing.
-themes.append(("Monokai", [monokai_folder(s) if is_folder(n) else monokai_trash(s) if n == "trash"
+themes.append(("Monokai", [monokai_folder(s) if is_folder(n) else monokai_trash(s) if n in ("trash", "trash-full")
                            else recolor(s, MONOKAI[cat_of.get(n, "gray")]) for n, s in zip(canon, sym)]))
 
 # de-duplicate identical SVG strings across all themes

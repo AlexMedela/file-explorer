@@ -118,6 +118,15 @@ static int icon_find(const char *name) {
     return -1;
 }
 
+// The trash's own bin (sidebar, tab, path bar): full when something is in it. A custom theme with its own bin but
+// no trash-full.svg keeps its bin rather than mixing in the built-in full one.
+static int trash_icon(bool full) {
+    int t = icon_find("trash"), f = icon_find("trash-full");
+    CustomIconTheme *c = icon_custom();
+    if (!full || f < 0 || (c && c->svg[t] && !c->svg[f])) return t;
+    return f;
+}
+
 // --- which icon for which file ---------------------------------------------
 
 typedef struct { const char *key, *icon; } IconMap;
@@ -667,6 +676,8 @@ static void icon_themes_readme(const char *dir) {
                "    python.svg        replaces a built-in icon (names below)\n"
                "    folder.svg        the plain folder; folder-src.svg, folder-docs.svg... for special folders\n"
                "    ext-blend.svg     icon for one file extension (any extension, also ones the app doesn't know)\n"
+               "    trash-full.svg    the Trash's bin when something is in it (trash.svg: empty); with only\n"
+               "                      trash.svg, that one is used either way\n"
                "    net-homelab.svg   an extra icon for network locations (Connect to server > Icon), offered\n"
                "                      whichever file icon theme is selected; a folder may hold only net-*.svg files\n\n"
                "After adding or editing files, press \"Icon themes folder\" in Options again to reload.\n\n"

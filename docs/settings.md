@@ -105,5 +105,6 @@ copy and paste, Shift+PageUp/PageDown scroll back, Ctrl+Shift+W closes, Ctrl+Tab
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`
 sets the icon for any extension, and `theme.conf` (`base=Catppuccin`) picks the set the missing icons come from.
-`net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
+`trash-full.svg` is the Trash's bin when something is in it (`trash.svg` when empty; a theme with only `trash.svg`
+uses it for both). `net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
 lists every icon name.

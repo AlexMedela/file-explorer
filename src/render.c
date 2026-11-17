@@ -139,7 +139,7 @@ static void draw_dir_icon(f32 x, f32 y, f32 s, const char *name, bool hidden) {
 
 // A folder given by its full path: the trash gets the bin, home its folder, anything else goes by its name.
 static void draw_path_icon(f32 x, f32 y, f32 s, const char *path) {
-    if (is_trash_dir(path) && draw_icon_id(x, y, s, icon_find("trash"), false)) return;
+    if (is_trash_dir(path) && draw_icon_id(x, y, s, trash_icon(A.trash_known && !A.trash_empty), false)) return;
     const char *home = getenv("HOME");
     draw_dir_icon(x, y, s, home && home[0] && !strcmp(path, home) ? "home" : path_basename(path), false);
 }
@@ -505,7 +505,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         if (h) draw_rrect(c->r.x, c->r.y, c->r.w, c->r.h, S(5), C(COL_CHIP));
         if (i == 0 && ly->crumbs_trash) {
             f32 s = roundf(S(16)), ix = roundf(c->r.x + S(8));
-            draw_icon_id(ix, roundf(c->r.y + (c->r.h - s) * 0.5f), s, icon_find("trash"), false);
+            draw_icon_id(ix, roundf(c->r.y + (c->r.h - s) * 0.5f), s, trash_icon(A.trash_known && !A.trash_empty), false);
             draw_text(f, ix + s + roundf(S(8)), ty, "Trash", 5, C(last ? COL_TEXT : COL_TEXT_DIM));
         } else if (i == 0) {
             f32 s = roundf(S(16));

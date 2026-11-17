@@ -7960,9 +7960,33 @@ static bool pane_watches(const Pane *p, const char *path) {
     return false;
 }
 
+// Keep watching path (adds the watch if it's new); false if it can't be watched.
+static bool watch_use(const char *path) {
+    int k = -1;
+    for (int i = 0; i < g_nw; i++)
+        if (!strcmp(g_w[i].path, path)) k = i;
+    if (k < 0 && g_nw < MAX_WATCHES) {
+        int wd = inotify_add_watch(g_ino, path, WATCH_MASK);
+        if (wd < 0) return false;
+        k = g_nw++;
+        memset(&g_w[k], 0, sizeof g_w[k]);
+        snprintf(g_w[k].path, sizeof g_w[k].path, "%s", path);
+        g_w[k].wd = wd;
+    }
+    if (k >= 0) g_w[k].used = true;
+    return k >= 0;
+}
+
 static void watch_sync(void) {
     if (g_ino < 0) return;
     for (int i = 0; i < g_nw; i++) g_w[i].used = false;
+    { // the trash too, while browsing elsewhere: its bin in the sidebar shows whether anything is in it
+        static u64 retry; // no files folder yet (nothing trashed so far): try again every few seconds, not every loop
+        char tf[PATH_MAX], ti[PATH_MAX];
+        trash_dirs(tf, ti, sizeof tf);
+        u64 now = now_ns();
+        if (now >= retry && !watch_use(tf)) retry = now + 3000000000ull;
+    }
     for (int t = 0; t < A.ntabs; t++)
         for (int j = 0; j < A.tabs[t]->npanes; j++) {
             Pane *p = &A.tabs[t]->pane[j];
@@ -7972,18 +7996,7 @@ static void watch_sync(void) {
                 char path[PATH_MAX];
                 if (x == 0) snprintf(path, sizeof path, "%s", p->path);
                 else path_join(path, sizeof path, p->path, p->expanded[x - 1]);
-                int k = -1;
-                for (int i = 0; i < g_nw; i++)
-                    if (!strcmp(g_w[i].path, path)) k = i;
-                if (k < 0 && g_nw < MAX_WATCHES) {
-                    int wd = inotify_add_watch(g_ino, path, WATCH_MASK);
-                    if (wd < 0) continue;
-                    k = g_nw++;
-                    memset(&g_w[k], 0, sizeof g_w[k]);
-                    snprintf(g_w[k].path, sizeof g_w[k].path, "%s", path);
-                    g_w[k].wd = wd;
-                }
-                if (k >= 0) g_w[k].used = true;
+                watch_use(path);
             }
         }
     int j = 0;
@@ -8026,6 +8039,7 @@ static void watch_process(void) {
         if (blocked || !(quiet || overdue) || now - w->last_refresh < gap) continue;
         w->dirty = false;
         w->last_refresh = now;
+        if (is_trash_dir(w->path)) trash_size_refresh(); // (measures it again: full or empty bin)
         for (int t = 0; t < A.ntabs; t++)
             for (int j = 0; j < A.tabs[t]->npanes; j++) {
                 Pane *p = &A.tabs[t]->pane[j];
