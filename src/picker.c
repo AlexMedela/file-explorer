@@ -164,7 +164,7 @@ static void draw_picker_tab(Rect s, const char *cap) {
     }
     px[n] = ax + dw; py[n++] = by;
     // fill: the body, then vertical strips under the outline down through the bar's border row
-    Color tb = C(COL_TOOLBAR);
+    Color tb = C(COL_STATUS); // (merges with the bar below)
     draw_rect(0, y0, bw, th + 1, tb);
     draw_reserve(n * 2, (n - 1) * 6);
     int base = g_nv;
@@ -182,7 +182,7 @@ static void draw_picker_tab(Rect s, const char *cap) {
 static void draw_picker_bar(Rect s) {
     Font *f = &A.font, *fs = &A.font_small;
     Pane *p = active_pane();
-    draw_rect(s.x, s.y, s.w, s.h, C(COL_TOOLBAR));
+    draw_rect(s.x, s.y, s.w, s.h, C(COL_STATUS));
     draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
     f32 pad = roundf(S(16)), bh = roundf(S(32));
     f32 by = s.y + roundf((s.h - bh) * 0.5f);

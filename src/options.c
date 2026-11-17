@@ -7,7 +7,7 @@ enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 enum {
     OPT_THEME, OPT_ACCENT, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
-    OPT_UNIFIED,
+    OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
@@ -40,6 +40,11 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_TEXT, OPT_BRAND_TEXT, "Your own name", "Shown above the sidebar instead of Explorer"},
     {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "The logo before the name above the sidebar"},
     {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED, "Unified surfaces", "Sidebar, header, preview and status bar take the file area's background; the lines between them stay"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_SIDEBAR, "Sidebar brightness", "Darker or lighter than the theme's own colour, -30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_HEADER, "Header brightness", "Tab strip, toolbar and the name above the sidebar, -30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_FILES, "File area brightness", "The background of the files, -30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_PREVIEW, "Preview panel brightness", "-30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_STATUS, "Status bar brightness", "-30% to +30%"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Font, colours, padding and cursor of terminal tabs (F4)"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_NEW, "Create theme from current colours", "Writes a JSON scheme you can edit"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_FOLDER, "Themes folder", "Open the folder and reload theme files"},
@@ -525,6 +530,7 @@ static int opt_int_get(int id) {
     case OPT_FONT_SIZE: return A.font_size;
     case OPT_ZOOM: return (int)lroundf(A.zoom * 100);
     }
+    if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) return g_surface_bright[id - OPT_BRIGHT_SIDEBAR];
     return 0;
 }
 
@@ -536,11 +542,17 @@ static void opt_int_step(int id, int dir) {
         break;
     case OPT_ZOOM: set_zoom(A.zoom + 0.1f * (f32)dir); break;
     }
+    if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) {
+        int *b = &g_surface_bright[id - OPT_BRIGHT_SIDEBAR];
+        *b = CLAMP(*b + dir * 5, -30, 30);
+        theme_apply();
+    }
     A.settings_dirty = true;
 }
 
 static void opt_int_fmt(int id, char *buf, size_t cap) {
-    if (id == OPT_ZOOM) snprintf(buf, cap, "%d%%", opt_int_get(id));
+    if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) snprintf(buf, cap, opt_int_get(id) ? "%+d%%" : "%d%%", opt_int_get(id));
+    else if (id == OPT_ZOOM) snprintf(buf, cap, "%d%%", opt_int_get(id));
     else snprintf(buf, cap, "%d px", opt_int_get(id));
 }
 
@@ -557,6 +569,8 @@ static void opt_button(int id) {
             if (access(path, F_OK) != 0 && theme_find(name) < 0) break;
         }
         if (!theme_export(path, name)) { toast("Couldn't write %s", path); break; }
+        for (int k = 0; k < SURF_COUNT; k++) // the scheme has these now (applied again they'd double); not the status bar's
+            if (k != SURF_STATUS) g_surface_bright[k] = 0;
         themes_scan();
         int t = theme_find(name);
         if (t >= 0) { g_theme_cur = t; theme_apply(); desktop_look_sync(); A.settings_dirty = true; }

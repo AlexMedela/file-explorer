@@ -3414,6 +3414,28 @@ static int run_selftest_m9(void) {
         ST_CHECK(g_unified_surfaces);
         opt_bool_toggle(OPT_UNIFIED);
         ST_CHECK(!g_unified_surfaces && !memcmp(&T, &g_theme_dark, sizeof T));
+        // brightness per part, always from the theme's own colour; the status bar is the toolbar's until moved
+        ST_CHECK(COL_STATUS == g_theme_dark.toolbar);
+        opt_int_step(OPT_BRIGHT_SIDEBAR, +1);
+        opt_int_step(OPT_BRIGHT_SIDEBAR, +1);
+        for (int k = 0; k < 8; k++) opt_int_step(OPT_BRIGHT_STATUS, -1);
+        ST_CHECK(g_surface_bright[SURF_SIDEBAR] == 10 && T.sidebar == rgb_mix(g_theme_dark.sidebar, 0xFFFFFF, 0.10f));
+        ST_CHECK(g_surface_bright[SURF_STATUS] == -30 && COL_STATUS == rgb_mix(g_theme_dark.toolbar, 0x000000, 0.30f));
+        ST_CHECK(T.bg == g_theme_dark.bg && T.toolbar == g_theme_dark.toolbar && T.preview_bg == g_theme_dark.preview_bg);
+        char buf[16];
+        opt_int_fmt(OPT_BRIGHT_SIDEBAR, buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "+10%"));
+        st_frames(2);
+        st_shot("m9-brightness");
+        settings_save();
+        settings_load();
+        theme_apply();
+        ST_CHECK(g_surface_bright[SURF_SIDEBAR] == 10 && g_surface_bright[SURF_STATUS] == -30 && !g_surface_bright[SURF_FILES]);
+        ST_CHECK(T.sidebar == rgb_mix(g_theme_dark.sidebar, 0xFFFFFF, 0.10f));
+        u32 sidebar = T.sidebar, status = COL_STATUS;
+        opt_button(OPT_THEME_NEW); // a scheme from the current colours keeps them, without applying the brightness twice
+        ST_CHECK(!g_surface_bright[SURF_SIDEBAR] && T.sidebar == sidebar && g_surface_bright[SURF_STATUS] == -30 && COL_STATUS == status);
+        memset(g_surface_bright, 0, sizeof g_surface_bright);
         g_theme_cur = saved;
         theme_apply();
     }

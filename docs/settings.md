@@ -16,6 +16,9 @@ OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is res
 on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
 `unified_surfaces=1` (Options -> Appearance -> Unified surfaces, off by default) gives the sidebar, the header (tab
 strip and toolbar), the preview panel and the status bar the file area's background; the lines between them stay.
+`sidebar_brightness`, `header_brightness`, `main_brightness` (the file area), `preview_brightness` and
+`status_brightness` (Options -> Appearance -> Surfaces, 0 by default) make that part darker (down to -30) or lighter
+(up to 30, in percent) than the theme's own colour.
 `tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a
 box on the tab strip, instead of the open tab as a card joining the folder below it.
 `title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling

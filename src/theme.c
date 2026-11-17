@@ -98,6 +98,10 @@ static Theme T = g_theme_dark; // the palette everything draws with
 static int g_theme_cur;
 static u32 g_accent_custom; // 0 = theme accent, else 0x01000000 | rgb
 static bool g_unified_surfaces; // Options: sidebar, header, preview and status bar take the file area's background
+// Options > Surfaces brightness: -30..+30 % per part (darker / lighter), 0 = the theme's own colour.
+enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_STATUS, SURF_COUNT };
+static int g_surface_bright[SURF_COUNT];
+static u32 g_status_bg; // the status bar: the toolbar's colour, unless its brightness moves it
 // The desktop's look, read off the UI thread (integration.c, "desktop look") only while Theme or File icons is System.
 static struct { bool known, light; u32 accent; char icons[64]; } g_desktop; // accent: 0 = none, else 0x01000000 | rgb
 
@@ -153,6 +157,7 @@ static const struct { const char *name; u32 rgb; } g_accents[] = {
 #define COL_WARN          (T.warn)
 #define COL_OK            (T.ok)
 #define COL_PREVIEW_BG    (T.preview_bg)
+#define COL_STATUS        (g_status_bg)
 
 static u32 rgb_mix(u32 a, u32 b, f32 t) {
     u32 out = 0;
@@ -188,11 +193,25 @@ static bool theme_is_system(void) {
     return g_theme_cur >= 0 && g_theme_cur < g_nthemes && !g_themes[g_theme_cur].file[0] && !strcmp(g_themes[g_theme_cur].name, "System");
 }
 
-// Recompute T from the selected theme + accent override.
+// A part's background moved towards black (negative) or white by its brightness setting; always from the theme's
+// own colour, so changing it twice doesn't add up.
+static u32 surface_adjust(u32 c, int part) {
+    int pct = CLAMP(g_surface_bright[part], -30, 30);
+    return pct ? rgb_mix(c, pct < 0 ? 0x000000 : 0xFFFFFF, (f32)abs(pct) / 100.f) : c;
+}
+
+// Recompute T from the selected theme, surfaces and accent override.
 static void theme_apply(void) {
     if (g_theme_cur < 0 || g_theme_cur >= g_nthemes) g_theme_cur = 0;
     T = theme_is_system() ? (g_desktop.light ? g_theme_light : g_theme_dark) : g_themes[g_theme_cur].t;
     if (g_unified_surfaces) T.sidebar = T.tabbar = T.toolbar = T.preview_bg = T.bg; // (the lines between them stay)
+    g_status_bg = surface_adjust(T.toolbar, SURF_STATUS);
+    T.sidebar = surface_adjust(T.sidebar, SURF_SIDEBAR);
+    T.tabbar = surface_adjust(T.tabbar, SURF_HEADER);
+    T.toolbar = surface_adjust(T.toolbar, SURF_HEADER);
+    T.bg = surface_adjust(T.bg, SURF_FILES);
+    T.alt_row = surface_adjust(T.alt_row, SURF_FILES);
+    T.preview_bg = surface_adjust(T.preview_bg, SURF_PREVIEW);
     u32 accent = g_accent_custom ? g_accent_custom : theme_is_system() ? g_desktop.accent : 0;
     if (accent) {
         u32 a = accent & 0xFFFFFF;

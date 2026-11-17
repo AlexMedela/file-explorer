@@ -2528,7 +2528,7 @@ static void draw_status(void) {
     A.r_xfer = A.r_size = (Rect){0, 0, 0, 0};
     if (picker_active()) { draw_picker_bar(s); return; } // Open / Save / Choose folder bar
     if (active_term()) { draw_status_term(active_term()); return; }
-    draw_rect(s.x, s.y, s.w, s.h, C(COL_TOOLBAR));
+    draw_rect(s.x, s.y, s.w, s.h, C(COL_STATUS));
     draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
     Font *f = &A.font_small;
     f32 ty = text_y(f, s.y, s.h);
@@ -2610,7 +2610,7 @@ static void draw_status(void) {
         bool hv = hot(r), on = options_is_open();
         if (hv || on) draw_rrect(r.x, r.y, r.w, r.h, S(5), on ? CA(COL_ACCENT, 0.25f) : C(COL_FIELD));
         draw_gear_icon(r.x + r.w * 0.5f, r.y + r.h * 0.5f, S(7), on ? C(COL_ACCENT) : hv ? C(COL_TEXT) : C(COL_TEXT_DIM),
-                       C(hv || on ? (on ? rgb_mix(COL_TOOLBAR, COL_ACCENT, 0.25f) : COL_FIELD) : COL_TOOLBAR));
+                       C(hv || on ? (on ? rgb_mix(COL_STATUS, COL_ACCENT, 0.25f) : COL_FIELD) : COL_STATUS));
     }
     { // features (eye): view toggles that otherwise only have a key
         Rect r = {A.r_gear.x - bw, s.y + roundf(S(3)), bw - S(2), bh};
