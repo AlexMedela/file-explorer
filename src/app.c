@@ -5362,6 +5362,18 @@ static bool ssh_target_for(const char *path, SshTarget *t) {
     return false;
 }
 
+// The terminals we know: the desktops' own and the popular ones (xdg-terminal-exec starts the user's preferred one).
+static const char *const g_terminals[] = {"xdg-terminal-exec", "ptyxis", "kgx", "gnome-terminal", "konsole", "cosmic-term",
+                                          "xfce4-terminal", "mate-terminal", "qterminal", "lxterminal", "tilix", "terminator",
+                                          "ghostty", "kitty", "alacritty", "foot", "wezterm", "rio", "st", "urxvt", "xterm"};
+
+// Is the program (by name) a terminal: one we know, or one an installed terminal app (.desktop) runs?
+static bool terminal_known(const char *name) {
+    for (size_t i = 0; i < ARRAY_COUNT(g_terminals); i++)
+        if (!strcmp(name, g_terminals[i])) return true;
+    return app_is_terminal(name);
+}
+
 static bool find_terminal(char *exe, size_t cap, const char **name) {
     if (g_external_terminal[0]) { // the one chosen in Options (an absolute path or a name on $PATH), and only that
         struct stat st;
@@ -5380,17 +5392,14 @@ static bool find_terminal(char *exe, size_t cap, const char **name) {
         return false;
     }
     // $TERMINAL, then xdg-terminal-exec (the user's preferred terminal, where set up), then the desktops' own
-    static const char *cands[] = {NULL, "xdg-terminal-exec", "ptyxis", "kgx", "gnome-terminal", "konsole", "cosmic-term",
-                                  "xfce4-terminal", "mate-terminal", "qterminal", "lxterminal", "tilix", "terminator",
-                                  "ghostty", "kitty", "alacritty", "foot", "wezterm", "rio", "st", "urxvt", "xterm"};
-    cands[0] = getenv("TERMINAL");
     const char *path_env = getenv("PATH");
-    for (size_t i = 0; i < ARRAY_COUNT(cands); i++) {
-        if (!cands[i] || !cands[i][0] || !path_env) continue;
+    for (size_t i = 0; i <= ARRAY_COUNT(g_terminals); i++) {
+        const char *cand = i ? g_terminals[i - 1] : getenv("TERMINAL");
+        if (!cand || !cand[0] || !path_env) continue;
         char pe[4096];
         snprintf(pe, sizeof pe, "%s", path_env);
         for (char *d = strtok(pe, ":"); d; d = strtok(NULL, ":")) {
-            snprintf(exe, cap, "%s/%s", d, cands[i]);
+            snprintf(exe, cap, "%s/%s", d, cand);
             if (access(exe, X_OK) == 0) { *name = path_basename(exe); return true; }
         }
     }

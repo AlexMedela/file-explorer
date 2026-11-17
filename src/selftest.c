@@ -2379,7 +2379,7 @@ static int run_selftest_m8(void) {
     // launching expands field codes (a fake app that writes its argument)
     // Exec quoting per the Desktop Entry spec: double quotes, backslash escapes, %% for a literal %
     DesktopApp fake = {"fake.desktop", "/tmp/fake.desktop", "Fake",
-                       "sh -c \"printf '%%s' \\\"$1\\\" > " M8_BASE "/launched\" sh %f", "", ";", false, false};
+                       "sh -c \"printf '%%s' \\\"$1\\\" > " M8_BASE "/launched\" sh %f", "", ";", false, false, false};
     char *files[1] = {M8_BASE "/abc.txt"};
     ST_CHECK(app_launch(&fake, files, 1));
     for (int k = 0; k < 200 && st_size(M8_BASE "/launched") <= 0; k++) SDL_Delay(5);
@@ -2430,7 +2430,7 @@ static int run_selftest_m8(void) {
 
     { // a folder opened with an app: it starts inside it; an Exec without file codes gets no argument
         DesktopApp term = {"faketerm.desktop", "/tmp/faketerm.desktop", "Fake terminal",
-                           "sh -c \"pwd > " M8_BASE "/launched; printf '%%s' \\\"$1\\\" >> " M8_BASE "/launched\" sh", "", ";", false, false};
+                           "sh -c \"pwd > " M8_BASE "/launched; printf '%%s' \\\"$1\\\" >> " M8_BASE "/launched\" sh", "", ";", false, false, false};
         char *dirs[1] = {M8_BASE "/dir"};
         ST_CHECK(app_launch(&term, dirs, 1));
         for (int k = 0; k < 200 && st_size(M8_BASE "/launched") <= 0; k++) SDL_Delay(5);
@@ -3538,29 +3538,44 @@ static int run_selftest_m9(void) {
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tfield.x + S(10), tfield.y + tfield.h * 0.5f, SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tfield.x + S(10), tfield.y + tfield.h * 0.5f, SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
     ST_CHECK(g_opt.terminal_path_focus);
-    options_text("/proc/self/exe");
+    st_write_text(M9_BASE "-bin/foot", "#!/bin/sh\n"); // a stand-in terminal (a name we know)
+    chmod(M9_BASE "-bin/foot", 0755);
+    options_text(M9_BASE "-bin/foot");
     ST_CHECK(!g_opt.search.buf[0]); // typed into the field, not the search
     st_key(SDLK_RETURN, SDL_KMOD_NONE);
-    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe") && strstr(A.toast, "Terminal applied: Open in exe") && !g_opt.terminal_path_focus);
+    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "Terminal applied: Open in foot") && !g_opt.terminal_path_focus);
     settings_save();
     settings_load();
-    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe"));
+    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot"));
     A.menu.n = 0;
     menu_terminal_items(p);
-    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in exe"));
+    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in foot"));
     A.menu.n = 0;
     te_set(&g_opt.terminal_path, "/nonexistent/terminal", 21, 0);
     opt_terminal_path_apply();
-    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe") && strstr(A.toast, "not found"));
+    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "not found"));
     te_set(&g_opt.terminal_path, "/tmp", 4, 0); // a folder
     opt_terminal_path_apply();
-    ST_CHECK(!strcmp(g_external_terminal, "/proc/self/exe") && strstr(A.toast, "not executable"));
-    te_set(&g_opt.terminal_path, "sh", 2, 0); // a name on $PATH
+    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "not executable"));
+    te_set(&g_opt.terminal_path, "/proc/self/exe", 14, 0); // a program, but not a terminal
+    opt_terminal_path_apply();
+    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "isn't a terminal"));
+    te_set(&g_opt.terminal_path, "sh", 2, 0); // a name on $PATH, not a terminal either
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tapply.x + S(4), tapply.y + S(4), SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tapply.x + S(4), tapply.y + S(4), SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "isn't a terminal"));
+    // a terminal we don't know by name, made one by its .desktop entry (Categories=TerminalEmulator)
+    DesktopApp myterm = {"myterm.desktop", "", "My Term", "\"" M9_BASE "-bin/myterm\" --new", "", ";", false, false, true};
+    g_apps = xrealloc(g_apps, (size_t)(g_napps + 1) * sizeof(DesktopApp));
+    g_apps[g_napps++] = myterm;
+    st_write_text(M9_BASE "-bin/myterm", "#!/bin/sh\n");
+    chmod(M9_BASE "-bin/myterm", 0755);
+    te_set(&g_opt.terminal_path, M9_BASE "-bin/myterm", (int)strlen(M9_BASE "-bin/myterm"), 0);
+    opt_terminal_path_apply();
+    g_napps--; // (its strings aren't ours to free)
     char texe[PATH_MAX];
     const char *tname = NULL;
-    ST_CHECK(!strcmp(g_external_terminal, "sh") && find_terminal(texe, sizeof texe, &tname) && !strcmp(tname, "sh") && texe[0] == '/');
+    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/myterm") && find_terminal(texe, sizeof texe, &tname) && !strcmp(tname, "myterm"));
     opt_terminal_path_sync();
     st_shot("m9-terminal-option");
     te_set(&g_opt.terminal_path, "", 0, 0); // Default

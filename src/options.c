@@ -452,7 +452,8 @@ static bool opt_terminal_path_valid(const char *s) {
     return strlen(s) < sizeof g_external_terminal && !strpbrk(s, "\n\r");
 }
 
-// Checked once, here (find_terminal: an executable regular file); the menus only show its name.
+// Checked once, here: an executable regular file (find_terminal) that is a terminal (terminal_known: one we know, or
+// one a .desktop entry calls a TerminalEmulator), not any program; the menus only show its name.
 static void opt_terminal_path_apply(void) {
     const char *s = g_opt.terminal_path.buf;
     if (!opt_terminal_path_valid(s)) { toast("Enter a single executable name or absolute path"); return; }
@@ -464,6 +465,11 @@ static void opt_terminal_path_apply(void) {
     if (*s && !find_terminal(exe, sizeof exe, &name)) {
         snprintf(g_external_terminal, sizeof g_external_terminal, "%s", old);
         toast("Terminal executable not found or not executable");
+        return;
+    }
+    if (*s && !terminal_known(name)) {
+        snprintf(g_external_terminal, sizeof g_external_terminal, "%s", old);
+        toast("\xE2\x80\x9C%s\xE2\x80\x9D isn't a terminal app (no terminal .desktop entry runs it)", name);
         return;
     }
     g_opt.terminal_path_focus = false;

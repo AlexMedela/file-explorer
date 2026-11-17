@@ -90,6 +90,7 @@ typedef struct {
     char *icon;
     char *mimes; // ";type;type;"
     bool nodisplay, terminal;
+    bool term_emu; // Categories has TerminalEmulator (a terminal app itself)
 } DesktopApp;
 
 static DesktopApp *g_apps;
@@ -146,7 +147,7 @@ static void apps_scan_dir(const char *dir, const char *prefix) {
         FILE *f = fopen(path, "r");
         if (!f) continue;
         char line[4096], name[256] = "", exec[2048] = "", icon[512] = "", mimes[4096] = "", type[64] = "", tryexec[512] = "";
-        char only[512] = "", notin[512] = "";
+        char only[512] = "", notin[512] = "", cats[1024] = "";
         bool in_main = false, nodisplay = false, hidden = false, terminal = false;
         while (fgets(line, sizeof line, f)) {
             line[strcspn(line, "\r\n")] = 0;
@@ -167,6 +168,7 @@ static void apps_scan_dir(const char *dir, const char *prefix) {
             else if (!strcmp(k, "TryExec")) snprintf(tryexec, sizeof tryexec, "%s", v);
             else if (!strcmp(k, "OnlyShowIn")) snprintf(only, sizeof only, ";%s", v);
             else if (!strcmp(k, "NotShowIn")) snprintf(notin, sizeof notin, ";%s", v);
+            else if (!strcmp(k, "Categories")) snprintf(cats, sizeof cats, ";%s;", v);
         }
         fclose(f);
         if (hidden || strcmp(type, "Application") || !exec[0]) continue;
@@ -176,9 +178,25 @@ static void apps_scan_dir(const char *dir, const char *prefix) {
         if (ml && mimes[ml - 1] != ';' && ml + 1 < sizeof mimes) strcat(mimes, ";");
         g_apps = xrealloc(g_apps, (size_t)(g_napps + 1) * sizeof(DesktopApp));
         g_apps[g_napps++] = (DesktopApp){strdup(id), strdup(path), strdup(name[0] ? name : id), strdup(exec),
-                                         strdup(icon), strdup(mimes), nodisplay, terminal};
+                                         strdup(icon), strdup(mimes), nodisplay, terminal, strstr(cats, ";TerminalEmulator;") != NULL};
     }
     closedir(d);
+}
+
+static void apps_load(void);
+
+// Does an installed terminal app (Categories=TerminalEmulator) run this program (its Exec's first word, by name)?
+static bool app_is_terminal(const char *prog) {
+    apps_load();
+    for (int i = 0; i < g_napps; i++) {
+        if (!g_apps[i].term_emu) continue;
+        const char *e = g_apps[i].exec;
+        while (*e == ' ' || *e == '"') e++;
+        char first[PATH_MAX];
+        snprintf(first, sizeof first, "%.*s", (int)strcspn(e, " \""), e);
+        if (!strcmp(path_basename(first), prog)) return true;
+    }
+    return false;
 }
 
 static void mimeapps_load(const char *path) {
