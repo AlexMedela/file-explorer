@@ -1518,10 +1518,13 @@ static int run_selftest_m5(void) {
     st_wait();
     ST_CHECK(np && A.npanels == 2);
     A.root->ratio = 0.4f;
+    A.window_buttons = A.brand_logo = false;
     settings_save();
     int ntabs0 = A.ntabs;
     settings_load(); // resets to defaults first, then reads the file
     ST_CHECK(A.show_hidden && !A.folder_sizes && A.search_recursive && A.preview_on);
+    ST_CHECK(!A.window_buttons && !A.brand_logo);
+    A.window_buttons = A.brand_logo = true;
     FolderView *fv5 = folder_view_find(M5_BASE, true); // sort order is remembered per folder
     ST_CHECK(fabsf(A.zoom - 1.3f) < 0.01f && fv5 && fv5->sort == SORT_SIZE && fv5->desc);
     ST_CHECK(pin_index(M5_BASE "/sub") >= 0 && A.nsess_tabs == ntabs0 && !strncmp(A.sess_layout, "H0.400(P0,P1)", 13));
@@ -4016,6 +4019,12 @@ static int run_selftest_m9(void) {
         st_shot("m9-titlebar-nobuttons");
         opt_bool_toggle(OPT_WINDOW_BUTTONS);
         ST_CHECK(A.window_buttons && A.r_wctl.w > 0);
+        opt_bool_toggle(OPT_BRAND_LOGO); // the name alone above the sidebar, the brand still moves the window
+        st_frames(1);
+        st_shot("m9-brand-nologo");
+        ST_CHECK(!A.brand_logo && A.r_brand.h > 0);
+        opt_bool_toggle(OPT_BRAND_LOGO);
+        ST_CHECK(A.brand_logo);
         bool pv = A.preview_on;
         if (!pv) preview_toggle();
         layout();
