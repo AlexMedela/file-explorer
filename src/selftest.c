@@ -3410,6 +3410,22 @@ static int run_selftest_m9(void) {
         memset(&g_desktop, 0, sizeof g_desktop);
         theme_apply();
         ST_CHECK(T.bg == g_theme_dark.bg && T.text == g_theme_dark.text);
+        // Desktop's accent colour (off by default): with every theme, over a picked one; none from the desktop: as before
+        opt_choice_set(OPT_THEME, theme_find("Nord"));
+        g_accent_custom = 0x01000000u | g_accents[1].rgb;
+        ST_CHECK(!g_accent_desktop);
+        opt_bool_toggle(OPT_ACCENT_DESKTOP);
+        ST_CHECK(g_accent_desktop && T.accent == g_accents[1].rgb && !g_dlook.running); // (no desktop answer yet; no watcher in tests)
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3584E4, .icons = "hicolor"};
+        dlook_apply(d);
+        ST_CHECK(T.accent == 0x3584E4 && T.bg == g_themes[theme_find("Nord")].t.bg);
+        settings_save();
+        settings_load();
+        ST_CHECK(g_accent_desktop);
+        opt_bool_toggle(OPT_ACCENT_DESKTOP);
+        ST_CHECK(!g_accent_desktop && T.accent == g_accents[1].rgb);
+        memset(&g_desktop, 0, sizeof g_desktop);
         g_accent_custom = saved_accent;
     }
 

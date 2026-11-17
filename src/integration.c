@@ -695,7 +695,7 @@ static void dlook_apply(void *arg) { // (main thread)
     memcpy(g_desktop.kde, d->kde, sizeof d->kde);
     snprintf(g_desktop.icons, sizeof g_desktop.icons, "%s", d->icons);
     free(d);
-    if (look && theme_is_system()) theme_apply(); // (icons follow the new colours in icons_sync_theme)
+    if (look && (theme_is_system() || g_accent_desktop)) theme_apply(); // (icons follow the new colours in icons_sync_theme)
     if (icons && icon_system_selected()) {
         sysi_reset();
         icons_flush();
@@ -750,9 +750,9 @@ static void *dlook_thread(void *arg) {
     return NULL;
 }
 
-// Start or stop the watcher as Theme / File icons need it (after either changes, and at startup).
+// Start or stop the watcher as Theme / the desktop's accent / File icons need it (after one changes, and at startup).
 static void desktop_look_sync(void) {
-    bool want = !A.selftest && (theme_is_system() || icon_system_selected());
+    bool want = !A.selftest && (theme_is_system() || g_accent_desktop || icon_system_selected());
     if (!want) { atomic_store(&g_dlook.stop, true); return; }
     atomic_store(&g_dlook.stop, false);
     if (atomic_load(&g_dlook.running)) return;

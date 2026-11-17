@@ -11937,7 +11937,7 @@ int main(int argc, char **argv) {
     }
     icon_themes_reload();
     icon_set_theme(MAX(0, icon_theme_find(A.icon_theme_name)));
-    desktop_look_sync(); // (Theme or File icons "System")
+    desktop_look_sync(); // (Theme or File icons "System", the desktop's accent)
     const char *mono[] = {"JetBrains Mono", "Cascadia Code", "Fira Code", "DejaVu Sans Mono", "Noto Sans Mono", "monospace"};
     A.mono_path = find_font_file(mono, (int)ARRAY_COUNT(mono));
     char *bold = font_weight_file(A.font_path, FC_WEIGHT_SEMIBOLD);

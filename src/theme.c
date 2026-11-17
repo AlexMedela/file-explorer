@@ -97,6 +97,7 @@ static int g_nthemes;
 static Theme T = g_theme_dark; // the palette everything draws with
 static int g_theme_cur;
 static u32 g_accent_custom; // 0 = theme accent, else 0x01000000 | rgb
+static bool g_accent_desktop; // Options: the desktop's accent with every theme, where it has one (it wins over g_accent_custom)
 static bool g_unified_surfaces; // Options: sidebar, header, preview and status bar take the file area's background
 // Options > Surfaces brightness: -30..+30 % per part (darker / lighter), 0 = the theme's own colour.
 enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_STATUS, SURF_COUNT };
@@ -242,7 +243,7 @@ static void theme_apply(void) {
     T.bg = surface_adjust(T.bg, SURF_FILES);
     T.alt_row = surface_adjust(T.alt_row, SURF_FILES);
     T.preview_bg = surface_adjust(T.preview_bg, SURF_PREVIEW);
-    u32 accent = g_accent_custom ? g_accent_custom : theme_is_system() ? g_desktop.accent : 0;
+    u32 accent = g_accent_desktop && g_desktop.accent ? g_desktop.accent : g_accent_custom ? g_accent_custom : theme_is_system() ? g_desktop.accent : 0;
     if (accent) {
         u32 a = accent & 0xFFFFFF;
         bool light = theme_is_light(&T);

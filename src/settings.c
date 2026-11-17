@@ -80,6 +80,7 @@ static void settings_defaults(void) {
     A.conflict_last = CF_KEEP_BOTH;
     snprintf(A.theme_name, sizeof A.theme_name, "Dark");
     g_accent_custom = 0;
+    g_accent_desktop = false;
     g_unified_surfaces = false;
     g_separators = true;
     g_scroll_custom = 0;
@@ -296,6 +297,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
         else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v);
         else if (!strcmp(k, "show_separators")) g_separators = atoi(v);
+        else if (!strcmp(k, "system_accent")) g_accent_desktop = atoi(v);
         else if (!strcmp(k, "scrollbar_color")) { u32 c; if (scroll_color_parse(v, &c)) g_scroll_custom = c; }
         else if (!strcmp(k, "sidebar_brightness")) g_surface_bright[SURF_SIDEBAR] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "header_brightness")) g_surface_bright[SURF_HEADER] = CLAMP(atoi(v), -30, 30);
@@ -517,7 +519,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
             A.dblclick_up, A.drop_ask, A.def_tree, A.single_instance);
     keys_save(f);
-    fprintf(f, "unified_surfaces=%d\nshow_separators=%d\n", g_unified_surfaces, g_separators);
+    fprintf(f, "unified_surfaces=%d\nshow_separators=%d\nsystem_accent=%d\n", g_unified_surfaces, g_separators, g_accent_desktop);
     if (g_scroll_custom) fprintf(f, "scrollbar_color=#%06X\n", g_scroll_custom & 0xFFFFFF);
     else fprintf(f, "scrollbar_color=auto\n");
     fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\n",

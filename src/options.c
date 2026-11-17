@@ -5,7 +5,7 @@ static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "
 enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
 enum {
-    OPT_THEME, OPT_ACCENT, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
+    OPT_THEME, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
@@ -22,6 +22,7 @@ typedef struct {
 static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_THEME, "Theme", "Colour scheme; System: light or dark as the desktop prefers, with its accent (KDE: its colours) (add your own JSON schemes below)"},
     {OC_APPEARANCE, OK_ACCENT, OPT_ACCENT, "Accent colour", "Selection, focus and highlight colour"},
+    {OC_APPEARANCE, OK_BOOL, OPT_ACCENT_DESKTOP, "Desktop's accent colour", "Use the desktop's accent with every theme, where it has one (else the colour above)"},
     {OC_APPEARANCE, OK_TEXT, OPT_SCROLL_COLOR, "Scrollbar colour", "Empty: Auto, the theme's own (System: the desktop's accent); or #RRGGBB / #RGB, then Apply"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders; System: the desktop's icon theme"},
     {OC_APPEARANCE, OK_CHOICE, OPT_FONT, "Font", "Interface font family"},
@@ -447,6 +448,7 @@ static bool opt_bool_get(int id) {
     case OPT_BRAND_LOGO: return A.brand_logo;
     case OPT_UNIFIED: return g_unified_surfaces;
     case OPT_SEPARATORS: return g_separators;
+    case OPT_ACCENT_DESKTOP: return g_accent_desktop;
     case OPT_ALT_ROWS: return A.alt_rows;
     case OPT_SIZE_BARS: return A.size_bars;
     case OPT_LOAD_TIMES: return A.load_times;
@@ -489,6 +491,11 @@ static void opt_bool_toggle(int id) {
         break;
     case OPT_BRAND_LOGO: A.brand_logo = !A.brand_logo; break;
     case OPT_SEPARATORS: g_separators = !g_separators; break;
+    case OPT_ACCENT_DESKTOP:
+        g_accent_desktop = !g_accent_desktop;
+        theme_apply();
+        desktop_look_sync();
+        break;
     case OPT_UNIFIED:
         g_unified_surfaces = !g_unified_surfaces;
         theme_apply();
