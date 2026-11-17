@@ -7940,7 +7940,8 @@ static int run_selftest_admin(void) {
         ST_CHECK(sv->l->noaccess && !sv->l->manage && !sv->l->n && !strcmp(sv->l->config, "home2") && sv->ballow.w > 0);
         st_shot("snapshots-noaccess");
         st_click_rect(sv->ballow);
-        ST_CHECK(sv->cmd && sv->cmd_kind == SC_ALLOW);
+        // The fake command may already have completed during the click's frames.
+        ST_CHECK(sv->cmd_kind == SC_ALLOW);
         for (int k = 0; k < 600 && (sv->cmd || !atomic_load(&sv->l->done)); k++) { st_frames(1); SDL_Delay(5); }
         st_frames(1);
         ST_CHECK(sv->l->manage && sv->l->n == 1 && sv->l->s[0].num == 5);
