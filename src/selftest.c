@@ -2690,6 +2690,11 @@ static int run_selftest_m9(void) {
     ST_CHECK(!p->sort_desc);
     // Views, Sort and Group share the connected Open With submenu behavior.
     menu_open(p, S(100), S(100), false);
+    ST_CHECK(menu_icons_in(&A.menu)); // built-in icons: shown whatever fonts are installed
+    for (int i = 0; i < UI_ICON_COUNT; i++) {
+        NSVGimage *img = icon_image(ICON_UI_BASE + i);
+        ST_CHECK(img && img->shapes);
+    }
     int views = -1, sorts = -1, groups = -1;
     for (int i = 0; i < A.menu.n; i++) {
         int act = A.menu.items[i].act;

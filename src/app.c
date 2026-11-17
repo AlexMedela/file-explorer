@@ -6938,14 +6938,98 @@ static void qa_pin_paths(char **paths, int n, int g) {
     A.settings_dirty = true;
 }
 
+// The icon before a menu action (UI_*, built in: ui_icons.h), by what it does - never by its label. -1: none, for choices
+// in a list (sort keys, columns, apps...) where the check mark says enough, and for anything not listed here.
+static int menu_action_icon(const MenuItem *it) {
+    int a = it->act;
+    if (a >= ACT_VIEW_BASE && a < ACT_VIEW_BASE + ZOOM_COUNT) {
+        int lv = a - ACT_VIEW_BASE;
+        return lv == 0 ? UI_TABLE_2 : lv == 1 ? UI_LIST : UI_LAYOUT_GRID; // Details, List, icons
+    }
+    switch (a) {
+    case ACT_CUT: return UI_SCISSORS;
+    case ACT_COPY: case ACT_TERM_COPY: case ACT_COPY_PATH: case ACT_CLOUD_COPY_PATH: case ACT_GIT_COPY_BRANCH:
+    case ACT_DROP_COPY: return UI_COPY;
+    case ACT_GIT_COPY_REMOTE: case ACT_DROP_LINK: return UI_LINK;
+    case ACT_PASTE: case ACT_TERM_PASTE: return UI_CLIPBOARD_PASTE;
+    case ACT_DROP_MOVE: return UI_ARROW_RIGHT;
+    case ACT_TRASH: case ACT_TRASH_EMPTY: case ACT_NET_FORGET: case ACT_QA_GROUP_DELETE: case ACT_SNAP_DELETE: return UI_TRASH;
+    case ACT_DELETE: return UI_CIRCLE_X;
+    case ACT_TERM_CLEAR: return UI_ERASER;
+    case ACT_RENAME: case ACT_BATCH_RENAME: case ACT_DEV_RENAME: case ACT_QA_RENAME: case ACT_QA_GROUP_RENAME:
+    case ACT_NET_EDIT_SAVED: return UI_PENCIL;
+    case ACT_PROPERTIES: return UI_INFO;
+    case ACT_NEW_FOLDER: case ACT_NEW_FOLDER_IN: return UI_FOLDER_PLUS;
+    case ACT_NEW_FILE: case ACT_NEW_FILE_IN: return UI_FILE_PLUS;
+    case ACT_QA_NEW_GROUP: return UI_FOLDERS;
+    case ACT_TERMINAL: case ACT_TERMINAL_LOCAL: case ACT_SSH_TERMINAL: return UI_TERMINAL;
+    case ACT_TERM_PANEL: return UI_PANEL_BOTTOM; // a panel along the bottom
+    case ACT_TERMINAL_EXTERNAL: return UI_SQUARE_TERMINAL;
+    case ACT_OPEN: case ACT_DU_OPEN: case ACT_SNAP_OPEN: case ACT_DEV_MOUNT: return UI_FOLDER_OPEN;
+    case ACT_OPEN_WITH: return it->sub ? UI_FOLDER_OPEN : UI_ELLIPSIS; // the submenu / "Other app..."
+    case ACT_OPEN_TAB: case ACT_PLACE_NEW_TAB: case ACT_DU_OPEN_TAB: case ACT_DEV_OPEN_TAB: case ACT_CLOUD_CONNECT_TAB:
+    case ACT_TAB_NEW: return UI_SQUARE_PLUS;
+    case ACT_TAB_DUP: return UI_COPY_PLUS;
+    case ACT_TAB_WINDOW: return UI_EXTERNAL_LINK;
+    case ACT_OPEN_SPLIT_RIGHT: case ACT_TAB_SPLIT_RIGHT: return UI_COLUMNS_2;
+    case ACT_OPEN_SPLIT_DOWN: case ACT_TAB_SPLIT_DOWN: return UI_ROWS_2;
+    case ACT_TAB_CLOSE: case ACT_TAB_CLOSE_OTHERS: case ACT_TAB_CLOSE_LEFT: case ACT_TAB_CLOSE_RIGHT: case ACT_CMP_END:
+    case ACT_DROP_CANCEL: case ACT_QA_REMOVE: return UI_X;
+    case ACT_TAB_REOPEN: case ACT_UNDO: case ACT_TRASH_RESTORE: case ACT_TRASH_RESTORE_ALL: case ACT_SNAP_RESTORE:
+    case ACT_FV_RESET: case ACT_COL_RESET: case ACT_DEV_RESET_NAME: case ACT_QA_RESET_NAME: return UI_UNDO_2;
+    case ACT_MENU_VIEWS: return UI_LAYOUT_DASHBOARD;
+    case ACT_MENU_SORT: return UI_ARROW_DOWN_WIDE_NARROW;
+    case ACT_MENU_GROUP: return UI_GROUP;
+    case ACT_TREE_VIEW: return UI_LIST_TREE;
+    case ACT_DU_TOGGLE: case ACT_SNAP_TOGGLE: case ACT_SNAP_BACK: // the Views toggles; in the views themselves: back
+        return !it->checkable || a == ACT_SNAP_BACK ? UI_ARROW_LEFT : a == ACT_DU_TOGGLE ? UI_CHART_PIE : UI_ROTATE_CCW_CLOCK;
+    case ACT_DU_NEW_TAB: case ACT_DU_PLACE: return UI_CHART_PIE;
+    case ACT_SNAP_PLACE: return UI_ROTATE_CCW_CLOCK;
+    case ACT_SNAP_CREATE: return UI_CAMERA;
+    case ACT_FV_SUBFOLDERS: return UI_FOLDER_TREE;
+    case ACT_FV_ALL: return UI_GLOBE;
+    case ACT_HIDDEN: return !it->checkable && A.show_hidden ? UI_EYE_OFF : UI_EYE;
+    case ACT_PREVIEW: case ACT_DU_SHOW: return UI_EYE;
+    case ACT_REFRESH: case ACT_CLOUD_REFRESH: case ACT_GIT_REFRESH: case ACT_SNAP_REFRESH: case ACT_DU_RESCAN:
+    case ACT_CMP_AGAIN: return UI_REFRESH_CW;
+    case ACT_SELECT_ALL: return UI_SQUARE_CHECK_BIG;
+    case ACT_PIN: return UI_PIN;
+    case ACT_COMPRESS_ZIP: case ACT_COMPRESS_TGZ: case ACT_EXTRACT_SEL: case ACT_EXTRACT_HERE: case ACT_EXTRACT_ALL:
+        return UI_ARCHIVE;
+    case ACT_CMP_START: case ACT_CMP_TAB: case ACT_SNAP_COMPARE: return UI_GIT_COMPARE;
+    case ACT_CMP_SYNC_A: case ACT_CMP_SYNC_B: case ACT_CMP_SYNC_BOTH: case ACT_CMP_MIRROR_A: case ACT_CMP_MIRROR_B:
+        return UI_ARROW_RIGHT_LEFT;
+    case ACT_CMP_DIFF_ONLY: return UI_FUNNEL;
+    case ACT_CS_HERE: return UI_SEARCH;
+    case ACT_CS_OPEN_LINE: return UI_CODE;
+    case ACT_CS_FOLD_ALL: return UI_MINIMIZE_2;
+    case ACT_CS_UNFOLD_ALL: return UI_MAXIMIZE_2;
+    case ACT_QA_UP: case ACT_QA_GROUP_UP: case ACT_DU_UP: return UI_ARROW_UP;
+    case ACT_QA_DOWN: case ACT_QA_GROUP_DOWN: return UI_ARROW_DOWN;
+    case ACT_NET_NEW: case ACT_NET_CONNECT_SAVED: case ACT_CLOUD_CONNECT: return UI_PLUG;
+    case ACT_CLOUD_NEW: return UI_PLUS;
+    case ACT_CLOUD_RECONNECT: return UI_KEY_ROUND;
+    case ACT_NET_DISCONNECT: case ACT_CLOUD_DISCONNECT: case ACT_DEV_UNMOUNT: return UI_UNLINK;
+    case ACT_DEV_EJECT: return UI_EJECT;
+    case ACT_CLOUD_LOG: return UI_FILE_TEXT;
+    case ACT_GIT_OPEN_REMOTE: return UI_EXTERNAL_LINK;
+    case ACT_GIT_ROOT: return UI_FOLDER_GIT_2;
+    case ACT_GIT_STATUS: return UI_GIT_BRANCH;
+    case ACT_FOLDER_SIZES: case ACT_SIZE_BARS: return UI_CHART_COLUMN;
+    case ACT_LOAD_TIMES: return UI_CLOCK;
+    }
+    return -1;
+}
+
 static bool menu_item_is_app(const MenuItem *it) { return it->act >= ACT_OW_APP_BASE && it->act < ACT_OW_APP_BASE + g_ow_menu.n; }
 
-// The Open with apps show their own icons (render.c draws them); a menu without them has no icon column at all.
+// Menus show those icons (render.c draws them; built in, the same everywhere); the Open with apps show their own.
+// When no item has an icon there's no icon column at all.
 static bool menu_icons_in(const Menu *m) {
     for (int i = 0; i < m->n; i++) {
         const MenuItem *it = &m->items[i];
         if (it->sep || it->info || it->head) continue;
-        if (menu_item_is_app(it)) return true;
+        if (menu_item_is_app(it) || menu_action_icon(it) >= 0) return true;
     }
     return false;
 }

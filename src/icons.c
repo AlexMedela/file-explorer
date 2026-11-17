@@ -33,21 +33,13 @@ static const char g_branch_svg[] =
     "<path d=\"M600 231V267A167 167 0 0 1 433 434H366A133 133 0 0 0 233 566\"/></g></svg>";
 static NSVGimage *g_branch_img;
 
-// Sort glyph (the toolbar's sort button): bars getting shorter beside an up/down arrow; white, tinted when drawn.
-#define ICON_SORT (ICON_COUNT + 3)
-static const char g_sort_svg[] =
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><g fill=\"none\" stroke=\"#FFFFFF\" "
-    "stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M2.5 6H11M2.5 12H9M2.5 18H7\"/>"
-    "<path d=\"M18 4V20M14.5 7.5L18 4L21.5 7.5M14.5 16.5L18 20L21.5 16.5\"/></g></svg>";
-static NSVGimage *g_sort_img;
-
 static int g_icon_theme; // 0..ICON_THEMES-1 built in, then custom themes (icon_theme_name)
 
 // --- custom icon themes: <config>/icons/<Name>/ with SVGs named like the built-in icons ("python.svg",
 // "folder-src.svg"), "ext-<extension>.svg" for any extension, and theme.conf ("base=Catppuccin": where the
 // icons it doesn't have come from; Material by default).
 #define MAX_CUSTOM_ICON_THEMES 16
-#define ICON_EXT_BASE (ICON_COUNT + 4) // ids of a custom theme's ext-*.svg icons (after the logo, branch and sort ids)
+#define ICON_EXT_BASE (ICON_COUNT + 3) // ids of a custom theme's ext-*.svg icons (after the logo and branch ids)
 typedef struct {
     char name[64];
     int base;           // built-in theme for missing icons
@@ -60,6 +52,12 @@ static CustomIconTheme g_cit[MAX_CUSTOM_ICON_THEMES];
 static int g_ncit;
 static NSVGimage **g_ext_img; // parsed ext icons of the current custom theme
 static int g_next_img;
+
+// --- interface icons (menu actions, toolbar): built in (ui_icons.h, white strokes tinted when drawn) so they look the
+// same everywhere, whatever fonts are installed.
+#include "ui_icons.h"
+#define ICON_UI_BASE 0x200000 // icon ids of interface icon UI_*: ICON_UI_BASE + UI_*
+static NSVGimage *g_ui_img[UI_ICON_COUNT];
 
 // --- network location icons (Connect to server > Icon): built in (net_icons.h) plus net-<name>.svg files from
 // any custom icon theme folder (offered whichever file icon theme is selected). Stored by key: the built-in name,
@@ -349,7 +347,11 @@ static void logo_recolor(char *svg, u32 accent) {
 static NSVGimage *icon_image(int id) {
     NSVGimage **slot;
     const char *nsrc = NULL;
-    if (id >= ICON_NET_BASE) {
+    if (id >= ICON_UI_BASE) {
+        if (id - ICON_UI_BASE >= UI_ICON_COUNT) return NULL;
+        slot = &g_ui_img[id - ICON_UI_BASE];
+        nsrc = g_ui_icons[id - ICON_UI_BASE];
+    } else if (id >= ICON_NET_BASE) {
         int k = id - ICON_NET_BASE;
         if (k >= net_icon_count()) return NULL;
         if (g_net_img_n < net_icon_count()) {
@@ -363,10 +365,10 @@ static NSVGimage *icon_image(int id) {
         int k = id - ICON_EXT_BASE;
         if (k >= g_next_img) return NULL;
         slot = &g_ext_img[k];
-    } else slot = id == ICON_LOGO ? &g_logo_img : id == ICON_LOGO_SMALL ? &g_logo_small_img : id == ICON_BRANCH ? &g_branch_img : id == ICON_SORT ? &g_sort_img : &g_icon_img[id];
+    } else slot = id == ICON_LOGO ? &g_logo_img : id == ICON_LOGO_SMALL ? &g_logo_small_img : id == ICON_BRANCH ? &g_branch_img : &g_icon_img[id];
     if (!*slot) {
         const char *src = nsrc ? nsrc : id == ICON_LOGO ? g_logo_svg : id == ICON_LOGO_SMALL ? g_logo_small_svg
-                        : id == ICON_BRANCH ? g_branch_svg : id == ICON_SORT ? g_sort_svg : icon_src(id);
+                        : id == ICON_BRANCH ? g_branch_svg : icon_src(id);
         if (!src) return NULL;
         char *copy = strdup(src); // nsvgParse modifies its input
         if (id == ICON_LOGO || id == ICON_LOGO_SMALL) logo_recolor(copy, g_logo_accent = COL_ACCENT);
@@ -402,7 +404,7 @@ static IconSlot g_icon_cache[512];
 // g_icon_cache_n lives in font.c (reset together with the atlas)
 
 static Glyph *icon_glyph(int id, int px) {
-    if (id < 0 || (id >= icon_id_limit() && (id < ICON_NET_BASE || id >= ICON_NET_BASE + net_icon_count())) || px <= 0 || px > 256) return NULL;
+    if (id < 0 || (id >= icon_id_limit() && (id < ICON_NET_BASE || id >= ICON_NET_BASE + net_icon_count()) && (id < ICON_UI_BASE || id >= ICON_UI_BASE + UI_ICON_COUNT)) || px <= 0 || px > 256) return NULL;
     for (int i = 0; i < g_icon_cache_n; i++)
         if (g_icon_cache[i].id == id && g_icon_cache[i].px == px) return &g_icon_cache[i].g;
     if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0; // crude eviction (atlas keeps the pixels)
@@ -437,6 +439,12 @@ static bool draw_net_icon(f32 x, f32 y, f32 s, const char *key, f32 alpha) {
     if (!g) return false;
     draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, alpha});
     return true;
+}
+
+// An interface icon (UI_*) s pixels big at (x, y), tinted c.
+static void draw_ui_icon(int ui, f32 x, f32 y, f32 s, Color c) {
+    Glyph *g = ui >= 0 ? icon_glyph(ICON_UI_BASE + ui, (int)roundf(s)) : NULL;
+    if (g) draw_glyph(g, roundf(x), roundf(y), c);
 }
 
 // Large icons (grid view) get their own textures so they don't flood the glyph atlas.

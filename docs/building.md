@@ -79,4 +79,6 @@ file and folder icon themes (all MIT): [Material Icon Theme](https://github.com/
 `tools/gen_icons.py` regenerates `src/icons_data.h`. Pick one with the palette ("Icon theme: …") or `icon_theme=` in settings.
 Network location icons: brand logos from [Simple Icons](https://simpleicons.org) (CC0) and Material Icon Theme (MIT),
 in `third_party/net-icons/`; `tools/gen_net_icons.py` regenerates `src/net_icons.h`. Logos are trademarks of their owners.
+Menu and toolbar icons: [Lucide](https://lucide.dev) (ISC, partly MIT from Feather) in `third_party/lucide-icons/`;
+`tools/gen_ui_icons.py` regenerates `src/ui_icons.h`.
 - `tools/mkfiles.sh DIR N` – generate a test directory with N files

@@ -463,13 +463,12 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         draw_line(cx - S(1.5f), cy + S(1), cx - S(1.5f), cy + S(6), t, fc);
         draw_line(cx + S(1.5f), cy + S(1), cx + S(1.5f), cy + S(4.5f), t, fc);
     }
-    if (ly->sortbtn.w > 0) { // sort key + direction (ICON_SORT, tinted like the funnel)
+    if (ly->sortbtn.w > 0) { // sort key + direction (tinted like the funnel)
         Rect sb = ly->sortbtn;
         bool on = A.menu.open && A.menu.pane == p && A.menu.ox == sb.x && A.menu.oy == sb.y + sb.h + S(4), hv = hot(sb);
         if (on || hv) draw_rrect(sb.x, sb.y, sb.w, sb.h, S(6), C(COL_FIELD_HOVER));
-        int px = (int)roundf(S(18));
-        Glyph *g = icon_glyph(ICON_SORT, px);
-        if (g) draw_glyph(g, roundf(sb.x + (sb.w - (f32)px) * 0.5f), roundf(sb.y + (sb.h - (f32)px) * 0.5f), C(COL_TEXT_DIM));
+        f32 is = roundf(S(18));
+        draw_ui_icon(UI_ARROW_DOWN_WIDE_NARROW, sb.x + (sb.w - is) * 0.5f, sb.y + (sb.h - is) * 0.5f, is, C(COL_TEXT_DIM));
     }
     {   // the folder's menu (three dots)
         Rect mb = ly->morebtn;
@@ -3047,7 +3046,7 @@ static void draw_menu_in(Menu *m, bool frame) {
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x, (int)r.y + 1, (int)r.w, (int)r.h - 2});
     bool anycheck = false; // one check mark column for the whole menu keeps labels aligned
     for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable;
-    bool icons = menu_icons_in(m); // an icon column before the labels (Open with's apps)
+    bool icons = menu_icons_in(m); // an icon column before the labels
     f32 yy = r.y + roundf(S(5)) - m->scroll;
     for (int i = 0; i < m->n; i++) {
         MenuItem *it = &m->items[i];
@@ -3090,6 +3089,9 @@ static void draw_menu_in(Menu *m, bool frame) {
                     char ch[2] = {(char)toupper((u8)it->label[0]), 0};
                     draw_text(fs, ix + (is - text_width(fs, ch, 1)) * 0.5f, text_y(fs, iy, is), ch, 1, tc);
                 }
+            } else if (icons) {
+                f32 is = roundf(S(16));
+                draw_ui_icon(menu_action_icon(it), lx - S(25) + (S(18) - is) * 0.5f, yy + (h - is) * 0.5f, is, tc);
             }
             draw_text(f, lx, text_y(f, yy, h), it->label, (int)strlen(it->label), tc);
             if (it->sub) { // opens a submenu: a chevron where the shortcut would be
