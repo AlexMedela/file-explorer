@@ -448,6 +448,7 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
         menu_open(p, ly->morebtn.x, ly->morebtn.y + ly->morebtn.h + S(4), false);
         return;
     }
+    if (in_rect(ly->sortbtn, x, y)) { menu_open_sort(p, ly->sortbtn.x, ly->sortbtn.y + ly->sortbtn.h + S(4)); return; }
     if (in_rect(ly->filterbtn, x, y)) { menu_open_types(p, ly->filterbtn.x, ly->filterbtn.y + ly->filterbtn.h + S(4)); return; }
     if (ly->has_cmpbar && in_rect(ly->cmpbar, x, y)) { cmp_bar_click(p, x, y); return; }
     if (ly->has_trashbar && in_rect(ly->trashbar, x, y)) {

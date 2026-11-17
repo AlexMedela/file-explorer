@@ -162,7 +162,7 @@ static const struct {
 };
 
 typedef struct {
-    Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, header, list, track, thumb, trashbar, rrestore, rempty;
+    Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, sortbtn, header, list, track, thumb, trashbar, rrestore, rempty;
     bool has_trashbar;
     f32 col_name;              // x of the icon inside the Name column
     f32 name_end;              // right edge of the Name column
@@ -885,7 +885,13 @@ static void layout_pane(Pane *p, Rect area) {
     f32 px = ly->up.x + bs + roundf(S(8));
     ly->morebtn = (Rect){area.x + area.w - bs - roundf(S(8)), by, bs, bs};
     ly->filterbtn = (Rect){ly->morebtn.x - bs - gap, by, bs, bs};
-    ly->pathbar = (Rect){px, by, ly->filterbtn.x - px - roundf(S(4)), bs};
+    ly->sortbtn = (Rect){ly->filterbtn.x - bs - gap, by, bs, bs};
+    f32 path_right = ly->sortbtn.x - roundf(S(4));
+    if (path_right - px < S(80)) { // a narrow split: the path keeps the room, sorting stays in the folder's menu
+        ly->sortbtn = (Rect){0};
+        path_right = ly->filterbtn.x - roundf(S(4));
+    }
+    ly->pathbar = (Rect){px, by, MAX(0.f, path_right - px), bs};
     f32 hh = p->view == VIEW_DETAILS && !pane_du_on(p) && !pane_snap_on(p) ? roundf(S(32)) : 0; // list/grid sort from the menu, no header
     ly->header = (Rect){area.x, area.y + tb, area.w, hh};
     ly->list = (Rect){area.x, area.y + tb + hh, area.w, area.h - tb - hh};
@@ -6314,17 +6320,32 @@ static void menu_sub_views(Pane *p) {
 }
 
 // Name, dates, type and size always; Permissions and Owner only while their column is shown (sorting by what you can't
-// see makes little sense). Extension sorts like Type: listed only while it's the current key.
-static void menu_sub_sort(Pane *p) {
+// see makes little sense). Extension sorts like Type: listed only while it's the current key. all: every key (the
+// toolbar's sort button).
+static void menu_add_sort(Pane *p, bool all) {
     static const char *labels[SORT_COUNT] = {"Name", "Date modified", "Type", "Size", "Date created", "Extension", "Permissions", "Owner"};
     for (int i = 0; i < SORT_COUNT; i++) {
-        bool shown = i <= SORT_CREATED || p->sort_key == i;
+        bool shown = all || i <= SORT_CREATED || p->sort_key == i;
         for (int c = 0; c < COL_COUNT && !shown; c++) shown = g_coldef[c].sort == i && i != SORT_EXT && col_visible(c);
         if (shown) menu_add_check(labels[i], ACT_SORT_BASE + i, p->sort_key == i, true);
     }
     menu_sep();
     menu_add_check("Ascending", ACT_SORT_ASC, !p->sort_desc, true);
     menu_add_check("Descending", ACT_SORT_DESC, p->sort_desc, true);
+}
+
+static void menu_sub_sort(Pane *p) { menu_add_sort(p, false); }
+
+// The toolbar's sort button: every sort key and the direction.
+static void menu_open_sort(Pane *p, f32 x, f32 y) {
+    Menu *m = &A.menu;
+    m->n = m->ninfo = 0;
+    m->hover = -1;
+    m->pane = p;
+    m->keep_open = false;
+    m->reopen = NULL;
+    menu_add_sort(p, true);
+    menu_finish(x, y);
 }
 
 static void menu_sub_group(Pane *p) {

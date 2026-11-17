@@ -2645,6 +2645,43 @@ static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
 
+    // --- the toolbar's sort button: every sort key and the direction ---
+    st_frames(1);
+    Rect sb = p->ly.sortbtn;
+    ST_CHECK(sb.w > 0 && sb.x + sb.w <= p->ly.filterbtn.x && p->ly.pathbar.x + p->ly.pathbar.w <= sb.x);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+    ST_CHECK(A.menu.open && A.menu.pane == p && A.menu.n == SORT_COUNT + 3);
+    if (A.menu.open && A.menu.n == SORT_COUNT + 3) {
+        ST_CHECK(A.menu.items[SORT_PERMS].act == ACT_SORT_BASE + SORT_PERMS && A.menu.items[A.menu.n - 1].act == ACT_SORT_DESC);
+        st_frames(1);
+        st_shot("toolbar-sort");
+        st_key(SDLK_DOWN, 0); // keyboard: down to Size, Enter picks it
+        st_key(SDLK_DOWN, 0);
+        st_key(SDLK_DOWN, 0);
+        st_key(SDLK_DOWN, 0);
+        st_key(SDLK_RETURN, 0);
+        ST_CHECK(!A.menu.open && p->sort_key == SORT_SIZE);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.menu.open && A.menu.items[SORT_SIZE].checked);
+        bool was_desc = p->sort_desc;
+        int dir = A.menu.n - (was_desc ? 2 : 1); // the other direction
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, A.menu.r.x + S(20), menu_item_y(&A.menu, dir) + S(12), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.menu.open && p->sort_key == SORT_SIZE && p->sort_desc == !was_desc);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+        st_key(SDLK_ESCAPE, 0);
+        ST_CHECK(!A.menu.open);
+    }
+    Rect area = p->ly.area; // a narrow split: no sort button, nothing overlaps
+    layout_pane(p, (Rect){area.x, area.y, S(200), area.h});
+    ST_CHECK(p->ly.sortbtn.w == 0 && p->ly.pathbar.w >= 0 && p->ly.pathbar.x + p->ly.pathbar.w <= p->ly.filterbtn.x);
+    layout_pane(p, area);
+    pane_set_sort(p, SORT_NAME);
+    do_action(p, ACT_SORT_ASC);
+
     // --- the folder menu's Views / Sort by / Group by submenus ---
     st_frames(1);
     do_action(p, ACT_SORT_DESC);

@@ -463,6 +463,14 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         draw_line(cx - S(1.5f), cy + S(1), cx - S(1.5f), cy + S(6), t, fc);
         draw_line(cx + S(1.5f), cy + S(1), cx + S(1.5f), cy + S(4.5f), t, fc);
     }
+    if (ly->sortbtn.w > 0) { // sort key + direction (ICON_SORT, tinted like the funnel)
+        Rect sb = ly->sortbtn;
+        bool on = A.menu.open && A.menu.pane == p && A.menu.ox == sb.x && A.menu.oy == sb.y + sb.h + S(4), hv = hot(sb);
+        if (on || hv) draw_rrect(sb.x, sb.y, sb.w, sb.h, S(6), C(COL_FIELD_HOVER));
+        int px = (int)roundf(S(18));
+        Glyph *g = icon_glyph(ICON_SORT, px);
+        if (g) draw_glyph(g, roundf(sb.x + (sb.w - (f32)px) * 0.5f), roundf(sb.y + (sb.h - (f32)px) * 0.5f), C(COL_TEXT_DIM));
+    }
     {   // the folder's menu (three dots)
         Rect mb = ly->morebtn;
         bool on = A.menu.open && A.menu.pane == p && A.menu.folder && A.menu.ox == mb.x, hv = hot(mb);
