@@ -761,8 +761,7 @@ static void draw_sidebar(void) {
             draw_net_icon(ix, iy, is, pl->server >= 0 && pl->server < A.nservers ? A.servers[pl->server].icon : "",
                           pl->kind == PK_NETSAVED ? 0.5f : 1.f);
         else if (pl->kind == PK_BORG) { // a saved backup: its icon (not open: faded); one open now: the default
-            const char *repo = pl->item >= 0 && pl->item < A.nborgs ? A.borgs[pl->item].repo : pl->item < 0 && -1 - pl->item < g_borg_n ? g_borg[-1 - pl->item].dir : "";
-            const char *ic = pl->item >= 0 && pl->item < A.nborgs && A.borgs[pl->item].icon[0] ? A.borgs[pl->item].icon : borg_default_icon(repo);
+            const char *ic = pl->item >= 0 && pl->item < A.nborgs && A.borgs[pl->item].icon[0] ? A.borgs[pl->item].icon : BORG_ICON_DEFAULT;
             draw_net_icon(ix, iy, is, ic, pl->path[0] ? 1.f : 0.5f);
         } else if (cl) { // the service's icon (not connected: faded) + a status dot while connecting / failing
             draw_net_icon(ix, iy, is, cloud_icon(cl), cloud_off && cl->state != CS_FAILED && cl->state != CS_RETRY ? 0.5f : 1.f);

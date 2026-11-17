@@ -1275,15 +1275,11 @@ static void connect_go(void) {
 }
 
 // The icon currently chosen in the dialog ("" = the sheet's default: globe for servers, an add-on sheet's own).
-static const char *borg_edit_default_icon(void) {
-    int i = g_sheet.borg_edit;
-    return i >= 0 && i < A.nborgs ? borg_default_icon(A.borgs[i].repo) : "backup";
-}
 static const char *cn_icon_key(void) {
-    return g_sheet.cn_icon[0] ? g_sheet.cn_icon : g_sheet.kind == SHEET_ADDON ? addon_sheet_icon() : g_sheet.kind == SHEET_BORG ? borg_edit_default_icon() : "";
+    return g_sheet.cn_icon[0] ? g_sheet.cn_icon : g_sheet.kind == SHEET_ADDON ? addon_sheet_icon() : g_sheet.kind == SHEET_BORG ? BORG_ICON_DEFAULT : "";
 }
 static const char *cn_icon_default(void) {
-    return g_sheet.kind == SHEET_ADDON ? addon_sheet_icon() : g_sheet.kind == SHEET_BORG ? borg_edit_default_icon() : NET_ICON_DEFAULT;
+    return g_sheet.kind == SHEET_ADDON ? addon_sheet_icon() : g_sheet.kind == SHEET_BORG ? BORG_ICON_DEFAULT : NET_ICON_DEFAULT;
 }
 
 // The icon picker: a popover under the Display icon button with the built-in icons by group, then the custom
