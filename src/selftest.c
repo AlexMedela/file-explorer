@@ -810,6 +810,41 @@ static int run_selftest_ops(void) {
     else printf("cancelled copy left no partial file\n");
     unlink(ST_BASE "/big.bin");
     unlink(ST_XDEV "/big.bin");
+
+    // a canceled op keeps the progress it reached (by bytes, or by items for a delete), in red, marked Canceled
+    static const int ckinds[] = {OP_COPY, OP_MOVE, OP_DELETE, OP_EXTRACT, OP_COMPRESS};
+    for (int k = 0; k < (int)(sizeof ckinds / sizeof *ckinds); k++) {
+        Op *cop = xcalloc(1, sizeof *cop);
+        pthread_mutex_init(&cop->mtx, NULL);
+        cop->kind = ckinds[k];
+        cop->nsrc = 1;
+        atomic_store(&cop->bytes_total, 1000);
+        atomic_store(&cop->bytes_done, 420);
+        atomic_store(&cop->files_total, 10);
+        atomic_store(&cop->files_done, 3);
+        snprintf(cop->cur, sizeof cop->cur, "half.bin");
+        atomic_store(&cop->phase, OPS_DONE);
+        char det[600], title[256], want[64];
+        op_detail(cop, now_ns(), det, sizeof det);
+        ST_CHECK(op_frac(cop) == 1.0 && !strncmp(det, "Done", 4)); // not canceled: full
+        atomic_store(&cop->cancel, 1);
+        int pct = cop->kind == OP_DELETE ? 30 : 42;
+        ST_CHECK(fabs(op_frac(cop) - pct / 100.0) < 1e-9);
+        op_detail(cop, now_ns(), det, sizeof det);
+        snprintf(want, sizeof want, "Canceled  \xC2\xB7  %d%%  \xC2\xB7  half.bin", pct);
+        ST_CHECK(!strcmp(det, want));
+        op_title(cop, title, sizeof title);
+        ST_CHECK(!strncmp(title, "Canceled: ", 10));
+        cop->cur[0] = 0; // nothing started yet: just the percentage
+        op_detail(cop, now_ns(), det, sizeof det);
+        snprintf(want, sizeof want, "Canceled  \xC2\xB7  %d%%", pct);
+        ST_CHECK(!strcmp(det, want));
+        cop->nerr = 2;
+        op_title(cop, title, sizeof title);
+        ST_CHECK(!strcmp(title, "Canceled after 2 errors"));
+        pthread_mutex_destroy(&cop->mtx);
+        free(cop);
+    }
     st_queue();
 
     // context menus (first let the refreshes from the deletes above land: slower machines see them later)
