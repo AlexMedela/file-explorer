@@ -37,6 +37,19 @@ iPhones / iPads and Android phones / cameras on a cable use the built-in connect
 installs a udev rule (`70-file-explorer-phones.rules`) that gives the user at the seat access to them; built from
 source, `install.sh` puts it in place. GVfs (`gvfs-mtp`, `gvfs-gphoto2`) is used as a fallback when installed.
 
+## Borg backups
+Folders that are [BorgBackup](https://www.borgbackup.org/) repositories get a **Borg backup** (or **Borg 2 backup**)
+pill, also with Git status off. Opening one shows its backups, one dated folder each, read-only: it runs `borg mount`
+into `$XDG_RUNTIME_DIR/fe-borg/`. That needs `borg` and borg's FUSE support for Python: `python-pyfuse3` (Arch),
+`python3-pyfuse3` (Debian / Ubuntu / Fedora) or llfuse. Borg 2 repositories need Borg 2 (still in beta), found as `borg2`
+or as a `borg` that says it's 2.x. An encrypted repository asks for its passphrase (it can be kept in the system
+keyring), keyfile repositories use your keys as usual, and `BORG_PASSPHRASE` / `BORG_PASSCOMMAND` from your session are
+honoured. Inside a backup the bar has **Compare with now** and **Restore…** (back to where it lives on this
+computer), copying or dragging out works as anywhere. **Close backups** (or Eject in the sidebar) unmounts them;
+unused ones are unmounted after two minutes and when the app quits. "Open as folder" (or a new tab) shows the
+repository's own files. A Borg 1 repository in an SFTP folder is read by borg on the server (`ssh://`, over the
+connection the folder uses, or your ssh keys / agent); without borg there it is read through the folder, slower.
+
 ## Administrator actions
 "Retry as administrator" runs a small helper through `pkexec`, so it needs polkit and an authentication agent.
 Full desktops start one; on tiling compositors start e.g. `hyprpolkitagent` or `polkit-gnome`.

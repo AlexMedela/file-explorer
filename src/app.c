@@ -404,6 +404,7 @@ enum {
     ACT_CMP_DIFF_ONLY, ACT_CMP_CONTENTS, ACT_CMP_AGAIN,
     ACT_SNAP_TOGGLE, ACT_SNAP_PLACE, ACT_SNAP_REFRESH, ACT_SNAP_BACK, ACT_SNAP_OPEN, ACT_SNAP_COMPARE, ACT_SNAP_CHANGES,
     ACT_SNAP_DELETE, ACT_SNAP_CREATE, ACT_SNAP_ALLOW, ACT_SNAP_RESTORE,
+    ACT_BORG_RAW, ACT_BORG_CLOSE, // a Borg repository's own files; leave + unmount its backups
     ACT_NEW_FOLDER_IN, ACT_NEW_FILE_IN,
     ACT_DROP_MOVE, ACT_DROP_COPY, ACT_DROP_LINK, ACT_DROP_CANCEL, // the menu after a drop (A.drop_ask)
     ACT_TERM_PANEL, ACT_TERM_FOCUS, // the terminal panel under the folder: show / hide, move the keyboard
@@ -862,6 +863,7 @@ static int cmp_side(const Pane *p);
 static bool pane_snap_on(const Pane *p);
 static void snapview_close(Pane *p);
 static bool snap_in(const char *path);
+static int pane_borg_repo(Pane *p);
 static void snap_action(Pane *p, int act);
 static void cmp_filter(Pane *p);
 static void cmp_after_op(Op *op);
@@ -922,7 +924,8 @@ static void layout_pane(Pane *p, Rect area) {
         ly->rempty = (Rect){area.x + area.w - bw - roundf(S(10)), byy, bw, bh2};
         ly->rrestore = (Rect){ly->rempty.x - bw - roundf(S(8)), byy, bw, bh2};
     }
-    ly->has_snapbar = !p->snapv && snap_in(p->path);
+    char bmp[PATH_MAX];
+    ly->has_snapbar = !p->snapv && (snap_in(p->path) || borg_mount_of(p->path, bmp, sizeof bmp) || pane_borg_repo(p));
     if (ly->has_snapbar) {
         f32 sbh2 = roundf(S(40));
         ly->list.h -= sbh2;
@@ -2012,6 +2015,7 @@ static void remote_mounts_load(void) {
         if (sscanf(line, "%4095s %4095s %63s", src, mp, type) != 3) continue;
         bool remote = false;
         for (size_t i = 0; i < ARRAY_COUNT(types) && !remote; i++) remote = !strcmp(type, types[i]);
+        remote |= !strcmp(src, "borgfs") && !strncmp(type, "fuse", 4); // Borg backups: every read goes through borg
         if (!remote) continue;
         char clean[PATH_MAX];
         mount_unescape(mp, clean, sizeof clean);
@@ -4175,6 +4179,8 @@ static void open_path(const char *full) {
 }
 
 static void arc_extract_open(Pane *p, const char *name);
+static const GitSub *git_entry_sub(Pane *p, const Entry *e);
+static void borg_open(Pane *p, const char *dir, int kind);
 
 static void open_entry(Pane *p, i64 pos, bool new_tab) {
     if (!p->order || pos < 0 || pos >= p->count) return;
@@ -4190,6 +4196,8 @@ static void open_entry(Pane *p, i64 pos, bool new_tab) {
         pane_navigate(p, vp, true);
         return;
     }
+    const GitSub *gs = (e->flags & ENT_DIR) && !new_tab ? git_entry_sub(p, e) : NULL;
+    if (gs && gs->borg) { borg_open(p, full, gs->borg); return; } // a Borg repository: its backups (new tab: its files)
     if (e->flags & ENT_DIR) {
         if (new_tab) tab_new(full, A.cur + 1, false);
         else pane_navigate(p, full, true);
@@ -5679,9 +5687,21 @@ static void paste_dir(Pane *p, char *out, size_t cap) {
 static void drop_menu_do(int act);
 static void open_with_menu_app(Pane *p, int k);
 
+static void borg_close(Pane *p);
+
 static void do_action(Pane *p, int act) {
     int n = 0;
     char **paths = NULL;
+    char bmp[PATH_MAX];
+    if (borg_mount_of(p->path, bmp, sizeof bmp)) {
+        switch (act) {
+        case ACT_CUT: case ACT_PASTE: case ACT_RENAME: case ACT_TRASH: case ACT_DELETE: case ACT_NEW_FOLDER: case ACT_NEW_FILE:
+        case ACT_BATCH_RENAME:
+            toast("Backups are read-only \xE2\x80\x94 copy items out or use Restore");
+            return;
+        default: break;
+        }
+    }
     if (pane_is_archive(p)) {
         switch (act) {
         case ACT_CUT: case ACT_COPY: case ACT_PASTE: case ACT_RENAME: case ACT_TRASH: case ACT_DELETE:
@@ -5928,6 +5948,14 @@ static void do_action(Pane *p, int act) {
     case ACT_SNAP_CHANGES: case ACT_SNAP_DELETE: case ACT_SNAP_CREATE: case ACT_SNAP_ALLOW: case ACT_SNAP_RESTORE:
         snap_action(p, act);
         break;
+    case ACT_BORG_RAW: // the repository's files, not its backups
+        if (p->order && p->cursor >= 0 && p->cursor < p->count) {
+            char t[PATH_MAX];
+            path_join(t, sizeof t, p->path, p->L->entries[p->order[p->cursor]].name);
+            pane_navigate(p, t, true);
+        }
+        break;
+    case ACT_BORG_CLOSE: borg_close(p); break;
     case ACT_SIZE_BARS: A.size_bars = !A.size_bars; A.settings_dirty = true; break;
     case ACT_OPEN_SPLIT_RIGHT:
     case ACT_OPEN_SPLIT_DOWN: {
@@ -6242,8 +6270,12 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
             menu_add("Delete permanently", "Del", ACT_DELETE, true);
             menu_sep();
         }
+        const GitSub *gsub = dir ? git_entry_sub(p, e) : NULL;
         if (e->flags & ENT_MATCH) menu_add("Open at this line", "Enter", ACT_CS_OPEN_LINE, true);
-        else menu_add("Open", "Enter", ACT_OPEN, true);
+        else if (gsub && gsub->borg) {
+            menu_add("Browse backups", "Enter", ACT_OPEN, true);
+            menu_add("Open as folder", "", ACT_BORG_RAW, true);
+        } else menu_add("Open", "Enter", ACT_OPEN, true);
         menu_add_open_with("Open with", mime_for_file(path_basename(e->name), dir), true);
         if (p->L->is_content) {
             menu_add("Fold all matches", "", ACT_CS_FOLD_ALL, true);
@@ -6286,6 +6318,11 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
     } else {
         if (pane_is_archive(p)) {
             menu_add("Extract this folder next to the archive", "", ACT_EXTRACT_ALL, true);
+            menu_sep();
+        }
+        char bmp[PATH_MAX];
+        if (borg_mount_of(p->path, bmp, sizeof bmp)) {
+            menu_add("Close backups", "", ACT_BORG_CLOSE, true);
             menu_sep();
         }
         if (pane_is_trash(p)) {
@@ -7050,6 +7087,8 @@ static int menu_action_icon(const MenuItem *it) {
     case ACT_OPEN_TAB: case ACT_PLACE_NEW_TAB: case ACT_DU_OPEN_TAB: case ACT_DEV_OPEN_TAB: case ACT_CLOUD_CONNECT_TAB:
     case ACT_TAB_NEW: return UI_SQUARE_PLUS;
     case ACT_TAB_DUP: return UI_COPY_PLUS;
+    case ACT_BORG_RAW: return UI_FOLDER_OPEN;
+    case ACT_BORG_CLOSE: return UI_EJECT;
     case ACT_TAB_WINDOW: return UI_EXTERNAL_LINK;
     case ACT_OPEN_SPLIT_RIGHT: case ACT_TAB_SPLIT_RIGHT: return UI_COLUMNS_2;
     case ACT_OPEN_SPLIT_DOWN: case ACT_TAB_SPLIT_DOWN: return UI_ROWS_2;
@@ -8123,6 +8162,7 @@ static struct GitSubs { // the repositories among a folder's subfolders (branch 
     char path[PATH_MAX];
     GitSub *v;
     int n;
+    int self_borg; // the folder itself is a Borg repository
     u64 used;
 } g_gsubs[GIT_SUBDIRS];
 static int g_gsubs_busy; // jobs in flight
@@ -8133,15 +8173,23 @@ typedef struct { // what a pane shows: its repository and its place in it
     char prefix[PATH_MAX];
 } GitView;
 
-static bool git_pane_eligible(Pane *p) {
-    if (!A.git_status || !p->path[0] || pane_is_archive(p) || pane_is_trash(p)) return false;
+// Folders whose subfolders are looked at (git repositories, Borg backups).
+static bool gitsub_pane_ok(Pane *p) {
+    char bmp[PATH_MAX];
+    if (!p->path[0] || pane_is_archive(p) || pane_is_trash(p) || borg_mount_of(p->path, bmp, sizeof bmp)) return false; // (backups: read through borg, slow)
     SshTarget st;
     // other network folders: git would stat every file through the mount; on SFTP it runs on the server instead
     if (path_is_remote(p->path) && !ssh_target_for(p->path, &st)) return false;
     Tab *t = tab_of(p);
-    if (t && t->term) return false;
-    return !A.selftest || getenv("FE_GIT"); // tests use a stand-in git, never the real one
+    return !(t && t->term);
 }
+
+static bool git_pane_eligible(Pane *p) {
+    return A.git_status && gitsub_pane_ok(p) && (!A.selftest || getenv("FE_GIT")); // tests use a stand-in git, never the real one
+}
+
+// Borg backups are marked even with git status off (tests: only with a stand-in borg).
+static bool borg_pane_eligible(Pane *p) { return gitsub_pane_ok(p) && (!A.selftest || getenv("FE_BORG")); }
 
 static struct GitRepo *git_repo(const char *root, bool create) {
     struct GitRepo *lru = NULL;
@@ -8317,6 +8365,7 @@ static void git_subs_done(void *arg) {
     snprintf(d->path, sizeof d->path, "%s", j->path);
     d->v = j->subs;
     d->n = j->nsubs;
+    d->self_borg = j->self_borg;
     d->used = now_ns();
     for (int i = 0; i < d->n; i++)
         if (d->v[i].remote[0]) git_remote_web(d->v[i].remote, d->v[i].disp, sizeof d->v[i].disp, NULL, 0);
@@ -8331,6 +8380,7 @@ static void git_subs_request(Pane *p) {
     if (L->is_search || L->is_content || L->is_archive) return;
     GitSubsJob *j = xcalloc(1, sizeof *j);
     snprintf(j->path, sizeof j->path, "%s", p->path);
+    j->git = git_pane_eligible(p);
     for (u32 i = 0; i < L->count && j->n < 20000; i++) {
         Entry *e = &L->entries[i];
         if (!(e->flags & ENT_DIR) || (e->flags & ENT_MATCH) || !strcmp(rel_base(e->name), ".git")) continue;
@@ -8342,8 +8392,7 @@ static void git_subs_request(Pane *p) {
 }
 
 // The repository a folder entry of the pane is (branch pill), or NULL.
-static const GitSub *git_entry_sub(Pane *p, const Entry *e) {
-    if (!(e->flags & ENT_DIR) || !git_pane_eligible(p)) return NULL;
+static struct GitSubs *git_subs_of(Pane *p) {
     static struct GitSubs *last; // rows of one pane are drawn together
     if (!last || strcmp(last->path, p->path)) {
         last = NULL;
@@ -8352,7 +8401,22 @@ static const GitSub *git_entry_sub(Pane *p, const Entry *e) {
         if (!last) return NULL;
     }
     last->used = now_ns();
-    return last->n ? git_sub_find(last->v, last->n, e->name) : NULL;
+    return last;
+}
+
+// (also a Borg backup repository: g->borg)
+static const GitSub *git_entry_sub(Pane *p, const Entry *e) {
+    if (!(e->flags & ENT_DIR) || !gitsub_pane_ok(p)) return NULL;
+    struct GitSubs *d = git_subs_of(p);
+    const GitSub *g = d && d->n ? git_sub_find(d->v, d->n, e->name) : NULL;
+    return g && (g->borg ? borg_pane_eligible(p) : git_pane_eligible(p)) ? g : NULL;
+}
+
+// The folder a pane shows is a Borg repository (looked at with its subfolders): BORG_V1 / BORG_V2, else 0.
+static int pane_borg_repo(Pane *p) {
+    if (!p->L || p->L->is_search || !borg_pane_eligible(p)) return 0;
+    struct GitSubs *d = git_subs_of(p);
+    return d ? d->self_borg : 0;
 }
 
 // Everything shown is asked again (focus regained, the feature switched on, Refresh).
@@ -8363,13 +8427,18 @@ static void git_refresh_all(void) {
 }
 
 static void git_tick(void) {
-    if (!A.git_status) return;
     u64 now = now_ns();
     for (int i = 0; i < A.npanels; i++) {
         Tab *t = A.panels[i]->cur;
         if (!t) continue;
         Pane *p = &t->pane[0];
-        if (!p->L || !git_pane_eligible(p)) continue;
+        if (!p->L) continue;
+        if (!git_pane_eligible(p)) { // only Borg backups to look for
+            if (p->gitsub_lt != p->L->t_start && atomic_load(&p->L->state) >= LST_READY && atomic_load(&p->L->state) != LST_ERROR &&
+                borg_pane_eligible(p))
+                git_subs_request(p);
+            continue;
+        }
         if (p->git_lt != p->L->t_start) { // a new listing (also a reload of the same folder): resolve, then status
             p->git_lt = p->L->t_start;
             GitResolve *rs = xcalloc(1, sizeof *rs);
@@ -9674,6 +9743,133 @@ static void cmp_bar_click(Pane *p, f32 x, f32 y) {
     else if (in_rect(sw, x, y)) cmp_action(p, ACT_CMP_DIFF_ONLY);
 }
 
+// --- Borg backups (main thread; borg.c mounts them): opening a repository as its archives, the passphrase, unmounting ---
+
+#define BORG_MOUNTS 16
+static struct { char mp[PATH_MAX], dir[PATH_MAX]; u64 used; } g_borg[BORG_MOUNTS]; // ours, open in this run
+static int g_borg_n, g_borg_busy;   // (busy: opening, for tests)
+static u64 g_borg_idle_ns = 120000000000ull; // unused this long (no tab inside, no file operation): unmounted
+
+static void borg_prompt_open(BorgOpen *o); // ui_tools.c
+
+static void borg_submit(BorgOpen *o) {
+    g_borg_busy++;
+    pool_submit(borg_open_job, o);
+}
+
+// Open the Borg repository dir (kind: BORG_V1 / BORG_V2, 0 = find out) in pane p: mounted, then p goes to its archives.
+static void borg_open(Pane *p, const char *dir, int kind) {
+    if (A.selftest && !getenv("FE_BORG")) return; // tests: only a stand-in borg
+    BorgOpen *o = xcalloc(1, sizeof *o);
+    snprintf(o->dir, sizeof o->dir, "%s", dir);
+    o->kind = kind;
+    o->pane = p;
+    o->sftp = ssh_target_for(dir, &o->t); // on a server: borg there reads it (Borg 1)
+    toast("Opening the backups in %s\xE2\x80\xA6", path_basename(dir));
+    borg_submit(o);
+}
+
+static void borg_open_done(void *arg) {
+    BorgOpen *o = arg;
+    g_borg_busy--;
+    Pane *p = pane_exists(o->pane) ? o->pane : NULL;
+    switch (o->rc) {
+    case BORG_OK: {
+        int k = 0;
+        while (k < g_borg_n && strcmp(g_borg[k].mp, o->mp)) k++;
+        if (k == g_borg_n && g_borg_n < BORG_MOUNTS) g_borg_n++;
+        if (k < g_borg_n) {
+            snprintf(g_borg[k].mp, sizeof g_borg[k].mp, "%s", o->mp);
+            snprintf(g_borg[k].dir, sizeof g_borg[k].dir, "%s", o->dir);
+            g_borg[k].used = now_ns();
+        }
+        if (p) pane_navigate(p, o->mp, true);
+        if (o->remote_tried) toast("Couldn't use borg on the server (not installed, or no key / shared connection): reading through the folder, slower");
+        else if (strstr(A.toast, "Opening the backups")) A.toast[0] = 0;
+        break;
+    }
+    case BORG_E_PASS: borg_prompt_open(o); return; // asked; o lives on with the prompt
+    case BORG_E_NOBORG:
+        if (o->kind == BORG_V2) toast("This is a Borg 2 repository: install Borg 2 (borg2 / borgbackup2) to open it");
+        else toast("BorgBackup isn't installed (the borg / borgbackup package)");
+        break;
+    case BORG_E_FUSE: toast("borg mount needs FUSE support for Python: install pyfuse3 (python-pyfuse3 / python3-pyfuse3)"); break;
+    case BORG_E_LOCK: toast("The repository is busy (a backup running?). Try again when it's done"); break;
+    default: toast("Couldn't open the backups: %s", o->err); break;
+    }
+    free(o);
+    A.redraw = true;
+}
+
+// The passphrase prompt was answered (pass NULL: cancelled).
+static void borg_prompt_answer(BorgOpen *o, const char *pass, bool remember) {
+    if (!pass) { free(o); return; }
+    o->retry = true;
+    o->from_keyring = false;
+    o->store = remember;
+    snprintf(o->pass, sizeof o->pass, "%s", pass);
+    borg_submit(o);
+}
+
+static int borg_mount_index(const char *mp) {
+    for (int k = 0; k < g_borg_n; k++)
+        if (!strcmp(g_borg[k].mp, mp)) return k;
+    return -1;
+}
+
+static void borg_unmount(int k) {
+    pool_submit(borg_umount_job, strdup(g_borg[k].mp));
+    g_borg[k] = g_borg[--g_borg_n];
+}
+
+// Close the backups p is in: back to where the repository is, then unmounted.
+static void borg_close(Pane *p) {
+    char mp[PATH_MAX];
+    if (!borg_mount_of(p->path, mp, sizeof mp)) return;
+    int k = borg_mount_index(mp);
+    char parent[PATH_MAX];
+    snprintf(parent, sizeof parent, "%s", k >= 0 ? g_borg[k].dir : getenv("HOME") ? getenv("HOME") : "/");
+    if (k >= 0) { char *sl = strrchr(parent, '/'); if (sl && sl != parent) *sl = 0; }
+    for (int i = 0; i < A.ntabs; i++) // every tab inside it leaves
+        for (int j = 0; j < A.tabs[i]->npanes; j++) {
+            Pane *q = &A.tabs[i]->pane[j];
+            size_t ml = strlen(mp);
+            if (!strncmp(q->path, mp, ml) && (!q->path[ml] || q->path[ml] == '/')) pane_navigate(q, parent, true);
+        }
+    if (k >= 0) borg_unmount(k);
+    else pool_submit(borg_umount_job, strdup(mp)); // (one from an earlier run)
+}
+
+// Unused mounts go after a while (a tab inside, or any file operation - maybe copying out of it - keeps them).
+static void borg_tick(void) {
+    if (!g_borg_n) return;
+    u64 now = now_ns();
+    for (int k = g_borg_n - 1; k >= 0; k--) {
+        size_t ml = strlen(g_borg[k].mp);
+        bool used = false;
+        for (int i = 0; i < A.nops && !used; i++) used = atomic_load(&A.ops[i]->phase) != OPS_DONE;
+        for (int i = 0; i < A.ntabs && !used; i++)
+            for (int j = 0; j < A.tabs[i]->npanes && !used; j++) {
+                const char *q = A.tabs[i]->pane[j].path;
+                used = !strncmp(q, g_borg[k].mp, ml) && (!q[ml] || q[ml] == '/');
+            }
+        if (used) g_borg[k].used = now;
+        else if (now - g_borg[k].used > g_borg_idle_ns) borg_unmount(k);
+    }
+}
+
+static int borg_wait_ms(void) { return g_borg_n ? 10000 : 0; } // (the main loop wakes up to check)
+
+static void borg_shutdown(void) { // quitting: ours go too (lazily, if something still reads them)
+    for (int k = 0; k < g_borg_n; k++) {
+        char out[256];
+        char *av[] = {(char *)tool("FE_FUSERMOUNT", "fusermount3"), "-u", "-z", g_borg[k].mp, NULL};
+        run_capture(av, out, sizeof out);
+        rmdir(g_borg[k].mp);
+    }
+    g_borg_n = 0;
+}
+
 // --- snapshots view (main thread; snapshots.c finds them) ------------------------------------------------------
 // A pane mode like disk usage: the drive's snapshots (Snapper, Timeshift, ZFS), newest first. Open one to browse it
 // read-only (a bar under the list says where you are, with Compare with now and Restore), see what changed between
@@ -9932,17 +10128,34 @@ static void snap_restore(Pane *p) {
     g_snap_rdst = xmalloc((size_t)n * sizeof(char *));
     g_snap_rn = n;
     size_t rl = strlen(root);
+    char bmp[PATH_MAX];
+    bool borg = borg_mount_of(p->path, bmp, sizeof bmp);
     for (int i = 0; i < n; i++) {
         char r2[PATH_MAX], l2[PATH_MAX], n2[96];
         if (snap_where(paths[i], r2, sizeof r2, l2, sizeof l2, n2, sizeof n2)) g_snap_rdst[i] = strdup(l2);
         else g_snap_rdst[i] = strdup(paths[i] + MIN(rl, strlen(paths[i]))); // (not expected)
     }
+    for (int i = 0; borg && i < n; i++) { // a whole backup, or files from another computer (or a relative path): not put back
+        char par[PATH_MAX];
+        snprintf(par, sizeof par, "%s", g_snap_rdst[i]);
+        char *sl = strrchr(par, '/');
+        if (sl) sl[sl == par] = 0;
+        struct stat st;
+        char tp[PATH_MAX];
+        tilde_path(par, tp, sizeof tp);
+        if (!g_snap_rdst[i][1]) toast("Pick what to restore: a whole backup isn't put back at once");
+        else if (stat(par, &st) || !S_ISDIR(st.st_mode)) toast("%s isn't on this computer: copy it out instead", tp);
+        else continue;
+        snap_restore_cb(1, false, NULL);
+        return;
+    }
     char msg[600];
-    if (n == 1) snprintf(msg, sizeof msg, "Put \xE2\x80\x9C%s\xE2\x80\x9D back as it was in snapshot %s? The current one goes to the Trash first.",
-                         g_snap_rdst[0][1] ? path_basename(g_snap_rdst[0]) : "/", nm);
-    else snprintf(msg, sizeof msg, "Put these %d items back as they were in snapshot %s? The current ones go to the Trash first.", n, nm);
+    const char *what = borg ? "backup" : "snapshot";
+    if (n == 1) snprintf(msg, sizeof msg, "Put \xE2\x80\x9C%s\xE2\x80\x9D back as it was in %s %s? The current one goes to the Trash first.",
+                         g_snap_rdst[0][1] ? path_basename(g_snap_rdst[0]) : "/", what, nm);
+    else snprintf(msg, sizeof msg, "Put these %d items back as they were in %s %s? The current ones go to the Trash first.", n, what, nm);
     static const char *b[] = {"Restore", "Cancel"};
-    dialog_open("Restore from snapshot", msg, b, 2, 0, 1, NULL, snap_restore_cb, NULL);
+    dialog_open(borg ? "Restore from backup" : "Restore from snapshot", msg, b, 2, 0, 1, NULL, snap_restore_cb, NULL);
     A.dlg.icon = DI_QUESTION;
     Dialog *d = &A.dlg; // where each goes
     for (int i = 0; i < n && d->nitems < 4; i++) {
@@ -9970,7 +10183,15 @@ static void snapbar_layout(Pane *p, Rect *bcmp, Rect *brest, Rect *ball) {
 static void snapbar_click(Pane *p, f32 x, f32 y) {
     Rect bc, br, ba;
     snapbar_layout(p, &bc, &br, &ba);
-    char root[PATH_MAX], live[PATH_MAX], nm[96];
+    char root[PATH_MAX], live[PATH_MAX], nm[96], mp[PATH_MAX];
+    bool borg = borg_mount_of(p->path, mp, sizeof mp);
+    int repo = borg ? 0 : pane_borg_repo(p);
+    if (repo) { if (in_rect(ba, x, y)) borg_open(p, p->path, repo); return; } // a repository's own files
+    if (borg && !snap_where(p->path, root, sizeof root, live, sizeof live, nm, sizeof nm)) { // its archives
+        if (in_rect(ba, x, y)) borg_close(p);
+        return;
+    }
+    if (borg && in_rect(ba, x, y)) { pane_navigate(p, mp, true); return; } // all its archives
     if (!snap_where(p->path, root, sizeof root, live, sizeof live, nm, sizeof nm)) return;
     if (in_rect(bc, x, y)) snap_compare(p, p->path, live);
     else if (in_rect(br, x, y)) snap_restore(p);
@@ -11789,7 +12010,7 @@ int main(int argc, char **argv) {
     bool force_new_window = false;
     const char *pick_mode = NULL;
     static char pick_start[PATH_MAX];
-    bool selftest = false, selftest_ops = false, selftest_m4 = false, selftest_m5 = false, selftest_m6 = false, selftest_m7 = false, selftest_m8 = false, selftest_m9 = false, selftest_m10 = false, selftest_m11 = false, selftest_git = false, selftest_grep = false, selftest_du = false, selftest_cmp = false, selftest_admin = false;
+    bool selftest = false, selftest_ops = false, selftest_m4 = false, selftest_m5 = false, selftest_m6 = false, selftest_m7 = false, selftest_m8 = false, selftest_m9 = false, selftest_m10 = false, selftest_m11 = false, selftest_git = false, selftest_grep = false, selftest_du = false, selftest_cmp = false, selftest_admin = false, selftest_borg = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--bench") && i + 1 < argc) return run_bench(argv[i + 1], i + 2 < argc ? argv[i + 2] : NULL);
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) A.screenshot = argv[++i];
@@ -11813,6 +12034,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--selftest-du")) { selftest_du = true; st_setup_du(); start = DU_BASE "/tree"; }
         else if (!strcmp(argv[i], "--selftest-cmp")) { selftest_cmp = true; st_setup_cmp(); start = CMP_BASE "/a"; }
         else if (!strcmp(argv[i], "--selftest-admin")) { selftest_admin = true; st_setup_admin(); start = ADM_BASE; }
+        else if (!strcmp(argv[i], "--selftest-borg")) { selftest_borg = true; st_setup_borg(); start = BORG_BASE "/home"; }
         else if (!strcmp(argv[i], "--select-tab") && i + 1 < argc) select_tab = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { usage(); return 0; }
         else if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--version")) {
@@ -11839,7 +12061,7 @@ int main(int argc, char **argv) {
     signal(SIGCHLD, SIG_IGN); // reap xdg-open children automatically
     A.rec_dir = getenv("FE_RECORD");
     if (A.rec_dir && !A.rec_dir[0]) A.rec_dir = NULL;
-    bool any_selftest = selftest || selftest_ops || selftest_m4 || selftest_m5 || selftest_m6 || selftest_m7 || selftest_m8 || selftest_m9 || selftest_m10 || selftest_m11 || selftest_git || selftest_grep || selftest_du || selftest_cmp || selftest_admin;
+    bool any_selftest = selftest || selftest_ops || selftest_m4 || selftest_m5 || selftest_m6 || selftest_m7 || selftest_m8 || selftest_m9 || selftest_m10 || selftest_m11 || selftest_git || selftest_grep || selftest_du || selftest_cmp || selftest_admin || selftest_borg;
     A.selftest = any_selftest;
     if (any_selftest || A.screenshot) setenv("XDG_STATE_HOME", "/tmp/fe-selftest-state", 1); // don't touch the user's recent list
     // Self-tests and screenshots run headless: no window on the user's screen (a window the compositor isn't
@@ -12052,6 +12274,7 @@ int main(int argc, char **argv) {
     if (selftest_du) return run_selftest_du();
     if (selftest_cmp) return run_selftest_cmp();
     if (selftest_admin) return run_selftest_admin();
+    if (selftest_borg) return run_selftest_borg();
 #ifdef FE_DEMO
     if (g_demo_out) return demo_run();
 #endif
@@ -12075,11 +12298,11 @@ int main(int argc, char **argv) {
         else if (loading || A.screenshot || ops_busy() || watch_pending() || A.search_due || A.pal_pending || sheet_busy())
             got = SDL_WaitEventTimeout(&e, MIN((loading || watch_pending() || A.search_due) ? 30 : ops_moving() ? 16 : 100,
                                                tip_ms > 0 ? tip_ms : INT_MAX));
-        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0 || tip_ms > 0) {
-            // add-on / cloud status, .git polls, a tooltip
+        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0 || borg_wait_ms() > 0 || tip_ms > 0) {
+            // add-on / cloud status, .git polls, unused Borg mounts, a tooltip
             int t = INT_MAX;
-            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms(), tip_ms};
-            for (int k = 0; k < 4; k++) if (w[k] > 0) t = MIN(t, w[k]);
+            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms(), borg_wait_ms(), tip_ms};
+            for (int k = 0; k < 5; k++) if (w[k] > 0) t = MIN(t, w[k]);
             got = SDL_WaitEventTimeout(&e, t);
         }
         else got = SDL_WaitEvent(&e);
@@ -12103,6 +12326,7 @@ int main(int argc, char **argv) {
         du_tick();
         cmp_tick();
         snap_tick();
+        borg_tick();
         tray_sync();
         layout();
         for (int i = 0; i < A.ntabs; i++)
@@ -12124,6 +12348,7 @@ int main(int argc, char **argv) {
     if (A.trash_job) { atomic_store(&A.trash_job->cancel, 1); stats_release(A.trash_job); A.trash_job = NULL; }
     recent_save();
     if (!A.screenshot) settings_save();
+    borg_shutdown();
     free(g_fit_tip);
     free(g_fit_tip_prev);
     SDL_DestroyRenderer(A.ren);

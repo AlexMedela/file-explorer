@@ -40,6 +40,7 @@ const char *__lsan_default_suppressions(void) { return "leak:libX11.so\nleak:lib
 #include "mtp.c"
 #include "devfs.c"
 #include "devices.c"
+#include "borg.c"
 #include "git.c"
 #include "apps.c"
 #include "font.c"

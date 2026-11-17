@@ -49,6 +49,7 @@ typedef struct {
     Rect cn_rsave;
     Rect cn_rf[7], cn_rproto[8], cn_rremember, cn_rremember_pw, cn_rconnect, cn_rsaved[8], cn_rforget[8];
     DevJob *sec_job; // password prompt: the connection waiting for it
+    BorgOpen *sec_borg; // ... or a Borg repository's passphrase
     // connect: the location's icon (network icon key, "" = default) and its picker popover
     char cn_icon[160];
     bool cn_pick;
@@ -74,6 +75,7 @@ static void sheet_close(void) {
     Sheet *s = &g_sheet;
     g_sbar.n = 0, g_sbar.drag = NULL;
     if (s->kind == SHEET_SECRET && s->sec_job) { dev_net_answer(s->sec_job, -1); s->sec_job = NULL; } // closed: cancel the login
+    if (s->kind == SHEET_SECRET && s->sec_borg) { borg_prompt_answer(s->sec_borg, NULL, false); s->sec_borg = NULL; }
     explicit_bzero(s->cn[CN_PASS].buf, sizeof s->cn[CN_PASS].buf); // the typed password doesn't linger
     if (s->stats) { atomic_store(&s->stats->cancel, 1); stats_release(s->stats); }
     if (s->sum) { atomic_store(&s->sum->cancel, 1); sum_release(s->sum); }
@@ -1529,6 +1531,20 @@ static void secret_prompt_open(DevJob *j) {
     Sheet *s = &g_sheet;
     s->kind = SHEET_SECRET;
     s->sec_job = j;
+    s->sec_borg = NULL;
+    te_set(&s->cn[CN_PASS], "", 0, 0);
+    s->cn_focus = CN_PASS;
+    s->cn_remember_pw = false;
+    A.redraw = true;
+}
+
+// A Borg repository wants its passphrase (o comes back through borg_prompt_answer).
+static void borg_prompt_open(BorgOpen *o) {
+    sheet_close();
+    Sheet *s = &g_sheet;
+    s->kind = SHEET_SECRET;
+    s->sec_job = NULL;
+    s->sec_borg = o;
     te_set(&s->cn[CN_PASS], "", 0, 0);
     s->cn_focus = CN_PASS;
     s->cn_remember_pw = false;
@@ -1537,6 +1553,13 @@ static void secret_prompt_open(DevJob *j) {
 
 static void secret_prompt_answer(bool ok) {
     Sheet *s = &g_sheet;
+    if (s->sec_borg) {
+        BorgOpen *o = s->sec_borg;
+        s->sec_borg = NULL;
+        borg_prompt_answer(o, ok ? s->cn[CN_PASS].buf : NULL, s->cn_remember_pw && secret_available());
+        sheet_close();
+        return;
+    }
     DevJob *j = s->sec_job;
     s->sec_job = NULL;
     if (j) {
@@ -1554,17 +1577,19 @@ static void secret_prompt_answer(bool ok) {
 static void secret_prompt_draw(void) {
     Sheet *s = &g_sheet;
     DevJob *j = s->sec_job;
-    if (!j) { sheet_close(); return; }
+    BorgOpen *bo = s->sec_borg;
+    if (!j && !bo) { sheet_close(); return; }
     Font *f = &A.font, *fs = &A.font_small;
-    bool phrase = str_has_ci(j->question, "passphrase");
+    bool phrase = bo || str_has_ci(j->question, "passphrase"), retry = bo ? bo->retry : j->qretry;
     f32 w = roundf(MIN(S(460), A.W - S(40))), pad = roundf(S(22)), fh = roundf(S(32)), bh = roundf(S(32));
     int st[6], ln[6];
     char msg[1100];
     NetAddr a;
     char host[300] = "";
-    if (net_parse(j->target, &a)) snprintf(host, sizeof host, "%s%s%s", a.user, a.user[0] ? "@" : "", a.host);
+    if (bo) tilde_path(bo->dir, host, sizeof host);
+    else if (net_parse(j->target, &a)) snprintf(host, sizeof host, "%s%s%s", a.user, a.user[0] ? "@" : "", a.host);
     // gio's text, tidied: "Authentication Required." repeats the title; the trailing ':' was its prompt
-    const char *q = j->question;
+    const char *q = bo ? "This Borg backup repository is encrypted. Enter its passphrase." : j->question;
     while (*q == ' ') q++;
     if (!strncasecmp(q, "Authentication Required", 23)) { q += 23; while (*q == '.' || *q == ' ') q++; }
     snprintf(msg, sizeof msg, "%s", q[0] ? q : (phrase ? "Enter the passphrase of your key." : "Enter your password."));
@@ -1573,7 +1598,7 @@ static void secret_prompt_draw(void) {
     int nl = wrap_text(fs, msg, w - pad * 2, st, ln, 6);
     f32 lh = roundf(fs->line_h * 1.3f);
     f32 srv = roundf(S(36)); // server row
-    f32 h = pad + roundf(S(30)) + srv + nl * lh + (j->qretry ? lh : 0) + roundf(S(14)) + fh + roundf(S(14)) + (secret_available() ? roundf(S(30)) : 0) + roundf(S(14)) + bh + pad;
+    f32 h = pad + roundf(S(30)) + srv + nl * lh + (retry ? lh : 0) + roundf(S(14)) + fh + roundf(S(14)) + (secret_available() ? roundf(S(30)) : 0) + roundf(S(14)) + bh + pad;
     Rect r = {roundf((A.W - w) * 0.5f), roundf((A.H - h) * 0.42f), w, h};
     s->r = r;
     draw_rect(0, 0, (f32)A.W, (f32)A.H, CA(0x000000, 0.45f));
@@ -1583,18 +1608,19 @@ static void secret_prompt_draw(void) {
     const char *title = phrase ? "Passphrase required" : "Password required";
     draw_text(&A.font_brand, x, y - S(1), title, (int)strlen(title), C(COL_TEXT_STRONG));
     y += roundf(S(30));
-    { // which server: a globe + user@host in a small card
+    { // which server: a globe + user@host in a small card (Borg: a history mark + the repository's folder)
         Rect sc = {x, y, w - pad * 2, srv - S(8)};
         draw_rrect(sc.x, sc.y, sc.w, sc.h, S(7), C(props_well()));
         f32 gs = roundf(S(16));
         const char *sicon = ""; // a saved server: its icon
-        for (int i = 0; i < A.nservers; i++) if (!strcmp(A.servers[i].uri, j->target)) sicon = A.servers[i].icon;
-        draw_net_icon(sc.x + S(9), sc.y + (sc.h - gs) * 0.5f, gs, sicon, 1.f);
+        for (int i = 0; j && i < A.nservers; i++) if (!strcmp(A.servers[i].uri, j->target)) sicon = A.servers[i].icon;
+        if (bo) draw_ui_icon(UI_ROTATE_CCW_CLOCK, sc.x + S(9), sc.y + (sc.h - gs) * 0.5f, gs, C(COL_TEXT_DIM));
+        else draw_net_icon(sc.x + S(9), sc.y + (sc.h - gs) * 0.5f, gs, sicon, 1.f);
         draw_text_fit(fs, sc.x + S(10) + gs + S(8), text_y(fs, sc.y, sc.h), sc.w - gs - S(30), host, (int)strlen(host), C(COL_TEXT), 0);
         y += srv;
     }
     for (int i = 0; i < nl; i++, y += lh) draw_text(fs, x, y, msg + st[i], ln[i], C(COL_TEXT2));
-    if (j->qretry) {
+    if (retry) {
         const char *e = phrase ? "That passphrase wasn't accepted. Try again." : "That password wasn't accepted. Try again.";
         draw_text(fs, x, y, e, (int)strlen(e), C(COL_DANGER));
         y += lh;
@@ -1615,7 +1641,7 @@ static void secret_prompt_draw(void) {
     s->cn_rconnect = (Rect){r.x + w - pad - roundf(S(110)), r.y + h - pad - bh, roundf(S(110)), bh};
     s->rcancel = (Rect){s->cn_rconnect.x - S(8) - roundf(S(96)), s->cn_rconnect.y, roundf(S(96)), bh};
     sheet_button(s->rcancel, "Cancel", false, true);
-    sheet_button(s->cn_rconnect, "Connect", true, true);
+    sheet_button(s->cn_rconnect, bo ? "Open" : "Connect", true, true);
 }
 
 static void connect_focus_step(int dir) {

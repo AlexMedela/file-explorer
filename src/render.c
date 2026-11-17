@@ -1110,8 +1110,12 @@ static void draw_git_badge(u8 gs, bool dir, f32 right, f32 y, f32 h, bool bright
     }
 }
 
-// A folder that is a repository: a pill with its branch, then its remote (faint) where there's room.
-static const char *repo_pill_text(const GitSub *g) { return g->branch[0] ? g->branch : "no commits"; }
+// A folder that is a repository: a pill with its branch, then its remote (faint) where there's room. A Borg backup
+// repository: a pill saying so, with a history mark.
+static const char *repo_pill_text(const GitSub *g) {
+    if (g->borg) return g->borg == BORG_V2 ? "Borg 2 backup" : "Borg backup";
+    return g->branch[0] ? g->branch : "no commits";
+}
 
 static f32 repo_pill_w(const GitSub *g) {
     const char *b = repo_pill_text(g);
@@ -1126,7 +1130,10 @@ static void draw_repo_pill(const GitSub *g, f32 x, f32 y, f32 h, f32 maxw, bool 
     x = roundf(x);
     f32 py = roundf(y + (h - ph) * 0.5f);
     draw_rrect(x, py, pw, ph, ph * 0.5f, bright ? CA(COL_SEL_TEXT, 0.18f) : C(COL_CHIP));
-    draw_branch_icon(x + S(6), py + ph * 0.5f, bright ? C(COL_SEL_DIM) : C(COL_TEXT_DIM));
+    if (g->borg) {
+        f32 is = roundf(S(12));
+        draw_ui_icon(UI_ROTATE_CCW_CLOCK, x + S(7), roundf(py + (ph - is) * 0.5f), is, bright ? C(COL_SEL_DIM) : C(COL_TEXT_DIM));
+    } else draw_branch_icon(x + S(6), py + ph * 0.5f, bright ? C(COL_SEL_DIM) : C(COL_TEXT_DIM));
     f32 tx = x + S(23);
     draw_text_fit(fs, tx, text_y(fs, py, ph), x + pw - S(8) - tx, b, (int)strlen(b), bright ? C(COL_SEL_TEXT) : C(COL_TEXT2), 0);
     f32 rx = x + pw + S(8);
@@ -1262,11 +1269,15 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
             }
             bool link = e->flags & ENT_LINK, hid = e->flags & ENT_HIDDEN;
             bool theme_link = link && draw_theme_badge(ix, iy, isz, BADGE_LINK, 0, hid);
-            if (git_entry_sub(p, e) && !draw_theme_badge(ix, iy, isz, BADGE_GIT, link, hid)) { // a repository: a branch mark on the icon's bottom-left corner
+            const GitSub *gsub = git_entry_sub(p, e);
+            if (gsub && (gsub->borg || !draw_theme_badge(ix, iy, isz, BADGE_GIT, link, hid))) { // a repository: a branch mark on the icon's bottom-left corner (Borg: a history mark)
                 f32 bs = roundf(MAX(S(18), isz * 0.3f)), bx = ix - S(2), by = iy + isz - bs + S(2);
                 draw_rrect(bx - S(2), by - S(2), bs + S(4), bs + S(4), (bs + S(4)) * 0.5f, C(COL_BG));
                 draw_rrect(bx, by, bs, bs, bs * 0.5f, C(COL_CHIP));
-                draw_branch_icon(bx + (bs - S(13)) * 0.5f, by + bs * 0.5f, C(COL_TEXT2));
+                if (gsub->borg) {
+                    f32 is = roundf(S(12));
+                    draw_ui_icon(UI_ROTATE_CCW_CLOCK, bx + (bs - is) * 0.5f, by + (bs - is) * 0.5f, is, C(COL_TEXT2));
+                } else draw_branch_icon(bx + (bs - S(13)) * 0.5f, by + bs * 0.5f, C(COL_TEXT2));
             }
             if (link && !theme_link) {
                 f32 bs = roundf(MAX(S(10), isz * 0.18f));
@@ -2030,21 +2041,34 @@ static void draw_snapbar(Pane *p) {
     Font *fs = &A.font_small;
     draw_rect(b.x, b.y, b.w, b.h, C(rgb_mix(COL_TOOLBAR, COL_ACCENT, 0.1f)));
     if (g_separators) draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
-    char root[PATH_MAX], live[PATH_MAX], nm[96], msg[PATH_MAX + 160], tl[PATH_MAX];
-    if (!snap_where(p->path, root, sizeof root, live, sizeof live, nm, sizeof nm)) return;
+    char root[PATH_MAX], live[PATH_MAX], nm[96], msg[PATH_MAX + 160], tl[PATH_MAX], mp[PATH_MAX];
+    bool borg = borg_mount_of(p->path, mp, sizeof mp), in = snap_where(p->path, root, sizeof root, live, sizeof live, nm, sizeof nm);
+    int repo = borg ? 0 : pane_borg_repo(p);
+    if (!in && !borg && !repo) return;
     Rect bc, br, ba;
     snapbar_layout(p, &bc, &br, &ba);
     f32 is = roundf(S(14)), ix = b.x + S(14), iy = roundf(b.y + (b.h - is) * 0.5f), t = MAX(1.f, roundf(S(1.4f)));
     draw_rrect_outline(ix, iy, is, is, is * 0.5f, t, C(COL_ACCENT)); // a clock
     draw_line(ix + is * 0.5f, iy + is * 0.5f, ix + is * 0.5f, iy + is * 0.22f, t, C(COL_ACCENT));
     draw_line(ix + is * 0.5f, iy + is * 0.5f, ix + is * 0.72f, iy + is * 0.5f, t, C(COL_ACCENT));
-    tilde_path(live, tl, sizeof tl);
-    snprintf(msg, sizeof msg, "Snapshot %s  \xC2\xB7  read-only  \xC2\xB7  now at %s", nm, tl);
     f32 tx = ix + is + S(10);
+    if (!in) { // a Borg repository's own files, or the list of its backups: one button
+        if (repo) snprintf(msg, sizeof msg, "%s repository  \xC2\xB7  these are borg's own files", repo == BORG_V2 ? "Borg 2 backup" : "Borg backup");
+        else {
+            int k = borg_mount_index(mp);
+            tilde_path(k >= 0 ? g_borg[k].dir : mp, tl, sizeof tl);
+            snprintf(msg, sizeof msg, "Backups in %s  \xC2\xB7  read-only  \xC2\xB7  one folder per backup", tl);
+        }
+        draw_text_fit(fs, tx, text_y(fs, b.y, b.h), ba.x - tx - S(8), msg, (int)strlen(msg), C(COL_TEXT2), 0);
+        sheet_button(ba, repo ? "Browse backups" : "Close backups", repo != 0, true);
+        return;
+    }
+    tilde_path(live, tl, sizeof tl);
+    snprintf(msg, sizeof msg, "%s %s  \xC2\xB7  read-only  \xC2\xB7  now at %s", borg ? "Backup" : "Snapshot", nm, tl);
     draw_text_fit(fs, tx, text_y(fs, b.y, b.h), bc.x - tx - S(8), msg, (int)strlen(msg), C(COL_TEXT2), 0);
     sheet_button(bc, "Compare with now", false, true);
     sheet_button(br, "Restore\xE2\x80\xA6", false, true);
-    sheet_button(ba, "All snapshots", false, true);
+    sheet_button(ba, borg ? "All backups" : "All snapshots", false, true);
 }
 
 static void draw_list(Pane *p, bool active) {
