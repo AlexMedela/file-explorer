@@ -161,8 +161,9 @@ static void ts_dir(char *out, size_t cap, const char *base, bool rsync) {
     snprintf(out, cap, "%s%s%s/snapshots", base, base[1] ? "/" : "", rsync ? "timeshift" : "timeshift-btrfs");
 }
 
-// A snapshot's <date>/info.json: when it was taken ("created", unix seconds), "comments", and its "tags" as words
-// (O on demand, B boot, H hourly, D daily, W weekly, M monthly). 0 when it can't be read (the folder name then).
+// A snapshot's <date>/info.json: when it was taken ("created", unix seconds), "comments", and its "tags" as words:
+// newer Timeshift writes them so ("ondemand daily"), older ones as letters ("O D": on demand, boot, hourly, daily,
+// weekly, monthly). 0 when it can't be read (the folder name then).
 static i64 ts_info(const char *snapdir, char *desc, size_t dcap, char *tags, size_t tcap) {
     char p[PATH_MAX + 16], js[8192], v[200];
     desc[0] = tags[0] = 0;
@@ -174,11 +175,12 @@ static i64 ts_info(const char *snapdir, char *desc, size_t dcap, char *tags, siz
     fclose(f);
     if (snap_json_val(js, js + k, "comments", v, sizeof v)) snprintf(desc, dcap, "%s", v);
     if (snap_json_val(js, js + k, "tags", v, sizeof v)) {
-        static const char *const w[] = {"O", "on demand", "B", "boot", "H", "hourly", "D", "daily", "W", "weekly", "M", "monthly"};
+        static const char *const w[] = {"O", "ondemand", "on demand", "B", "boot", "boot", "H", "hourly", "hourly",
+                                        "D", "daily", "daily", "W", "weekly", "weekly", "M", "monthly", "monthly"};
         size_t o = 0;
-        for (const char *c = v; *c; c++)
-            for (int i = 0; i < 12; i += 2)
-                if (*c == w[i][0] && o + 1 < tcap) o += (size_t)snprintf(tags + o, tcap - o, "%s%s", o ? ", " : "", w[i + 1]);
+        for (char *tok = strtok(v, " ,"); tok; tok = strtok(NULL, " ,"))
+            for (int i = 0; i < 18; i += 3)
+                if ((!strcmp(tok, w[i]) || !strcasecmp(tok, w[i + 1])) && o + 1 < tcap) o += (size_t)snprintf(tags + o, tcap - o, "%s%s", o ? ", " : "", w[i + 2]);
         if (o >= tcap) tags[tcap - 1] = 0;
     }
     return snap_json_val(js, js + k, "created", v, sizeof v) ? (i64)atoll(v) : 0;

@@ -7876,10 +7876,11 @@ static void st_setup_admin(void) {
     mkdir_p(ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/localhost" ADM_BASE "/vol3/notes", 0755);
     st_write_text(ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/localhost" ADM_BASE "/vol3/notes/n.txt", "old notes\n");
     st_write_text(ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/info.json",
-                  "{\n  \"created\" : \"1780300000\",\n  \"tags\" : \"D W\",\n  \"comments\" : \"before upgrade\"\n}\n");
+                  "{\n  \"created\" : \"1780300000\",\n  \"tags\" : \"daily weekly\",\n  \"comments\" : \"before upgrade\"\n}\n");
     mkdir_p(ADM_BASE "/run/8", 0755);
     if (symlink(ADM_BASE "/tsroot", ADM_BASE "/run/8/backup")) {}
     mkdir_p(ADM_BASE "/backupdisk/timeshift/snapshots/2026-07-01_08-00-00/localhost" ADM_BASE "/vol3", 0755);
+    st_write_text(ADM_BASE "/backupdisk/timeshift/snapshots/2026-07-01_08-00-00/info.json", "{\"tags\" : \"O B\"}\n"); // (older Timeshift: letters)
     mkdir_p(ADM_BASE "/byuuid", 0755);
     st_write_text(ADM_BASE "/sdz", "");
     if (symlink(ADM_BASE "/sdz", ADM_BASE "/byuuid/abcd-1234")) {}
@@ -8229,6 +8230,7 @@ static int run_selftest_admin(void) {
     ST_CHECK(!strcmp(sl->tool, "Timeshift") && sl->n == 2 && sl->ts_manage && !sl->manage && !strcmp(sl->mnt, ADM_BASE "/vol3"));
     if (sl->n == 2) {
         ST_CHECK(!strcmp(sl->s[0].name, "2026-07-01_08-00-00") && sl->s[0].when == snap_parse_time("2026-07-01_08-00-00", false) &&
+                 !strcmp(sl->s[0].cleanup, "on demand, boot") &&
                  !strcmp(sl->s[0].root, ADM_BASE "/backupdisk/timeshift/snapshots/2026-07-01_08-00-00/localhost" ADM_BASE "/vol3"));
         ST_CHECK(sl->s[1].when == 1780300000 && !strcmp(sl->s[1].desc, "before upgrade") && !strcmp(sl->s[1].cleanup, "daily, weekly") &&
                  !strcmp(sl->s[1].root, ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/localhost" ADM_BASE "/vol3"));
