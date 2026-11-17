@@ -97,6 +97,7 @@ static int g_nthemes;
 static Theme T = g_theme_dark; // the palette everything draws with
 static int g_theme_cur;
 static u32 g_accent_custom; // 0 = theme accent, else 0x01000000 | rgb
+static bool g_unified_surfaces; // Options: sidebar, header, preview and status bar take the file area's background
 // The desktop's look, read off the UI thread (integration.c, "desktop look") only while Theme or File icons is System.
 static struct { bool known, light; u32 accent; char icons[64]; } g_desktop; // accent: 0 = none, else 0x01000000 | rgb
 
@@ -191,6 +192,7 @@ static bool theme_is_system(void) {
 static void theme_apply(void) {
     if (g_theme_cur < 0 || g_theme_cur >= g_nthemes) g_theme_cur = 0;
     T = theme_is_system() ? (g_desktop.light ? g_theme_light : g_theme_dark) : g_themes[g_theme_cur].t;
+    if (g_unified_surfaces) T.sidebar = T.tabbar = T.toolbar = T.preview_bg = T.bg; // (the lines between them stay)
     u32 accent = g_accent_custom ? g_accent_custom : theme_is_system() ? g_desktop.accent : 0;
     if (accent) {
         u32 a = accent & 0xFFFFFF;

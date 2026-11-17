@@ -3400,6 +3400,23 @@ static int run_selftest_m9(void) {
     A.font_size = 13;
     reload_fonts();
     g_accent_custom = 0;
+    { // Unified surfaces (off by default): sidebar, header, preview and status bar take the file area's background
+        int saved = g_theme_cur;
+        g_theme_cur = theme_find("Dark");
+        theme_apply();
+        ST_CHECK(!g_unified_surfaces && !memcmp(&T, &g_theme_dark, sizeof T));
+        opt_bool_toggle(OPT_UNIFIED);
+        ST_CHECK(T.sidebar == T.bg && T.tabbar == T.bg && T.toolbar == T.bg && T.preview_bg == T.bg && T.border == g_theme_dark.border);
+        st_frames(2);
+        st_shot("m9-unified");
+        settings_save();
+        settings_load();
+        ST_CHECK(g_unified_surfaces);
+        opt_bool_toggle(OPT_UNIFIED);
+        ST_CHECK(!g_unified_surfaces && !memcmp(&T, &g_theme_dark, sizeof T));
+        g_theme_cur = saved;
+        theme_apply();
+    }
 
     // font family switch (if a second family is installed)
     char *dv = font_family_file("DejaVu Sans");

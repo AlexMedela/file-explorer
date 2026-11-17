@@ -7,6 +7,7 @@ enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 enum {
     OPT_THEME, OPT_ACCENT, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
+    OPT_UNIFIED,
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
@@ -38,6 +39,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_BRAND_NAME, "Name above the sidebar", "Explorer, this computer's name, your own text, or none (the sidebar then starts at the top)"},
     {OC_APPEARANCE, OK_TEXT, OPT_BRAND_TEXT, "Your own name", "Shown above the sidebar instead of Explorer"},
     {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "The logo before the name above the sidebar"},
+    {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED, "Unified surfaces", "Sidebar, header, preview and status bar take the file area's background; the lines between them stay"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Font, colours, padding and cursor of terminal tabs (F4)"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_NEW, "Create theme from current colours", "Writes a JSON scheme you can edit"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_FOLDER, "Themes folder", "Open the folder and reload theme files"},
@@ -79,7 +81,7 @@ static const OptDef g_opts[] = {
 
 // Section headings: each starts a card with the option it names and runs until the next one.
 static const struct { int id; const char *title; } g_opt_sections[] = {
-    {OPT_THEME, "Theme"}, {OPT_FONT, "Text"}, {OPT_DIM_INACTIVE, "Display"}, {OPT_TERM_LOOK, "Terminal"}, {OPT_THEME_NEW, "Custom themes"},
+    {OPT_THEME, "Theme"}, {OPT_FONT, "Text"}, {OPT_DIM_INACTIVE, "Display"}, {OPT_UNIFIED, "Surfaces"}, {OPT_TERM_LOOK, "Terminal"}, {OPT_THEME_NEW, "Custom themes"},
     {OPT_HIDDEN, "Files and folders"}, {OPT_RESTORE, "Startup"}, {OPT_SINGLE_CLICK, "Mouse"}, {OPT_TRANSFERS, "Copying and moving"},
     {OPT_KEYS_RESET, "Shortcuts"}, {OPT_DEF_VIEW, "New folders"}, {OPT_RENDERER, "Rendering"}, {OPT_SETTINGS_FILE, "Maintenance"},
     {OPT_IG_DEFAULT_FM, "Desktop roles (yours to give: installing never takes them)"}, {OPT_TERMINAL, "External terminal"},
@@ -433,6 +435,7 @@ static bool opt_bool_get(int id) {
     case OPT_ROUND_CORNERS: return A.round_corners;
     case OPT_WINDOW_BUTTONS: return A.window_buttons;
     case OPT_BRAND_LOGO: return A.brand_logo;
+    case OPT_UNIFIED: return g_unified_surfaces;
     case OPT_ALT_ROWS: return A.alt_rows;
     case OPT_SIZE_BARS: return A.size_bars;
     case OPT_LOAD_TIMES: return A.load_times;
@@ -474,6 +477,10 @@ static void opt_bool_toggle(int id) {
         layout();
         break;
     case OPT_BRAND_LOGO: A.brand_logo = !A.brand_logo; break;
+    case OPT_UNIFIED:
+        g_unified_surfaces = !g_unified_surfaces;
+        theme_apply();
+        break;
     case OPT_ALT_ROWS: A.alt_rows = !A.alt_rows; break;
     case OPT_SIZE_BARS: A.size_bars = !A.size_bars; break;
     case OPT_LOAD_TIMES: A.load_times = !A.load_times; break;

@@ -80,6 +80,7 @@ static void settings_defaults(void) {
     A.conflict_last = CF_KEEP_BOTH;
     snprintf(A.theme_name, sizeof A.theme_name, "Dark");
     g_accent_custom = 0;
+    g_unified_surfaces = false;
     A.ui_font[0] = 0;
     A.font_size = 13;
     A.row_spacing = 1;
@@ -290,6 +291,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "group")) A.def_group = CLAMP(atoi(v), 0, GROUP_COUNT - 1);
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
+        else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v);
         else if (!strcmp(k, "theme")) snprintf(A.theme_name, sizeof A.theme_name, "%s", v);
         else if (!strcmp(k, "accent")) {
             u32 c;
@@ -505,6 +507,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
             A.dblclick_up, A.drop_ask, A.def_tree, A.single_instance);
     keys_save(f);
+    fprintf(f, "unified_surfaces=%d\n", g_unified_surfaces);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
     fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",

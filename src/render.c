@@ -324,7 +324,7 @@ static void draw_panel_bar(Panel *pn) {
             bool hover = A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my);
             if (pass == 0 && !cur && hover) { // the active card's shape, faded halfway towards the tab bar
                 f32 bot = tb.y + tb.h;
-                Color hc = C(rgb_mix(COL_TABBAR, COL_TOOLBAR, 0.5f));
+                Color hc = C(COL_TABBAR == COL_TOOLBAR ? rgb_mix(COL_TABBAR, COL_TEXT, 0.05f) : rgb_mix(COL_TABBAR, COL_TOOLBAR, 0.5f)); // (Unified surfaces)
                 draw_rrect(r.x, r.y, r.w, r.h + rad * 2, rad, hc);
                 draw_flare(r.x - rad, bot - rad, rad, 0.f, r.x, bot, hc);
                 draw_flare(r.x + r.w + rad, bot - rad, rad, (f32)M_PI * 0.5f, r.x + r.w, bot, hc);
@@ -333,10 +333,10 @@ static void draw_panel_bar(Panel *pn) {
                 // inactive panel of a split: the same dimming as its toolbar below (that overlay stops at the bar)
                 u32 card = t->term ? term_bg_color() : COL_TOOLBAR; // a terminal tab merges into the terminal below
                 if (multi && !active_panel && A.dim_inactive && !t->term) card = rgb_mix(card, 0x000000, 0.10f);
-                if (t->term && fabsf(rgb_luma(card) - rgb_luma(COL_TABBAR)) < 0.09f) {
-                    // a terminal colour close to the tab bar's (black on a dark theme...): outline the card and the
-                    // bar's bottom edge so the tab still reads as a tab
-                    Color bc = C(rgb_mix(COL_TABBAR, term_fg_color(), theme_is_light(&T) ? 0.22f : 0.16f));
+                if (t->term ? fabsf(rgb_luma(card) - rgb_luma(COL_TABBAR)) < 0.09f : card == COL_TABBAR) {
+                    // a terminal colour close to the tab bar's (black on a dark theme...), or Unified surfaces (one
+                    // colour for both): outline the card and the bar's bottom edge so the tab still reads as a tab
+                    Color bc = C(rgb_mix(COL_TABBAR, t->term ? term_fg_color() : COL_TEXT, theme_is_light(&T) ? 0.22f : 0.16f));
                     draw_rect(tb.x, bot - 1, tb.w, 1, bc);
                     draw_rrect(r.x - 1, r.y - 1, r.w + 2, r.h + rad * 2 + 1, rad + 1, bc);
                     draw_flare(r.x - rad, bot - rad, rad - 1, 0.f, r.x, bot, bc);
