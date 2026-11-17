@@ -11341,6 +11341,7 @@ static void frame_draw(void) {
     if (A.show_overlay) draw_overlay();
     fit_tip_mouse(false);
     draw_fit_tooltip();
+    draw_window_edge();
     draw_flush();
     corners_mask();
     shadow_draw();

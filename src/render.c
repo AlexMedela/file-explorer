@@ -592,8 +592,8 @@ static void draw_preedit(void) {
     draw_rect(x + pad, y + h - roundf(S(5)), w - pad * 2, MAX(1.f, roundf(S(1))), C(COL_ACCENT));
 }
 
-// Own title bar: minimise / maximise / close at the top right (Windows-sized, red close on hover), the strip above
-// the preview, and a hairline round the window (borderless windows get no shadow from some compositors).
+// Own title bar: minimise / maximise / close at the top right (Windows-sized, red close on hover) and the strip above
+// the preview.
 static void draw_window_controls(void) {
     if (!A.csd) return;
     Rect s = A.r_wstrip;
@@ -618,6 +618,14 @@ static void draw_window_controls(void) {
             draw_rrect_outline(x0, y0 + o, w2, w2, S(1.5f), lt, ic);
         } else draw_cross(cx, cy, is, lt, ic);
     }
+}
+
+// A hairline round the window with our own title bar (borderless windows get no shadow from some compositors), drawn
+// last so the status bar, menus and sheets don't cover parts of it.
+static void draw_window_edge(void) {
+    if (!A.csd) return;
+    bool max = window_maximized();
+    draw_clip(NULL);
     f32 cr = window_corner_radius();
     if (cr > 0) draw_rrect_outline(0, 0, (f32)A.W, (f32)A.H, cr, 1, C(COL_BORDER)); // (the corners are cut after the frame)
     else if (!max) {
