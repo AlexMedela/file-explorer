@@ -59,6 +59,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: release
     runs-on: ubuntu-latest
+    environment: release # OBS_TOKEN lives here; only v* tags may deploy to it
     steps:
       - name: Rebuild the distro packages on OBS
         env:
