@@ -1835,7 +1835,8 @@ static void snap_type_label(const SnapInfo *s, char *out, size_t cap) {
     if (!strcmp(s->type, "pre")) snprintf(out, cap, "before");
     else if (!strcmp(s->type, "post")) snprintf(out, cap, "after #%d", s->pre);
     else if (!strcmp(s->cleanup, "timeline")) snprintf(out, cap, "timeline");
-    else if (!strcmp(s->type, "zfs") || !strcmp(s->type, "timeshift")) out[0] = 0;
+    else if (!strcmp(s->type, "timeshift")) snprintf(out, cap, "%s", s->cleanup); // its tags: "daily, weekly"
+    else if (!strcmp(s->type, "zfs")) out[0] = 0;
     else snprintf(out, cap, "%s", s->type[0] ? s->type : "single");
 }
 
@@ -1890,7 +1891,7 @@ static void draw_snapview(Pane *p, bool active) {
                 {ACT_SNAP_OPEN, "Open", s != NULL},
                 {ACT_SNAP_COMPARE, "Compare with now", s != NULL},
                 {ACT_SNAP_CHANGES, v->sel2 >= 0 ? "Changes between" : "What changed", s && l->manage},
-                {ACT_SNAP_CREATE, "Create\xE2\x80\xA6", l->manage},
+                {ACT_SNAP_CREATE, "Create\xE2\x80\xA6", l->manage || l->ts_manage},
             };
             for (int i = 3; i >= 0; i--) {
                 f32 w = roundf(text_width(f, bt[i].lb, (int)strlen(bt[i].lb)) + S(24));
@@ -1996,7 +1997,7 @@ static void draw_snapview(Pane *p, bool active) {
         draw_text_fit(f, c1, ty, c2 - c1 - S(14), d, (int)strlen(d), tc, 0);
         snap_type_label(si, tl, sizeof tl);
         if (tl[0]) draw_text_fit(f, c2, ty, c3 - c2 - S(14), tl, (int)strlen(tl), dc, 0);
-        const char *desc = si->desc[0] ? si->desc : !strcmp(si->type, "zfs") || !strcmp(si->type, "timeshift") ? si->name : "";
+        const char *desc = si->desc[0] ? si->desc : !strcmp(si->type, "zfs") ? si->name : !strcmp(si->type, "timeshift") ? "Timeshift" : "";
         draw_text_fit(f, c3, ty, rx + rw - c3 - S(10), desc, (int)strlen(desc), tc, 0);
     }
     draw_clip_pop(cs);

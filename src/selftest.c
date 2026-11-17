@@ -7871,10 +7871,31 @@ static void st_setup_admin(void) {
     st_write_text(ADM_BASE "/vol2/.snapshots/5/info.xml", "<snapshot><date>2026-05-01 08:00:00</date><description>root</description></snapshot>");
     st_write_text(ADM_BASE "/vol2/r.txt", "now\n");
     chmod(ADM_BASE "/vol2/.snapshots", 0);
+    // Timeshift in rsync mode: one snapshot on "/" (also seen through /run/timeshift/8/backup: listed once), one on the
+    // backup drive its settings name (by UUID); the drive is ext4
+    mkdir_p(ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/localhost" ADM_BASE "/vol3/notes", 0755);
+    st_write_text(ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/localhost" ADM_BASE "/vol3/notes/n.txt", "old notes\n");
+    st_write_text(ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/info.json",
+                  "{\n  \"created\" : \"1780300000\",\n  \"tags\" : \"D W\",\n  \"comments\" : \"before upgrade\"\n}\n");
+    mkdir_p(ADM_BASE "/run/8", 0755);
+    if (symlink(ADM_BASE "/tsroot", ADM_BASE "/run/8/backup")) {}
+    mkdir_p(ADM_BASE "/backupdisk/timeshift/snapshots/2026-07-01_08-00-00/localhost" ADM_BASE "/vol3", 0755);
+    mkdir_p(ADM_BASE "/byuuid", 0755);
+    st_write_text(ADM_BASE "/sdz", "");
+    if (symlink(ADM_BASE "/sdz", ADM_BASE "/byuuid/abcd-1234")) {}
+    st_write_text(ADM_BASE "/timeshift.json", "{\n  \"backup_device_uuid\" : \"abcd-1234\",\n  \"btrfs_mode\" : \"false\"\n}\n");
+    mkdir_p(ADM_BASE "/vol3/notes", 0755);
+    st_write_text(ADM_BASE "/vol3/notes/n.txt", "new notes\n");
+    f = fopen(ADM_BASE "/tools/timeshift", "w");
+    fputs("#!/bin/sh\necho \"$*\" >> " ADM_BASE "/tools/timeshift.log\nexit 0\n", f);
+    fclose(f);
+    chmod(ADM_BASE "/tools/timeshift", 0755);
     st_write_text(ADM_BASE "/mountinfo", "21 1 0:31 /@ / rw - btrfs /dev/x rw\n"
                                           "60 21 0:61 /@vol " ADM_BASE "/vol rw - btrfs /dev/y rw\n"
                                           "61 21 0:62 / " ADM_BASE "/zvol rw - zfs pool/z rw\n"
-                                          "62 21 0:63 /@vol2 " ADM_BASE "/vol2 rw - btrfs /dev/y rw\n");
+                                          "62 21 0:63 /@vol2 " ADM_BASE "/vol2 rw - btrfs /dev/y rw\n"
+                                          "63 21 0:64 / " ADM_BASE "/vol3 rw - ext4 /dev/w rw\n"
+                                          "64 21 0:65 / " ADM_BASE "/backupdisk rw - ext4 " ADM_BASE "/sdz rw\n");
     // stand-in snapper: two configs; "list" only works once allowed (a flag file per config), status / create / delete logged
     mkdir_p(ADM_BASE "/configs", 0755);
     st_write_text(ADM_BASE "/configs/home2", "SUBVOLUME=\"" ADM_BASE "/vol2\"\nALLOW_USERS=\"bob\"\nSYNC_ACL=\"no\"\n");
@@ -7899,6 +7920,10 @@ static void st_setup_admin(void) {
     setenv("FE_SNAPPER_CONFIGS", ADM_BASE "/configs", 1);
     setenv("FE_MOUNTINFO", ADM_BASE "/mountinfo", 1);
     setenv("FE_TIMESHIFT", ADM_BASE "/run", 1);
+    setenv("FE_TIMESHIFT_ROOT", ADM_BASE "/tsroot", 1);
+    setenv("FE_TIMESHIFT_CONF", ADM_BASE "/timeshift.json", 1);
+    setenv("FE_DISK_BY_UUID", ADM_BASE "/byuuid", 1);
+    setenv("FE_TIMESHIFT_BIN", ADM_BASE "/tools/timeshift", 1);
     setenv("XDG_DATA_HOME", ADM_BASE "/xdg", 1);
     unsetenv("FE_PKEXEC");
 }
@@ -8097,6 +8122,15 @@ static int run_selftest_admin(void) {
         ST_CHECK(snap_where("/home/.snapshots/3/snapshot/a", r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !strcmp(lv, "/home/a"));
         ST_CHECK(snap_where("/tank/.zfs/snapshot/daily/f", r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !strcmp(lv, "/tank/f") && !strcmp(nm, "daily"));
         ST_CHECK(!snap_where("/x/.snapshots/abc", r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !snap_where("/home/me", r, sizeof r, lv, sizeof lv, nm, sizeof nm));
+        // Timeshift: rsync mode (the whole system under localhost), btrfs mode (@ is /, @home is /home)
+        ST_CHECK(snap_where("/timeshift/snapshots/2026-06-01_09-30-00/localhost/etc/x", r, sizeof r, lv, sizeof lv, nm, sizeof nm) &&
+                 !strcmp(r, "/timeshift/snapshots/2026-06-01_09-30-00/localhost") && !strcmp(lv, "/etc/x") && !strcmp(nm, "2026-06-01 09:30 (Timeshift)"));
+        ST_CHECK(snap_where("/run/timeshift/9/backup/timeshift/snapshots/2026-06-01_09-30-00/localhost", r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !strcmp(lv, "/"));
+        ST_CHECK(snap_where("/run/timeshift/9/backup/timeshift-btrfs/snapshots/2026-06-01_09-30-00/@home/me/a", r, sizeof r, lv, sizeof lv, nm, sizeof nm) &&
+                 !strcmp(r, "/run/timeshift/9/backup/timeshift-btrfs/snapshots/2026-06-01_09-30-00/@home") && !strcmp(lv, "/home/me/a"));
+        ST_CHECK(snap_where("/x/timeshift-btrfs/snapshots/2026-06-01_09-30-00/@/etc", r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !strcmp(lv, "/etc"));
+        ST_CHECK(!snap_where("/timeshift/snapshots/2026-06-01_09-30-00", r, sizeof r, lv, sizeof lv, nm, sizeof nm) &&
+                 !snap_where("/timeshift/snapshots/2026-06-01_09-30-00/other/x", r, sizeof r, lv, sizeof lv, nm, sizeof nm));
     }
     p = active_pane();
     pane_navigate(p, ADM_BASE "/vol", true);
@@ -8108,15 +8142,19 @@ static int run_selftest_admin(void) {
     ST_CHECK(st_wait_cond(st_snapl_done, 3000));
     st_frames(2);
     SnapList *sl = sv->l;
-    ST_CHECK(sl && sl->manage && !strcmp(sl->config, "root") && !strcmp(sl->tool, "Snapper") && sl->n == 3 && !strcmp(sl->mnt, ADM_BASE "/vol"));
-    if (sl && sl->n == 3) {
-        ST_CHECK(sl->s[0].num == 3 && !strcmp(sl->s[0].cleanup, "timeline") && sl->s[1].num == 2 && !strcmp(sl->s[1].type, "post") && sl->s[1].pre == 1 &&
-                 sl->s[2].num == 1 && !strcmp(sl->s[2].desc, "pacman -Syu") && !strcmp(sl->s[1].root, ADM_BASE "/vol/.snapshots/2/snapshot"));
+    // (Timeshift's btrfs snapshot of the same subvolume next to Snapper's)
+    ST_CHECK(sl && sl->manage && sl->ts_manage && !strcmp(sl->config, "root") && !strcmp(sl->tool, "Snapper, Timeshift") && sl->n == 4 &&
+             !strcmp(sl->mnt, ADM_BASE "/vol"));
+    if (sl && sl->n == 4) {
+        ST_CHECK(!strcmp(sl->s[0].type, "timeshift") && !strcmp(sl->s[0].root, ADM_BASE "/run/7/backup/timeshift-btrfs/snapshots/2026-04-01_12-00-00/@vol"));
+        ST_CHECK(sl->s[1].num == 3 && !strcmp(sl->s[1].cleanup, "timeline") && sl->s[2].num == 2 && !strcmp(sl->s[2].type, "post") && sl->s[2].pre == 1 &&
+                 sl->s[3].num == 1 && !strcmp(sl->s[3].desc, "pacman -Syu") && !strcmp(sl->s[2].root, ADM_BASE "/vol/.snapshots/2/snapshot"));
     }
     st_shot("snapshots-list");
     // what a change did (a post and its pre): snapper status, then a changed file opens in the snapshot
     st_key(SDLK_DOWN, 0);
-    ST_CHECK(sv->cur == 1);
+    st_key(SDLK_DOWN, 0);
+    ST_CHECK(sv->cur == 2);
     snap_action(p, ACT_SNAP_CHANGES);
     for (int k = 0; k < 400 && sv->cmd; k++) { st_frames(1); SDL_Delay(5); }
     ST_CHECK(sv->mode == 1 && sv->nch == 3 && sv->ca == 1 && sv->cb == 2 && sv->ch[1].st == '+' && !strcmp(sv->ch[2].path, ADM_BASE "/vol/gone.txt"));
@@ -8161,13 +8199,13 @@ static int run_selftest_admin(void) {
     snap_create_cb(0, false, p);
     for (int k = 0; k < 400 && (sv->cmd || !atomic_load(&sv->l->done)); k++) { st_frames(1); SDL_Delay(5); }
     st_frames(2);
-    sv->cur = 0;
+    sv->cur = 1;
     {
-        f32 y2 = sv->list.y + snap_row_h() * 1.5f;
+        f32 y2 = sv->list.y + snap_row_h() * 2.5f;
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sv->list.x + 100, y2, SDL_BUTTON_LEFT, 1, SDL_KMOD_CTRL);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
     }
-    ST_CHECK(sv->cur == 0 && sv->sel2 == 1);
+    ST_CHECK(sv->cur == 1 && sv->sel2 == 2);
     st_key(SDLK_DELETE, 0);
     ST_CHECK(A.dlg.open && A.dlg.fn == snap_delete_cb && A.dlg.danger);
     A.dlg.open = false;
@@ -8178,6 +8216,69 @@ static int run_selftest_admin(void) {
              strstr(log, "-c root status 1..2"));
     st_key(SDLK_ESCAPE, 0);
     ST_CHECK(!p->snapv && !p->sv);
+    // Timeshift in rsync mode on an ext4 drive: listed (with info.json's time, comment and tags), browsed with the bar,
+    // a file restored, created and deleted as administrator (the stand-in pkexec)
+    pane_navigate(p, ADM_BASE "/vol3/notes", true);
+    st_wait();
+    snapview_toggle(p);
+    st_frames(1);
+    ST_CHECK(st_wait_cond(st_snapl_done, 3000));
+    st_frames(2);
+    sv = p->sv;
+    sl = sv->l;
+    ST_CHECK(!strcmp(sl->tool, "Timeshift") && sl->n == 2 && sl->ts_manage && !sl->manage && !strcmp(sl->mnt, ADM_BASE "/vol3"));
+    if (sl->n == 2) {
+        ST_CHECK(!strcmp(sl->s[0].name, "2026-07-01_08-00-00") && sl->s[0].when == snap_parse_time("2026-07-01_08-00-00", false) &&
+                 !strcmp(sl->s[0].root, ADM_BASE "/backupdisk/timeshift/snapshots/2026-07-01_08-00-00/localhost" ADM_BASE "/vol3"));
+        ST_CHECK(sl->s[1].when == 1780300000 && !strcmp(sl->s[1].desc, "before upgrade") && !strcmp(sl->s[1].cleanup, "daily, weekly") &&
+                 !strcmp(sl->s[1].root, ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/localhost" ADM_BASE "/vol3"));
+    }
+    st_shot("snapshots-timeshift");
+    st_key(SDLK_DOWN, 0);
+    st_key(SDLK_RETURN, 0);
+    st_wait();
+    st_frames(1);
+    ST_CHECK(!p->snapv && !strcmp(p->path, ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/localhost" ADM_BASE "/vol3") && p->ly.has_snapbar);
+    pane_navigate(p, ADM_BASE "/tsroot/timeshift/snapshots/2026-06-01_09-30-00/localhost" ADM_BASE "/vol3/notes", true);
+    st_wait();
+    st_frames(1);
+    st_shot("snapshot-bar-timeshift");
+    {
+        Rect bc, br, ba;
+        snapbar_layout(p, &bc, &br, &ba);
+        sel_set(p, p->cursor, true);
+        st_click_rect(br);
+        ST_CHECK(A.dlg.open && A.dlg.fn == snap_restore_cb && A.dlg.nitems == 1 && strstr(A.dlg.item_sub[0], "/vol3/notes/n.txt") &&
+                 strstr(A.dlg.msg, "2026-06-01 09:30 (Timeshift)"));
+        A.dlg.open = false;
+        snap_restore_cb(0, false, NULL);
+        st_wait_ops();
+        char now[64];
+        st_read_text(ADM_BASE "/vol3/notes/n.txt", now, sizeof now);
+        ST_CHECK(!strcmp(now, "old notes\n"));
+        st_click_rect(ba); // All snapshots
+        ST_CHECK(st_wait_cond(st_snapl_done, 3000));
+        ST_CHECK(p->snapv && !strcmp(p->path, ADM_BASE "/vol3/notes"));
+        sv = p->sv;
+    }
+    snap_action(p, ACT_SNAP_CREATE);
+    ST_CHECK(A.dlg.open && A.dlg.fn == snap_create_cb && strstr(A.dlg.msg, "Timeshift"));
+    A.dlg.open = false;
+    snap_create_cb(0, false, p);
+    ST_CHECK(sv->cmd && sv->cmd_kind == SC_CREATE);
+    for (int k = 0; k < 400 && (sv->cmd || !atomic_load(&sv->l->done)); k++) { st_frames(1); SDL_Delay(5); }
+    st_frames(2);
+    sv->cur = 1;
+    st_key(SDLK_DELETE, 0);
+    ST_CHECK(A.dlg.open && A.dlg.fn == snap_delete_cb && A.dlg.danger);
+    A.dlg.open = false;
+    snap_delete_cb(0, false, p);
+    for (int k = 0; k < 400 && (sv->cmd || !atomic_load(&sv->l->done)); k++) { st_frames(1); SDL_Delay(5); }
+    st_read_text(ADM_BASE "/tools/timeshift.log", log, sizeof log);
+    ST_CHECK(strstr(log, "--create --comments File Explorer --scripted") && strstr(log, "--delete --snapshot 2026-06-01_09-30-00 --scripted"));
+    st_read_text(ADM_BASE "/tools/pkexec.log", log, sizeof log);
+    ST_CHECK(strstr(log, ADM_BASE "/tools/timeshift --delete") != NULL);
+    st_key(SDLK_ESCAPE, 0);
     // snapshots only root may see: "Allow me to browse snapshots" (pkexec once), then they're listed
     if (geteuid() != 0) {
         chmod(ADM_BASE "/vol2/.snapshots", 0);
@@ -8216,6 +8317,10 @@ static int run_selftest_admin(void) {
     unsetenv("FE_SNAPPER_CONFIGS");
     unsetenv("FE_MOUNTINFO");
     unsetenv("FE_TIMESHIFT");
+    unsetenv("FE_TIMESHIFT_ROOT");
+    unsetenv("FE_TIMESHIFT_CONF");
+    unsetenv("FE_DISK_BY_UUID");
+    unsetenv("FE_TIMESHIFT_BIN");
     unsetenv("FE_PKEXEC");
     chmod(ADM_BASE "/locked", 0755);
     chmod(ADM_BASE "/vol2/.snapshots", 0755);

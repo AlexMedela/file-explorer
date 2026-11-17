@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+**New**
+- The Snapshots view lists Timeshift snapshots in rsync mode too (on any drive, e.g. ext4), with when each was taken, its comment and its tags (daily, boot…). Timeshift snapshots of either mode now also show up next to Snapper's, and can be created or deleted from the view: Timeshift runs as administrator and asks for the password each time. Thanks to @teraflop09-web.
+
+**Fixed**
+- Inside a Timeshift snapshot the bar with "Compare with now" and "Restore…" shows, as it does for Snapper and ZFS.
+
 ## 0.11.2
 
 **New**
