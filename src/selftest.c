@@ -7214,9 +7214,20 @@ static int run_selftest_du(void) {
     st_frames(1);
     p = active_pane();
     menu_open(p, 100, 100, false);
-    ST_CHECK(st_menu_has(ACT_DU_TOGGLE));
+    int views = -1, toggle = -1;
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].act == ACT_MENU_VIEWS && A.menu.items[i].enabled && A.menu.items[i].sub)
+            views = i;
+    ST_CHECK(views >= 0);
+    if (views >= 0) {
+        menu_sub_open(views, false);
+        for (int i = 0; i < g_menu_sub.n; i++)
+            if (g_menu_sub.items[i].act == ACT_DU_TOGGLE && g_menu_sub.items[i].enabled)
+                toggle = i;
+        ST_CHECK(menu_sub_shown() && toggle >= 0);
+        if (toggle >= 0) menu_sub_activate(toggle);
+    }
     A.menu.open = false;
-    do_action(p, ACT_DU_TOGGLE);
     st_frames(1);
     ST_CHECK(p->du && p->dv);
     for (int i = 0; i < A.nplaces; i++)
