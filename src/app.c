@@ -6938,100 +6938,14 @@ static void qa_pin_paths(char **paths, int n, int g) {
     A.settings_dirty = true;
 }
 
-// The icon before a menu action (a Nerd Font codepoint), by what it does - never by its label. 0: none, for choices
-// in a list (sort keys, columns, apps...) where the check mark says enough, and for anything not listed here.
-static u32 menu_action_icon(const MenuItem *it) {
-    int a = it->act;
-    if (a >= ACT_VIEW_BASE && a < ACT_VIEW_BASE + ZOOM_COUNT) {
-        int lv = a - ACT_VIEW_BASE;
-        return lv == 0 ? 0xf00b : lv == 1 ? 0xf0ca : 0xf00a; // Details, List, icons
-    }
-    switch (a) {
-    case ACT_CUT: return 0xf0c4;
-    case ACT_COPY: case ACT_TERM_COPY: case ACT_COPY_PATH: case ACT_CLOUD_COPY_PATH: case ACT_GIT_COPY_BRANCH:
-    case ACT_DROP_COPY: return 0xf0c5;
-    case ACT_GIT_COPY_REMOTE: case ACT_DROP_LINK: return 0xf0c1;
-    case ACT_PASTE: case ACT_TERM_PASTE: return 0xf0ea;
-    case ACT_DROP_MOVE: return 0xf0ab9;
-    case ACT_TRASH: case ACT_TRASH_EMPTY: case ACT_NET_FORGET: case ACT_QA_GROUP_DELETE: case ACT_SNAP_DELETE: return 0xf1f8;
-    case ACT_DELETE: return 0xf05e8;
-    case ACT_TERM_CLEAR: return 0xf12d;
-    case ACT_RENAME: case ACT_BATCH_RENAME: case ACT_DEV_RENAME: case ACT_QA_RENAME: case ACT_QA_GROUP_RENAME:
-    case ACT_NET_EDIT_SAVED: return 0xf044;
-    case ACT_PROPERTIES: return 0xf05a;
-    case ACT_NEW_FOLDER: case ACT_NEW_FOLDER_IN: return 0xf07b;
-    case ACT_NEW_FILE: case ACT_NEW_FILE_IN: return 0xf15b;
-    case ACT_QA_NEW_GROUP: return 0xf0257;
-    case ACT_TERMINAL: case ACT_TERMINAL_LOCAL: case ACT_SSH_TERMINAL: return 0xf489;
-    case ACT_TERM_PANEL: return 0xf10a9; // a panel along the bottom
-    case ACT_TERMINAL_EXTERNAL: return 0xe795;
-    case ACT_OPEN: case ACT_DU_OPEN: case ACT_SNAP_OPEN: case ACT_DEV_MOUNT: return 0xf07c;
-    case ACT_OPEN_WITH: return it->sub ? 0xf07c : 0xf141; // the submenu / "Other app..."
-    case ACT_OPEN_TAB: case ACT_PLACE_NEW_TAB: case ACT_DU_OPEN_TAB: case ACT_DEV_OPEN_TAB: case ACT_CLOUD_CONNECT_TAB:
-    case ACT_TAB_NEW: return 0xf075c;
-    case ACT_TAB_DUP: return 0xf24d;
-    case ACT_TAB_WINDOW: return 0xf03cc;
-    case ACT_OPEN_SPLIT_RIGHT: case ACT_TAB_SPLIT_RIGHT: return 0xf0bcc;
-    case ACT_OPEN_SPLIT_DOWN: case ACT_TAB_SPLIT_DOWN: return 0xf0bcb;
-    case ACT_TAB_CLOSE: case ACT_TAB_CLOSE_OTHERS: case ACT_TAB_CLOSE_LEFT: case ACT_TAB_CLOSE_RIGHT: case ACT_CMP_END:
-    case ACT_DROP_CANCEL: case ACT_QA_REMOVE: return 0xf00d;
-    case ACT_TAB_REOPEN: case ACT_UNDO: case ACT_TRASH_RESTORE: case ACT_TRASH_RESTORE_ALL: case ACT_SNAP_RESTORE:
-    case ACT_FV_RESET: case ACT_COL_RESET: case ACT_DEV_RESET_NAME: case ACT_QA_RESET_NAME: return 0xf0e2;
-    case ACT_MENU_VIEWS: return 0xf009;
-    case ACT_MENU_SORT: return 0xf04ba;
-    case ACT_MENU_GROUP: return 0xf02c3;
-    case ACT_TREE_VIEW: return 0xf0645;
-    case ACT_DU_TOGGLE: case ACT_SNAP_TOGGLE: case ACT_SNAP_BACK: // the Views toggles; in the views themselves: back
-        return !it->checkable || a == ACT_SNAP_BACK ? 0xf060 : a == ACT_DU_TOGGLE ? 0xf200 : 0xf1da;
-    case ACT_DU_NEW_TAB: case ACT_DU_PLACE: return 0xf200;
-    case ACT_SNAP_PLACE: return 0xf1da;
-    case ACT_SNAP_CREATE: return 0xf030;
-    case ACT_FV_SUBFOLDERS: return 0xf0253;
-    case ACT_FV_ALL: return 0xf0ac;
-    case ACT_HIDDEN: return !it->checkable && A.show_hidden ? 0xf070 : 0xf06e;
-    case ACT_PREVIEW: case ACT_DU_SHOW: return 0xf06e;
-    case ACT_REFRESH: case ACT_CLOUD_REFRESH: case ACT_GIT_REFRESH: case ACT_SNAP_REFRESH: case ACT_DU_RESCAN:
-    case ACT_CMP_AGAIN: return 0xf021;
-    case ACT_SELECT_ALL: return 0xf046;
-    case ACT_PIN: return 0xf08d;
-    case ACT_COMPRESS_ZIP: case ACT_COMPRESS_TGZ: case ACT_EXTRACT_SEL: case ACT_EXTRACT_HERE: case ACT_EXTRACT_ALL:
-        return 0xf1c6;
-    case ACT_CMP_START: case ACT_CMP_TAB: case ACT_SNAP_COMPARE: return 0xf018a;
-    case ACT_CMP_SYNC_A: case ACT_CMP_SYNC_B: case ACT_CMP_SYNC_BOTH: case ACT_CMP_MIRROR_A: case ACT_CMP_MIRROR_B:
-        return 0xf0ec;
-    case ACT_CMP_DIFF_ONLY: return 0xf0b0;
-    case ACT_CS_HERE: return 0xf002;
-    case ACT_CS_OPEN_LINE: return 0xf121;
-    case ACT_CS_FOLD_ALL: return 0xf066;
-    case ACT_CS_UNFOLD_ALL: return 0xf065;
-    case ACT_QA_UP: case ACT_QA_GROUP_UP: case ACT_DU_UP: return 0xf062;
-    case ACT_QA_DOWN: case ACT_QA_GROUP_DOWN: return 0xf063;
-    case ACT_NET_NEW: case ACT_NET_CONNECT_SAVED: case ACT_CLOUD_CONNECT: return 0xf1e6;
-    case ACT_CLOUD_NEW: return 0xf067;
-    case ACT_CLOUD_RECONNECT: return 0xf084;
-    case ACT_NET_DISCONNECT: case ACT_CLOUD_DISCONNECT: case ACT_DEV_UNMOUNT: return 0xf127;
-    case ACT_DEV_EJECT: return 0xf052;
-    case ACT_CLOUD_LOG: return 0xf0f6;
-    case ACT_GIT_OPEN_REMOTE: return 0xf08e;
-    case ACT_GIT_ROOT: return 0xf0ccf;
-    case ACT_GIT_STATUS: return 0xf126;
-    case ACT_FOLDER_SIZES: case ACT_SIZE_BARS: return 0xf080;
-    case ACT_LOAD_TIMES: return 0xf017;
-    }
-    return 0;
-}
-
 static bool menu_item_is_app(const MenuItem *it) { return it->act >= ACT_OW_APP_BASE && it->act < ACT_OW_APP_BASE + g_ow_menu.n; }
 
-// Menus show those icons (render.c draws them) when a Nerd Font supplies the symbols (font.c's fallback looks for one,
-// once per glyph: they're cached); the Open with apps show their own icons, Nerd Font or not. When no item has an
-// icon there's no icon column at all: the plain layout, never placeholder boxes.
+// The Open with apps show their own icons (render.c draws them); a menu without them has no icon column at all.
 static bool menu_icons_in(const Menu *m) {
-    bool nerd = !font_glyph(&A.font, 0xf0c5)->missing;
     for (int i = 0; i < m->n; i++) {
         const MenuItem *it = &m->items[i];
         if (it->sep || it->info || it->head) continue;
-        if (menu_item_is_app(it) || (nerd && menu_action_icon(it))) return true;
+        if (menu_item_is_app(it)) return true;
     }
     return false;
 }

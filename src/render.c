@@ -3036,22 +3036,6 @@ static void draw_dialog(void) {
     }
 }
 
-// The icon centred in r. Material Design and Devicons glyphs (newer Nerd Fonts) fall back to a Font Awesome one older
-// Nerd Fonts have; a glyph nobody has isn't drawn (the label keeps its place): never a missing-glyph box.
-static void draw_action_glyph(Font *f, u32 cp, Rect r, Color color) {
-    static const u32 older[][2] = {{0xe795, 0xf120}, {0xf04ba, 0xf0dc}, {0xf02c3, 0xf247}, {0xf0645, 0xf1bb}, {0xf018a, 0xf0db},
-                                   {0xf075c, 0xf067}, {0xf03cc, 0xf08e}, {0xf0bcc, 0xf0db}, {0xf0bcb, 0xf0db}, {0xf05e8, 0xf1f8},
-                                   {0xf0ab9, 0xf061}, {0xf0ccf, 0xf126}, {0xf0253, 0xf07b}, {0xf0257, 0xf07b},
-                                   {0xf489, 0xf120}, {0xf10a9, 0xf120}};
-    if (!cp) return;
-    Glyph *g = font_glyph(f, cp);
-    for (size_t i = 0; g->missing && i < ARRAY_COUNT(older); i++)
-        if (older[i][0] == cp) g = font_glyph(f, older[i][1]);
-    if (g->missing || !g->w || !g->h) return;
-    f32 scale = MIN(1.f, MIN(r.w / g->w, r.h / g->h));
-    draw_glyph_scaled(g, roundf(r.x + (r.w - g->w * scale) * .5f), roundf(r.y + (r.h - g->h * scale) * .5f), scale, color);
-}
-
 static void draw_menu_in(Menu *m, bool frame) {
     if (!m->open) return;
     Font *f = &A.font, *fs = &A.font_small;
@@ -3063,7 +3047,7 @@ static void draw_menu_in(Menu *m, bool frame) {
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x, (int)r.y + 1, (int)r.w, (int)r.h - 2});
     bool anycheck = false; // one check mark column for the whole menu keeps labels aligned
     for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable;
-    bool icons = menu_icons_in(m); // an icon column before the labels (not without a Nerd Font)
+    bool icons = menu_icons_in(m); // an icon column before the labels (Open with's apps)
     f32 yy = r.y + roundf(S(5)) - m->scroll;
     for (int i = 0; i < m->n; i++) {
         MenuItem *it = &m->items[i];
@@ -3106,7 +3090,7 @@ static void draw_menu_in(Menu *m, bool frame) {
                     char ch[2] = {(char)toupper((u8)it->label[0]), 0};
                     draw_text(fs, ix + (is - text_width(fs, ch, 1)) * 0.5f, text_y(fs, iy, is), ch, 1, tc);
                 }
-            } else if (icons) draw_action_glyph(f, menu_action_icon(it), (Rect){lx - S(25), yy + S(5), S(18), h - S(10)}, tc);
+            }
             draw_text(f, lx, text_y(f, yy, h), it->label, (int)strlen(it->label), tc);
             if (it->sub) { // opens a submenu: a chevron where the shortcut would be
                 draw_chevron(r.x + r.w - S(20), yy + h * 0.5f, S(4), 1, MAX(1.f, S(1.5f)), it->enabled ? (i == m->hover ? C(COL_SEL_DIM) : C(COL_TEXT_DIM)) : C(COL_TEXT_FAINT));
