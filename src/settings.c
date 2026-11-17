@@ -13,6 +13,7 @@ static void settings_file(char *out, size_t cap, bool dir_only) {
 }
 
 static const char *g_sort_names[SORT_COUNT] = {"name", "date", "type", "size", "created", "ext", "perms", "owner"};
+static const char *const g_exec_names[] = {"ask", "run", "terminal", "open"}; // EXEC_*
 
 static void settings_defaults(void) {
     A.zoom = 1.f;
@@ -93,6 +94,7 @@ static void settings_defaults(void) {
     A.smooth_scroll = true;
     A.single_click = false;
     A.drop_ask = false;
+    A.exec_open = EXEC_ASK;
     A.dblclick_up = true;
     A.def_tree = false;
     A.single_instance = true;
@@ -339,6 +341,10 @@ static void settings_load(void) {
         else if (!strcmp(k, "single_click")) A.single_click = atoi(v);
         else if (!strcmp(k, "dblclick_up")) A.dblclick_up = atoi(v);
         else if (!strcmp(k, "drop_ask")) A.drop_ask = atoi(v);
+        else if (!strcmp(k, "exec_open")) {
+            for (int i = 0; i < (int)ARRAY_COUNT(g_exec_names); i++)
+                if (!strcmp(v, g_exec_names[i])) A.exec_open = i;
+        }
         else if (!strcmp(k, "tree_view")) A.def_tree = atoi(v);
         else if (!strcmp(k, "single_instance")) A.single_instance = atoi(v);
         else if (!strcmp(k, "key")) keys_load_line(v);
@@ -541,6 +547,7 @@ static void settings_write(FILE *f) {
             g_nthemes ? g_themes[g_theme_cur].name : A.theme_name, A.ui_font, A.font_size, A.row_spacing, A.smooth_scroll);
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
             A.dblclick_up, A.drop_ask, A.def_tree, A.single_instance);
+    fprintf(f, "exec_open=%s\n", g_exec_names[CLAMP(A.exec_open, 0, EXEC_OPEN)]);
     keys_save(f);
     fprintf(f, "unified_surfaces=%d\nshow_separators=%d\nsystem_accent=%d\n", g_unified_surfaces, g_separators, g_accent_desktop);
     if (g_scroll_custom) fprintf(f, "scrollbar_color=#%06X\n", g_scroll_custom & 0xFFFFFF);

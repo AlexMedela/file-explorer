@@ -137,6 +137,7 @@ typedef struct {
 enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
 enum { TITLEBAR_AUTO, TITLEBAR_SYSTEM, TITLEBAR_APP }; // A.title_bar
 enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
+enum { EXEC_ASK, EXEC_RUN, EXEC_TERMINAL, EXEC_OPEN }; // A.exec_open: opening an executable file asks, runs it (here / in a terminal), or opens it as a document
 enum { TABS_CARDS, TABS_PILLS }; // A.tab_style
 static const struct { int view, px; const char *label; } g_zoom[] = {
     {VIEW_DETAILS, 0, "Details"},       {VIEW_LIST, 0, "List"},          {VIEW_GRID, 48, "Small icons"},
@@ -407,6 +408,7 @@ enum {
     ACT_NEW_FOLDER_IN, ACT_NEW_FILE_IN,
     ACT_DROP_MOVE, ACT_DROP_COPY, ACT_DROP_LINK, ACT_DROP_CANCEL, // the menu after a drop (A.drop_ask)
     ACT_TERM_PANEL, ACT_TERM_FOCUS, // the terminal panel under the folder: show / hide, move the keyboard
+    ACT_RUN, ACT_RUN_TERM, // run an executable file (here / in a terminal window)
     ACT_FIRST_FREE_, // (keep below 100: shortcuts share ids with CMD_*)
     ACT_COL_BASE = 200,  // + column id: toggle that column
     ACT_VIEW_BASE = 300, // + zoom level index
@@ -533,6 +535,7 @@ static struct {
     int drop_place;
     bool drop_copy, drop_link; // what a drop would do now (drop_link: Ctrl+Shift)
     bool drop_ask;           // setting: a drop without Ctrl/Shift asks (Move / Copy / Link here) instead of moving
+    int exec_open;           // setting: what opening an executable file (program, AppImage, script) does, EXEC_*
     char **dmenu_paths;      // ... the dropped items while that menu is open, and where they go
     int dmenu_n;
     char dmenu_dst[PATH_MAX];
@@ -4234,6 +4237,123 @@ static void open_path(const char *full) {
     else if (!app_launch(a, files, 1)) toast("Couldn't start %s", a->name);
 }
 
+// Running executable files: programs (ELF binaries, AppImages) and scripts with a #! line. Opening one asks first
+// (Options > Behaviour > Executable files); one without the executable bit (a downloaded AppImage) runs only after
+// "Make executable and run". Local files only: a stalled network folder would freeze the UI thread.
+enum { RUN_NONE, RUN_PROGRAM, RUN_SCRIPT };
+
+static int run_kind(const char *full, bool *exec) {
+    struct stat st;
+    if (path_is_remote(full) || stat(full, &st) || !S_ISREG(st.st_mode)) return RUN_NONE;
+    *exec = (st.st_mode & 0111) && access(full, X_OK) == 0;
+    int fd = open(full, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) return RUN_NONE;
+    char b[4];
+    ssize_t n = read(fd, b, sizeof b);
+    close(fd);
+    if (n == 4 && !memcmp(b, "\x7f" "ELF", 4)) return RUN_PROGRAM; // (AppImages are ELF files too)
+    if (n >= 2 && b[0] == '#' && b[1] == '!') return RUN_SCRIPT;
+    return RUN_NONE;
+}
+
+static void run_program(const char *full, bool term) {
+    char dir[PATH_MAX]; // started in its own folder: scripts often use files next to them
+    snprintf(dir, sizeof dir, "%s", full);
+    char *slash = strrchr(dir, '/');
+    if (slash) slash[slash == dir] = 0;
+    if (A.selftest) { snprintf(A.last_opened, sizeof A.last_opened, "%s:%s", term ? "run-terminal" : "run", full); return; }
+    if (term) { // the window stays open when it ends, so its output can be read
+        char *cmd[] = {"/bin/sh", "-c", "\"$0\"; s=$?; printf '\\n[exited with code %s] Press Enter to close ' \"$s\"; read -r _", (char *)full, NULL};
+        spawn_terminal(dir, cmd);
+        return;
+    }
+    char *argv[] = {(char *)full, NULL};
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addchdir_np(&fa, dir);
+    pid_t pid;
+    int err = posix_spawn(&pid, full, &fa, spawn_attr(), argv, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    if (err) toast("Couldn't run %s: %s%s", path_basename(full), strerror(err), err == EACCES ? " (its drive may not allow programs)" : "");
+}
+
+static void dialog_open(const char *title, const char *msg, const char **buttons, int nb, int def, int cancel,
+                        const char *check_label, DialogFn fn, void *ud);
+static struct { char path[PATH_MAX]; int kind; bool term; } g_run; // the file the run question is about
+
+// Executable bits where it can be read (like chmod +x under the usual umask), then run.
+static void run_chmod_cb(int choice, bool check, void *ud) {
+    (void)check; (void)ud;
+    if (choice != 0) return;
+    struct stat st;
+    if (stat(g_run.path, &st) || chmod(g_run.path, (st.st_mode & 07777) | ((st.st_mode & 0444) >> 2))) {
+        toast("Can't make %s executable: %s", path_basename(g_run.path), strerror(errno));
+        return;
+    }
+    run_program(g_run.path, g_run.term);
+}
+
+// Buttons: Run, Run in terminal, [Open (scripts)], Cancel. "Don't ask again" keeps the answer (Options undoes it).
+static void run_ask_cb(int choice, bool check, void *ud) {
+    (void)ud;
+    if (choice == A.dlg.cancel) return;
+    int how = choice == 0 ? EXEC_RUN : choice == 1 ? EXEC_TERMINAL : EXEC_OPEN;
+    if (check) { A.exec_open = how; A.settings_dirty = true; }
+    if (how == EXEC_OPEN) open_path(g_run.path);
+    else run_program(g_run.path, how == EXEC_TERMINAL);
+}
+
+static void run_ask_chmod(const char *full, int kind, bool term) {
+    snprintf(g_run.path, sizeof g_run.path, "%s", full);
+    g_run.kind = kind;
+    g_run.term = term;
+    char title[200], msg[700];
+    snprintf(title, sizeof title, "\xE2\x80\x9C%s\xE2\x80\x9D isn't allowed to run", path_basename(full));
+    snprintf(msg, sizeof msg, "It's a %s, but it isn't marked as executable. Make it executable and run it? Only do this if you trust where it came from.",
+             kind == RUN_SCRIPT ? "script" : "program");
+    static const char *bb[] = {"Make executable and run", "Cancel"};
+    dialog_open(title, msg, bb, 2, 0, 1, NULL, run_chmod_cb, NULL);
+    A.dlg.icon = DI_WARN;
+}
+
+// Right-click > Run / Run in terminal: no question, unless it isn't executable yet.
+static void run_file(const char *full, bool term) {
+    bool exec = false;
+    int kind = run_kind(full, &exec);
+    if (kind == RUN_NONE) { toast("%s isn't a program or a script", path_basename(full)); return; }
+    if (!exec) run_ask_chmod(full, kind, term);
+    else run_program(full, term);
+}
+
+// Opening a file: true when it was a program / script and was dealt with here (run, or a question asked).
+static bool open_executable(const char *full) {
+    bool exec = false;
+    int kind = run_kind(full, &exec);
+    if (kind == RUN_NONE) return false;
+    if (!exec) { // a script without the bit is a document to read; a program can't be anything else
+        if (kind == RUN_SCRIPT) return false;
+        run_ask_chmod(full, kind, false);
+        return true;
+    }
+    int how = A.exec_open;
+    if (how == EXEC_OPEN && kind == RUN_SCRIPT) return false;
+    if (how == EXEC_RUN || how == EXEC_TERMINAL) { run_program(full, how == EXEC_TERMINAL); return true; }
+    snprintf(g_run.path, sizeof g_run.path, "%s", full); // ask (programs also with "Open": nothing else opens them)
+    g_run.kind = kind;
+    g_run.term = false;
+    const char *dot = strrchr(path_basename(full), '.');
+    char title[200], msg[700];
+    snprintf(title, sizeof title, "Run \xE2\x80\x9C%s\xE2\x80\x9D?", path_basename(full));
+    if (kind == RUN_SCRIPT) snprintf(msg, sizeof msg, "It's an executable script. Run it, or open it to read what it does first. Only run it if you trust where it came from.");
+    else snprintf(msg, sizeof msg, "It's a program%s. Only run it if you trust where it came from.", dot && !strcasecmp(dot, ".appimage") ? " (AppImage)" : "");
+    static const char *bs[] = {"Run", "Run in terminal", "Open", "Cancel"};
+    static const char *bp[] = {"Run", "Run in terminal", "Cancel"};
+    bool script = kind == RUN_SCRIPT;
+    dialog_open(title, msg, script ? bs : bp, script ? 4 : 3, 0, script ? 3 : 2, "Don't ask again", run_ask_cb, NULL);
+    A.dlg.icon = DI_QUESTION;
+    return true;
+}
+
 static void arc_extract_open(Pane *p, const char *name);
 static const GitSub *git_entry_sub(Pane *p, const Entry *e);
 static void borg_open(Pane *p, const char *dir, int kind);
@@ -4257,7 +4377,7 @@ static void open_entry(Pane *p, i64 pos, bool new_tab) {
     if (e->flags & ENT_DIR) {
         if (new_tab) tab_new(full, A.cur + 1, false);
         else pane_navigate(p, full, true);
-    } else open_path(full);
+    } else if (!open_executable(full)) open_path(full);
 }
 
 static void type_to_jump(Pane *p, const char *text) {
@@ -5778,6 +5898,13 @@ static void do_action(Pane *p, int act) {
     case ACT_DROP_MOVE: case ACT_DROP_COPY: case ACT_DROP_LINK: case ACT_DROP_CANCEL: drop_menu_do(act); break;
     case ACT_OPEN: open_entry(p, p->cursor, false); break;
     case ACT_OPEN_TAB: open_entry(p, p->cursor, true); break;
+    case ACT_RUN: case ACT_RUN_TERM:
+        if (p->cursor >= 0) {
+            char full[PATH_MAX];
+            path_join(full, sizeof full, p->path, p->L->entries[p->order[p->cursor]].name);
+            run_file(full, act == ACT_RUN_TERM);
+        }
+        break;
     case ACT_CUT:
     case ACT_COPY:
         paths = pane_selection_paths(p, &n);
@@ -6368,6 +6495,15 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
             menu_add("Add to sidebar", "", ACT_BORG_SAVE, true);
         } else menu_add("Open", "Enter", ACT_OPEN, true);
         menu_add_open_with("Open with", mime_for_file(path_basename(e->name), dir), true);
+        if (!dir && !pane_is_archive(p) && !pane_is_trash(p) && !(e->flags & ENT_MATCH)) { // programs and scripts
+            char full[PATH_MAX];
+            bool exec;
+            path_join(full, sizeof full, p->path, e->name);
+            if (run_kind(full, &exec) != RUN_NONE) {
+                menu_add("Run", "", ACT_RUN, true);
+                menu_add("Run in terminal", "", ACT_RUN_TERM, true);
+            }
+        }
         if (p->L->is_content) {
             menu_add("Fold all matches", "", ACT_CS_FOLD_ALL, true);
             menu_add("Unfold all matches", "", ACT_CS_UNFOLD_ALL, true);
@@ -7193,6 +7329,8 @@ static int menu_action_icon(const MenuItem *it) {
     case ACT_TERMINAL: case ACT_TERMINAL_LOCAL: case ACT_SSH_TERMINAL: return UI_TERMINAL;
     case ACT_TERM_PANEL: return UI_PANEL_BOTTOM; // a panel along the bottom
     case ACT_TERMINAL_EXTERNAL: return UI_SQUARE_TERMINAL;
+    case ACT_RUN: return UI_PLAY;
+    case ACT_RUN_TERM: return UI_SQUARE_TERMINAL;
     case ACT_OPEN: case ACT_DU_OPEN: case ACT_SNAP_OPEN: case ACT_DEV_MOUNT: return UI_FOLDER_OPEN;
     case ACT_OPEN_WITH: return it->sub ? UI_FOLDER_OPEN : UI_ELLIPSIS; // the submenu / "Other app..."
     case ACT_OPEN_TAB: case ACT_PLACE_NEW_TAB: case ACT_DU_OPEN_TAB: case ACT_DEV_OPEN_TAB: case ACT_CLOUD_CONNECT_TAB:
@@ -10605,6 +10743,8 @@ static const CmdDef g_cmds[] = {
     {"Rename", "F2", ACT_RENAME},
     {"Batch rename", "F2 (multiple)", ACT_BATCH_RENAME},
     {"Open with", "", ACT_OPEN_WITH},
+    {"Run (program or script)", "", ACT_RUN},
+    {"Run in terminal", "", ACT_RUN_TERM},
     {"Properties", "Alt+Enter", ACT_PROPERTIES},
     {"Copy", "Ctrl+C", ACT_COPY},
     {"Cut", "Ctrl+X", ACT_CUT},

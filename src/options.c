@@ -8,7 +8,7 @@ enum {
     OPT_THEME, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
-    OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
+    OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
@@ -66,6 +66,7 @@ static const OptDef g_opts[] = {
     {OC_BEHAVIOUR, OK_BOOL, OPT_DROP_ASK, "Ask what to do when dropping files", "Move, copy or link: a menu after each drop (holding Ctrl, Shift or both still decides at once)"},
     {OC_BEHAVIOUR, OK_CHOICE, OPT_TRANSFERS, "Big transfers", "Copies and moves wait their turn in the transfer queue (Ctrl+J); small ones never wait"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_VERIFY, "Verify after copy", "Read each copied file back and compare checksums; a copy that differs is removed"},
+    {OC_BEHAVIOUR, OK_CHOICE, OPT_EXEC_OPEN, "Opening programs and scripts", "Executable files (AppImages, programs, scripts with #!): ask first, or always do one thing; right-click > Run works either way"},
     {OC_KEYBOARD, OK_BUTTON, OPT_KEYS_RESET, "Reset all shortcuts", "Click a key to change it, + to add one"},
     {OC_VIEWS, OK_CHOICE, OPT_DEF_VIEW, "Default view", "New tabs open in this view; a tab keeps the view you pick while you browse"},
     {OC_VIEWS, OK_BOOL, OPT_VIEW_PER_FOLDER, "Each folder keeps its own view", "Opening a folder switches to the view last used there (else the default)"},
@@ -90,7 +91,7 @@ static const OptDef g_opts[] = {
 // Section headings: each starts a card with the option it names and runs until the next one.
 static const struct { int id; const char *title; } g_opt_sections[] = {
     {OPT_THEME, "Theme"}, {OPT_FONT, "Text"}, {OPT_DIM_INACTIVE, "Display"}, {OPT_UNIFIED, "Surfaces"}, {OPT_TERM_LOOK, "Terminal"}, {OPT_THEME_NEW, "Custom themes"},
-    {OPT_HIDDEN, "Files and folders"}, {OPT_RESTORE, "Startup"}, {OPT_SINGLE_CLICK, "Mouse"}, {OPT_TRANSFERS, "Copying and moving"},
+    {OPT_HIDDEN, "Files and folders"}, {OPT_RESTORE, "Startup"}, {OPT_SINGLE_CLICK, "Mouse"}, {OPT_TRANSFERS, "Copying and moving"}, {OPT_EXEC_OPEN, "Programs"},
     {OPT_KEYS_RESET, "Shortcuts"}, {OPT_DEF_VIEW, "New folders"}, {OPT_RENDERER, "Rendering"}, {OPT_SETTINGS_FILE, "Maintenance"},
     {OPT_IG_DEFAULT_FM, "Desktop roles (yours to give: installing never takes them)"}, {OPT_TERMINAL, "External terminal"},
     {OPT_UPD_NOW, "Version"}, {OPT_IG_UPDATES, "Automatic updates"},
@@ -111,6 +112,7 @@ static const char *g_renderers[] = {"auto", "vulkan", "opengl", "software"};
 static const char *g_renderer_labels[] = {"Automatic", "Vulkan", "OpenGL", "Software"};
 static const int g_transfer_counts[] = {1, 2, 4, 0}; // A.transfers_at_once (0 = no limit)
 static const char *g_transfer_labels[] = {"One at a time", "Two at a time", "Four at a time", "All at once"};
+static const char *g_exec_labels[] = {"Ask", "Run", "Run in terminal", "Open as a document (programs still ask)"}; // EXEC_*
 static const char *g_tab_style_labels[] = {"Cards", "Pills"}; // TABS_*
 static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
 
@@ -310,6 +312,7 @@ static int opt_choice_count(int id) {
     case OPT_DEF_GROUP: return GROUP_COUNT;
     case OPT_RENDERER: return (int)ARRAY_COUNT(g_renderers);
     case OPT_TRANSFERS: return (int)ARRAY_COUNT(g_transfer_counts);
+    case OPT_EXEC_OPEN: return (int)ARRAY_COUNT(g_exec_labels);
     }
     return 0;
 }
@@ -345,6 +348,7 @@ static const char *opt_choice_label(int id, int i) {
     case OPT_BRAND_NAME: return g_brand_labels[i];
     case OPT_TAB_STYLE: return g_tab_style_labels[i];
     case OPT_TRANSFERS: return g_transfer_labels[i];
+    case OPT_EXEC_OPEN: return g_exec_labels[i];
     }
     return "";
 }
@@ -379,6 +383,7 @@ static int opt_choice_get(int id) {
         for (int i = 0; i < (int)ARRAY_COUNT(g_renderers); i++)
             if (!strcmp(A.renderer, g_renderers[i])) return i;
         return 0;
+    case OPT_EXEC_OPEN: return A.exec_open;
     case OPT_TRANSFERS:
         for (int i = 0; i < (int)ARRAY_COUNT(g_transfer_counts); i++)
             if (A.transfers_at_once == g_transfer_counts[i]) return i;
@@ -436,6 +441,7 @@ static void opt_choice_set(int id, int i) {
         toast("Renderer: %s (after restart)", g_renderer_labels[i]);
         break;
     case OPT_TRANSFERS: A.transfers_at_once = g_transfer_counts[i]; break;
+    case OPT_EXEC_OPEN: A.exec_open = i; break;
     }
     A.settings_dirty = true;
 }

@@ -43,6 +43,14 @@ Ctrl / Shift / Ctrl+Shift say copy / move / link. `drop_ask=1` ("Ask what to do 
 after each drop instead: Move here, Copy here, Link here (a symbolic link to each item), Cancel. Holding a modifier
 still decides at once.
 
+**Programs and scripts** (Options > Behaviour > Programs): opening an executable file (an AppImage or other program, or a
+script starting with `#!`) asks first: Run, Run in terminal (the window stays open with the exit code when it ends),
+Open (scripts: as a document, in your editor) or Cancel. "Don't ask again" keeps that answer; `exec_open=ask|run|terminal|open`
+("Opening programs and scripts") changes it back. Programs started this way start in their own folder. A program without
+the executable bit (an AppImage just downloaded) always asks "Make executable and run" first; a script without it opens as
+a document. Right-click > Run / Run in terminal runs a program or script without the question. Files in network folders
+are never run.
+
 **Updates** (Options > Updates) shows the version and how this copy gets new ones. The AppImage asks GitHub for the
 newest release once a day (`check_updates=0` turns it off; nothing but that request is sent) and shows a card once per
 new version: "Update now" downloads it next to the AppImage, checks it against the release's SHA-256 and replaces the
