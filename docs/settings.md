@@ -38,6 +38,10 @@ zypper) update with the system and makepkg / source builds are told the command 
 
 Per-folder views live in `~/.config/file-explorer/folders.conf`, saved layouts in `layouts.conf`.
 
+Theme > **System** (`theme=System`) is Light or Dark as the desktop prefers (the settings portal's dark / light
+preference, else GTK's), with the desktop's accent colour where it has one (an accent picked in Options wins), and
+follows changes while the app runs.
+
 Colour schemes: `~/.config/file-explorer/themes/*.json` (Options → "Create theme from current colours" writes a
 starting point). Any key you leave out comes from the `base` theme:
 ```json

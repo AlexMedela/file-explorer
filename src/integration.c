@@ -545,12 +545,12 @@ static void ig_picker_set(bool on) {
     ig_portal_restart();
 }
 
-// --- desktop look (File icons > System) -------------------------------------------------------------------------
-// Only while it is chosen: a thread asks the settings portal (org.freedesktop.portal.Settings: the icon theme) and
-// listens for its changes, falling back to KDE's / GTK's config files; what it finds goes to g_desktop on the main
-// thread. Nothing is started otherwise, nor in self-tests.
+// --- desktop look (Theme > System, File icons > System) -----------------------------------------------------------
+// Only while one of them is chosen: a thread asks the settings portal (org.freedesktop.portal.Settings: dark or
+// light, accent colour, icon theme) and listens for its changes, falling back to KDE's / GTK's config files; what
+// it finds goes to g_desktop on the main thread. Nothing is started otherwise, nor in self-tests.
 
-typedef struct { char icons[64]; } DesktopLook;
+typedef struct { bool light; u32 accent; char icons[64]; } DesktopLook;
 
 static struct {
     atomic_bool running, stop;
@@ -616,8 +616,25 @@ static void *dlook_read(void *conn, const char *ns, const char *key, IgDBusIter 
 
 static void dlook_get(void *conn, DesktopLook *d) {
     memset(d, 0, sizeof *d);
+    int scheme = -1; // portal: 0 no preference, 1 dark, 2 light
     IgDBusIter it;
     void *r;
+    if (conn && (r = dlook_read(conn, "org.freedesktop.appearance", "color-scheme", &it))) {
+        u32 v = 0;
+        if (g_fm1.iter_get_arg_type(&it) == 'u') { g_fm1.iter_get_basic(&it, &v); scheme = (int)v; }
+        g_fm1.message_unref(r);
+    }
+    if (conn && (r = dlook_read(conn, "org.freedesktop.appearance", "accent-color", &it))) {
+        f64 c[3] = {-1, -1, -1};
+        if (g_fm1.iter_get_arg_type(&it) == 'r') {
+            IgDBusIter s;
+            g_fm1.iter_recurse(&it, &s);
+            for (int i = 0; i < 3 && g_fm1.iter_get_arg_type(&s) == 'd'; i++, g_fm1.iter_next(&s)) g_fm1.iter_get_basic(&s, &c[i]);
+        }
+        if (c[0] >= 0 && c[0] <= 1 && c[1] >= 0 && c[1] <= 1 && c[2] >= 0 && c[2] <= 1) // (out of range: not set)
+            d->accent = 0x01000000u | (u32)lround(c[0] * 255) << 16 | (u32)lround(c[1] * 255) << 8 | (u32)lround(c[2] * 255);
+        g_fm1.message_unref(r);
+    }
     static const char *icon_keys[][2] = {{"org.gnome.desktop.interface", "icon-theme"}, {"org.kde.kdeglobals.Icons", "Theme"}};
     for (int k = 0; conn && !d->icons[0] && k < 2; k++)
         if ((r = dlook_read(conn, icon_keys[k][0], icon_keys[k][1], &it))) {
@@ -634,16 +651,22 @@ static void dlook_get(void *conn, DesktopLook *d) {
     static const char *gtk[] = {"gtk-4.0/settings.ini", "gtk-3.0/settings.ini"};
     for (int i = 0; i < 2; i++) {
         if (!d->icons[0] && dlook_ini(gtk[i], "Settings", "gtk-icon-theme-name", v, sizeof v) && sysi_component(v)) snprintf(d->icons, sizeof d->icons, "%s", v);
+        if (scheme <= 0 && dlook_ini(gtk[i], "Settings", "gtk-application-prefer-dark-theme", v, sizeof v)) scheme = atoi(v) || !strcasecmp(v, "true") ? 1 : 2;
     }
     if (!d->icons[0]) snprintf(d->icons, sizeof d->icons, "hicolor");
+    d->light = scheme == 2;
 }
 
 static void dlook_apply(void *arg) { // (main thread)
     DesktopLook *d = arg;
+    bool look = !g_desktop.known || g_desktop.light != d->light || g_desktop.accent != d->accent;
     bool icons = strcmp(g_desktop.icons, d->icons) != 0;
     g_desktop.known = true;
+    g_desktop.light = d->light;
+    g_desktop.accent = d->accent;
     snprintf(g_desktop.icons, sizeof g_desktop.icons, "%s", d->icons);
     free(d);
+    if (look && theme_is_system()) theme_apply(); // (icons follow the new colours in icons_sync_theme)
     if (icons && icon_system_selected()) {
         sysi_reset();
         icons_flush();
@@ -686,7 +709,7 @@ static void *dlook_thread(void *arg) {
         next = now_ns() + 5000000000ull;
         DesktopLook d;
         dlook_get(conn, &d);
-        if (!first && !strcmp(d.icons, last.icons)) continue;
+        if (!first && d.light == last.light && d.accent == last.accent && !strcmp(d.icons, last.icons)) continue;
         first = false;
         last = d;
         DesktopLook *copy = xmalloc(sizeof *copy);
@@ -698,9 +721,9 @@ static void *dlook_thread(void *arg) {
     return NULL;
 }
 
-// Start or stop the watcher as File icons needs it (after it changes, and at startup).
+// Start or stop the watcher as Theme / File icons need it (after either changes, and at startup).
 static void desktop_look_sync(void) {
-    bool want = !A.selftest && icon_system_selected();
+    bool want = !A.selftest && (theme_is_system() || icon_system_selected());
     if (!want) { atomic_store(&g_dlook.stop, true); return; }
     atomic_store(&g_dlook.stop, false);
     if (atomic_load(&g_dlook.running)) return;

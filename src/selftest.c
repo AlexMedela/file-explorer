@@ -3310,6 +3310,36 @@ static int run_selftest_m9(void) {
     opt_button(OPT_THEME_NEW);
     ST_CHECK(theme_find("My theme") >= 0 && g_theme_cur == theme_find("My theme"));
     sheet_close();
+    { // Theme "System": Light or Dark as the desktop says (Dark until it does), its accent unless one is picked
+        u32 saved_accent = g_accent_custom;
+        g_accent_custom = 0;
+        memset(&g_desktop, 0, sizeof g_desktop);
+        opt_choice_set(OPT_THEME, theme_find("System"));
+        ST_CHECK(theme_is_system() && T.bg == g_theme_dark.bg && T.accent == g_theme_dark.accent && !g_dlook.running); // (no watcher in tests)
+        DesktopLook *d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3584E4, .icons = "hicolor"};
+        dlook_apply(d);
+        ST_CHECK(g_desktop.known && T.bg == g_theme_light.bg && T.accent == 0x3584E4 && T.sel != g_theme_light.sel);
+        g_accent_custom = 0x01000000u | g_accents[1].rgb; // a picked accent wins
+        theme_apply();
+        ST_CHECK(T.accent == g_accents[1].rgb && T.bg == g_theme_light.bg);
+        g_accent_custom = 0;
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = false, .icons = "hicolor"}; // dark again, no accent: the theme's own
+        dlook_apply(d);
+        ST_CHECK(T.bg == g_theme_dark.bg && T.accent == g_theme_dark.accent);
+        settings_save();
+        settings_load();
+        ST_CHECK(!strcmp(A.theme_name, "System"));
+        opt_choice_set(OPT_THEME, theme_find("Nord")); // other themes ignore the desktop
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3584E4, .icons = "hicolor"};
+        dlook_apply(d);
+        ST_CHECK(!theme_is_system() && T.bg == g_themes[theme_find("Nord")].t.bg && T.accent == g_themes[theme_find("Nord")].t.accent);
+        memset(&g_desktop, 0, sizeof g_desktop);
+        g_accent_custom = saved_accent;
+    }
+
     // settings round trip
     g_theme_cur = theme_find("Nord");
     g_accent_custom = 0x01000000u | 0x123456;

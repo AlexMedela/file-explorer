@@ -97,8 +97,8 @@ static int g_nthemes;
 static Theme T = g_theme_dark; // the palette everything draws with
 static int g_theme_cur;
 static u32 g_accent_custom; // 0 = theme accent, else 0x01000000 | rgb
-// The desktop's look, read off the UI thread (integration.c, "desktop look") only while File icons is System.
-static struct { bool known; char icons[64]; } g_desktop;
+// The desktop's look, read off the UI thread (integration.c, "desktop look") only while Theme or File icons is System.
+static struct { bool known, light; u32 accent; char icons[64]; } g_desktop; // accent: 0 = none, else 0x01000000 | rgb
 
 static const struct { const char *name; u32 rgb; } g_accents[] = {
     {"Blue", 0x4C9BFF}, {"Purple", 0x9D7CF4}, {"Pink", 0xE86AB8}, {"Red", 0xEF5B5B}, {"Orange", 0xF2913A},
@@ -182,12 +182,18 @@ static bool parse_hex_color(const char *s, u32 *out) {
     return false;
 }
 
+// Theme "System": Light or Dark as the desktop prefers (Dark until it says), with its accent unless one is picked.
+static bool theme_is_system(void) {
+    return g_theme_cur >= 0 && g_theme_cur < g_nthemes && !g_themes[g_theme_cur].file[0] && !strcmp(g_themes[g_theme_cur].name, "System");
+}
+
 // Recompute T from the selected theme + accent override.
 static void theme_apply(void) {
     if (g_theme_cur < 0 || g_theme_cur >= g_nthemes) g_theme_cur = 0;
-    T = g_themes[g_theme_cur].t;
-    if (g_accent_custom) {
-        u32 a = g_accent_custom & 0xFFFFFF;
+    T = theme_is_system() ? (g_desktop.light ? g_theme_light : g_theme_dark) : g_themes[g_theme_cur].t;
+    u32 accent = g_accent_custom ? g_accent_custom : theme_is_system() ? g_desktop.accent : 0;
+    if (accent) {
+        u32 a = accent & 0xFFFFFF;
         bool light = theme_is_light(&T);
         T.accent = a;
         T.accent_hover = rgb_mix(a, light ? 0x000000 : 0xFFFFFF, 0.15f);
@@ -279,7 +285,7 @@ static void themes_scan(void) {
     g_nthemes = 0;
     static const struct { const char *name; const Theme *t; } builtin[] = {
         {"Dark", &g_theme_dark}, {"Light", &g_theme_light}, {"Black", &g_theme_black},
-        {"Monokai", &g_theme_monokai}, {"Nord", &g_theme_nord},
+        {"Monokai", &g_theme_monokai}, {"Nord", &g_theme_nord}, {"System", &g_theme_dark}, // (System: theme_apply)
     };
     for (size_t i = 0; i < ARRAY_COUNT(builtin); i++) {
         ThemeEntry *e = &g_themes[g_nthemes++];
