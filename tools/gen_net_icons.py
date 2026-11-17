@@ -27,8 +27,8 @@ GENERIC = {
                     '<path d="M12 13.6v1.8M12 17.6v1.8" stroke="#E0F2F1" stroke-width="1.5" stroke-linecap="round"/>'),
     "cloud": svg24('<path d="' + CLOUD + '" fill="#64B5F6"/>'),
     "home": svg24('<path d="M12 3.2 2.8 11h2.7v9h5v-5.5h3V20h5v-9h2.7Z" fill="#81C784"/>'),
-    # backups (Borg repositories): a cloud with a clock
-    "backup": svg24('<path d="M5.8 19a4.8 4.8 0 0 1-.65-9.55A6.4 6.4 0 0 1 17.5 7.6 5.6 5.6 0 0 1 18.3 18.6Z" fill="#26A69A"/><circle cx="16.5" cy="16.5" r="6.5" fill="#00796B"/><circle cx="16.5" cy="16.5" r="5" fill="#FFFFFF"/><path d="M16.5 13.6v3.1l2.1 1.4" fill="none" stroke="#004D40" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'),
+    # backups (Borg repositories): a cloud with a clock whose ring turns back (history)
+    "backup": svg24('<path d="M5.8 19a4.8 4.8 0 0 1-.65-9.55A6.4 6.4 0 0 1 17.5 7.6 5.6 5.6 0 0 1 18.3 18.6Z" fill="#26A69A"/><path d="M10.79 15.49A5.8 5.8 0 1 0 13.60 11.48" fill="none" stroke="#00796B" stroke-width="2.2"/><path d="M10.31 13.38L12.00 8.71L15.20 14.25Z" fill="#00796B" stroke="#00796B" stroke-width=".5" stroke-linejoin="round"/><circle cx="16.5" cy="16.5" r="4.75" fill="#FFFFFF"/><path d="M16.5 13.9v2.8l1.9 1.3" fill="none" stroke="#004D40" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'),
     "aws": svg24('<path d="' + CLOUD + '" fill="#FF9900"/><path d="M7 15.2q5 2.6 10 0" fill="none" stroke="#232F3E" stroke-width="1.6" stroke-linecap="round"/>'
                  '<path d="M15.4 14.2l1.8.9-.6 1.9" fill="none" stroke="#232F3E" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>'),
     "windows": svg24('<path d="M3 5.2 10.6 4v7.4H3ZM11.8 3.8 21 2.5v8.9h-9.2ZM3 12.6h7.6V20L3 18.8ZM11.8 12.6H21v8.9l-9.2-1.3Z" fill="#0078D4"/>'),
