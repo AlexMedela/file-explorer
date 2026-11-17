@@ -592,12 +592,17 @@ static void term_winsize(Term *t) {
 // what's typed); bash runs signal handlers only after Enter, so it gets a private key sequence bound to "save the
 // typed line, cd, run an empty command (a fresh prompt), restore the line, remove the old prompt". Other shells, or
 // one whose startup files never got to ours, are typed a cd instead (dock_follow).
+// The panel is small: a fastfetch the user's startup files (or fish's greeting) run is skipped there. fastfetch is a
+// do-nothing function until their files are done (bash, zsh) or the first prompt (fish; defined before its config by
+// a vendor_conf.d file in a folder put first in XDG_DATA_DIRS, which that file restores); typed later, it runs.
 
 enum { SHINT_NONE, SHINT_BASH, SHINT_ZSH, SHINT_FISH };
 
 static const char g_shint_bash[] =
     "# File Explorer terminal panel: follows the folder without typing cd. Runs ~/.bashrc first.\n"
+    "fastfetch() { : __fe_quiet; }\n"
     "[ -f ~/.bashrc ] && . ~/.bashrc\n"
+    "[[ $(declare -f fastfetch) == *__fe_quiet* ]] && unset -f fastfetch\n"
     "__fe_cd1() {\n"
     "    __fe_line=$READLINE_LINE __fe_point=$READLINE_POINT\n"
     "    READLINE_LINE= READLINE_POINT=0\n"
@@ -629,7 +634,9 @@ static const char g_shint_zshenv[] =
 static const char g_shint_zshrc[] =
     "ZDOTDIR=$FE_USER_ZDOTDIR\n"
     "unset FE_USER_ZDOTDIR\n"
+    "fastfetch() { : __fe_quiet; }\n"
     "[[ -r $ZDOTDIR/.zshrc ]] && . $ZDOTDIR/.zshrc\n"
+    "[[ $functions[fastfetch] == *__fe_quiet* ]] && unfunction fastfetch\n"
     "TRAPUSR1() {\n"
     "    builtin cd -- \"$(<$FE_CD_FILE)\" 2>/dev/null || return 0\n"
     "    local f; for f in precmd $precmd_functions; do (( $+functions[$f] )) && $f; done\n"
@@ -645,6 +652,22 @@ static const char g_shint_fish[] =
     "end\n"
     "true > \"$FE_CD_FILE.ready\"\n";
 
+static const char g_shint_fish_quiet[] =
+    "# File Explorer terminal panel: no fastfetch before the first prompt (config.fish, fish_greeting)\n"
+    "if set -q FE_USER_XDG_DATA_DIRS\n"
+    "    set -gx XDG_DATA_DIRS $FE_USER_XDG_DATA_DIRS\n"
+    "    set -e FE_USER_XDG_DATA_DIRS\n"
+    "else\n"
+    "    set -e XDG_DATA_DIRS\n"
+    "end\n"
+    "function fastfetch\n"
+    "    : __fe_quiet\n"
+    "end\n"
+    "function __fe_quiet --on-event fish_prompt\n"
+    "    functions fastfetch 2>/dev/null | string match -q '*__fe_quiet*'; and functions -e fastfetch\n"
+    "    functions -e __fe_quiet\n"
+    "end\n";
+
 // Where the scripts and the per-terminal files live (written once per run; private to the user).
 static bool shint_dir(char *out, size_t cap) {
     static int done = -1;
@@ -656,6 +679,8 @@ static bool shint_dir(char *out, size_t cap) {
     mkdir_p(out, 0700);
     snprintf(p, sizeof p, "%s/zsh", out);
     mkdir_p(p, 0700);
+    snprintf(p, sizeof p, "%s/fish-data/fish/vendor_conf.d", out);
+    mkdir_p(p, 0700);
     bool ok = true;
     snprintf(p, sizeof p, "%s/fe.bash", out);
     ok &= write_file_atomic(p, g_shint_bash);
@@ -665,6 +690,8 @@ static bool shint_dir(char *out, size_t cap) {
     ok &= write_file_atomic(p, g_shint_zshenv);
     snprintf(p, sizeof p, "%s/zsh/.zshrc", out);
     ok &= write_file_atomic(p, g_shint_zshrc);
+    snprintf(p, sizeof p, "%s/fish-data/fish/vendor_conf.d/00-file-explorer.fish", out);
+    ok &= write_file_atomic(p, g_shint_fish_quiet);
     done = ok;
     return ok;
 }
@@ -713,6 +740,7 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
     // the terminal panel's shell: with our integration (see above) where we know the shell
     int shint = SHINT_NONE;
     char sdir[PATH_MAX], a1[PATH_MAX + 16], cdf[PATH_MAX], e_cdf[PATH_MAX + 16], e_zdot[PATH_MAX + 16], e_uzdot[PATH_MAX + 32];
+    char *e_xdd = NULL, *e_uxdd = NULL; // fish: XDG_DATA_DIRS with ours first, and the user's to put back
     static unsigned shint_n;
     if (follow && !argv && shint_dir(sdir, sizeof sdir)) {
         const char *b = path_basename(shell);
@@ -729,6 +757,14 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
             snprintf(a1, sizeof a1, "source %s/fe.fish", q);
             sh_argv[1] = "-C";
             sh_argv[2] = a1;
+            const char *xdd = getenv("XDG_DATA_DIRS");
+            size_t xl = strlen(sdir) + (xdd ? strlen(xdd) : 0) + 64;
+            e_xdd = xmalloc(xl);
+            snprintf(e_xdd, xl, "XDG_DATA_DIRS=%s/fish-data:%s", sdir, xdd && xdd[0] ? xdd : "/usr/local/share:/usr/share"); // (the spec's default)
+            if (xdd) {
+                e_uxdd = xmalloc(strlen(xdd) + 32);
+                sprintf(e_uxdd, "FE_USER_XDG_DATA_DIRS=%s", xdd);
+            }
         } else if (shint == SHINT_ZSH) {
             const char *uz = getenv("ZDOTDIR");
             snprintf(e_zdot, sizeof e_zdot, "ZDOTDIR=%s/zsh", sdir);
@@ -741,10 +777,13 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
     int ne = 0;
     for (int i = 0; i < nenv; i++)
         if (strncmp(environ[i], "TERM=", 5) && strncmp(environ[i], "COLORTERM=", 10) && strncmp(environ[i], "TERM_PROGRAM=", 13) &&
-            !(shint == SHINT_ZSH && !strncmp(environ[i], "ZDOTDIR=", 8)))
+            !(shint == SHINT_ZSH && !strncmp(environ[i], "ZDOTDIR=", 8)) && !(e_xdd && !strncmp(environ[i], "XDG_DATA_DIRS=", 14)) &&
+            strncmp(environ[i], "FE_USER_XDG_DATA_DIRS=", 22))
             envp[ne++] = environ[i];
     if (shint) envp[ne++] = e_cdf;
     if (shint == SHINT_ZSH) { envp[ne++] = e_zdot; envp[ne++] = e_uzdot; }
+    if (e_xdd) envp[ne++] = e_xdd;
+    if (e_uxdd) envp[ne++] = e_uxdd;
     char e_term[64], e_ct[] = "COLORTERM=truecolor", e_tp[] = "TERM_PROGRAM=file-explorer";
     snprintf(e_term, sizeof e_term, "TERM=%s", g_tc.term[0] ? g_tc.term : "xterm-256color");
     envp[ne++] = e_term;
@@ -769,6 +808,8 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
     posix_spawn_file_actions_destroy(&fa);
     posix_spawnattr_destroy(&at);
     free(envp);
+    free(e_xdd);
+    free(e_uxdd);
     if (rc) { close(fd); free(t); toast("Couldn't start %s: %s", av[0], strerror(rc)); return NULL; }
     snprintf(t->start_label, sizeof t->start_label, "%s", path_basename(av[0]));
     t->shint = shint;

@@ -99,7 +99,8 @@ Terminal panel: F4 shows a shell under the folder, one per tab, that follows the
 its prompt (Ctrl+Shift+F4 moves the keyboard between the two). bash, zsh and fish move quietly: the panel's shell loads
 a few lines of shell integration after your own startup files (bash: `--rcfile` that runs `~/.bashrc` first; zsh:
 `ZDOTDIR` pointing at files that run yours; fish: `-C`), kept in `$XDG_RUNTIME_DIR/file-explorer/shell`, so the prompt
-just updates and what you typed stays. Other shells, or one whose startup files fail before that, get a `cd` typed. Tabs that had it open get it back after a restart, with
+just updates and what you typed stays. Other shells, or one whose startup files fail before that, get a `cd` typed. A
+`fastfetch` your startup files or fish's greeting run is skipped in the panel (typed at its prompt, it runs). Tabs that had it open get it back after a restart, with
 a new shell; `terminal_panel_height` is its height. Terminal tabs: Shift+F4 opens a terminal tab in the current
 folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. The external
 terminal is `$TERMINAL`, else xdg-terminal-exec, else the desktop's own; Options > Integration > Terminal executable
