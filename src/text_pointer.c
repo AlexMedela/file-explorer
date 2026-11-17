@@ -70,7 +70,6 @@ static bool te_pointer_down(SDL_MouseButtonEvent *b) {
             (t == &A.qa_te && A.qa_edit_g < 0))
             continue;
         if (sheet_open() ? !sheet_text_focus(t, field->focused) : !field->focused) continue;
-        t->animation.input = now_ns();
         int at = te_hit(field, b->x), n = (int)strlen(t->buf);
         if (b->clicks >= 3 || (b->clicks == 2 && field->masked)) { t->anchor = 0; t->caret = n; } // (a password: no words to show)
         else if (b->clicks == 2) {
