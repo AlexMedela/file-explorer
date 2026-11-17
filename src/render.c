@@ -269,7 +269,17 @@ static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
         draw_rect(roundf(x + a), r.y + roundf(S(4)), roundf(b - a), r.h - roundf(S(8)), C(COL_SEL_FOCUS));
     }
     draw_text(f, x, ty, t->buf, n, tc);
-    draw_rect(roundf(x + cx), r.y + roundf(S(5)), MAX(1.f, roundf(S(1.2f))), r.h - roundf(S(10)), C(COL_ACCENT));
+    // The caret glides to where it belongs and breathes for a while at rest (text_caret.c); still while dragging a
+    // selection, in a window without the keyboard, in tests and screenshots.
+    bool snap = g_text_selecting || A.selftest || A.screenshot || !(SDL_GetWindowFlags(A.win) & SDL_WINDOW_INPUT_FOCUS);
+    u64 now = now_ns();
+    f32 alpha, cursor = text_caret_animate(&t->animation, cx - t->scroll, t->caret, t->anchor, now, snap, &alpha);
+    u64 due = snap ? 0 : text_caret_due(&t->animation, now);
+    if (due && (!g_caret_due || due < g_caret_due)) g_caret_due = due;
+    Color cc = tc;
+    cc.a *= alpha;
+    f32 cw = MAX(2.f, roundf(S(2.4f)));
+    draw_rect(CLAMP(roundf(r.x + pad + cursor), r.x + 1, MAX(r.x + 1, r.x + r.w - cw - 1)), r.y + roundf(S(4)), cw, r.h - roundf(S(8)), cc);
     draw_clip_pop(cs);
 }
 

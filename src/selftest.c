@@ -3214,6 +3214,32 @@ static int run_selftest_m9(void) {
     }
     st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
     ST_CHECK(!A.edit_pane);
+    // the caret: glides to a new place, solid while typing, breathes at rest, then settles and asks for no more frames
+    {
+        TextCaret c = {0};
+        f32 al, x;
+        u64 t0 = 1000000000ull, ms = 1000000ull;
+        ST_CHECK(text_caret_animate(&c, 10, 1, 1, t0, false, &al) == 10 && al == 1);
+        x = text_caret_animate(&c, 30, 2, 2, t0 + 10 * ms, false, &al);
+        ST_CHECK(x == 10 && al == 1 && text_caret_due(&c, t0 + 10 * ms) == t0 + 26 * ms); // gliding: the next frame soon
+        x = text_caret_animate(&c, 30, 2, 2, t0 + 55 * ms, false, &al);
+        ST_CHECK(x > 10 && x < 30);
+        ST_CHECK(text_caret_animate(&c, 30, 2, 2, t0 + 110 * ms, false, &al) == 30 && al == 1);
+        ST_CHECK(text_caret_due(&c, t0 + 110 * ms) == t0 + 660 * ms); // solid: nothing to draw until it breathes
+        bool dimmed = false;
+        for (int k = 700; k < 10000; k += 30) {
+            text_caret_animate(&c, 30, 2, 2, t0 + (u64)k * ms, false, &al);
+            ST_CHECK(al >= 0.299f && al <= 1.001f && text_caret_due(&c, t0 + (u64)k * ms) == t0 + (u64)(k + 33) * ms);
+            dimmed |= al < 0.5f;
+        }
+        ST_CHECK(dimmed);
+        text_caret_animate(&c, 30, 2, 2, t0 + 10020 * ms, false, &al);
+        ST_CHECK(al == 1 && !text_caret_due(&c, t0 + 10020 * ms)); // at rest: solid, no frames (an idle window sleeps)
+        c.input = t0 + 20000 * ms; // a key: solid again, then breathing again
+        text_caret_animate(&c, 30, 2, 2, c.input, false, &al);
+        ST_CHECK(al == 1 && text_caret_due(&c, c.input) == c.input + 650 * ms);
+        ST_CHECK(text_caret_animate(&c, 60, 5, 5, c.input + ms, true, &al) == 60 && al == 1);
+    }
 
     // Options > Keyboard: record a new shortcut with the recorder
     options_open();

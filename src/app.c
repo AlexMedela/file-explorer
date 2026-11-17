@@ -10,12 +10,15 @@ extern char **environ;
 typedef struct { f32 x, y, w, h; } Rect;
 static inline bool in_rect(Rect r, f32 x, f32 y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }
 
+#include "text_caret.c"
+
 // --- single-line text editing (path bar, inline rename) --------------------
 
 typedef struct {
     char buf[PATH_MAX];
     int caret, anchor; // selection is [min, max) of the two
     f32 scroll;
+    TextCaret animation;
 } TextEdit;
 
 static void te_set(TextEdit *t, const char *s, int anchor, int caret) {
@@ -24,6 +27,7 @@ static void te_set(TextEdit *t, const char *s, int anchor, int caret) {
     t->anchor = CLAMP(anchor, 0, n);
     t->caret = CLAMP(caret, 0, n);
     t->scroll = 0;
+    memset(&t->animation, 0, sizeof t->animation); // (a field opened again doesn't glide from where it was)
 }
 
 static int te_prev(const TextEdit *t, int i) {
@@ -64,6 +68,7 @@ static void te_delete_sel(TextEdit *t) {
 }
 
 static void te_insert(TextEdit *t, const char *s) {
+    t->animation.input = now_ns();
     te_delete_sel(t);
     size_t n = strlen(t->buf), k = strlen(s);
     if (n + k + 1 > sizeof t->buf) return;
@@ -74,6 +79,7 @@ static void te_insert(TextEdit *t, const char *s) {
 }
 
 static bool te_key(TextEdit *t, SDL_Keycode key, SDL_Keymod mod) {
+    t->animation.input = now_ns();
     bool ctrl = mod & SDL_KMOD_CTRL, shift = mod & SDL_KMOD_SHIFT;
     int n = (int)strlen(t->buf), lo = MIN(t->anchor, t->caret), hi = MAX(t->anchor, t->caret);
     switch (key) {
@@ -11195,6 +11201,7 @@ static bool animating(void) {
 
 static void frame_draw(void) {
     g_text_field_count = 0; // (each te_draw records its field again)
+    g_caret_due = 0;        // (and when its caret wants the next frame)
     draw_clip(NULL);
     g_alpha = 1.f;
     if (A.shadow_px) { // transparent margin, opaque window (clearing ignores the viewport)
@@ -11937,14 +11944,16 @@ int main(int argc, char **argv) {
             }
         SDL_Event e;
         bool got;
+        int caret_ms = A.win_hidden ? 0 : caret_wait_ms(); // a text caret gliding or breathing
         if (hold_ms) got = SDL_WaitEventTimeout(&e, hold_ms); // the listing's progress wakes us
         else if ((A.redraw || animating()) && !A.win_hidden) got = SDL_PollEvent(&e);
         else if (loading || A.screenshot || ops_busy() || watch_pending() || A.search_due || A.pal_pending || sheet_busy())
-            got = SDL_WaitEventTimeout(&e, (loading || watch_pending() || A.search_due) ? 30 : ops_moving() ? 16 : 100);
-        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0) { // add-on / cloud status, .git polls
+            got = SDL_WaitEventTimeout(&e, MIN((loading || watch_pending() || A.search_due) ? 30 : ops_moving() ? 16 : 100,
+                                               caret_ms > 0 ? caret_ms : INT_MAX));
+        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0 || caret_ms > 0) { // add-on / cloud status, .git polls, the caret
             int t = INT_MAX;
-            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms()};
-            for (int k = 0; k < 3; k++) if (w[k] > 0) t = MIN(t, w[k]);
+            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms(), caret_ms};
+            for (int k = 0; k < 4; k++) if (w[k] > 0) t = MIN(t, w[k]);
             got = SDL_WaitEventTimeout(&e, t);
         }
         else got = SDL_WaitEvent(&e);
