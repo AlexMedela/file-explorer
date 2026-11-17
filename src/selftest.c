@@ -1426,7 +1426,7 @@ static int run_selftest_m5(void) {
         ST_CHECK(n >= 1);
         printf("svg thumbnail via installed thumbnailer: ok\n");
     } else { // none installed: drawn by nanosvg
-        ST_CHECK(A.pv->kind == PV_IMAGE && A.pv->src_w == 64 && A.pv->src_h == 64 && A.pv->rgba && A.pv->rgba[3] == 255);
+        ST_CHECK(A.pv->kind == PV_IMAGE && !A.pv->from_thumb && A.pv->src_w == 64 && A.pv->src_h == 64 && A.pv_tex); // (pixels went to the texture)
         printf("svg preview via nanosvg (no thumbnailer output)\n");
     }
     { // nanosvg previews directly: fitted size, colours, transparency, viewBox only, what's refused
