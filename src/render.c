@@ -595,7 +595,7 @@ static void draw_brand(void) {
     Rect r = A.r_brand;
     if (r.h <= 0) return;
     draw_rect(r.x, r.y, r.w, r.h, C(COL_SIDEBAR));
-    draw_rect(r.x + r.w - 1, r.y, 1, r.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
+    if (g_separators || sidebar_edge_hot()) draw_rect(r.x + r.w - 1, r.y, 1, r.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
     f32 lh = roundf(S(17)), lw = roundf(lh * 624.f / 456.f), lx = roundf(r.x + S(18)), ly = roundf(r.y + (r.h - lh) * 0.5f);
     f32 tx = lx;
     if (A.brand_logo) {
@@ -630,7 +630,7 @@ static void draw_window_controls(void) {
     Rect s = A.r_wstrip;
     if (s.w > 0) {
         draw_rect(s.x, s.y, s.w, s.h, C(COL_TABBAR));
-        draw_rect(s.x, s.y, 1, s.h, C(COL_BORDER));
+        if (g_separators) draw_rect(s.x, s.y, 1, s.h, C(COL_BORDER));
     }
     bool max = window_maximized();
     f32 lt = MAX(1.f, roundf(S(1))), is = roundf(S(10));
@@ -681,7 +681,7 @@ static void draw_sidebar(void) {
     Pane *p = active_pane();
     Rect sb = A.r_sidebar;
     draw_rect(sb.x, sb.y, sb.w, sb.h, C(COL_SIDEBAR));
-    draw_rect(sb.x + sb.w - 1, sb.y, 1, sb.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
+    if (g_separators || sidebar_edge_hot()) draw_rect(sb.x + sb.w - 1, sb.y, 1, sb.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
     Font *fs = &A.font_small, *f = &A.font;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)sb.x, (int)sb.y, (int)sb.w - 1, (int)sb.h});
     bool dragging_place = A.drag == DRAG_PLACE;
@@ -923,7 +923,7 @@ static void draw_header(Pane *p) {
     Rect h = ly->header;
     if (h.h <= 0) return;
     draw_rect(h.x, h.y, h.w, h.h, C(COL_BG));
-    draw_rect(h.x, h.y + h.h - 1, h.w, 1, C(COL_BORDER));
+    if (g_separators) draw_rect(h.x, h.y + h.h - 1, h.w, 1, C(COL_BORDER));
     Font *f = &A.font_small;
     f32 ty = text_y(f, h.y, h.h);
     bool dragging_here = A.drag == DRAG_COL && A.drag_pane == p;
@@ -950,7 +950,7 @@ static void draw_header(Pane *p) {
         if (i > 0) {
             bool eh = (A.drag == DRAG_COL_RESIZE && A.drag_pane == p && ly->cid[i - 1] == A.drag_edge_col) ||
                       (A.mouse_in && A.drag == DRAG_NONE && in_rect(h, A.mx, A.my) && header_edge_at(ly, A.mx) == i - 1);
-            draw_rect(x0, h.y + S(eh ? 5 : 9), 1, h.h - S(eh ? 10 : 18), eh ? C(COL_ACCENT) : C(COL_BORDER));
+            if (g_separators || eh) draw_rect(x0, h.y + S(eh ? 5 : 9), 1, h.h - S(eh ? 10 : 18), eh ? C(COL_ACCENT) : C(COL_BORDER));
         }
     }
     if (dragging_here && A.col_insert >= 0) { // reorder caret
@@ -1860,7 +1860,7 @@ static void draw_snapview(Pane *p, bool active) {
     f32 c0 = rx + roundf(S(10)), c1 = c0 + roundf(S(96)), c2 = c1 + roundf(S(176)), c3 = c2 + roundf(S(112));
     {
         Rect h = {lr.x, lr.y, lr.w, hh};
-        draw_rect(h.x, h.y + h.h - 1, h.w, 1, C(COL_BORDER));
+        if (g_separators) draw_rect(h.x, h.y + h.h - 1, h.w, 1, C(COL_BORDER));
         f32 ty = text_y(fs, h.y, h.h);
         const char *lab[4] = {"Snapshot", "Date", "Kind", "Description"};
         f32 cx[4] = {c0, c1, c2, c3};
@@ -1868,14 +1868,14 @@ static void draw_snapview(Pane *p, bool active) {
         if (v->mode == 1) { lab[0] = "Path"; lab[1] = "Change"; cx[1] = rx + rw - roundf(S(120)); nc = 2; }
         for (int i = 0; i < nc; i++) {
             draw_text(fs, cx[i] + (i ? S(0) : S(16) + S(8)), ty, lab[i], (int)strlen(lab[i]), C(COL_TEXT_DIM));
-            if (i) draw_rect(cx[i] - S(10), h.y + S(9), 1, h.h - S(18), C(COL_BORDER));
+            if (i && g_separators) draw_rect(cx[i] - S(10), h.y + S(9), 1, h.h - S(18), C(COL_BORDER));
         }
     }
     // the bottom bar
     {
         Rect b = v->hdr;
         draw_rect(b.x, b.y, b.w, b.h, C(COL_TOOLBAR));
-        draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
+        if (g_separators) draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
         f32 bh = roundf(S(28)), by = b.y + roundf((b.h - bh) * 0.5f), bx = b.x + b.w - roundf(S(8));
         bx -= bh;
         v->bback = (Rect){bx, by, bh, bh};
@@ -2010,7 +2010,7 @@ static void draw_snapbar(Pane *p) {
     Rect b = ly->snapbar;
     Font *fs = &A.font_small;
     draw_rect(b.x, b.y, b.w, b.h, C(rgb_mix(COL_TOOLBAR, COL_ACCENT, 0.1f)));
-    draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
+    if (g_separators) draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
     char root[PATH_MAX], live[PATH_MAX], nm[96], msg[PATH_MAX + 160], tl[PATH_MAX];
     if (!snap_where(p->path, root, sizeof root, live, sizeof live, nm, sizeof nm)) return;
     Rect bc, br, ba;
@@ -2352,7 +2352,7 @@ static void draw_searchbar(Pane *p) {
     Rect sb = ly->sbar;
     Font *f = &A.font, *fs = &A.font_small;
     draw_rect(sb.x, sb.y, sb.w, sb.h, C(COL_TOOLBAR));
-    draw_rect(sb.x, sb.y, sb.w, 1, C(COL_BORDER));
+    if (g_separators) draw_rect(sb.x, sb.y, sb.w, 1, C(COL_BORDER));
     Rect field, toggle, close, cont, opt[3];
     search_bar_layout(p, &field, &toggle, &close, &cont, opt);
     bool focused = A.search_pane == p;
@@ -2435,7 +2435,7 @@ static void draw_trashbar(Pane *p) {
     Rect tb = ly->trashbar;
     Font *fs = &A.font_small;
     draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TOOLBAR));
-    draw_rect(tb.x, tb.y, tb.w, 1, C(COL_BORDER));
+    if (g_separators) draw_rect(tb.x, tb.y, tb.w, 1, C(COL_BORDER));
     char msg[96], n[32];
     int st = p->L ? atomic_load(&p->L->state) : LST_ERROR;
     u32 total = (st == LST_READY || st == LST_COMPLETE) ? p->L->count : 0; // count is published with the state
@@ -2452,7 +2452,7 @@ static void draw_cmpbar(Pane *p) {
     Rect b = ly->cmpbar;
     Font *fs = &A.font_small;
     draw_rect(b.x, b.y, b.w, b.h, C(COL_TOOLBAR));
-    draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
+    if (g_separators) draw_rect(b.x, b.y, b.w, 1, C(COL_BORDER));
     Rect sw, sync, close;
     cmp_bar_layout(p, &sw, &sync, &close);
     f32 is = roundf(S(14)), ix = b.x + S(14), iy = roundf(b.y + (b.h - is) * 0.5f), t = MAX(1.f, roundf(S(1.3f)));
@@ -2529,7 +2529,7 @@ static void draw_status(void) {
     if (picker_active()) { draw_picker_bar(s); return; } // Open / Save / Choose folder bar
     if (active_term()) { draw_status_term(active_term()); return; }
     draw_rect(s.x, s.y, s.w, s.h, C(COL_STATUS));
-    draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
+    if (g_separators) draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
     Font *f = &A.font_small;
     f32 ty = text_y(f, s.y, s.h);
     char left[256], right[256], n1[32], n2[32];
@@ -3554,7 +3554,7 @@ static void draw_preview(void) {
     Font *f = &A.font, *fs = &A.font_small;
     draw_rect(r.x, r.y, r.w, r.h, C(COL_PREVIEW_BG));
     bool dh = A.drag == DRAG_PREVIEW || (A.mouse_in && in_rect(A.r_pdiv, A.mx, A.my));
-    draw_rect(r.x, r.y, 1, r.h, C(dh ? COL_ACCENT : COL_BORDER));
+    if (g_separators || dh) draw_rect(r.x, r.y, 1, r.h, C(dh ? COL_ACCENT : COL_BORDER));
     f32 pad = roundf(S(16)), x = r.x + pad, w = r.w - pad * 2, y = r.y + pad;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x + 1, (int)r.y, (int)r.w - 1, (int)r.h});
     Listing *L = p->L;

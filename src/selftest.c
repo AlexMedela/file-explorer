@@ -3414,6 +3414,16 @@ static int run_selftest_m9(void) {
         ST_CHECK(g_unified_surfaces);
         opt_bool_toggle(OPT_UNIFIED);
         ST_CHECK(!g_unified_surfaces && !memcmp(&T, &g_theme_dark, sizeof T));
+        // separator lines (on by default)
+        ST_CHECK(g_separators);
+        opt_bool_toggle(OPT_SEPARATORS);
+        st_frames(2);
+        st_shot("m9-no-separators");
+        settings_save();
+        settings_load();
+        ST_CHECK(!g_separators);
+        opt_bool_toggle(OPT_SEPARATORS);
+        ST_CHECK(g_separators);
         // brightness per part, always from the theme's own colour; the status bar is the toolbar's until moved
         ST_CHECK(COL_STATUS == g_theme_dark.toolbar);
         opt_int_step(OPT_BRIGHT_SIDEBAR, +1);

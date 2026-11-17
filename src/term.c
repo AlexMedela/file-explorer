@@ -1375,7 +1375,7 @@ static void tc_reload_all(void) {
 static void draw_status_term(Term *t) {
     Rect s = A.r_status;
     draw_rect(s.x, s.y, s.w, s.h, C(COL_STATUS));
-    draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
+    if (g_separators) draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
     Font *f = &A.font_small;
     char left[300], right[96];
     snprintf(left, sizeof left, "Built-in terminal \xC2\xB7 %s", term_label(t));

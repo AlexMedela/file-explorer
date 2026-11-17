@@ -81,6 +81,7 @@ static void settings_defaults(void) {
     snprintf(A.theme_name, sizeof A.theme_name, "Dark");
     g_accent_custom = 0;
     g_unified_surfaces = false;
+    g_separators = true;
     memset(g_surface_bright, 0, sizeof g_surface_bright);
     A.ui_font[0] = 0;
     A.font_size = 13;
@@ -293,6 +294,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
         else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v);
+        else if (!strcmp(k, "show_separators")) g_separators = atoi(v);
         else if (!strcmp(k, "sidebar_brightness")) g_surface_bright[SURF_SIDEBAR] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "header_brightness")) g_surface_bright[SURF_HEADER] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "main_brightness")) g_surface_bright[SURF_FILES] = CLAMP(atoi(v), -30, 30);
@@ -513,7 +515,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
             A.dblclick_up, A.drop_ask, A.def_tree, A.single_instance);
     keys_save(f);
-    fprintf(f, "unified_surfaces=%d\n", g_unified_surfaces);
+    fprintf(f, "unified_surfaces=%d\nshow_separators=%d\n", g_unified_surfaces, g_separators);
     fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\n",
             g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_STATUS]);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);

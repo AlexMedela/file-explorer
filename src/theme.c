@@ -101,6 +101,7 @@ static bool g_unified_surfaces; // Options: sidebar, header, preview and status 
 // Options > Surfaces brightness: -30..+30 % per part (darker / lighter), 0 = the theme's own colour.
 enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_STATUS, SURF_COUNT };
 static int g_surface_bright[SURF_COUNT];
+static bool g_separators = true; // Options: the lines between the window's parts (a hovered / dragged edge always shows)
 static u32 g_status_bg; // the status bar: the toolbar's colour, unless its brightness moves it
 // The desktop's look, read off the UI thread (integration.c, "desktop look") only while Theme or File icons is System.
 static struct { bool known, light; u32 accent; char icons[64]; } g_desktop; // accent: 0 = none, else 0x01000000 | rgb

@@ -16,6 +16,8 @@ OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is res
 on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
 `unified_surfaces=1` (Options -> Appearance -> Unified surfaces, off by default) gives the sidebar, the header (tab
 strip and toolbar), the preview panel and the status bar the file area's background; the lines between them stay.
+`show_separators=0` (Options -> Appearance -> Separator lines, on by default) leaves out the lines between the sidebar,
+header, column headings, preview, terminal panel and status bar; an edge you can drag still lights up on hover.
 `sidebar_brightness`, `header_brightness`, `main_brightness` (the file area), `preview_brightness` and
 `status_brightness` (Options -> Appearance -> Surfaces, 0 by default) make that part darker (down to -30) or lighter
 (up to 30, in percent) than the theme's own colour.

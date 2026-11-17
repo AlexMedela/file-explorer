@@ -11314,7 +11314,7 @@ static void frame_draw(void) {
             bool dh = A.drag == DRAG_DOCK || (A.mouse_in && A.drag == DRAG_NONE && in_rect(ct->dock_div, A.mx, A.my));
             ct->dock->hint_rpad = ct->dock_x.w + roundf(S(6)); // (its scrolled-back hint goes left of the close button)
             term_draw(ct->dock, ct->dock_r, pn == A.ap && ct->dock_focus);
-            draw_rect(ct->dock_r.x, ct->dock_r.y - 1, ct->dock_r.w, 1, C(dh ? COL_ACCENT : COL_BORDER));
+            if (g_separators || dh) draw_rect(ct->dock_r.x, ct->dock_r.y - 1, ct->dock_r.w, 1, C(dh ? COL_ACCENT : COL_BORDER));
             Rect xb = ct->dock_x; // close (hides it, like F4), for those who don't use the keys
             bool xh = A.drag == DRAG_NONE && hot(xb);
             draw_rrect(xb.x, xb.y, xb.w, xb.h, xb.h * 0.5f, C(xh ? COL_CONTROL_HOVER : COL_POPUP));
