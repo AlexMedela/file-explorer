@@ -4319,6 +4319,42 @@ static int run_selftest_m10(void) {
         ST_CHECK(strstr(mux, "-O check -- me@box") && strstr(mux, "-O exit -- me@box")); // its shared ssh connection too
     }
 
+    { // mount tables write spaces, tabs, newlines and backslashes as octal escapes: decoded once, malformed ones kept
+        static const char *cases[][2] = {
+            {"/mnt/my\\040share", "/mnt/my share"}, {"a\\011b\\012c\\134d", "a\tb\nc\\d"}, {"/literal\\134040", "/literal\\040"},
+            {"/x\\043y", "/x#y"}, {"\\000\\777\\04\\", "\\000\\777\\04\\"}, {"end\\0", "end\\0"}, {"end\\04", "end\\04"},
+            {"\\", "\\"}, {"\\8\\400\\09a", "\\8\\400\\09a"}, {"", ""},
+        };
+        for (size_t i = 0; i < ARRAY_COUNT(cases); i++) {
+            char out[64];
+            mount_unescape(cases[i][0], out, sizeof out);
+            ST_CHECK(!strcmp(out, cases[i][1]));
+        }
+        char tiny[6];
+        mount_unescape("ab\\040cdefgh", tiny, sizeof tiny); // cut to the buffer, still terminated
+        ST_CHECK(!strcmp(tiny, "ab cd"));
+        char inplace[] = "/mnt/a\\040b";
+        mount_unescape(inplace, inplace, sizeof inplace);
+        ST_CHECK(!strcmp(inplace, "/mnt/a b"));
+        // network mounts with escaped fields: the folder as it is on disk, sshfs's source readable
+        st_write_text(M10_BASE "/mounts", "//nas/my\\040share " M10_BASE "/smb\\040share cifs rw 0 0\n"
+                                          "me@box:/home/me/my\\040docs " M10_BASE "/ssh\\011tab fuse.sshfs rw 0 0\n"
+                                          "nas:/x " M10_BASE "/literal\\134040 nfs rw 0 0\n"
+                                          "/dev/sda1 " M10_BASE "/not\\040network ext4 rw 0 0\n");
+        setenv("FE_NET_MOUNTS", M10_BASE "/mounts", 1);
+        NetMount nm[16];
+        int nn = network_mounts(nm, 16), found = 0;
+        unsetenv("FE_NET_MOUNTS");
+        for (int i = 0; i < nn; i++) {
+            found += !strcmp(nm[i].path, M10_BASE "/smb share") && !strcmp(nm[i].label, "//nas/my share");
+            found += !strcmp(nm[i].path, M10_BASE "/ssh\ttab") && !strcmp(nm[i].label, "me@box:/home/me/my docs");
+            found += !strcmp(nm[i].path, M10_BASE "/literal\\040");
+            ST_CHECK(!strstr(nm[i].path, "not network") && !strstr(nm[i].path, "\\011"));
+        }
+        ST_CHECK(found == 3);
+        unlink(M10_BASE "/mounts");
+    }
+
     // phones and cameras on a cable: what the volume monitors list, matched with their folders in the FUSE bridge
     {
         DevList *L = xcalloc(1, sizeof *L);
@@ -6370,8 +6406,10 @@ static int run_selftest_du(void) {
                             "23 21 0:34 /@snapshots /.snapshots rw shared:3 - btrfs /dev/nvme0n1p2 rw\n"
                             "24 21 259:1 / /boot rw shared:4 - vfat /dev/nvme0n1p1 rw\n"
                             "25 21 0:22 / /proc rw,nosuid - proc proc rw\n"
-                            "26 22 0:50 / /home/me/remote rw - fuse.sshfs me@host:/ rw\n");
-        ST_CHECK(t.nmounts == 6 && !strcmp(t.mounts[1].mnt, "/home") && !strcmp(t.mounts[3].fstype, "vfat"));
+                            "26 22 0:50 / /home/me/remote rw - fuse.sshfs me@host:/ rw\n"
+                            "27 21 8:17 /my\\040dir /mnt/usb\\040disk rw - ext4 /dev/sdb1 rw\n");
+        ST_CHECK(t.nmounts == 7 && !strcmp(t.mounts[1].mnt, "/home") && !strcmp(t.mounts[3].fstype, "vfat"));
+        ST_CHECK(!strcmp(t.mounts[6].mnt, "/mnt/usb disk") && !strcmp(t.mounts[6].root, "/my dir")); // (decoded)
         ST_CHECK(t.mounts[1].compressed && !t.mounts[0].compressed && !t.mounts[5].compressed);
         t.dev = makedev(0, 31);
         t.fstype = "btrfs";

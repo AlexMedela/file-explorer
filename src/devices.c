@@ -74,15 +74,7 @@ static bool dev_mount_point(const char *majmin, const char *devpath, char *out, 
         char fstype[64] = "", src[PATH_MAX] = "";
         if (dash) sscanf(dash + 3, "%63s %4095s", fstype, src);
         if (!strcmp(mm, majmin) || (devpath[0] && !strcmp(src, devpath))) {
-            // mountinfo escapes spaces as \040
-            size_t o = 0;
-            for (const char *c = mp; *c && o + 1 < cap; c++) {
-                if (c[0] == '\\' && isdigit((u8)c[1]) && isdigit((u8)c[2]) && isdigit((u8)c[3])) {
-                    out[o++] = (char)((c[1] - '0') * 64 + (c[2] - '0') * 8 + (c[3] - '0'));
-                    c += 3;
-                } else out[o++] = *c;
-            }
-            out[o] = 0;
+            mount_unescape(mp, out, cap);
             found = true;
         }
     }
@@ -263,8 +255,12 @@ static bool gvfs_fuse_running(void) {
     gvfs_dir(gdir, sizeof gdir);
     FILE *f = fopen("/proc/self/mounts", "r");
     bool up = false;
-    while (f && !up && fgets(line, sizeof line, f))
-        up = sscanf(line, "%4095s %4095s %63s", src, mp, type) == 3 && !strcmp(mp, gdir) && strstr(type, "fuse");
+    while (f && !up && fgets(line, sizeof line, f)) {
+        char m2[PATH_MAX];
+        if (sscanf(line, "%4095s %4095s %63s", src, mp, type) != 3) continue;
+        mount_unescape(mp, m2, sizeof m2);
+        up = !strcmp(m2, gdir) && strstr(type, "fuse");
+    }
     if (f) fclose(f);
     return up;
 }
@@ -335,7 +331,8 @@ static int network_mounts(NetMount *out, int max) {
         }
         closedir(d);
     }
-    FILE *f = fopen("/proc/self/mounts", "r");
+    const char *ov = getenv("FE_NET_MOUNTS"); // tests: a made-up mount table
+    FILE *f = fopen(ov ? ov : "/proc/self/mounts", "r");
     if (f) {
         char line[PATH_MAX * 2], src[PATH_MAX], mp[PATH_MAX], type[64];
         while (n < max && fgets(line, sizeof line, f)) {
@@ -343,15 +340,8 @@ static int network_mounts(NetMount *out, int max) {
             if (strcmp(type, "fuse.sshfs") && strcmp(type, "cifs") && strcmp(type, "smb3") && strcmp(type, "nfs") &&
                 strcmp(type, "nfs4") && strcmp(type, "fuse.rclone"))
                 continue;
-            size_t o = 0;
-            char clean[PATH_MAX];
-            for (const char *c = mp; *c && o + 1 < sizeof clean; c++) {
-                if (c[0] == '\\' && c[1] == '0' && c[2] == '4' && c[3] == '0') { clean[o++] = ' '; c += 3; }
-                else clean[o++] = *c;
-            }
-            clean[o] = 0;
-            snprintf(out[n].path, sizeof out[n].path, "%s", clean);
-            snprintf(out[n].label, sizeof out[n].label, "%s", src);
+            mount_unescape(mp, out[n].path, sizeof out[n].path);
+            mount_unescape(src, out[n].label, sizeof out[n].label); // (sshfs: user@host:/dir, which can have spaces too)
             n++;
         }
         fclose(f);
@@ -566,14 +556,7 @@ static bool own_mount_of(const char *id, char *out, size_t cap) {
     bool found = false;
     while (f && !found && fgets(line, sizeof line, f)) {
         if (sscanf(line, "%4095s %4095s %63s", src, mp, type) != 3 || strcmp(type, "fuse.fe-device") || strcmp(src, want)) continue;
-        size_t o = 0;
-        for (const char *c = mp; *c && o + 1 < cap; c++) { // \040 for spaces (and other octal escapes)
-            if (c[0] == '\\' && isdigit((u8)c[1]) && isdigit((u8)c[2]) && isdigit((u8)c[3])) {
-                out[o++] = (char)((c[1] - '0') * 64 + (c[2] - '0') * 8 + (c[3] - '0'));
-                c += 3;
-            } else out[o++] = *c;
-        }
-        out[o] = 0;
+        mount_unescape(mp, out, cap);
         found = true;
     }
     if (f) fclose(f);

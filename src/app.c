@@ -1986,18 +1986,6 @@ static void toast(const char *fmt, ...);
 static char **g_remote;
 static int g_nremote;
 
-// /proc/self/mounts writes spaces, tabs, newlines and backslashes as \ooo octal escapes (also used by rclone.c).
-static void mount_unescape(const char *s, char *out, size_t cap) {
-    size_t o = 0;
-    for (const char *c = s; *c && o + 1 < cap; c++) {
-        if (c[0] == '\\' && c[1] >= '0' && c[1] <= '3' && c[2] >= '0' && c[2] <= '7' && c[3] >= '0' && c[3] <= '7') {
-            out[o++] = (char)((c[1] - '0') * 64 + (c[2] - '0') * 8 + (c[3] - '0'));
-            c += 3;
-        } else out[o++] = *c;
-    }
-    out[o] = 0;
-}
-
 static void remote_mounts_load(void) {
     strv_free(g_remote, g_nremote);
     g_remote = NULL;
@@ -2848,12 +2836,7 @@ static void init_places(void) {
             if (sscanf(line, "%511s %511s", dev, mnt) != 2) continue;
             if (!strncmp(mnt, "/run/media/", 11) || !strncmp(mnt, "/media/", 7) || !strncmp(mnt, "/mnt/", 5)) {
                 char clean[512];
-                size_t o = 0;
-                for (const char *c = mnt; *c && o < sizeof clean - 1; c++) {
-                    if (c[0] == '\\' && c[1] == '0' && c[2] == '4' && c[3] == '0') { clean[o++] = ' '; c += 3; }
-                    else clean[o++] = *c;
-                }
-                clean[o] = 0;
+                mount_unescape(mnt, clean, sizeof clean);
                 bool dup = false; // already listed from lsblk
                 for (int r = A.nplaces_user; r < A.nplaces && !dup; r++) dup = !strcmp(A.places[r].path, clean);
                 if (dup) continue;
