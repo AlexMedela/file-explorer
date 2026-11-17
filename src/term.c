@@ -1039,10 +1039,11 @@ static int term_draw_run(Term *t, int r, int c, f32 y, f32 base, Font *f) {
             f32 gy = roundf(y + base - pos[j].y_offset * sc) - g->by;
             if (g->w && g->color) draw_glyph_scale_xy(g, x, gy, xs, 1.f, (Color){1, 1, 1, 1});
             else if (g->w) { // one slice per run of cells with the same colour (a ligature may span several)
-                int left = MAX(c, (int)floorf((x - t->ox) / t->cw));
-                int right = MIN(end, (int)ceilf((x + g->w * xs - t->ox) / t->cw));
-                left = MIN(left, end - 1);
-                right = MAX(right, left + 1);
+                // the cells it covers: its own, and a neighbour only when it covers most of it (a ligature drawn
+                // over the cells before it); a slight overhang (powerline caps, bearings) keeps the glyph's own colour
+                int own0 = c + (int)info[i].cluster, own1 = c + (int)cell_end;
+                int left = MAX(c, MIN(own0, (int)floorf((x - t->ox) / t->cw + 0.5f)));
+                int right = MIN(end, MAX(own1, (int)ceilf((x + g->w * xs - t->ox) / t->cw - 0.5f)));
                 for (int k = left; k < right;) {
                     TCell cell; term_cell(t, r, k, &cell);
                     u32 fg = term_cell_foreground(t, r, k, &cell);

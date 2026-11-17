@@ -4100,11 +4100,11 @@ static int run_selftest_m11(void) {
     }
     { // Fish can change colour between operator characters; that must not break shaping.
         Term sample = {0};
-        sample.rows = 2; sample.cols = 8; sample.cw = 10; sample.ch = 20;
+        sample.rows = 3; sample.cols = 8; sample.cw = 10; sample.ch = 20;
         sample.vt = vterm_new(sample.rows, sample.cols);
         sample.scr = vterm_obtain_screen(sample.vt);
         vterm_screen_reset(sample.scr, 1);
-        const char *ansi = "\033[31m=\033[32m=\033[0m\r\nM";
+        const char *ansi = "\033[31m=\033[32m=\033[0m\r\nM\r\n\033[31mM\033[32mM";
         vterm_input_write(sample.vt, ansi, strlen(ansi));
         vterm_screen_flush_damage(sample.scr);
         TCell first, second;
@@ -4120,6 +4120,12 @@ static int run_selftest_m11(void) {
         ST_CHECK(term_draw_run(&sample, 1, 0, 20, 14, &g_term_font) == 0);
         Glyph *mg = font_glyph(&g_term_font, 'M');
         ST_CHECK(g_nv == nv0 + 4 && mg->w > 2 && fabsf((g_v[nv0 + 1].position.x - g_v[nv0].position.x) - mg->w) < 0.01f);
+        // a slight overhang into a cell of another colour stays the glyph's own colour (no seam by powerline caps)
+        sample.cw = MAX(2.f, (f32)mg->w - 1);
+        nv0 = g_nv;
+        ST_CHECK(term_draw_run(&sample, 2, 0, 40, 14, &g_term_font) == 1);
+        ST_CHECK(g_nv == nv0 + 8 && fabsf((g_v[nv0 + 1].position.x - g_v[nv0].position.x) - mg->w) < 0.01f &&
+                 g_v[nv0].color.r != g_v[nv0 + 4].color.r);
         vterm_free(sample.vt);
     }
     const char *cfg = "/tmp/fe-selftest-config";
