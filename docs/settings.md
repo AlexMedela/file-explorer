@@ -19,6 +19,8 @@ compositors included, so it looks the same everywhere: minimise / maximise / clo
 the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.
 `system` leaves the title bar to the desktop (on a tiling compositor: no buttons at all).
 `FE_TITLE_BAR=app|system` overrides it for one run.
+`window_buttons=0` (Options -> Appearance -> Window buttons, on by default) leaves out minimise / maximise / close, for
+desktops that close and tile windows from the keyboard; the tab strip then runs to the window's edge.
 `round_corners=1` (Options -> Appearance -> Rounded corners, off by default) rounds the window's corners with Explorer's own title bar,
 and draws a drop shadow round it the way GTK apps do (square and without shadow when maximised or snapped). On X11 this
 needs a compositor (else the corners stay square) and the OpenGL renderer (Automatic picks it there); the shadow needs a

@@ -4005,6 +4005,17 @@ static int run_selftest_m9(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, wctl_button(2).x + S(20), S(15), SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
         ST_CHECK(!strcmp(A.last_opened, "window:close"));
+        opt_bool_toggle(OPT_WINDOW_BUTTONS); // without the buttons: the tab strip runs to the window's edge, nothing to press
+        ST_CHECK(!A.window_buttons && A.r_wctl.w == 0);
+        if (tr) ST_CHECK(tr->splitbtn.x + tr->splitbtn.w > A.r_content.x + A.r_content.w - S(46));
+        A.last_opened[0] = 0;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, A.W - S(20), S(15), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
+        ST_CHECK(strncmp(A.last_opened, "window:", 7) != 0);
+        st_frames(1);
+        st_shot("m9-titlebar-nobuttons");
+        opt_bool_toggle(OPT_WINDOW_BUTTONS);
+        ST_CHECK(A.window_buttons && A.r_wctl.w > 0);
         bool pv = A.preview_on;
         if (!pv) preview_toggle();
         layout();

@@ -636,6 +636,7 @@ static struct {
     bool dim_inactive;
     int title_bar; // TITLEBAR_*: who draws the window's title bar (setting)
     bool round_corners; // round the window's corners with our own title bar (setting)
+    bool window_buttons; // minimise / maximise / close in our own title bar (setting; off: the desktop's keys close it)
     bool win_alpha;     // the window was created with an alpha channel (needed for rounded corners)
     bool win_shadow;    // ...and draws its own drop shadow in a margin round the window (Wayland)
     int shadow_px;      // that margin now, in pixels (0: maximised, system title bar...); A.W / A.H exclude it
@@ -1157,7 +1158,7 @@ static void layout(void) {
     // own title bar: the buttons sit at the right end of the tab strips; with the preview open they get a strip of
     // tab-bar colour above it (the preview moves down to the panels' toolbars)
     A.r_wctl = A.r_wstrip = (Rect){0, 0, 0, 0};
-    if (A.csd) {
+    if (A.csd && A.window_buttons) {
         f32 bw = roundf(S(46)), bh2 = roundf(S(38));
         A.r_wctl = (Rect){W - 3 * bw, 0, 3 * bw, bh2};
         if (A.preview_on) {

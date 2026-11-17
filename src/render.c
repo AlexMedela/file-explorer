@@ -603,7 +603,7 @@ static void draw_window_controls(void) {
     }
     bool max = window_maximized();
     f32 lt = MAX(1.f, roundf(S(1))), is = roundf(S(10));
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; A.r_wctl.w > 0 && i < 3; i++) {
         Rect b = wctl_button(i);
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(b, A.mx, A.my));
         if (hover) draw_rect(b.x, b.y, b.w, b.h, i == 2 ? (Color){0xC4 / 255.f, 0x2B / 255.f, 0x1C / 255.f, 1} : C(COL_TAB_HOVER));
