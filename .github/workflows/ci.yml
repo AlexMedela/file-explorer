@@ -52,7 +52,7 @@ jobs:
             set -e
             sh tools/mkfiles.sh /tmp/fe-st 5000
             ./build/file-explorer --selftest /tmp/fe-st
-            for t in ops admin git grep du cmp m4 m5 m6 m7 m8 m9 m10 m11; do
+            for t in ops admin git borg grep du cmp m4 m5 m6 m7 m8 m9 m10 m11; do
               echo "::group::selftest-$t"
               ./build/file-explorer --selftest-$t || { echo "::error::selftest-$t failed"; exit 1; }
               echo "::endgroup::"

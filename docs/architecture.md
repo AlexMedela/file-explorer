@@ -32,6 +32,8 @@
   relative to the two roots; syncs run as one operation copying each item to its own place (`OP_SYNC` in `ops.c`).
 - `src/snapshots.c` – previous versions: finds the filesystem a path is on and looks for it in Snapper / Timeshift / ZFS
   snapshots on a worker thread (or as root through the pkexec helper).
+- `src/borg.c` – Borg backup repositories: recognised by their top files (Borg 1 and 2), mounted with `borg mount` on a
+  worker thread (passphrase through our askpass, `ssh://` for repositories in SFTP folders), mount points and labels.
 - `src/git.c` – finds a folder's repository, runs `git status --porcelain=v2` for the repository on its own threads (on the server over ssh in SFTP folders) and parses it into per-path states, plus remotes, last commit and stashes; reads branch + remote of the subfolders that are repositories.
 - `src/app.c` – layout, input, virtualized list, navigation, tabs, dialogs, menus, progress cards, transfer queue, undo.
   `src/input.c` (keyboard/mouse), `src/render.c` (drawing), `src/settings.c` (config files) and

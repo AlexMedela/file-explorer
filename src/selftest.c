@@ -21,6 +21,7 @@ static void st_frames(int n) {
         du_tick();
         cmp_tick();
         snap_tick();
+        borg_tick();
         layout();
         for (int i = 0; i < A.ntabs; i++)
             for (int j = 0; j < A.tabs[i]->npanes; j++) pane_poll(&A.tabs[i]->pane[j]);
@@ -8328,6 +8329,362 @@ static int run_selftest_admin(void) {
     chmod(ADM_BASE "/vol2/.snapshots", 0755);
 
     fprintf(stderr, "selftest-admin: %s (%d failures)\n", st_fail ? "FAIL" : "ok", st_fail);
+    return st_fail ? 1 : 0;
+}
+
+// --- self-test for Borg backups: recognising repositories (1 and 2), opening (stand-in borg), passphrase, restore, unmount ---
+
+#define BORG_BASE "/tmp/fe-borg-test"
+
+static void st_borg_repo(const char *dir, int kind) { // the files borg keeps at a repository's top
+    char p[PATH_MAX];
+    if (kind == 1) {
+        snprintf(p, sizeof p, "%s/data/0", dir);
+        mkdir_p(p, 0755);
+        snprintf(p, sizeof p, "%s/README", dir);
+        st_write_text(p, "This is a Borg Backup repository.\nSee https://borgbackup.readthedocs.io/\n");
+        snprintf(p, sizeof p, "%s/config", dir);
+        st_write_text(p, "[repository]\nversion = 1\n");
+        snprintf(p, sizeof p, "%s/nonce", dir);
+        st_write(p, 16);
+    } else {
+        snprintf(p, sizeof p, "%s/archives", dir);
+        mkdir_p(p, 0755);
+        snprintf(p, sizeof p, "%s/packs", dir);
+        mkdir_p(p, 0755);
+        snprintf(p, sizeof p, "%s/config", dir);
+        mkdir_p(p, 0755);
+        snprintf(p, sizeof p, "%s/config/readme", dir);
+        st_write_text(p, "This is a Borg Backup repository.\nSee https://borgbackup.readthedocs.io/\n");
+    }
+}
+
+static void st_setup_borg(void) {
+    st_rmrf(BORG_BASE);
+    mkdir_p(BORG_BASE "/tools", 0755);
+    mkdir_p(BORG_BASE "/mnt", 0755);
+    mkdir_p(BORG_BASE "/live/docs", 0755);
+    mkdir_p(BORG_BASE "/home/plain", 0755);
+    st_write_text(BORG_BASE "/live/docs/a.txt", "now\n");
+    st_borg_repo(BORG_BASE "/home/repo1", 1);
+    st_borg_repo(BORG_BASE "/home/enc1", 1);
+    st_borg_repo(BORG_BASE "/home/locked1", 1);
+    st_borg_repo(BORG_BASE "/home/repo2", 2);
+    st_borg_repo(BORG_BASE "/gvfs/sftp:host=vm,user=me,port=2222/srv/remote1", 1);
+    mkdir_p(BORG_BASE "/home/fake/data", 0755); // looks like one, but its README says otherwise
+    st_write_text(BORG_BASE "/home/fake/README", "my notes\n");
+    st_write_text(BORG_BASE "/home/fake/config", "x\n");
+    st_write_text(BORG_BASE "/tools/mounts", "");
+    // the stand-in borg: logs, answers --version, "mounts" by making an archive folder (and a mount table line);
+    // ssh:// finds no borg on the server, *locked* is busy, *enc* wants the passphrase "secret" (asked via the pass command)
+    static const char script[] =
+        "#!/bin/sh\n"
+        "echo \"borg $* | PASSCMD=${BORG_PASSCOMMAND-unset} PASS=${BORG_PASSPHRASE-unset} RSH=${BORG_RSH-}\" >> " BORG_BASE "/tools/log\n"
+        "[ \"$1\" = --version ] && { echo \"borg VERSION\"; exit 0; }\n"
+        "prev=; repo=; n=0; for a; do n=$((n+1)); [ \"$prev\" = -r ] && repo=$a; prev=$a; last2=$last; last=$a; done\n"
+        "[ -n \"$repo\" ] || repo=$last2\n"
+        "case \"$repo\" in ssh://*) echo 'Remote: sh: 1: borg: not found'; echo '{\"type\": \"log_message\", \"levelname\": \"ERROR\", \"message\": \"Connection closed by remote host\", \"msgid\": \"ConnectionClosedWithHint\"}'; exit 2;; esac\n"
+        "case \"$repo\" in *locked*) echo '{\"type\": \"log_message\", \"levelname\": \"ERROR\", \"message\": \"Failed to create/acquire the lock\", \"msgid\": \"LockTimeout\"}'; exit 2;; esac\n"
+        "case \"$repo\" in *enc*) if [ -n \"${BORG_PASSCOMMAND-}\" ]; then p=$(eval \"$BORG_PASSCOMMAND\"); else p=${BORG_PASSPHRASE-}; fi\n"
+        "  [ \"$p\" = secret ] || { echo '{\"type\": \"log_message\", \"levelname\": \"ERROR\", \"message\": \"Passphrase supplied in BORG_PASSPHRASE, by BORG_PASSCOMMAND, or via BORG_PASSPHRASE_FD is incorrect.\", \"msgid\": \"PassphraseWrong\"}'; exit 2; };; esac\n"
+        "mkdir -p \"$last/2026-11-01/${BASE#/}/live/docs\" \"$last/2026-11-01/nowhere/else\" && echo then > \"$last/2026-11-01/${BASE#/}/live/docs/a.txt\"\n"
+        "echo \"borgfs $last fuse ro 0 0\" >> " BORG_BASE "/tools/mounts\n";
+    for (int v = 1; v <= 2; v++) {
+        char body[sizeof script + 64], *o = body;
+        for (const char *s = script; *s;) {
+            if (!strncmp(s, "VERSION", 7)) { o += sprintf(o, "%s", v == 1 ? "1.4.5" : "2.0.0b24"); s += 7; }
+            else if (!strncmp(s, "${BASE#/}", 9)) { o += sprintf(o, "%s", BORG_BASE + 1); s += 9; }
+            else *o++ = *s++;
+        }
+        *o = 0;
+        const char *path = v == 1 ? BORG_BASE "/tools/borg" : BORG_BASE "/tools/borg2";
+        st_write_text(path, body);
+        chmod(path, 0755);
+    }
+    st_write_text(BORG_BASE "/tools/fusermount", "#!/bin/sh\necho \"fusermount $*\" >> " BORG_BASE "/tools/log\nfor a; do last=$a; done\n"
+                  "rm -rf \"$last\"/*\ngrep -v \" $last \" " BORG_BASE "/tools/mounts > " BORG_BASE "/tools/m.tmp; mv " BORG_BASE "/tools/m.tmp " BORG_BASE "/tools/mounts\n");
+    chmod(BORG_BASE "/tools/fusermount", 0755);
+    st_write_text(BORG_BASE "/tools/secret-tool", "#!/bin/sh\necho \"secret-tool $*\" >> " BORG_BASE "/tools/log\n");
+    chmod(BORG_BASE "/tools/secret-tool", 0755);
+    setenv("FE_BORG", BORG_BASE "/tools/borg", 1);
+    setenv("FE_BORG2", BORG_BASE "/tools/borg2", 1);
+    setenv("FE_BORG1", BORG_BASE "/tools/none", 1);
+    setenv("FE_BORG_MNT", BORG_BASE "/mnt", 1);
+    setenv("FE_BORG_MOUNTS", BORG_BASE "/tools/mounts", 1);
+    setenv("FE_FUSERMOUNT", BORG_BASE "/tools/fusermount", 1);
+    setenv("FE_SECRET_TOOL", BORG_BASE "/tools/secret-tool", 1);
+    setenv("FE_GVFS_DIR", BORG_BASE "/gvfs", 1);
+    unsetenv("BORG_PASSPHRASE");
+    unsetenv("BORG_PASSCOMMAND");
+    unsetenv("BORG_PASSPHRASE_FD");
+}
+
+static void st_borg_settle(void) {
+    for (int k = 0; k < 1500 && (g_borg_busy || git_busy()); k++) { st_frames(1); SDL_Delay(2); }
+    st_wait();
+    st_frames(2);
+}
+
+static const GitSub *st_borg_sub(Pane *p, const char *name) {
+    for (u32 i = 0; p->L && i < p->L->count; i++)
+        if (!strcmp(p->L->entries[i].name, name)) return git_entry_sub(p, &p->L->entries[i]);
+    return NULL;
+}
+
+static bool st_borg_log(const char *needle) {
+    static char buf[1 << 16];
+    st_read_text(BORG_BASE "/tools/log", buf, sizeof buf);
+    return strstr(buf, needle) != NULL;
+}
+
+static void st_borg_open(Pane *p, const char *name) { // Enter on a repository in the folder shown
+    if (!st_select(p, name)) return;
+    open_entry(p, p->cursor, false);
+    st_borg_settle();
+}
+
+static int run_selftest_borg(void) {
+    st_wait();
+    Pane *p = active_pane();
+    char r[PATH_MAX], lv[PATH_MAX], nm[96], mp[PATH_MAX], want[PATH_MAX * 2];
+
+    // --- paths: where our mounts are, which archive a path is in and where it lives now, borg's words
+    borg_mount_point(BORG_BASE "/home/repo1", mp, sizeof mp);
+    ST_CHECK(!strncmp(mp, BORG_BASE "/mnt/repo1-", strlen(BORG_BASE "/mnt/repo1-")) && strlen(mp) == strlen(BORG_BASE "/mnt/repo1-") + 8);
+    snprintf(want, sizeof want, "%s/2026-11-01/home/me/x.txt", mp);
+    ST_CHECK(borg_where(want, r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !strcmp(lv, "/home/me/x.txt") && !strcmp(nm, "2026-11-01"));
+    snprintf(want, sizeof want, "%s/2026-11-01", mp);
+    ST_CHECK(borg_where(want, r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !strcmp(lv, "/") && !strcmp(r, want));
+    ST_CHECK(!borg_where(mp, r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !borg_where("/home/me", r, sizeof r, lv, sizeof lv, nm, sizeof nm));
+    snprintf(want, sizeof want, "%s/2026-11-01/etc", mp);
+    ST_CHECK(snap_where(want, r, sizeof r, lv, sizeof lv, nm, sizeof nm) && !strcmp(lv, "/etc")); // the snapshot bar knows them too
+    char err[400];
+    ST_CHECK(borg_classify("{\"type\": \"log_message\", \"levelname\": \"ERROR\", \"message\": \"Passphrase \\\"x\\\" wrong\", \"msgid\": \"PassphraseWrong\"}\n",
+                           err, sizeof err) == BORG_E_PASS && !strcmp(err, "Passphrase \"x\" wrong"));
+    ST_CHECK(borg_classify("borg mount not available: no FUSE support, BORG_FUSE_IMPL=pyfuse3,llfuse.\n", err, sizeof err) == BORG_E_FUSE);
+    ST_CHECK(borg_classify("something odd\n\n", err, sizeof err) == BORG_E_OTHER && !strcmp(err, "something odd"));
+    ST_CHECK(borg_repo_kind(BORG_BASE "/home/repo1") == BORG_V1 && borg_repo_kind(BORG_BASE "/home/repo2") == BORG_V2);
+    ST_CHECK(!borg_repo_kind(BORG_BASE "/home/fake") && !borg_repo_kind(BORG_BASE "/home/plain") && !borg_repo_kind(BORG_BASE "/nothing"));
+
+    // --- marked in their folder like git repositories (git status off: still marked)
+    A.git_status = false;
+    pane_navigate(p, BORG_BASE "/home", true);
+    st_borg_settle();
+    const GitSub *g = st_borg_sub(p, "repo1");
+    ST_CHECK(g && g->borg == BORG_V1 && (g = st_borg_sub(p, "repo2")) && g->borg == BORG_V2);
+    ST_CHECK(!st_borg_sub(p, "fake") && !st_borg_sub(p, "plain") && !pane_borg_repo(p) && !p->ly.has_snapbar);
+    st_shot("borg-pills");
+    int pview = p->view;
+    p->view = VIEW_GRID;
+    st_shot("borg-pills-grid");
+    p->view = pview;
+
+    // --- open from the folder it's in: mounted, the pane shows its backups (dated folders)
+    st_borg_open(p, "repo1");
+    ST_CHECK(!strcmp(p->path, mp) && g_borg_n == 1 && st_exists(BORG_BASE "/tools/mounts"));
+    snprintf(want, sizeof want, "--log-json mount -o ignore_permissions " BORG_BASE "/home/repo1 %s | PASSCMD=unset PASS= RSH=", mp);
+    ST_CHECK(st_borg_log(want));
+    ST_CHECK(p->ly.has_snapbar && st_cursor_name(p)[0] && !strcmp(st_cursor_name(p), "2026-11-01"));
+    st_shot("borg-archives");
+    // read-only: no new folders, no renames
+    A.toast[0] = 0;
+    do_action(p, ACT_NEW_FOLDER);
+    ST_CHECK(strstr(A.toast, "read-only") != NULL);
+    // inside an archive: the bar compares with now and restores
+    snprintf(want, sizeof want, "%s/2026-11-01" BORG_BASE "/live/docs", mp);
+    pane_navigate(p, want, true);
+    st_wait();
+    ST_CHECK(p->ly.has_snapbar && st_select(p, "a.txt"));
+    st_shot("borg-inside");
+    snap_restore(p);
+    ST_CHECK(A.dlg.open && g_snap_rn == 1 && !strcmp(g_snap_rdst[0], BORG_BASE "/live/docs/a.txt") && strstr(A.dlg.msg, "backup 2026-11-01"));
+    if (A.dlg.open) dialog_choose(1);
+    ST_CHECK(!A.dlg.open && !g_snap_rn);
+    snprintf(want, sizeof want, "%s/2026-11-01/nowhere", mp); // not from this computer: copy it out instead
+    pane_navigate(p, want, true);
+    st_wait();
+    st_select(p, "else");
+    snap_restore(p);
+    ST_CHECK(!A.dlg.open && strstr(A.toast, "isn't on this computer"));
+    snprintf(want, sizeof want, "%s/2026-11-01", mp); // a whole backup: not at once
+    pane_navigate(p, want, true);
+    st_wait();
+    sel_clear(p);
+    p->cursor = -1; // nothing picked: the whole backup isn't restored at once
+    snap_restore(p);
+    ST_CHECK(!A.dlg.open && strstr(A.toast, "Pick what to restore"));
+    // the bar's last button: all backups, then closing them (back to the repository's folder, unmounted)
+    ST_CHECK(p->ly.has_snapbar);
+    Rect bc, br, ba;
+    snapbar_layout(p, &bc, &br, &ba);
+    snapbar_click(p, ba.x + 2, ba.y + 2);
+    ST_CHECK(!strcmp(p->path, mp));
+    snapbar_layout(p, &bc, &br, &ba);
+    snapbar_click(p, ba.x + 2, ba.y + 2);
+    st_borg_settle();
+    for (int k = 0; k < 500 && st_exists(mp); k++) { st_frames(1); SDL_Delay(2); }
+    ST_CHECK(!strcmp(p->path, BORG_BASE "/home") && g_borg_n == 0 && !st_exists(mp) && !borg_is_mounted(mp));
+    snprintf(want, sizeof want, "fusermount -u %s", mp);
+    ST_CHECK(st_borg_log(want));
+
+    // --- a repository's own files (new tab / "Open as folder"): a bar offers its backups
+    st_select(p, "repo1");
+    do_action(p, ACT_BORG_RAW);
+    st_borg_settle();
+    ST_CHECK(!strcmp(p->path, BORG_BASE "/home/repo1") && pane_borg_repo(p) == BORG_V1 && p->ly.has_snapbar);
+    st_shot("borg-raw");
+    snapbar_layout(p, &bc, &br, &ba);
+    snapbar_click(p, ba.x + 2, ba.y + 2);
+    st_borg_settle();
+    ST_CHECK(!strcmp(p->path, mp) && g_borg_n == 1);
+    // unused for a while: unmounted
+    pane_navigate(p, BORG_BASE "/home", true);
+    st_wait();
+    u64 idle = g_borg_idle_ns, idle1 = g_borg1_idle_ns;
+    g_borg1_idle_ns = 0;
+    st_frames(2);
+    for (int k = 0; k < 500 && st_exists(mp); k++) { st_frames(1); SDL_Delay(2); }
+    g_borg1_idle_ns = idle1;
+    ST_CHECK(g_borg_n == 0 && !borg_is_mounted(mp));
+
+    // --- encrypted: asked for the passphrase (a wrong one: asked again), it goes through our askpass, never argv
+    st_borg_open(p, "enc1");
+    ST_CHECK(g_sheet.kind == SHEET_SECRET && g_sheet.sec_borg && !g_sheet.sec_borg->retry && !strcmp(p->path, BORG_BASE "/home"));
+    st_shot("borg-passphrase");
+    te_set(&g_sheet.cn[CN_PASS], "nope", 4, 4);
+    secret_prompt_answer(true);
+    st_borg_settle();
+    ST_CHECK(g_sheet.kind == SHEET_SECRET && g_sheet.sec_borg && g_sheet.sec_borg->retry);
+    te_set(&g_sheet.cn[CN_PASS], "secret", 6, 6);
+    g_sheet.cn_remember_pw = true;
+    secret_prompt_answer(true);
+    st_borg_settle();
+    borg_mount_point(BORG_BASE "/home/enc1", mp, sizeof mp);
+    ST_CHECK(g_sheet.kind != SHEET_SECRET && !strcmp(p->path, mp) && borg_is_mounted(mp));
+    ST_CHECK(st_borg_log("PASSCMD='") && st_borg_log("' passphrase PASS=unset") && !st_borg_log("secret ") && !st_borg_log("nope"));
+    ST_CHECK(st_borg_log("secret-tool lookup application file-explorer uri borg:" BORG_BASE "/home/enc1"));
+    ST_CHECK(st_borg_log("secret-tool store --label Files: borg:" BORG_BASE "/home/enc1"));
+    { // the passphrase files are gone
+        char pat[64];
+        snprintf(pat, sizeof pat, "fe-askpass-%d-b", (int)getpid());
+        const char *rt = getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "/tmp";
+        DIR *dd = opendir(rt);
+        struct dirent *de;
+        bool left = false;
+        while (dd && (de = readdir(dd))) left |= !strncmp(de->d_name, pat, strlen(pat));
+        if (dd) closedir(dd);
+        ST_CHECK(!left);
+    }
+    // cancelled: nothing happens
+    pane_navigate(p, BORG_BASE "/home", true);
+    st_wait();
+    borg_close(p); // (not inside: nothing)
+    for (int k = 0; k < g_borg_n; k++) pool_submit(borg_umount_job, strdup(g_borg[k].mp));
+    g_borg_n = 0;
+    st_borg_settle();
+    for (int k = 0; k < 500 && borg_is_mounted(mp); k++) { st_frames(1); SDL_Delay(2); }
+    st_write_text(BORG_BASE "/tools/log", "");
+    st_borg_open(p, "enc1");
+    ST_CHECK(g_sheet.kind == SHEET_SECRET);
+    secret_prompt_answer(false);
+    st_borg_settle();
+    ST_CHECK(g_sheet.kind != SHEET_SECRET && !strcmp(p->path, BORG_BASE "/home") && !borg_is_mounted(mp));
+
+    // --- busy (a backup running): said so; Borg 2: its own program and argument order
+    st_borg_open(p, "locked1");
+    ST_CHECK(strstr(A.toast, "busy") && !strcmp(p->path, BORG_BASE "/home"));
+    st_borg_open(p, "repo2");
+    borg_mount_point(BORG_BASE "/home/repo2", mp, sizeof mp);
+    snprintf(want, sizeof want, "--log-json -r " BORG_BASE "/home/repo2 mount -o ignore_permissions %s |", mp);
+    ST_CHECK(!strcmp(p->path, mp) && st_borg_log(want) && st_borg_log("borg2 ") == false);
+    pane_navigate(p, BORG_BASE "/home", true);
+    st_wait();
+    setenv("FE_BORG2", BORG_BASE "/tools/missing", 1); // no Borg 2 installed (a Borg 1 doesn't do)
+    borg_open(p, BORG_BASE "/home/repo2", BORG_V2);
+    st_borg_settle();
+    ST_CHECK(strstr(A.toast, "Borg 2") && !strcmp(p->path, BORG_BASE "/home"));
+    setenv("FE_BORG2", BORG_BASE "/tools/borg2", 1);
+
+    // --- saved in the sidebar: name and icon kept in the settings, opened with a click; Borg 2 can stay mounted
+    pane_navigate(p, BORG_BASE "/home", true);
+    st_borg_settle();
+    for (int k = 0; k < g_borg_n; k++) pool_submit(borg_umount_job, strdup(g_borg[k].mp));
+    g_borg_n = 0;
+    st_borg_settle();
+    st_select(p, "repo2");
+    do_action(p, ACT_BORG_SAVE);
+    st_select(p, "repo1");
+    do_action(p, ACT_BORG_SAVE);
+    do_action(p, ACT_BORG_SAVE); // (once)
+    ST_CHECK(A.nborgs == 2 && !strcmp(A.borgs[0].name, "repo2") && A.borgs[0].kind == BORG_V2 && !strcmp(A.borgs[1].repo, BORG_BASE "/home/repo1"));
+    int brow = -1;
+    for (int i = 0; i < A.nplaces; i++) if (A.places[i].kind == PK_BORG && A.places[i].item == 0) brow = i;
+    ST_CHECK(brow >= 0 && !A.places[brow].path[0] && !strcmp(A.places[brow].label, "repo2"));
+    ST_CHECK(net_icon_find(BORG_ICON_DEFAULT) >= 0);
+    st_shot("borg-sidebar-default");
+    borg_edit_open(0);
+    ST_CHECK(g_sheet.kind == SHEET_BORG && !strcmp(g_sheet.cn[CN_NAME].buf, "repo2"));
+    te_set(&g_sheet.cn[CN_NAME], "Server nightly", 14, 14);
+    snprintf(g_sheet.cn_icon, sizeof g_sheet.cn_icon, "nas");
+    g_sheet.cn_remember = true;
+    st_shot("borg-edit");
+    borg_edit_save();
+    ST_CHECK(g_sheet.kind != SHEET_BORG && !strcmp(A.borgs[0].name, "Server nightly") && !strcmp(A.borgs[0].icon, "nas") && A.borgs[0].keep);
+    borg_saved_update(1, "Laptop", "", true); // Borg 1: never kept mounted (it would be locked)
+    ST_CHECK(!strcmp(A.borgs[1].name, "Laptop") && !A.borgs[1].keep);
+    settings_save();
+    {
+        char sp[PATH_MAX], sbuf[1 << 16];
+        snprintf(sp, sizeof sp, "%s/file-explorer/settings.conf", getenv("XDG_CONFIG_HOME"));
+        st_read_text(sp, sbuf, sizeof sbuf);
+        ST_CHECK(strstr(sbuf, "\nborg=Server nightly\t" BORG_BASE "/home/repo2\tnas\t2\t1\n") && strstr(sbuf, "\nborg=Laptop\t" BORG_BASE "/home/repo1\t\t1\t0\n"));
+    }
+    // kept mounted: mounted in the background (no tab moves), never unmounted for being unused
+    for (int k = 0; k < 1000 && !g_borg_n; k++) { st_frames(1); SDL_Delay(2); }
+    st_borg_settle();
+    borg_mount_point(BORG_BASE "/home/repo2", mp, sizeof mp);
+    ST_CHECK(g_borg_n == 1 && borg_is_mounted(mp) && !strcmp(p->path, BORG_BASE "/home"));
+    g_borg_idle_ns = 0;
+    st_frames(3);
+    ST_CHECK(g_borg_n == 1 && borg_is_mounted(mp));
+    g_borg_idle_ns = idle;
+    for (int i = 0; i < A.nplaces; i++) if (A.places[i].kind == PK_BORG && A.places[i].item == 0) brow = i;
+    ST_CHECK(!strcmp(A.places[brow].path, mp) && A.places[brow].removable && !strcmp(A.places[brow].label, "Server nightly"));
+    st_shot("borg-sidebar");
+    // a click on the saved Borg 1 one: opened in the pane
+    for (int i = 0; i < A.nplaces; i++) if (A.places[i].kind == PK_BORG && A.places[i].item == 1) brow = i;
+    st_click_rect(place_rect(brow));
+    st_borg_settle();
+    char mp1[PATH_MAX];
+    borg_mount_point(BORG_BASE "/home/repo1", mp1, sizeof mp1);
+    ST_CHECK(!strcmp(p->path, mp1) && g_borg_n == 2 && p->ly.has_snapbar);
+    // closed by hand: the kept one stays closed this run; removed from the sidebar
+    borg_close_mount(mp);
+    st_borg_settle();
+    for (int k = 0; k < 500 && borg_is_mounted(mp); k++) { st_frames(1); SDL_Delay(2); }
+    st_frames(3);
+    ST_CHECK(!borg_is_mounted(mp) && g_borg_n == 1);
+    borg_forget(0);
+    ST_CHECK(A.nborgs == 1 && !strcmp(A.borgs[0].name, "Laptop"));
+    borg_forget(0);
+    borg_close(p);
+    st_borg_settle();
+
+    // --- in an SFTP folder: borg on the server first (ssh://, the shared connection), no borg there: through the folder
+    st_write_text(BORG_BASE "/tools/log", "");
+    pane_navigate(p, BORG_BASE "/gvfs/sftp:host=vm,user=me,port=2222/srv", true);
+    st_borg_settle();
+    g = st_borg_sub(p, "remote1");
+    ST_CHECK(g && g->borg == BORG_V1);
+    st_borg_open(p, "remote1");
+    ST_CHECK(st_borg_log("mount -o ignore_permissions ssh://me@vm:2222/srv/remote1 ") && st_borg_log("-o BatchMode=yes") && st_borg_log("ControlPath="));
+    borg_mount_point(BORG_BASE "/gvfs/sftp:host=vm,user=me,port=2222/srv/remote1", mp, sizeof mp);
+    ST_CHECK(!strcmp(p->path, mp) && borg_is_mounted(mp) && strstr(A.toast, "Couldn't use borg on the server"));
+    borg_close(p);
+    st_borg_settle();
+
+    unsetenv("FE_GVFS_DIR");
+    fprintf(stderr, "selftest-borg: %s (%d failures)\n", st_fail ? "FAIL" : "ok", st_fail);
     return st_fail ? 1 : 0;
 }
 

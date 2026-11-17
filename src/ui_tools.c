@@ -1,6 +1,6 @@
 // ui_tools.c - modal "sheets": Open with, Properties, Batch rename, Options, Connect to server (included from app.c)
 
-enum { SHEET_NONE, SHEET_OPENWITH, SHEET_PROPS, SHEET_RENAME, SHEET_OPTIONS, SHEET_CONNECT, SHEET_SECRET, SHEET_ADDON }; // SHEET_ADDON: an add-on's (addons.c)
+enum { SHEET_NONE, SHEET_OPENWITH, SHEET_PROPS, SHEET_RENAME, SHEET_OPTIONS, SHEET_CONNECT, SHEET_SECRET, SHEET_ADDON, SHEET_BORG }; // SHEET_ADDON: an add-on's (addons.c)
 
 typedef struct {
     int kind;
@@ -49,6 +49,8 @@ typedef struct {
     Rect cn_rsave;
     Rect cn_rf[7], cn_rproto[8], cn_rremember, cn_rremember_pw, cn_rconnect, cn_rsaved[8], cn_rforget[8];
     DevJob *sec_job; // password prompt: the connection waiting for it
+    BorgOpen *sec_borg; // ... or a Borg repository's passphrase
+    int borg_edit;      // SHEET_BORG: the saved backup edited (A.borgs)
     // connect: the location's icon (network icon key, "" = default) and its picker popover
     char cn_icon[160];
     bool cn_pick;
@@ -74,6 +76,7 @@ static void sheet_close(void) {
     Sheet *s = &g_sheet;
     g_sbar.n = 0, g_sbar.drag = NULL;
     if (s->kind == SHEET_SECRET && s->sec_job) { dev_net_answer(s->sec_job, -1); s->sec_job = NULL; } // closed: cancel the login
+    if (s->kind == SHEET_SECRET && s->sec_borg) { borg_prompt_answer(s->sec_borg, NULL, false); s->sec_borg = NULL; }
     explicit_bzero(s->cn[CN_PASS].buf, sizeof s->cn[CN_PASS].buf); // the typed password doesn't linger
     if (s->stats) { atomic_store(&s->stats->cancel, 1); stats_release(s->stats); }
     if (s->sum) { atomic_store(&s->sum->cancel, 1); sum_release(s->sum); }
@@ -1272,8 +1275,12 @@ static void connect_go(void) {
 }
 
 // The icon currently chosen in the dialog ("" = the sheet's default: globe for servers, an add-on sheet's own).
-static const char *cn_icon_key(void) { return g_sheet.cn_icon[0] ? g_sheet.cn_icon : g_sheet.kind == SHEET_ADDON ? addon_sheet_icon() : ""; }
-static const char *cn_icon_default(void) { return g_sheet.kind == SHEET_ADDON ? addon_sheet_icon() : NET_ICON_DEFAULT; }
+static const char *cn_icon_key(void) {
+    return g_sheet.cn_icon[0] ? g_sheet.cn_icon : g_sheet.kind == SHEET_ADDON ? addon_sheet_icon() : g_sheet.kind == SHEET_BORG ? BORG_ICON_DEFAULT : "";
+}
+static const char *cn_icon_default(void) {
+    return g_sheet.kind == SHEET_ADDON ? addon_sheet_icon() : g_sheet.kind == SHEET_BORG ? BORG_ICON_DEFAULT : NET_ICON_DEFAULT;
+}
 
 // The icon picker: a popover under the Display icon button with the built-in icons by group, then the custom
 // ones (net-*.svg in the icon themes folder); the hovered icon's name in its footer.
@@ -1529,6 +1536,20 @@ static void secret_prompt_open(DevJob *j) {
     Sheet *s = &g_sheet;
     s->kind = SHEET_SECRET;
     s->sec_job = j;
+    s->sec_borg = NULL;
+    te_set(&s->cn[CN_PASS], "", 0, 0);
+    s->cn_focus = CN_PASS;
+    s->cn_remember_pw = false;
+    A.redraw = true;
+}
+
+// A Borg repository wants its passphrase (o comes back through borg_prompt_answer).
+static void borg_prompt_open(BorgOpen *o) {
+    sheet_close();
+    Sheet *s = &g_sheet;
+    s->kind = SHEET_SECRET;
+    s->sec_job = NULL;
+    s->sec_borg = o;
     te_set(&s->cn[CN_PASS], "", 0, 0);
     s->cn_focus = CN_PASS;
     s->cn_remember_pw = false;
@@ -1537,6 +1558,13 @@ static void secret_prompt_open(DevJob *j) {
 
 static void secret_prompt_answer(bool ok) {
     Sheet *s = &g_sheet;
+    if (s->sec_borg) {
+        BorgOpen *o = s->sec_borg;
+        s->sec_borg = NULL;
+        borg_prompt_answer(o, ok ? s->cn[CN_PASS].buf : NULL, s->cn_remember_pw && secret_available());
+        sheet_close();
+        return;
+    }
     DevJob *j = s->sec_job;
     s->sec_job = NULL;
     if (j) {
@@ -1554,17 +1582,19 @@ static void secret_prompt_answer(bool ok) {
 static void secret_prompt_draw(void) {
     Sheet *s = &g_sheet;
     DevJob *j = s->sec_job;
-    if (!j) { sheet_close(); return; }
+    BorgOpen *bo = s->sec_borg;
+    if (!j && !bo) { sheet_close(); return; }
     Font *f = &A.font, *fs = &A.font_small;
-    bool phrase = str_has_ci(j->question, "passphrase");
+    bool phrase = bo || str_has_ci(j->question, "passphrase"), retry = bo ? bo->retry : j->qretry;
     f32 w = roundf(MIN(S(460), A.W - S(40))), pad = roundf(S(22)), fh = roundf(S(32)), bh = roundf(S(32));
     int st[6], ln[6];
     char msg[1100];
     NetAddr a;
     char host[300] = "";
-    if (net_parse(j->target, &a)) snprintf(host, sizeof host, "%s%s%s", a.user, a.user[0] ? "@" : "", a.host);
+    if (bo) tilde_path(bo->dir, host, sizeof host);
+    else if (net_parse(j->target, &a)) snprintf(host, sizeof host, "%s%s%s", a.user, a.user[0] ? "@" : "", a.host);
     // gio's text, tidied: "Authentication Required." repeats the title; the trailing ':' was its prompt
-    const char *q = j->question;
+    const char *q = bo ? "This Borg backup repository is encrypted. Enter its passphrase." : j->question;
     while (*q == ' ') q++;
     if (!strncasecmp(q, "Authentication Required", 23)) { q += 23; while (*q == '.' || *q == ' ') q++; }
     snprintf(msg, sizeof msg, "%s", q[0] ? q : (phrase ? "Enter the passphrase of your key." : "Enter your password."));
@@ -1573,7 +1603,7 @@ static void secret_prompt_draw(void) {
     int nl = wrap_text(fs, msg, w - pad * 2, st, ln, 6);
     f32 lh = roundf(fs->line_h * 1.3f);
     f32 srv = roundf(S(36)); // server row
-    f32 h = pad + roundf(S(30)) + srv + nl * lh + (j->qretry ? lh : 0) + roundf(S(14)) + fh + roundf(S(14)) + (secret_available() ? roundf(S(30)) : 0) + roundf(S(14)) + bh + pad;
+    f32 h = pad + roundf(S(30)) + srv + nl * lh + (retry ? lh : 0) + roundf(S(14)) + fh + roundf(S(14)) + (secret_available() ? roundf(S(30)) : 0) + roundf(S(14)) + bh + pad;
     Rect r = {roundf((A.W - w) * 0.5f), roundf((A.H - h) * 0.42f), w, h};
     s->r = r;
     draw_rect(0, 0, (f32)A.W, (f32)A.H, CA(0x000000, 0.45f));
@@ -1583,18 +1613,19 @@ static void secret_prompt_draw(void) {
     const char *title = phrase ? "Passphrase required" : "Password required";
     draw_text(&A.font_brand, x, y - S(1), title, (int)strlen(title), C(COL_TEXT_STRONG));
     y += roundf(S(30));
-    { // which server: a globe + user@host in a small card
+    { // which server: a globe + user@host in a small card (Borg: a history mark + the repository's folder)
         Rect sc = {x, y, w - pad * 2, srv - S(8)};
         draw_rrect(sc.x, sc.y, sc.w, sc.h, S(7), C(props_well()));
         f32 gs = roundf(S(16));
         const char *sicon = ""; // a saved server: its icon
-        for (int i = 0; i < A.nservers; i++) if (!strcmp(A.servers[i].uri, j->target)) sicon = A.servers[i].icon;
-        draw_net_icon(sc.x + S(9), sc.y + (sc.h - gs) * 0.5f, gs, sicon, 1.f);
+        for (int i = 0; j && i < A.nservers; i++) if (!strcmp(A.servers[i].uri, j->target)) sicon = A.servers[i].icon;
+        if (bo) draw_ui_icon(UI_ROTATE_CCW_CLOCK, sc.x + S(9), sc.y + (sc.h - gs) * 0.5f, gs, C(COL_TEXT_DIM));
+        else draw_net_icon(sc.x + S(9), sc.y + (sc.h - gs) * 0.5f, gs, sicon, 1.f);
         draw_text_fit(fs, sc.x + S(10) + gs + S(8), text_y(fs, sc.y, sc.h), sc.w - gs - S(30), host, (int)strlen(host), C(COL_TEXT), 0);
         y += srv;
     }
     for (int i = 0; i < nl; i++, y += lh) draw_text(fs, x, y, msg + st[i], ln[i], C(COL_TEXT2));
-    if (j->qretry) {
+    if (retry) {
         const char *e = phrase ? "That passphrase wasn't accepted. Try again." : "That password wasn't accepted. Try again.";
         draw_text(fs, x, y, e, (int)strlen(e), C(COL_DANGER));
         y += lh;
@@ -1615,7 +1646,7 @@ static void secret_prompt_draw(void) {
     s->cn_rconnect = (Rect){r.x + w - pad - roundf(S(110)), r.y + h - pad - bh, roundf(S(110)), bh};
     s->rcancel = (Rect){s->cn_rconnect.x - S(8) - roundf(S(96)), s->cn_rconnect.y, roundf(S(96)), bh};
     sheet_button(s->rcancel, "Cancel", false, true);
-    sheet_button(s->cn_rconnect, "Connect", true, true);
+    sheet_button(s->cn_rconnect, bo ? "Open" : "Connect", true, true);
 }
 
 static void connect_focus_step(int dir) {
@@ -1627,6 +1658,74 @@ static void connect_focus_step(int dir) {
         i = (i + dir + CN_ALL) % CN_ALL;
         if (cn_field_visible(order[i])) { s->cn_focus = order[i]; return; }
     }
+}
+
+// --- a saved Borg backup: its name and icon in the sidebar, kept mounted (Borg 2) ----------------------------
+
+static void borg_edit_open(int i) {
+    if (i < 0 || i >= A.nborgs) return;
+    sheet_close();
+    Sheet *s = &g_sheet;
+    s->kind = SHEET_BORG;
+    s->borg_edit = i;
+    te_set(&s->cn[CN_NAME], A.borgs[i].name, (int)strlen(A.borgs[i].name), (int)strlen(A.borgs[i].name));
+    snprintf(s->cn_icon, sizeof s->cn_icon, "%s", A.borgs[i].icon);
+    s->cn_pick = false;
+    s->cn_remember = A.borgs[i].keep;
+    s->cn_focus = CN_NAME;
+    A.redraw = true;
+}
+
+static void borg_edit_save(void) {
+    Sheet *s = &g_sheet;
+    borg_saved_update(s->borg_edit, s->cn[CN_NAME].buf, s->cn_icon, s->cn_remember);
+    sheet_close();
+}
+
+static void borg_edit_draw(void) {
+    Sheet *s = &g_sheet;
+    int i = s->borg_edit;
+    if (i < 0 || i >= A.nborgs) { sheet_close(); return; }
+    Font *fs = &A.font_small;
+    bool v2 = A.borgs[i].kind == BORG_V2;
+    f32 pad = roundf(S(20)), rh = roundf(S(44)), gap = roundf(S(16)), hh = roundf(fs->line_h + S(6)), bh = roundf(S(32));
+    f32 lh = roundf(fs->line_h * 1.3f);
+    f32 w = roundf(MIN(S(520), A.W - S(40)));
+    f32 h = pad + roundf(S(62)) + hh + rh * 2 + gap + hh + rh + lh * 2 + gap + bh + pad;
+    Rect r = {roundf((A.W - w) * 0.5f), roundf((A.H - h) * 0.42f), w, h};
+    s->r = r;
+    char where[PATH_MAX];
+    tilde_path(A.borgs[i].repo, where, sizeof where);
+    sheet_frame(r, "Edit backup", where);
+    f32 x = r.x + pad, cw = w - pad * 2, y = r.y + pad + roundf(S(62)), lw0 = roundf(S(110)), fh0 = roundf(S(30));
+    y = props_heading(x, y, "In the sidebar");
+    props_card(x, y, cw, 2, rh, 0);
+    draw_text(fs, x + S(14), text_y(fs, y, rh), "Display name", 12, C(COL_TEXT_DIM));
+    Rect nr = {x + lw0, roundf(y + (rh - fh0) * 0.5f), cw - lw0 - S(10), fh0};
+    s->cn_rf[CN_NAME] = nr;
+    sheet_field(nr, &s->cn[CN_NAME], !s->cn_pick, path_basename(A.borgs[i].repo));
+    sheet_icon_row(x, y + rh, cw, rh, lw0);
+    y += rh * 2 + gap;
+    y = props_heading(x, y, v2 ? "Borg 2 repository" : "Borg repository");
+    props_card(x, y, cw, 1, rh, 0);
+    s->cn_rremember = (Rect){x + S(14), roundf(y + (rh - S(22)) * 0.5f), cw - S(28), roundf(S(22))};
+    if (v2) sheet_check(s->cn_rremember, "Keep mounted while the app runs", s->cn_remember);
+    else {
+        s->cn_rremember = (Rect){0, 0, 0, 0};
+        const char *t = "Opened when you click it, closed when unused";
+        draw_text(fs, x + S(14), text_y(fs, y, rh), t, (int)strlen(t), C(COL_TEXT_DIM));
+    }
+    y += rh + S(4);
+    const char *note = v2 ? "Mounted in the background (its passphrase from the system keyring); new backups still work while it is."
+                          : "Borg 1 locks a repository while it's mounted, so backups to it would fail: it isn't kept mounted.";
+    int st[3], ln[3];
+    int nl = wrap_text(fs, note, cw, st, ln, 2);
+    for (int k = 0; k < nl; k++) draw_text(fs, x, y + k * lh, note + st[k], ln[k], C(COL_TEXT_FAINT));
+    s->cn_rconnect = (Rect){r.x + w - pad - roundf(S(100)), r.y + h - pad - bh, roundf(S(100)), bh};
+    s->rcancel = (Rect){s->cn_rconnect.x - S(8) - roundf(S(96)), s->cn_rconnect.y, roundf(S(96)), bh};
+    sheet_button(s->rcancel, "Cancel", false, true);
+    sheet_button(s->cn_rconnect, "Save", true, true);
+    if (s->cn_pick) connect_icon_picker_draw();
 }
 
 #include "options.c"
@@ -1643,6 +1742,7 @@ static void sheet_draw(void) {
     case SHEET_CONNECT: connect_draw(); break;
     case SHEET_SECRET: secret_prompt_draw(); break;
     case SHEET_ADDON: addon_sheet_draw(); break;
+    case SHEET_BORG: borg_edit_draw(); break;
     default: break;
     }
 }
@@ -1651,13 +1751,17 @@ static void sheet_key(SDL_Keycode k, SDL_Keymod mod) {
     Sheet *s = &g_sheet;
     A.redraw = true;
     if (s->kind == SHEET_OPTIONS) { options_key(k, mod); return; }
-    if (k == SDLK_ESCAPE && (s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON) && s->cn_pick) { s->cn_pick = false; return; }
+    if (k == SDLK_ESCAPE && (s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON || s->kind == SHEET_BORG) && s->cn_pick) { s->cn_pick = false; return; }
     if (s->kind == SHEET_ADDON && addon_sheet_key(k, mod)) return;
     if (k == SDLK_ESCAPE) { sheet_close(); return; }
     switch (s->kind) {
     case SHEET_SECRET:
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) secret_prompt_answer(true);
         else te_key(&s->cn[CN_PASS], k, mod);
+        break;
+    case SHEET_BORG:
+        if (k == SDLK_RETURN || k == SDLK_KP_ENTER) borg_edit_save();
+        else te_key(&s->cn[CN_NAME], k, mod);
         break;
     case SHEET_CONNECT:
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) connect_go();
@@ -1695,6 +1799,7 @@ static void sheet_text(const char *text) {
     if (s->kind == SHEET_OPTIONS) options_text(text);
     else if (s->kind == SHEET_OPENWITH) { te_insert(&s->filter, text); openwith_refresh(); }
     else if (s->kind == SHEET_SECRET) te_insert(&s->cn[CN_PASS], text);
+    else if (s->kind == SHEET_BORG) te_insert(&s->cn[CN_NAME], text);
     else if (s->kind == SHEET_ADDON) addon_sheet_text(text);
     else if (s->kind == SHEET_CONNECT) {
         if (s->cn_focus == CN_PORT) { // digits only
@@ -1728,6 +1833,7 @@ static bool sheet_text_focus(TextEdit *edit, bool focused) {
             if (edit == tes[i]) { s->focus = i; return true; }
         return false;
     }
+    if (s->kind == SHEET_BORG) return edit == &s->cn[CN_NAME] && !s->cn_pick;
     return focused && !((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON) && s->cn_pick);
 }
 
@@ -1737,7 +1843,7 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
     A.redraw = true;
     if (b->button != SDL_BUTTON_LEFT) return;
     if (s->kind == SHEET_OPTIONS) { options_click(x, y, b->clicks); return; }
-    if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON) && s->cn_pick) { // icon picker open: a click picks an icon or closes it
+    if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON || s->kind == SHEET_BORG) && s->cn_pick) { // icon picker open: a click picks an icon or closes it
         if (in_rect(s->cn_rpick, x, y)) {
             if (in_rect(s->cn_rpick_body, x, y))
                 for (int c = 0; c < s->cn_ncell; c++)
@@ -1756,6 +1862,12 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
     if (s->kind == SHEET_ADDON) { addon_sheet_click(x, y); return; }
     if (!in_rect(s->r, x, y)) { sheet_close(); return; }
     switch (s->kind) {
+    case SHEET_BORG:
+        if (in_rect(s->cn_ricon, x, y)) { s->cn_pick = true; s->cn_pick_scroll = 0; return; }
+        if (in_rect(s->cn_rconnect, x, y)) { borg_edit_save(); return; }
+        if (in_rect(s->rcancel, x, y)) { sheet_close(); return; }
+        if (s->cn_rremember.w > 0 && in_rect(s->cn_rremember, x, y)) { s->cn_remember = !s->cn_remember; return; }
+        break;
     case SHEET_SECRET:
         if (in_rect(s->cn_rconnect, x, y)) { secret_prompt_answer(true); return; }
         if (in_rect(s->rcancel, x, y)) { secret_prompt_answer(false); return; }
@@ -1873,7 +1985,7 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
 static void sheet_wheel(f32 dy) {
     Sheet *s = &g_sheet;
     if (s->kind == SHEET_OPTIONS) options_wheel(dy);
-    else if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON) && s->cn_pick) s->cn_pick_scroll -= dy * S(48); // clamped when drawn
+    else if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON || s->kind == SHEET_BORG) && s->cn_pick) s->cn_pick_scroll -= dy * S(48); // clamped when drawn
     else if (s->kind == SHEET_OPENWITH) s->ow_scroll -= dy * s->row_h * 1.5f; // clamped when drawn
     else if (s->kind == SHEET_PROPS) s->pv_scroll -= dy * S(48);
     else if (s->kind == SHEET_RENAME) s->top = MAX(0, s->top - (int)dy * 3);

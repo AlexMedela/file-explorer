@@ -447,6 +447,7 @@ static void git_job_run(void *arg) {
 
 // --- repositories among a folder's subfolders (the branch pill on folder rows) -------------------------------
 // No git: a stat for ".git" in each subfolder, then HEAD and the config file of the ones that are repositories.
+// Borg backup repositories are found on the same pass (borg.c), and whether the folder itself is one.
 
 typedef struct {
     char *name;       // as the listing spells it ("x", "sub/x" in the tree view)
@@ -454,6 +455,7 @@ typedef struct {
     bool detached;
     char remote[300]; // origin's URL (else the first remote's), "" without one
     char disp[320];   // the remote shortened for display ("github.com/me/x"), filled by the main thread
+    int borg;         // BORG_V1 / BORG_V2: a Borg backup repository, not git (nothing above is set)
 } GitSub;
 
 typedef struct GitSubsJob {
@@ -462,6 +464,8 @@ typedef struct GitSubsJob {
     int n;
     GitSub *subs; // the repositories among them, sorted by name
     int nsubs;
+    bool git;     // look for git repositories (else only Borg ones)
+    int self_borg; // the folder itself is a Borg repository
 } GitSubsJob;
 
 static void git_subs_done(void *arg); // app.c
@@ -500,12 +504,21 @@ static int git_sub_cmp(const void *a, const void *b) { return strcmp(((const Git
 static void git_subs_job(void *arg) {
     GitSubsJob *j = arg;
     int cap = 0;
+    j->self_borg = borg_repo_kind(j->path);
     for (int i = 0; i < j->n; i++) {
         char dir[PATH_MAX], probe[PATH_MAX + 8], gitdir[PATH_MAX];
         path_join(dir, sizeof dir, j->path, j->names[i]);
         snprintf(probe, sizeof probe, "%s/.git", dir);
         struct stat st;
-        if (lstat(probe, &st)) continue;
+        if (!j->git || lstat(probe, &st)) {
+            int bk = borg_repo_kind(dir);
+            if (!bk) continue;
+            GitSub g = {.name = j->names[i], .borg = bk};
+            j->names[i] = NULL;
+            if (j->nsubs == cap) { cap = cap ? cap * 2 : 8; j->subs = xrealloc(j->subs, (size_t)cap * sizeof *j->subs); }
+            j->subs[j->nsubs++] = g;
+            continue;
+        }
         snprintf(gitdir, sizeof gitdir, "%s", probe);
         if (S_ISREG(st.st_mode)) { // worktree / submodule: "gitdir: <path>"
             char line[PATH_MAX + 16];

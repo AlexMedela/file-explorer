@@ -835,9 +835,13 @@ static bool snap_where_ts(const char *path, char *root, size_t rcap, char *live,
     return true;
 }
 
+static bool borg_where(const char *path, char *root, size_t rcap, char *live, size_t lcap, char *name, size_t ncap); // borg.c
+
 // Where a path is when it's inside a snapshot: the snapshot's root and the live folder that root stands for.
-// "<mnt>/.snapshots/<N>/snapshot[/rest]", "<mnt>/.zfs/snapshot/<name>[/rest]", or Timeshift's (above).
+// "<mnt>/.snapshots/<N>/snapshot[/rest]", "<mnt>/.zfs/snapshot/<name>[/rest]", Timeshift's (above), or an archive
+// of a Borg backup we mounted.
 static bool snap_where(const char *path, char *root, size_t rcap, char *live, size_t lcap, char *name, size_t ncap) {
+    if (borg_where(path, root, rcap, live, lcap, name, ncap)) return true;
     if (snap_where_ts(path, root, rcap, live, lcap, name, ncap)) return true;
     const char *k = strstr(path, "/.snapshots/"), *z = strstr(path, "/.zfs/snapshot/");
     const char *mk = k ? k : z;
