@@ -1379,7 +1379,9 @@ static void draw_status_term(Term *t) {
     Font *f = &A.font_small;
     char left[300], right[96];
     snprintf(left, sizeof left, "Terminal \xC2\xB7 %s", term_label(t));
-    snprintf(right, sizeof right, "%d\xC3\x97%d%s%s", t->cols, t->rows, g_tc.source[0] ? " \xC2\xB7 " : "", g_tc.source[0] ? g_tc.source : "");
+    // (the look's source: this tab looks like that terminal, from its config; the external terminal is another setting)
+    if (g_tc.source[0]) snprintf(right, sizeof right, "%d\xC3\x97%d \xC2\xB7 look from %s", t->cols, t->rows, g_tc.source);
+    else snprintf(right, sizeof right, "%d\xC3\x97%d", t->cols, t->rows);
     f32 ty = text_y(f, s.y, s.h);
     draw_text_fit(f, s.x + S(14), ty, s.w * 0.6f, left, (int)strlen(left), C(COL_TEXT_DIM), 0);
     f32 rw = text_width(f, right, (int)strlen(right));
