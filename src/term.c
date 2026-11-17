@@ -1,6 +1,7 @@
 // term.c - terminal tabs: a shell (or ssh) in a pseudo-terminal, emulated by libvterm, drawn with the UI's
-// GPU text renderer. Uses Explorer's font with HarfBuzz ligatures. Colours, padding, cursor and scrollback are
-// read from its config (foot, kitty, Alacritty, Ghostty), and follow it when that file changes.
+// GPU text renderer. Looks like the user's default terminal: font, colours, padding, cursor and scrollback are
+// read from its config (foot, kitty, Alacritty, Ghostty), and follow it when that file changes. The font's
+// programming ligatures (HarfBuzz liga/calt) are drawn on the cell grid.
 // (included from app.c)
 
 #include <vterm.h>
@@ -388,12 +389,12 @@ struct Term {
 static Font g_term_font, g_term_bold;
 static bool g_term_font_ok;
 static f32 g_term_font_scale;
-static char g_term_font_family[PATH_MAX];
+static char g_term_font_family[128];
 
 static void term_fonts(void) {
-    if (g_term_font_ok && g_term_font_scale == A.scale && !strcmp(g_term_font_family, A.font_path) && g_term_font.px == MAX(6, (int)roundf(A.font_size * A.scale))) return;
-    int px = MAX(6, (int)roundf(A.font_size * A.scale));
-    char *path = strdup(A.font_path);
+    if (g_term_font_ok && g_term_font_scale == A.scale && !strcmp(g_term_font_family, g_tc.family)) return;
+    int px = MAX(6, (int)roundf(g_tc.size_pt * 96.f / 72.f * A.scale));
+    char *path = font_family_file(g_tc.family);
     if (!path && A.mono_path) path = strdup(A.mono_path);
     if (!path) path = strdup(A.font_path);
     char *bold = font_weight_file(path, FC_WEIGHT_BOLD);
@@ -408,7 +409,7 @@ static void term_fonts(void) {
     free(path);
     free(bold);
     g_term_font_scale = A.scale;
-    snprintf(g_term_font_family, sizeof g_term_font_family, "%s", A.font_path);
+    snprintf(g_term_font_family, sizeof g_term_font_family, "%s", g_tc.family);
     // Free the old glyphs' space, but not now: this runs mid-frame and text queued before it would vanish for a
     // frame (a blink). A "full" atlas makes frame() reset it and draw the frame again before presenting.
     g_atlas_full = true;
@@ -591,12 +592,17 @@ static void term_winsize(Term *t) {
 // what's typed); bash runs signal handlers only after Enter, so it gets a private key sequence bound to "save the
 // typed line, cd, run an empty command (a fresh prompt), restore the line, remove the old prompt". Other shells, or
 // one whose startup files never got to ours, are typed a cd instead (dock_follow).
+// The panel is small: a fastfetch the user's startup files (or fish's greeting) run is skipped there. fastfetch is a
+// do-nothing function until their files are done (bash, zsh) or the first prompt (fish; defined before its config by
+// a vendor_conf.d file in a folder put first in XDG_DATA_DIRS, which that file restores); typed later, it runs.
 
 enum { SHINT_NONE, SHINT_BASH, SHINT_ZSH, SHINT_FISH };
 
 static const char g_shint_bash[] =
     "# File Explorer terminal panel: follows the folder without typing cd. Runs ~/.bashrc first.\n"
+    "fastfetch() { : __fe_quiet; }\n"
     "[ -f ~/.bashrc ] && . ~/.bashrc\n"
+    "[[ $(declare -f fastfetch) == *__fe_quiet* ]] && unset -f fastfetch\n"
     "__fe_cd1() {\n"
     "    __fe_line=$READLINE_LINE __fe_point=$READLINE_POINT\n"
     "    READLINE_LINE= READLINE_POINT=0\n"
@@ -628,7 +634,9 @@ static const char g_shint_zshenv[] =
 static const char g_shint_zshrc[] =
     "ZDOTDIR=$FE_USER_ZDOTDIR\n"
     "unset FE_USER_ZDOTDIR\n"
+    "fastfetch() { : __fe_quiet; }\n"
     "[[ -r $ZDOTDIR/.zshrc ]] && . $ZDOTDIR/.zshrc\n"
+    "[[ $functions[fastfetch] == *__fe_quiet* ]] && unfunction fastfetch\n"
     "TRAPUSR1() {\n"
     "    builtin cd -- \"$(<$FE_CD_FILE)\" 2>/dev/null || return 0\n"
     "    local f; for f in precmd $precmd_functions; do (( $+functions[$f] )) && $f; done\n"
@@ -644,6 +652,22 @@ static const char g_shint_fish[] =
     "end\n"
     "true > \"$FE_CD_FILE.ready\"\n";
 
+static const char g_shint_fish_quiet[] =
+    "# File Explorer terminal panel: no fastfetch before the first prompt (config.fish, fish_greeting)\n"
+    "if set -q FE_USER_XDG_DATA_DIRS\n"
+    "    set -gx XDG_DATA_DIRS $FE_USER_XDG_DATA_DIRS\n"
+    "    set -e FE_USER_XDG_DATA_DIRS\n"
+    "else\n"
+    "    set -e XDG_DATA_DIRS\n"
+    "end\n"
+    "function fastfetch\n"
+    "    : __fe_quiet\n"
+    "end\n"
+    "function __fe_quiet --on-event fish_prompt\n"
+    "    functions fastfetch 2>/dev/null | string match -q '*__fe_quiet*'; and functions -e fastfetch\n"
+    "    functions -e __fe_quiet\n"
+    "end\n";
+
 // Where the scripts and the per-terminal files live (written once per run; private to the user).
 static bool shint_dir(char *out, size_t cap) {
     static int done = -1;
@@ -655,6 +679,8 @@ static bool shint_dir(char *out, size_t cap) {
     mkdir_p(out, 0700);
     snprintf(p, sizeof p, "%s/zsh", out);
     mkdir_p(p, 0700);
+    snprintf(p, sizeof p, "%s/fish-data/fish/vendor_conf.d", out);
+    mkdir_p(p, 0700);
     bool ok = true;
     snprintf(p, sizeof p, "%s/fe.bash", out);
     ok &= write_file_atomic(p, g_shint_bash);
@@ -664,6 +690,8 @@ static bool shint_dir(char *out, size_t cap) {
     ok &= write_file_atomic(p, g_shint_zshenv);
     snprintf(p, sizeof p, "%s/zsh/.zshrc", out);
     ok &= write_file_atomic(p, g_shint_zshrc);
+    snprintf(p, sizeof p, "%s/fish-data/fish/vendor_conf.d/00-file-explorer.fish", out);
+    ok &= write_file_atomic(p, g_shint_fish_quiet);
     done = ok;
     return ok;
 }
@@ -712,6 +740,7 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
     // the terminal panel's shell: with our integration (see above) where we know the shell
     int shint = SHINT_NONE;
     char sdir[PATH_MAX], a1[PATH_MAX + 16], cdf[PATH_MAX], e_cdf[PATH_MAX + 16], e_zdot[PATH_MAX + 16], e_uzdot[PATH_MAX + 32];
+    char *e_xdd = NULL, *e_uxdd = NULL; // fish: XDG_DATA_DIRS with ours first, and the user's to put back
     static unsigned shint_n;
     if (follow && !argv && shint_dir(sdir, sizeof sdir)) {
         const char *b = path_basename(shell);
@@ -728,6 +757,14 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
             snprintf(a1, sizeof a1, "source %s/fe.fish", q);
             sh_argv[1] = "-C";
             sh_argv[2] = a1;
+            const char *xdd = getenv("XDG_DATA_DIRS");
+            size_t xl = strlen(sdir) + (xdd ? strlen(xdd) : 0) + 64;
+            e_xdd = xmalloc(xl);
+            snprintf(e_xdd, xl, "XDG_DATA_DIRS=%s/fish-data:%s", sdir, xdd && xdd[0] ? xdd : "/usr/local/share:/usr/share"); // (the spec's default)
+            if (xdd) {
+                e_uxdd = xmalloc(strlen(xdd) + 32);
+                sprintf(e_uxdd, "FE_USER_XDG_DATA_DIRS=%s", xdd);
+            }
         } else if (shint == SHINT_ZSH) {
             const char *uz = getenv("ZDOTDIR");
             snprintf(e_zdot, sizeof e_zdot, "ZDOTDIR=%s/zsh", sdir);
@@ -740,10 +777,13 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
     int ne = 0;
     for (int i = 0; i < nenv; i++)
         if (strncmp(environ[i], "TERM=", 5) && strncmp(environ[i], "COLORTERM=", 10) && strncmp(environ[i], "TERM_PROGRAM=", 13) &&
-            !(shint == SHINT_ZSH && !strncmp(environ[i], "ZDOTDIR=", 8)))
+            !(shint == SHINT_ZSH && !strncmp(environ[i], "ZDOTDIR=", 8)) && !(e_xdd && !strncmp(environ[i], "XDG_DATA_DIRS=", 14)) &&
+            strncmp(environ[i], "FE_USER_XDG_DATA_DIRS=", 22))
             envp[ne++] = environ[i];
     if (shint) envp[ne++] = e_cdf;
     if (shint == SHINT_ZSH) { envp[ne++] = e_zdot; envp[ne++] = e_uzdot; }
+    if (e_xdd) envp[ne++] = e_xdd;
+    if (e_uxdd) envp[ne++] = e_uxdd;
     char e_term[64], e_ct[] = "COLORTERM=truecolor", e_tp[] = "TERM_PROGRAM=file-explorer";
     snprintf(e_term, sizeof e_term, "TERM=%s", g_tc.term[0] ? g_tc.term : "xterm-256color");
     envp[ne++] = e_term;
@@ -768,6 +808,8 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
     posix_spawn_file_actions_destroy(&fa);
     posix_spawnattr_destroy(&at);
     free(envp);
+    free(e_xdd);
+    free(e_uxdd);
     if (rc) { close(fd); free(t); toast("Couldn't start %s: %s", av[0], strerror(rc)); return NULL; }
     snprintf(t->start_label, sizeof t->start_label, "%s", path_basename(av[0]));
     t->shint = shint;
@@ -919,7 +961,7 @@ static void term_metrics(f32 *cw, f32 *ch) {
     Glyph *g = font_glyph(&g_term_font, 'M');
     *cw = MAX(1.f, roundf(g->adv));
     f32 lh = g_tc.line_pt > 0 ? roundf(g_tc.line_pt * 96.f / 72.f * A.scale) : roundf(g_term_font.line_h);
-    *ch = MAX(roundf(g_term_font.line_h), lh);
+    *ch = MAX(2.f, lh);
 }
 
 static void term_layout(Term *t, Rect area) {
@@ -943,9 +985,9 @@ static void term_shape_buffer(hb_font_t *font, hb_buffer_t *buf) {
     hb_script_t script = hb_buffer_get_script(buf);
     if (script == HB_SCRIPT_COMMON || script == HB_SCRIPT_INHERITED || script == HB_SCRIPT_UNKNOWN)
         hb_buffer_set_script(buf, HB_SCRIPT_LATIN);
+    // (no dlig: discretionary ligatures are opt-in in terminals too)
     hb_feature_t features[] = {{HB_TAG('l','i','g','a'), 1, 0, (unsigned)-1},
-                               {HB_TAG('c','a','l','t'), 1, 0, (unsigned)-1},
-                               {HB_TAG('d','l','i','g'), 1, 0, (unsigned)-1}};
+                               {HB_TAG('c','a','l','t'), 1, 0, (unsigned)-1}};
     hb_shape(font, buf, features, ARRAY_COUNT(features));
 }
 
@@ -957,6 +999,8 @@ static u32 term_cell_foreground(Term *t, int r, int c, const TCell *cell) {
 
 // Shape equal-font, single-width cell runs, anchoring each cluster to the terminal grid.
 // This permits programming ligatures while selection, cursor and wide glyphs retain their cells.
+// Only a cluster that spans several cells (a ligature) is fitted to them; a glyph in one cell is drawn as it is,
+// and may reach past the run's ends (wide icons, bearings) as before. Returns the run's last column.
 static int term_draw_run(Term *t, int r, int c, f32 y, f32 base, Font *f) {
     TCell first;
     term_cell(t, r, c, &first);
@@ -987,16 +1031,19 @@ static int term_draw_run(Term *t, int r, int c, f32 y, f32 base, Font *f) {
         f32 advance = 0;
         for (unsigned j = i; j < next; j++) advance += pos[j].x_advance * sc;
         f32 span = (cell_end - info[i].cluster) * t->cw;
-        f32 xs = advance > 0 ? span / advance : 1.f, pen = 0;
-        f32 origin = t->ox + (c + info[i].cluster) * t->cw;
+        f32 xs = cell_end - info[i].cluster > 1 && advance > 0 ? span / advance : 1.f, pen = 0;
+        f32 origin = roundf(t->ox + (c + info[i].cluster) * t->cw);
         for (unsigned j = i; j < next; j++) {
             Glyph *g = font_glyph_id(f, fi, info[j].codepoint);
-            f32 x = origin + (pen + pos[j].x_offset * sc + g->bx) * xs;
+            f32 x = xs == 1.f ? roundf(origin + pen + pos[j].x_offset * sc) + g->bx : origin + (pen + pos[j].x_offset * sc + g->bx) * xs;
             f32 gy = roundf(y + base - pos[j].y_offset * sc) - g->by;
             if (g->w && g->color) draw_glyph_scale_xy(g, x, gy, xs, 1.f, (Color){1, 1, 1, 1});
-            else if (g->w) {
-                int left = MAX(c, (int)floorf((x - t->ox) / t->cw));
-                int right = MIN(end, (int)ceilf((x + g->w * xs - t->ox) / t->cw));
+            else if (g->w) { // one slice per run of cells with the same colour (a ligature may span several)
+                // the cells it covers: its own, and a neighbour only when it covers most of it (a ligature drawn
+                // over the cells before it); a slight overhang (powerline caps, bearings) keeps the glyph's own colour
+                int own0 = c + (int)info[i].cluster, own1 = c + (int)cell_end;
+                int left = MAX(c, MIN(own0, (int)floorf((x - t->ox) / t->cw + 0.5f)));
+                int right = MIN(end, MAX(own1, (int)ceilf((x + g->w * xs - t->ox) / t->cw - 0.5f)));
                 for (int k = left; k < right;) {
                     TCell cell; term_cell(t, r, k, &cell);
                     u32 fg = term_cell_foreground(t, r, k, &cell);
@@ -1006,7 +1053,9 @@ static int term_draw_run(Term *t, int r, int c, f32 y, f32 base, Font *f) {
                         if (term_cell_foreground(t, r, finish, &next) != fg) break;
                         finish++;
                     }
-                    draw_glyph_slice_x(g, x, gy, xs, t->ox + k * t->cw, t->ox + finish * t->cw, C(fg));
+                    // the run's outer edges stay open: what pokes out of it is drawn, in the edge cell's colour
+                    f32 sl = k == left ? x : t->ox + k * t->cw, sr = finish == right ? x + g->w * xs : t->ox + finish * t->cw;
+                    draw_glyph_slice_x(g, x, gy, xs, sl, sr, C(fg));
                     k = finish;
                 }
             }
@@ -1326,11 +1375,13 @@ static void tc_reload_all(void) {
 static void draw_status_term(Term *t) {
     Rect s = A.r_status;
     draw_rect(s.x, s.y, s.w, s.h, C(COL_STATUS));
-    if (g_show_separators) draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
+    if (g_separators) draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
     Font *f = &A.font_small;
     char left[300], right[96];
-    snprintf(left, sizeof left, "Terminal \xC2\xB7 %s", term_label(t));
-    snprintf(right, sizeof right, "%d\xC3\x97%d%s%s", t->cols, t->rows, g_tc.source[0] ? " \xC2\xB7 " : "", g_tc.source[0] ? g_tc.source : "");
+    snprintf(left, sizeof left, "Built-in terminal \xC2\xB7 %s", term_label(t));
+    // (the look's source: this tab looks like that terminal, from its config; the external terminal is another setting)
+    if (g_tc.source[0]) snprintf(right, sizeof right, "%d\xC3\x97%d \xC2\xB7 colours and font from %s", t->cols, t->rows, g_tc.source);
+    else snprintf(right, sizeof right, "%d\xC3\x97%d", t->cols, t->rows);
     f32 ty = text_y(f, s.y, s.h);
     draw_text_fit(f, s.x + S(14), ty, s.w * 0.6f, left, (int)strlen(left), C(COL_TEXT_DIM), 0);
     f32 rw = text_width(f, right, (int)strlen(right));

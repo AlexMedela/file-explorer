@@ -8,15 +8,6 @@ DEST="${DESTDIR:-}"
 [ -x build/file-explorer ] || { echo "build/file-explorer missing: run ./build.sh first"; exit 1; }
 install -Dm755 build/file-explorer "$DEST$PREFIX/bin/file-explorer"
 install -Dm644 packaging/dev.fileexplorer.desktop "$DEST$PREFIX/share/applications/dev.fileexplorer.desktop"
-# Bind this launcher to this installation; another copy earlier in PATH must
-# not replace the binary selected by PREFIX (including Distrobox exports).
-FE_INSTALL_BINARY="$PREFIX/bin/file-explorer" awk '
-    /^Exec=file-explorer %F$/ {
-        printf "Exec=\"%s\" %%F\n", ENVIRON["FE_INSTALL_BINARY"]
-        next
-    }
-    { print }
-' packaging/dev.fileexplorer.desktop > "$DEST$PREFIX/share/applications/dev.fileexplorer.desktop"
 sed "s|@BINDIR@|$PREFIX/bin|" packaging/dev.fileexplorer.policy > /tmp/fe-policy.$$ # "Retry as administrator" (pkexec)
 install -Dm644 /tmp/fe-policy.$$ "$DEST$PREFIX/share/polkit-1/actions/dev.fileexplorer.policy"
 rm -f /tmp/fe-policy.$$
@@ -32,6 +23,7 @@ install -Dm644 third_party/nanosvg_LICENSE.txt "$DEST$PREFIX/share/licenses/file
 install -Dm644 third_party/material-icons/LICENSE "$DEST$PREFIX/share/licenses/file-explorer/material-icon-theme_LICENSE.txt"
 install -Dm644 third_party/icons-catppuccin/LICENSE "$DEST$PREFIX/share/licenses/file-explorer/catppuccin-icons_LICENSE.txt"
 install -Dm644 third_party/icons-symbols/LICENSE "$DEST$PREFIX/share/licenses/file-explorer/symbols-icons_LICENSE.txt"
+install -Dm644 third_party/lucide-icons/LICENSE "$DEST$PREFIX/share/licenses/file-explorer/lucide-icons_LICENSE.txt"
 echo "installed to $DEST$PREFIX"
 if [ -z "$DEST" ]; then
   command -v update-desktop-database >/dev/null && update-desktop-database -q "$PREFIX/share/applications" || true

@@ -1,47 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Network entries from fstab decode escaped whitespace and backslashes before
-  matching mounted folders, avoiding duplicate rows and broken reconnect paths.
-- Canceling a running operation (× on its card, or Del in the transfer queue)
-  now leaves its bar where it stopped, in red, and says "Canceled", keeping the
-  last item it was working on. This applies to copies, moves, deletes,
-  extraction and compression.
-- Vulkan now composes each frame offscreen before presenting it, so redraw passes and
-  sidebar boundaries reach the window together. The sidebar separator spans the
-  integrated header and sidebar; tab icons adapt to their tab background.
-- Trash icons now follow the selected file icon theme, including bundled and custom sets.
-  Long file names in deletion confirmation dialogs end with an ellipsis inside their rows.
-- Nerd Font action icons, compact Views / Sort by / Group by context submenus,
-  and a navigation sort button with eight fields and explicit direction.
-- One external-terminal executable setting with validation, Apply/reset feedback,
-  accent hover colours, and executable-derived Open in menu labels.
-- Embedded terminals share Explorer's font and size, enable liga/calt/dlig, and
-  preserve ligatures across colour-only syntax-highlighting changes.
-- Empty Trash from Quick Access shares the existing confirmation dialog. Trash
-  artwork respects icon overrides and switches between full and empty states,
-  including zero-byte files; directory watching keeps the sidebar state current.
-
-- Local Samba/SMB, NFS and WebDAV share detection, including host configuration
-  exposed by Distrobox, with protocol badges on the base folder icon.
-- Consistent lower-right share, symlink and Git repository badges; custom themes
-  can replace each badge SVG. See [the customization guide](docs/custom-icons.md).
-- A shared folder keeps its share badge when its parent is reached through a
-  symbolic link (for example /mnt -> /var/mnt).
-- Built-in SVG grid thumbnails and preview rendering, plus host application
-  discovery and launching for Open with in Distrobox.
-- Mouse caret placement and drag/word selection in text fields; thicker
-  text-colored carets with smooth motion, gentle pulse and accent selections.
-- Shared path/search/pill enclosure backgrounds, improved light-theme icon and
-  new-tab button contrast, and pointer cursors over clickable path segments.
-- Independent sidebar and preview-panel brightness controls.
-- Configurable application icon and improved Distrobox launcher identity,
-  artwork preservation and installation-path handling.
-- Compressing to zip or tar.gz now says what went wrong (a file that vanished, an
-  unreadable folder, a failed write) instead of leaving an empty archive behind,
-  and entry names keep their accents and spaces.
-
 ## 0.11.2
 
 **New**

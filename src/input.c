@@ -73,7 +73,7 @@ static bool queue_mouse(f32 x, f32 y) {
 }
 
 static void on_key(SDL_KeyboardEvent *k) {
-    te_pointer_up();
+    te_pointer_up(); // a key ends a drag-selection
     Pane *p = active_pane();
     bool ctrl = k->mod & SDL_KMOD_CTRL, shift = k->mod & SDL_KMOD_SHIFT;
     A.redraw = true;
@@ -365,8 +365,7 @@ static void tab_drop_update(f32 x, f32 y) {
             return;
         }
         if (!in_rect(pn->area, x, y)) continue;
-        Rect a = panel_content_rect(pn);
-        if (!in_rect(a, x, y)) continue; // navigation is not a split-drop target
+        Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
         f32 fx = (x - a.x) / MAX(a.w, 1.f), fy = (y - a.y) / MAX(a.h, 1.f);
         f32 d[4] = {fx, 1 - fx, fy, 1 - fy};
         int zone = ZONE_CENTER;
@@ -615,7 +614,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         if (b->button == SDL_BUTTON_LEFT) dialog_mouse(x, y);
         return;
     }
-    if (!A.menu.open && te_pointer_down(b)) return;
+    if (!A.menu.open && (sheet_open() || A.pal_open) && te_pointer_down(b)) return; // their text fields
     if (sheet_open()) { sheet_mouse(b); return; }
     if (A.qa_edit_g >= 0 && !in_rect(A.r_sidebar, x, y)) qa_edit_commit();
     if (A.pal_open) {
@@ -653,6 +652,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         }
         for (int i = 0; i < A.nops; i++)
             if (A.op_card[i].w > 0 && in_rect(A.op_card[i], x, y)) { queue_toggle(); A.q_sel = i; return; } // the card: the queue
+        if (te_pointer_down(b)) return; // path bar, rename, search fields (under the cards above)
     }
     if (A.ren_pane) {
         if (in_rect(A.ren_rect, x, y)) return;
@@ -748,9 +748,13 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         if (idx < 0) return;
         Place *pl = &A.places[idx];
         if (b->button == SDL_BUTTON_RIGHT) { menu_open_place(idx, x, y); return; }
-        if (pl->kind == PK_NETEMPTY || pl->kind == PK_ADDONEMPTY) return;
+        if (pl->kind == PK_NETEMPTY || pl->kind == PK_ADDONEMPTY || pl->kind == PK_CLOUDEMPTY) return;
+        if (pl->kind == PK_CLOUDHDR && b->button == SDL_BUTTON_LEFT) {
+            if (pl->eject.w > 0 && in_rect(pl->eject, x, y)) cloud_config_terminal();
+            else { g_cloud_collapsed = !g_cloud_collapsed; init_places(); A.settings_dirty = true; }
+            return;
+        }
         if (pl->kind == PK_CLOUD && pl->item < g_ncloud) { // not connected: connect, then open; connected: a folder row
-            if (b->button == SDL_BUTTON_LEFT && pl->config.w > 0 && in_rect(pl->config, x, y)) { cloud_config_terminal(); return; }
             if (b->button == SDL_BUTTON_LEFT && pl->removable && pl->eject.w > 0 && in_rect(pl->eject, x, y)) { cloud_disconnect(pl->item); return; }
             if (!pl->path[0]) {
                 if (b->button == SDL_BUTTON_LEFT || b->button == SDL_BUTTON_MIDDLE) cloud_connect(pl->item, b->button == SDL_BUTTON_MIDDLE ? 2 : 1);
@@ -784,10 +788,6 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         }
         if (pl->kind == PK_NETSAVED) {
             if (b->button == SDL_BUTTON_LEFT) net_connect_saved(pl->item);
-            return;
-        }
-        if (pl->kind == PK_NETSYSTEM) {
-            if (b->button == SDL_BUTTON_LEFT) place_dev_action(idx, ACT_DEV_MOUNT);
             return;
         }
         if (pl->kind == PK_UNMOUNTED || (pl->kind == PK_PHONE && !pl->path[0])) {
@@ -1220,8 +1220,8 @@ static void handle_event(SDL_Event *e) {
         break;
     case SDL_EVENT_MOUSE_MOTION: on_mouse_motion(&e->motion); break;
     case SDL_EVENT_MOUSE_WHEEL: on_wheel(&e->wheel); break;
-    case SDL_EVENT_WINDOW_FOCUS_LOST: te_pointer_up(); break;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE: A.mouse_in = false; A.redraw = true; break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST: te_pointer_up(); break;
     case SDL_EVENT_WINDOW_MINIMIZED:
     case SDL_EVENT_WINDOW_HIDDEN:
     case SDL_EVENT_WINDOW_OCCLUDED:

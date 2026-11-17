@@ -122,16 +122,7 @@ static DesktopApp *app_by_id(const char *id) {
     return NULL;
 }
 
-// Distrobox applications need the host's executable namespace as well as its
-// desktop files. Never list a host-only handler unless we can launch it there.
-static const char *apps_host_launcher(void) {
-    if (access("/run/host/etc", F_OK)) return NULL;
-    if (in_path("distrobox-host-exec")) return "distrobox-host-exec";
-    if (in_path("host-spawn")) return "host-spawn";
-    return NULL;
-}
-
-static void apps_scan_dir_at(const char *dir, const char *prefix, bool host_dir) {
+static void apps_scan_dir(const char *dir, const char *prefix) {
     DIR *d = opendir(dir);
     if (!d) return;
     struct dirent *e;
@@ -140,20 +131,11 @@ static void apps_scan_dir_at(const char *dir, const char *prefix, bool host_dir)
         char path[PATH_MAX];
         snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
         struct stat st;
-        bool host = host_dir;
-        if (stat(path, &st)) {
-            // Host Flatpak exports often point to absolute host-only paths.
-            char target[PATH_MAX];
-            ssize_t n = host ? readlink(path, target, sizeof target - 1) : -1;
-            if (n <= 0 || target[0] != '/') continue;
-            target[n] = 0;
-            snprintf(path, sizeof path, "/run/host%s", target);
-            if (stat(path, &st)) continue;
-        }
+        if (stat(path, &st)) continue;
         if (S_ISDIR(st.st_mode)) { // subdirectories contribute "sub-" to the desktop id
             char pre[PATH_MAX];
             snprintf(pre, sizeof pre, "%s%s-", prefix, e->d_name);
-            apps_scan_dir_at(path, pre, host);
+            apps_scan_dir(path, pre);
             continue;
         }
         size_t l = strlen(e->d_name);
@@ -188,7 +170,7 @@ static void apps_scan_dir_at(const char *dir, const char *prefix, bool host_dir)
         }
         fclose(f);
         if (hidden || strcmp(type, "Application") || !exec[0]) continue;
-        if (tryexec[0] && !host && !in_path(tryexec)) continue; // its program isn't installed
+        if (tryexec[0] && !in_path(tryexec)) continue; // its program isn't installed
         if ((only[0] && !desktop_listed(only)) || (notin[0] && desktop_listed(notin))) nodisplay = true; // other desktops' tools
         size_t ml = strlen(mimes);
         if (ml && mimes[ml - 1] != ';' && ml + 1 < sizeof mimes) strcat(mimes, ";");
@@ -197,10 +179,6 @@ static void apps_scan_dir_at(const char *dir, const char *prefix, bool host_dir)
                                          strdup(icon), strdup(mimes), nodisplay, terminal};
     }
     closedir(d);
-}
-
-static void apps_scan_dir(const char *dir, const char *prefix) {
-    apps_scan_dir_at(dir, prefix, !strncmp(dir, "/run/host/", 10));
 }
 
 static void mimeapps_load(const char *path) {
@@ -256,13 +234,6 @@ static void apps_load(void) {
     for (char *s = strtok(dirs, ":"); s; s = strtok(NULL, ":")) {
         snprintf(p, sizeof p, "%s/applications", s);
         apps_scan_dir(p, "");
-    }
-    if (apps_host_launcher()) {
-        snprintf(p, sizeof p, "/run/host%s/.local/share/flatpak/exports/share/applications", home);
-        apps_scan_dir(p, "");
-        apps_scan_dir("/run/host/var/lib/flatpak/exports/share/applications", "");
-        apps_scan_dir("/run/host/usr/local/share/applications", "");
-        apps_scan_dir("/run/host/usr/share/applications", "");
     }
     // mimeapps.list in the spec's order (earlier wins): config home, config dirs, data home, data dirs; in each,
     // the desktop's own "<desktop>-mimeapps.list" (kde-, gnome-...) before the shared one
@@ -512,7 +483,7 @@ static bool app_launch(const DesktopApp *a, char **files, int nfiles) {
         } else if (!strcmp(t, "%c")) {
             argv[argc++] = a->name;
         } else if (!strcmp(t, "%k")) {
-            argv[argc++] = !strncmp(a->path, "/run/host/", 10) ? a->path + 9 : a->path;
+            argv[argc++] = a->path;
         } else if (t[0] == '%' && t[1] && !t[2]) {
             // %d %D %n %N %v %m: deprecated, dropped
         } else {
@@ -528,12 +499,6 @@ static bool app_launch(const DesktopApp *a, char **files, int nfiles) {
     const char *dir = nfiles == 1 && !strstr(files[0], "://") && stat(files[0], &st) == 0 && S_ISDIR(st.st_mode) ? files[0] : NULL;
     if (!used && !dir) // app without file codes: append the files
         for (int k = 0; k < nfiles && argc < 250; k++) argv[argc++] = files[k];
-    if (!strncmp(a->path, "/run/host/", 10)) {
-        const char *launcher = apps_host_launcher();
-        if (!launcher) { for (int i = 0; i < nuri; i++) free(uris[i]); return false; }
-        memmove(argv + 1, argv, (size_t)argc * sizeof *argv);
-        argv[0] = (char *)launcher; argc++;
-    }
     argv[argc] = NULL;
     bool ok = false;
     if (argc && a->terminal) { // a console program (vim, htop...): in a terminal window

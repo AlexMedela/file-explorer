@@ -348,10 +348,6 @@ static void draw_glyph_slice_x(const Glyph *g, f32 x, f32 y, f32 sx, f32 left, f
     di4(a, b, d, e);
 }
 
-static void draw_glyph_scaled(const Glyph *g, f32 x, f32 y, f32 scale, Color c) {
-    draw_glyph_scale_xy(g, x, y, scale, scale, c);
-}
-
 // Draw text with its line box top at y. Returns pen x after the text.
 static f32 draw_text(Font *f, f32 x, f32 y, const char *s, int len, Color c) {
     f32 bl = roundf(y + f->ascent);
@@ -377,8 +373,8 @@ static f32 draw_text(Font *f, f32 x, f32 y, const char *s, int len, Color c) {
 
 #define ELLIPSIS "\xE2\x80\xA6"
 
-// One hovered, elided label per frame. The renderer draws its full text after
-// all the normal UI, so the tooltip is never clipped by a pane or a sheet.
+// One hovered, elided label per frame. The renderer draws its full text after all the normal UI
+// (draw_fit_tooltip), so the tooltip is never clipped by a pane or a sheet.
 static char *g_fit_tip, *g_fit_tip_prev;
 static int g_fit_tip_len, g_fit_tip_prev_len;
 static size_t g_fit_tip_cap, g_fit_tip_prev_cap;
@@ -388,15 +384,16 @@ static u64 g_fit_tip_since;
 
 static void fit_tip_begin(f32 mx, f32 my) {
     g_fit_tip_len = 0;
-    g_fit_tip_mx = mx; g_fit_tip_my = my;
+    g_fit_tip_mx = mx;
+    g_fit_tip_my = my;
     g_fit_tip_mouse = false;
 }
 
-static void fit_tip_mouse(bool enabled) { g_fit_tip_mouse = enabled; }
+static void fit_tip_mouse(bool enabled) { g_fit_tip_mouse = enabled; } // (off while an overlay has the mouse)
 
-static void fit_tip_offer(Font *f, f32 x, f32 y, f32 w, const char *s, int len) {
-    if (!g_fit_tip_mouse || len <= 0 || g_fit_tip_mx < x || g_fit_tip_mx >= x + w ||
-        g_fit_tip_my < y || g_fit_tip_my >= y + f->line_h) return;
+// The full text of a label cut off in the box x, y, w, h, if the mouse is there (and not clipped away).
+static void fit_tip_offer_box(f32 x, f32 y, f32 w, f32 h, const char *s, int len) {
+    if (!g_fit_tip_mouse || len <= 0 || g_fit_tip_mx < x || g_fit_tip_mx >= x + w || g_fit_tip_my < y || g_fit_tip_my >= y + h) return;
     if (g_clip_on && (g_fit_tip_mx < g_clip_cur.x || g_fit_tip_mx >= g_clip_cur.x + g_clip_cur.w ||
                       g_fit_tip_my < g_clip_cur.y || g_fit_tip_my >= g_clip_cur.y + g_clip_cur.h)) return;
     if ((size_t)len + 1 > g_fit_tip_cap) {
@@ -408,12 +405,13 @@ static void fit_tip_offer(Font *f, f32 x, f32 y, f32 w, const char *s, int len) 
     g_fit_tip_len = len;
 }
 
+static void fit_tip_offer(Font *f, f32 x, f32 y, f32 w, const char *s, int len) { fit_tip_offer_box(x, y, w, f->line_h, s, len); }
+
+// Shown once the mouse rests on the same label for a moment.
 static bool fit_tip_ready(void) {
     u64 now = now_ns();
-    bool same = g_fit_tip_len == g_fit_tip_prev_len && g_fit_tip_len > 0 &&
-                !memcmp(g_fit_tip, g_fit_tip_prev, (size_t)g_fit_tip_len) &&
-                fabsf(g_fit_tip_mx - g_fit_tip_prev_mx) < 4.f &&
-                fabsf(g_fit_tip_my - g_fit_tip_prev_my) < 4.f;
+    bool same = g_fit_tip_len == g_fit_tip_prev_len && g_fit_tip_len > 0 && !memcmp(g_fit_tip, g_fit_tip_prev, (size_t)g_fit_tip_len) &&
+                fabsf(g_fit_tip_mx - g_fit_tip_prev_mx) < 4.f && fabsf(g_fit_tip_my - g_fit_tip_prev_my) < 4.f;
     if (!same) {
         if ((size_t)g_fit_tip_len + 1 > g_fit_tip_prev_cap) {
             g_fit_tip_prev_cap = (size_t)g_fit_tip_len + 1;
@@ -421,12 +419,14 @@ static bool fit_tip_ready(void) {
         }
         if (g_fit_tip_len) memcpy(g_fit_tip_prev, g_fit_tip, (size_t)g_fit_tip_len + 1);
         g_fit_tip_prev_len = g_fit_tip_len;
-        g_fit_tip_prev_mx = g_fit_tip_mx; g_fit_tip_prev_my = g_fit_tip_my;
+        g_fit_tip_prev_mx = g_fit_tip_mx;
+        g_fit_tip_prev_my = g_fit_tip_my;
         g_fit_tip_since = now;
     }
     return g_fit_tip_len && now - g_fit_tip_since >= 550000000ull;
 }
 
+// How long the main loop may sleep before a pending tooltip is due (0: none pending).
 static int fit_tip_wait_ms(void) {
     if (!g_fit_tip_prev_len) return 0;
     u64 age = now_ns() - g_fit_tip_since;

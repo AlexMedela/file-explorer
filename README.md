@@ -23,8 +23,8 @@ https://github.com/user-attachments/assets/fbfe88ff-015f-431b-87c6-2704839d9ee3
 - **Instant on huge folders**: 200,000 files listed with sizes and dates in under 0.1 s; the UI never waits on the disk.
 - **Keyboard-first**: `Ctrl+P` jumps to any folder or file, typing finds one, and every shortcut can be rebound.
 - **Split panels and tabs**: split any way you like, each panel with its own tabs; save layouts and switch between them.
-- **Built-in terminal**: a panel under your files that follows the folder (`F4`), or a terminal tab (`Shift+F4`), using Explorer's font with programming ligatures.
-- **Search and sorting**: filter as you type, sort beside the navigation bar, search subfolders, or search inside files (ripgrep when installed).
+- **Built-in terminal**: a panel under your files that follows the folder (`F4`), or a terminal tab (`Shift+F4`).
+- **Search**: filter as you type, search subfolders, or search inside files (ripgrep when installed).
 - **Disk usage map**: see what takes the space as a treemap or sunburst, and clean it up right there.
 - **Git status**: changed, new and ignored files marked in repositories, with the branch in the path bar.
 - **Compare and sync**: compare two folders side by side and sync them one way or both.
@@ -63,7 +63,7 @@ Installing never replaces your current file manager or file picker: switch those
 All keys: [docs/keys.md](docs/keys.md)
 
 ## Docs
-[Install](docs/install.md) · [Keys](docs/keys.md) · [Settings](docs/settings.md) · [Integration](docs/integration.md) · [Building](docs/building.md) · [Maintenance](MAINTENANCE.md) · [Architecture](docs/architecture.md)
+[Install](docs/install.md) · [Keys](docs/keys.md) · [Settings](docs/settings.md) · [Integration](docs/integration.md) · [Building](docs/building.md) · [Architecture](docs/architecture.md)
 
 ## Thanks
 To everyone who sent code, reported bugs or asked for features:
@@ -74,6 +74,3 @@ To everyone who sent code, reported bugs or asked for features:
 
 ## Licence
 [MIT](LICENSE). Bundled icon sets and libraries keep their own licences, listed in [Building](docs/building.md#tools-and-self-tests).
-
-Custom file themes and share/symlink/Git badge overrides are documented in
-[Custom icons and folder badges](docs/custom-icons.md).

@@ -74,15 +74,7 @@ static bool dev_mount_point(const char *majmin, const char *devpath, char *out, 
         char fstype[64] = "", src[PATH_MAX] = "";
         if (dash) sscanf(dash + 3, "%63s %4095s", fstype, src);
         if (!strcmp(mm, majmin) || (devpath[0] && !strcmp(src, devpath))) {
-            // mountinfo escapes spaces as \040
-            size_t o = 0;
-            for (const char *c = mp; *c && o + 1 < cap; c++) {
-                if (c[0] == '\\' && isdigit((u8)c[1]) && isdigit((u8)c[2]) && isdigit((u8)c[3])) {
-                    out[o++] = (char)((c[1] - '0') * 64 + (c[2] - '0') * 8 + (c[3] - '0'));
-                    c += 3;
-                } else out[o++] = *c;
-            }
-            out[o] = 0;
+            mount_unescape(mp, out, cap);
             found = true;
         }
     }
@@ -213,7 +205,7 @@ static void drives_scan(DevList *L) {
 
 // --- network mounts ------------------------------------------------------------
 
-typedef struct { char path[PATH_MAX]; char label[64]; bool sshfs, mounted; } NetMount;
+typedef struct { char path[PATH_MAX]; char label[64]; bool sshfs; } NetMount; // sshfs: label is its "user@host:/dir"
 
 // "smb-share:server=nas,share=media" -> "media on nas"; "sftp:host=box,user=me" -> "me@box"
 static void gvfs_label(const char *name, char *out, size_t cap) {
@@ -263,8 +255,12 @@ static bool gvfs_fuse_running(void) {
     gvfs_dir(gdir, sizeof gdir);
     FILE *f = fopen("/proc/self/mounts", "r");
     bool up = false;
-    while (f && !up && fgets(line, sizeof line, f))
-        up = sscanf(line, "%4095s %4095s %63s", src, mp, type) == 3 && !strcmp(mp, gdir) && strstr(type, "fuse");
+    while (f && !up && fgets(line, sizeof line, f)) {
+        char m2[PATH_MAX];
+        if (sscanf(line, "%4095s %4095s %63s", src, mp, type) != 3) continue;
+        mount_unescape(mp, m2, sizeof m2);
+        up = !strcmp(m2, gdir) && strstr(type, "fuse");
+    }
     if (f) fclose(f);
     return up;
 }
@@ -320,25 +316,6 @@ static bool gvfs_fuse_ensure(void) {
 
 static char phone_kind(const char *s);
 
-// fstab and /proc mount fields escape whitespace and backslashes. Decode once
-// before matching paths, so a literal \134040 never becomes a space.
-static void network_mount_unescape(char *field) {
-    char *out = field;
-    for (const char *c = field; *c; c++) {
-        if (c[0] == '\\' && c[1] >= '0' && c[1] <= '3' &&
-            c[2] >= '0' && c[2] <= '7' && c[3] >= '0' && c[3] <= '7') {
-            int value = (c[1] - '0') * 64 + (c[2] - '0') * 8 + c[3] - '0';
-            if (value == ' ' || value == '\t' || value == '\n' || value == '\\') {
-                *out++ = (char)value;
-                c += 3;
-                continue;
-            }
-        }
-        *out++ = *c;
-    }
-    *out = 0;
-}
-
 static int network_mounts(NetMount *out, int max) {
     int n = 0;
     char gdir[PATH_MAX];
@@ -351,12 +328,12 @@ static int network_mounts(NetMount *out, int max) {
             path_join(out[n].path, sizeof out[n].path, gdir, de->d_name);
             gvfs_label(de->d_name, out[n].label, sizeof out[n].label);
             out[n].sshfs = false;
-            out[n].mounted = true;
             n++;
         }
         closedir(d);
     }
-    FILE *f = fopen("/proc/self/mounts", "r");
+    const char *ov = getenv("FE_NET_MOUNTS"); // tests: a made-up mount table
+    FILE *f = fopen(ov ? ov : "/proc/self/mounts", "r");
     if (f) {
         char line[PATH_MAX * 2], src[PATH_MAX], mp[PATH_MAX], type[64];
         while (n < max && fgets(line, sizeof line, f)) {
@@ -364,32 +341,9 @@ static int network_mounts(NetMount *out, int max) {
             if (strcmp(type, "fuse.sshfs") && strcmp(type, "cifs") && strcmp(type, "smb3") && strcmp(type, "nfs") &&
                 strcmp(type, "nfs4") && strcmp(type, "fuse.rclone"))
                 continue;
-            network_mount_unescape(mp);
-            network_mount_unescape(src);
-            snprintf(out[n].path, sizeof out[n].path, "%s", mp);
-            snprintf(out[n].label, sizeof out[n].label, "%s", src);
+            mount_unescape(mp, out[n].path, sizeof out[n].path);
+            mount_unescape(src, out[n].label, sizeof out[n].label); // (sshfs: user@host:/dir, which can have spaces too)
             out[n].sshfs = !strcmp(type, "fuse.sshfs");
-            out[n].mounted = true;
-            n++;
-        }
-        fclose(f);
-    }
-    // Keep configured NFS/SMB mounts available for reconnection after unmount.
-    f = fopen(getenv("FE_FSTAB") ? getenv("FE_FSTAB") : "/etc/fstab", "r");
-    if (f) {
-        char line[PATH_MAX * 2], src[PATH_MAX], mp[PATH_MAX], type[64];
-        while (n < max && fgets(line, sizeof line, f)) {
-            if (line[0] == '#' || sscanf(line, "%4095s %4095s %63s", src, mp, type) != 3) continue;
-            if (strcmp(type, "cifs") && strcmp(type, "smb3") && strcmp(type, "nfs") && strcmp(type, "nfs4") &&
-                strcmp(type, "fuse.rclone")) continue;
-            network_mount_unescape(mp);
-            network_mount_unescape(src);
-            bool found = false;
-            for (int k = 0; k < n; k++) if (!strcmp(out[k].path, mp)) { found = true; break; }
-            if (found) continue;
-            snprintf(out[n].path, sizeof out[n].path, "%s", mp);
-            snprintf(out[n].label, sizeof out[n].label, "%s", src);
-            out[n].sshfs = out[n].mounted = false;
             n++;
         }
         fclose(f);
@@ -604,14 +558,7 @@ static bool own_mount_of(const char *id, char *out, size_t cap) {
     bool found = false;
     while (f && !found && fgets(line, sizeof line, f)) {
         if (sscanf(line, "%4095s %4095s %63s", src, mp, type) != 3 || strcmp(type, "fuse.fe-device") || strcmp(src, want)) continue;
-        size_t o = 0;
-        for (const char *c = mp; *c && o + 1 < cap; c++) { // \040 for spaces (and other octal escapes)
-            if (c[0] == '\\' && isdigit((u8)c[1]) && isdigit((u8)c[2]) && isdigit((u8)c[3])) {
-                out[o++] = (char)((c[1] - '0') * 64 + (c[2] - '0') * 8 + (c[3] - '0'));
-                c += 3;
-            } else out[o++] = *c;
-        }
-        out[o] = 0;
+        mount_unescape(mp, out, cap);
         found = true;
     }
     if (f) fclose(f);
@@ -714,9 +661,7 @@ static void phone_error_hint(char kind, const char *err, char *out, size_t cap) 
 
 // --- actions (worker thread) ------------------------------------------------------
 
-enum { NET_METHOD_GVFS, NET_METHOD_KIO, NET_METHOD_SYSTEM, NET_METHOD_COUNT };
-enum { DEV_MOUNT, DEV_UNMOUNT, DEV_EJECT, DEV_NET_MOUNT, DEV_NET_UNMOUNT, DEV_OWN_MOUNT, DEV_NET_SYSTEM_MOUNT,
-       DEV_NET_KIO_MOUNT };
+enum { DEV_MOUNT, DEV_UNMOUNT, DEV_EJECT, DEV_NET_MOUNT, DEV_NET_UNMOUNT, DEV_OWN_MOUNT };
 typedef struct {
     int kind;
     char target[PATH_MAX]; // device, URI, or mount point
@@ -726,7 +671,6 @@ typedef struct {
     int rc;
     char out[1024];
     char mount[PATH_MAX];  // where it got mounted
-    char open_path[PATH_MAX]; // system mount: subfolder to open after mounting
     // network mounts: answers for GVfs's prompts (the password never leaves this struct; wiped after use)
     char user[128], domain[128], password[256];
     // a question GVfs asks (unknown SSH host key...): relayed to the main thread, answered by the user
@@ -1219,37 +1163,6 @@ static void dev_job(void *arg) {
             char *argv2[] = {(char *)ud, "power-off", "-b", disk, NULL};
             char tmp[256];
             run_capture(argv2, tmp, sizeof tmp); // not every device supports it; unmounted is what matters
-        }
-        break;
-    }
-    case DEV_NET_SYSTEM_MOUNT: {
-        char *argv[] = {(char *)tool("FE_MOUNT", "mount"), j->target, NULL};
-        j->rc = run_capture(argv, j->out, sizeof j->out);
-        if (!j->rc) snprintf(j->mount, sizeof j->mount, "%s", j->target);
-        break;
-    }
-    case DEV_NET_KIO_MOUNT: {
-        // KIO FUSE returns a POSIX path, which this file explorer can browse.
-        // KDE's wallet handles authentication; never put a password in this URI.
-        char url[PATH_MAX], arg[PATH_MAX + 16];
-        const char *prefix = !strncmp(j->target, "davs://", 7) ? "webdavs://" :
-                             !strncmp(j->target, "dav://", 6) ? "webdav://" : NULL;
-        if (prefix) snprintf(url, sizeof url, "%s%s", prefix, strstr(j->target, "://") + 3);
-        else snprintf(url, sizeof url, "%s", j->target);
-        snprintf(arg, sizeof arg, "string:%s", url);
-        char *argv[] = {(char *)tool("FE_DBUS_SEND", "dbus-send"), "--session", "--print-reply", "--type=method_call",
-                        "--reply-timeout=30000", "--dest=org.kde.KIOFuse", "/org/kde/KIOFuse",
-                        "org.kde.KIOFuse.VFS.mountUrl", arg, NULL};
-        j->rc = run_capture(argv, j->out, sizeof j->out);
-        if (!j->rc) {
-            const char *p = strstr(j->out, "string \"");
-            if (p) {
-                p += 8;
-                const char *end = strchr(p, '"');
-                if (end && *p == '/' && end > p)
-                    snprintf(j->mount, sizeof j->mount, "%.*s", (int)(end - p), p);
-            }
-            if (!j->mount[0]) { j->rc = 1; snprintf(j->out, sizeof j->out, "KIO FUSE did not return a folder path"); }
         }
         break;
     }

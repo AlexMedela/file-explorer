@@ -75,7 +75,66 @@ static void ig_default_fm_set(bool on) {
 // Browsers' "Show in folder", download panels and many apps call ShowItems / ShowFolders on this name. libdbus is
 // loaded when the switch is on (no build dependency); a thread answers and hands the paths to the main loop.
 
-#include "dbus.c"
+typedef struct { const char *name, *message; unsigned dummy; void *pad; void *more[4]; } IgDBusError;
+typedef struct { void *p[16]; } IgDBusIter; // (libdbus's DBusMessageIter is smaller; it only writes its own part)
+
+static struct {
+    void *lib, *conn;
+    void (*error_init)(IgDBusError *);
+    void (*error_free)(IgDBusError *);
+    void *(*bus_get_private)(int, IgDBusError *);
+    int (*request_name)(void *, const char *, unsigned, IgDBusError *);
+    int (*release_name)(void *, const char *, IgDBusError *);
+    unsigned (*read_write)(void *, int);
+    void *(*pop_message)(void *);
+    unsigned (*is_method_call)(void *, const char *, const char *);
+    unsigned (*iter_init)(void *, IgDBusIter *);
+    int (*iter_get_arg_type)(IgDBusIter *);
+    void (*iter_recurse)(IgDBusIter *, IgDBusIter *);
+    void (*iter_get_basic)(IgDBusIter *, void *);
+    unsigned (*iter_next)(IgDBusIter *);
+    void *(*new_method_return)(void *);
+    unsigned (*append_args)(void *, int, ...);
+    unsigned (*send)(void *, void *, unsigned *);
+    void (*flush)(void *);
+    void (*message_unref)(void *);
+    void (*connection_close)(void *);
+    void (*connection_unref)(void *);
+    atomic_bool stop, running;
+    int state; // IG_FM1_*
+} g_fm1;
+
+enum { IG_FM1_OFF, IG_FM1_SERVING, IG_FM1_TAKEN, IG_FM1_NO_DBUS };
+
+static bool ig_dbus_load(void) {
+    if (g_fm1.lib) return true;
+    void *l = dlopen("libdbus-1.so.3", RTLD_NOW | RTLD_LOCAL);
+    if (!l) return false;
+    #define IG_SYM(field, name) *(void **)&g_fm1.field = dlsym(l, name); if (!g_fm1.field) { dlclose(l); return false; }
+    IG_SYM(error_init, "dbus_error_init")
+    IG_SYM(error_free, "dbus_error_free")
+    IG_SYM(bus_get_private, "dbus_bus_get_private")
+    IG_SYM(request_name, "dbus_bus_request_name")
+    IG_SYM(release_name, "dbus_bus_release_name")
+    IG_SYM(read_write, "dbus_connection_read_write")
+    IG_SYM(pop_message, "dbus_connection_pop_message")
+    IG_SYM(is_method_call, "dbus_message_is_method_call")
+    IG_SYM(iter_init, "dbus_message_iter_init")
+    IG_SYM(iter_get_arg_type, "dbus_message_iter_get_arg_type")
+    IG_SYM(iter_recurse, "dbus_message_iter_recurse")
+    IG_SYM(iter_get_basic, "dbus_message_iter_get_basic")
+    IG_SYM(iter_next, "dbus_message_iter_next")
+    IG_SYM(new_method_return, "dbus_message_new_method_return")
+    IG_SYM(append_args, "dbus_message_append_args")
+    IG_SYM(send, "dbus_connection_send")
+    IG_SYM(flush, "dbus_connection_flush")
+    IG_SYM(message_unref, "dbus_message_unref")
+    IG_SYM(connection_close, "dbus_connection_close")
+    IG_SYM(connection_unref, "dbus_connection_unref")
+    #undef IG_SYM
+    g_fm1.lib = l;
+    return true;
+}
 
 typedef struct { char **paths; int n; bool items; char token[256]; } IgShow;
 
@@ -484,6 +543,234 @@ static void ig_picker_set(bool on) {
     free(out);
     free(base);
     ig_portal_restart();
+}
+
+// --- desktop look (Theme > System, File icons > System) -----------------------------------------------------------
+// Only while one of them is chosen: a thread asks the settings portal (org.freedesktop.portal.Settings: dark or
+// light, accent colour, icon theme) and listens for its changes, falling back to KDE's / GTK's config files; what
+// it finds goes to g_desktop on the main thread. Nothing is started otherwise, nor in self-tests.
+
+typedef struct { bool light; u32 accent, kde[KDE_COLORS]; char icons[64]; } DesktopLook;
+
+static struct {
+    atomic_bool running, stop;
+    unsigned (*threads_init)(void);
+    void *(*new_call)(const char *, const char *, const char *, const char *);
+    void *(*call_block)(void *, void *, int, IgDBusError *);
+    void (*add_match)(void *, const char *, IgDBusError *);
+    unsigned (*is_signal)(void *, const char *, const char *);
+    void (*set_exit)(void *, unsigned);
+} g_dlook;
+
+// Value of key in [group] of an ini-style file (lines of any length); false if it isn't there.
+static bool dlook_ini(const char *file, const char *group, const char *key, char *out, size_t cap) {
+    char path[PATH_MAX];
+    const char *cfg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
+    if (cfg && cfg[0] == '/') snprintf(path, sizeof path, "%s/%s", cfg, file);
+    else snprintf(path, sizeof path, "%s/.config/%s", home ? home : "/tmp", file);
+    FILE *f = fopen(path, "re");
+    if (!f) return false;
+    char *line = NULL;
+    size_t lcap = 0;
+    bool in = false, found = false;
+    while (!found && getline(&line, &lcap, f) >= 0) {
+        char *s = sysi_trim(line);
+        if (s[0] == '[') { in = !strncmp(s + 1, group, strlen(group)) && s[1 + strlen(group)] == ']'; continue; }
+        char *eq = strchr(s, '=');
+        if (!in || !eq) continue;
+        *eq = 0;
+        if (strcmp(sysi_trim(s), key)) continue;
+        snprintf(out, cap, "%s", sysi_trim(eq + 1));
+        found = true;
+    }
+    free(line);
+    fclose(f);
+    return found;
+}
+
+// KDE's "r,g,b" colour values -> rgb; false if malformed.
+static bool dlook_rgb(const char *s, u32 *out) {
+    int r, g, b, n = 0;
+    if (sscanf(s, " %d , %d , %d %n", &r, &g, &b, &n) != 3 || s[n] || r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255) return false;
+    *out = (u32)r << 16 | (u32)g << 8 | (u32)b;
+    return true;
+}
+
+// Settings portal value ns/key: the reply (unref it) with *it on the innermost value; NULL if the portal / key isn't there.
+static void *dlook_read(void *conn, const char *ns, const char *key, IgDBusIter *it) {
+    static const char *methods[] = {"ReadOne", "Read"}; // (Read: older portals, a variant in a variant)
+    for (int m = 0; m < 2; m++) {
+        void *msg = g_dlook.new_call("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings", methods[m]);
+        if (!msg) return NULL;
+        g_fm1.append_args(msg, 's', &ns, 's', &key, 0);
+        IgDBusError e;
+        g_fm1.error_init(&e);
+        void *reply = g_dlook.call_block(conn, msg, 1000, &e);
+        g_fm1.error_free(&e);
+        g_fm1.message_unref(msg);
+        if (!reply) continue;
+        if (g_fm1.iter_init(reply, it)) {
+            while (g_fm1.iter_get_arg_type(it) == 'v') {
+                IgDBusIter sub;
+                g_fm1.iter_recurse(it, &sub);
+                *it = sub;
+            }
+            return reply;
+        }
+        g_fm1.message_unref(reply);
+    }
+    return NULL;
+}
+
+static void dlook_get(void *conn, DesktopLook *d) {
+    memset(d, 0, sizeof *d);
+    int scheme = -1; // portal: 0 no preference, 1 dark, 2 light
+    IgDBusIter it;
+    void *r;
+    if (conn && (r = dlook_read(conn, "org.freedesktop.appearance", "color-scheme", &it))) {
+        u32 v = 0;
+        if (g_fm1.iter_get_arg_type(&it) == 'u') { g_fm1.iter_get_basic(&it, &v); scheme = (int)v; }
+        g_fm1.message_unref(r);
+    }
+    if (conn && (r = dlook_read(conn, "org.freedesktop.appearance", "accent-color", &it))) {
+        f64 c[3] = {-1, -1, -1};
+        if (g_fm1.iter_get_arg_type(&it) == 'r') {
+            IgDBusIter s;
+            g_fm1.iter_recurse(&it, &s);
+            for (int i = 0; i < 3 && g_fm1.iter_get_arg_type(&s) == 'd'; i++, g_fm1.iter_next(&s)) g_fm1.iter_get_basic(&s, &c[i]);
+        }
+        if (c[0] >= 0 && c[0] <= 1 && c[1] >= 0 && c[1] <= 1 && c[2] >= 0 && c[2] <= 1) // (out of range: not set)
+            d->accent = 0x01000000u | (u32)lround(c[0] * 255) << 16 | (u32)lround(c[1] * 255) << 8 | (u32)lround(c[2] * 255);
+        g_fm1.message_unref(r);
+    }
+    static const char *icon_keys[][2] = {{"org.gnome.desktop.interface", "icon-theme"}, {"org.kde.kdeglobals.Icons", "Theme"}};
+    for (int k = 0; conn && !d->icons[0] && k < 2; k++)
+        if ((r = dlook_read(conn, icon_keys[k][0], icon_keys[k][1], &it))) {
+            const char *v = NULL;
+            if (g_fm1.iter_get_arg_type(&it) == 's') g_fm1.iter_get_basic(&it, &v);
+            if (v && sysi_component(v)) snprintf(d->icons, sizeof d->icons, "%s", v);
+            g_fm1.message_unref(r);
+        }
+    // without a portal (or one that doesn't say): KDE's and GTK's own settings
+    char v[256];
+    const char *de = getenv("XDG_CURRENT_DESKTOP");
+    bool kde = de && (strcasestr(de, "kde") || strcasestr(de, "plasma"));
+    // KDE's colour scheme (KDE_*): from its portal (others don't have these keys), else kdeglobals, on KDE only (a
+    // file left from an old Plasma install mustn't colour another desktop); the view's background is a must
+    static const char *kde_keys[KDE_COLORS][2] = {{"Colors:View", "BackgroundNormal"}, {"Colors:Window", "BackgroundNormal"},
+                                                  {"Colors:View", "ForegroundNormal"}, {"Colors:Selection", "BackgroundNormal"}};
+    for (int k = 0; k < KDE_COLORS; k++) {
+        v[0] = 0;
+        char ns[64];
+        snprintf(ns, sizeof ns, "org.kde.kdeglobals.%s", kde_keys[k][0]);
+        if (conn && (r = dlook_read(conn, ns, kde_keys[k][1], &it))) {
+            const char *s = NULL;
+            if (g_fm1.iter_get_arg_type(&it) == 's') g_fm1.iter_get_basic(&it, &s);
+            if (s) snprintf(v, sizeof v, "%s", s);
+            g_fm1.message_unref(r);
+        }
+        u32 c;
+        if (!v[0] && kde) dlook_ini("kdeglobals", kde_keys[k][0], kde_keys[k][1], v, sizeof v);
+        if (v[0] && dlook_rgb(v, &c)) d->kde[k] = 0x01000000u | c;
+    }
+    if (!d->kde[KDE_VIEW]) memset(d->kde, 0, sizeof d->kde);
+    if (!d->icons[0] && kde && dlook_ini("kdeglobals", "Icons", "Theme", v, sizeof v) && sysi_component(v)) snprintf(d->icons, sizeof d->icons, "%s", v);
+    static const char *gtk[] = {"gtk-4.0/settings.ini", "gtk-3.0/settings.ini"};
+    for (int i = 0; i < 2; i++) {
+        if (!d->icons[0] && dlook_ini(gtk[i], "Settings", "gtk-icon-theme-name", v, sizeof v) && sysi_component(v)) snprintf(d->icons, sizeof d->icons, "%s", v);
+        if (scheme <= 0 && dlook_ini(gtk[i], "Settings", "gtk-application-prefer-dark-theme", v, sizeof v)) scheme = atoi(v) || !strcasecmp(v, "true") ? 1 : 2;
+    }
+    if (!d->icons[0]) snprintf(d->icons, sizeof d->icons, "hicolor");
+    d->light = d->kde[KDE_VIEW] ? rgb_luma(d->kde[KDE_VIEW] & 0xFFFFFF) > 0.5f : scheme == 2; // (KDE: its scheme says)
+    if (!d->accent) d->accent = d->kde[KDE_SELECTION];
+}
+
+static void dlook_apply(void *arg) { // (main thread)
+    DesktopLook *d = arg;
+    bool look = !g_desktop.known || g_desktop.light != d->light || g_desktop.accent != d->accent || memcmp(g_desktop.kde, d->kde, sizeof d->kde);
+    bool icons = strcmp(g_desktop.icons, d->icons) != 0;
+    g_desktop.known = true;
+    g_desktop.light = d->light;
+    g_desktop.accent = d->accent;
+    memcpy(g_desktop.kde, d->kde, sizeof d->kde);
+    snprintf(g_desktop.icons, sizeof g_desktop.icons, "%s", d->icons);
+    free(d);
+    if (look && (theme_is_system() || g_accent_desktop)) theme_apply(); // (icons follow the new colours in icons_sync_theme)
+    if (icons && icon_system_selected()) {
+        sysi_reset();
+        icons_flush();
+    }
+}
+
+static void *dlook_thread(void *arg) {
+    (void)arg;
+    void *conn = NULL;
+    if (ig_dbus_load() && g_dlook.threads_init) {
+        g_dlook.threads_init();
+        IgDBusError e;
+        g_fm1.error_init(&e);
+        conn = g_fm1.bus_get_private(0 /* session */, &e);
+        g_fm1.error_free(&e);
+        if (conn) {
+            g_dlook.set_exit(conn, 0);
+            g_fm1.error_init(&e);
+            g_dlook.add_match(conn, "type='signal',interface='org.freedesktop.portal.Settings',member='SettingChanged'", &e);
+            g_fm1.error_free(&e);
+        }
+    }
+    DesktopLook last;
+    memset(&last, 0, sizeof last);
+    bool first = true;
+    u64 next = 0;
+    while (!atomic_load(&g_dlook.stop)) {
+        bool changed = false; // the portal says something changed; config files are looked at every 5 s
+        if (conn && g_fm1.read_write(conn, 1000)) {
+            void *m;
+            while ((m = g_fm1.pop_message(conn))) {
+                changed |= g_dlook.is_signal(m, "org.freedesktop.portal.Settings", "SettingChanged") != 0;
+                g_fm1.message_unref(m);
+            }
+        } else {
+            if (conn) { g_fm1.connection_close(conn); g_fm1.connection_unref(conn); conn = NULL; } // (the bus went away)
+            usleep(1000000);
+        }
+        if (!changed && !first && now_ns() < next) continue;
+        next = now_ns() + 5000000000ull;
+        DesktopLook d;
+        dlook_get(conn, &d);
+        if (!first && d.light == last.light && d.accent == last.accent && !memcmp(d.kde, last.kde, sizeof d.kde) && !strcmp(d.icons, last.icons)) continue;
+        first = false;
+        last = d;
+        DesktopLook *copy = xmalloc(sizeof *copy);
+        *copy = d;
+        main_post(dlook_apply, copy);
+    }
+    if (conn) { g_fm1.connection_close(conn); g_fm1.connection_unref(conn); }
+    atomic_store(&g_dlook.running, false);
+    return NULL;
+}
+
+// Start or stop the watcher as Theme / the desktop's accent / File icons need it (after one changes, and at startup).
+static void desktop_look_sync(void) {
+    bool want = !A.selftest && (theme_is_system() || g_accent_desktop || icon_system_selected());
+    if (!want) { atomic_store(&g_dlook.stop, true); return; }
+    atomic_store(&g_dlook.stop, false);
+    if (atomic_load(&g_dlook.running)) return;
+    if (ig_dbus_load() && !g_dlook.new_call) {
+        void *l = g_fm1.lib;
+        *(void **)&g_dlook.threads_init = dlsym(l, "dbus_threads_init_default");
+        *(void **)&g_dlook.new_call = dlsym(l, "dbus_message_new_method_call");
+        *(void **)&g_dlook.call_block = dlsym(l, "dbus_connection_send_with_reply_and_block");
+        *(void **)&g_dlook.add_match = dlsym(l, "dbus_bus_add_match");
+        *(void **)&g_dlook.is_signal = dlsym(l, "dbus_message_is_signal");
+        *(void **)&g_dlook.set_exit = dlsym(l, "dbus_connection_set_exit_on_disconnect");
+        if (!g_dlook.new_call || !g_dlook.call_block || !g_dlook.add_match || !g_dlook.is_signal || !g_dlook.set_exit)
+            g_dlook.threads_init = NULL; // (then config files only)
+    }
+    atomic_store(&g_dlook.running, true);
+    pthread_t th;
+    if (pthread_create(&th, NULL, dlook_thread, NULL)) { atomic_store(&g_dlook.running, false); return; }
+    pthread_detach(th);
 }
 
 // --- first run: offer (once) to become the default file manager -----------------------------------------------------

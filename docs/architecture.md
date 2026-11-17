@@ -23,7 +23,8 @@
 - Folders refresh automatically when their contents change (inotify, debounced and throttled by scan cost);
   refreshes load in the background and swap in, so the list never flickers.
 - `src/preview.c` – preview worker (latest request wins): stb_image decode + downscale, thumbnail lookup
-  (own cache, `~/.cache/thumbnails`), installed `.thumbnailer`s with an 8 s timeout, text and folder summaries.
+  (own cache, `~/.cache/thumbnails`), installed `.thumbnailer`s with an 8 s timeout, SVGs through nanosvg when no thumbnailer drew them
+  (`src/svg_preview.c`), text and folder summaries.
 - `src/diskuse.c` – disk usage map: measures a folder tree on 4 threads into a tree of folders and their biggest files
   (the rest summed), staying on one drive (btrfs subvolumes of the same disk included); the view in `app.c` / `render.c`
   lays it out as a squarified treemap or a sunburst every frame.
@@ -35,10 +36,3 @@
 - `src/app.c` – layout, input, virtualized list, navigation, tabs, dialogs, menus, progress cards, transfer queue, undo.
   `src/input.c` (keyboard/mouse), `src/render.c` (drawing), `src/settings.c` (config files) and
   `src/selftest.c` (self-tests) are included from it.
-
-- `src/theme.c` owns the effective palette and scrollbar colors; `src/tab_preferences.c` shares tab settings and
-  geometry across rendering and input; `src/header_preferences.c` owns the label and control-visibility settings. `src/desktop_config.c` / `src/desktop_palette.c` read desktop colors without
-  GTK/Qt build dependencies. `src/system_appearance.c` monitors the optional Settings portal off the UI thread and
-  posts updates to the existing main queue. The optional libdbus loader is shared with integration via `src/dbus.c`.
-- `src/system_icons.c` resolves installed freedesktop icon themes and inheritance; `src/system_icon_raster.c` converts
-  SVG/PNG icons into the existing atlas/texture caches in `icons.c`. Missing icons keep bundled fallbacks.

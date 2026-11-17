@@ -1,7 +1,6 @@
 // main.c - unity build entry point
 #include "base.h"
 #include <ctype.h>
-#include <locale.h>
 #include <regex.h>
 #include <dlfcn.h>
 #include <SDL3/SDL.h>
@@ -27,7 +26,6 @@ const char *__lsan_default_suppressions(void) { return "leak:libX11.so\nleak:lib
 #include "pool.c"
 #include "ipc.c"
 #include "fs.c"
-#include "local_shares.c"
 #include "ops.c"
 #include "archive.c"
 #include "search.c"
@@ -47,7 +45,6 @@ const char *__lsan_default_suppressions(void) { return "leak:libX11.so\nleak:lib
 #include "font.c"
 #include "shape.c"
 #include "draw.c"
-#include "desktop_config.c"
 #include "theme.c"
 #include "icons.c"
 #include "app.c"

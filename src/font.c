@@ -10,7 +10,6 @@ typedef struct {
     u16 x, y, w, h;
     i16 bx, by;
     f32 adv;
-    bool missing; // no font supplied the requested glyph
     bool color; // colour bitmap (emoji): drawn untinted
 } Glyph;
 
@@ -29,12 +28,7 @@ typedef struct {
 static FT_Library g_ft;
 static const char *g_ui_families[] = {"Inter", "Segoe UI", "Noto Sans", "Open Sans", "Cantarell", "DejaVu Sans", "sans-serif"};
 static u8 *g_atlas; // RGBA, white + coverage in alpha
-static SDL_Texture *g_atlas_tex; // current ring slot; draw.c samples this
-static SDL_Texture **g_atlas_slots; // one atlas per in-flight Vulkan frame
-static u64 *g_atlas_slot_version; // atlas version each slot contains
-static int g_atlas_nslots = 1, g_atlas_slot;
-static u64 g_atlas_presents, g_atlas_version = 1;
-static bool g_atlas_vulkan;
+static SDL_Texture *g_atlas_tex;
 static int g_shelf_x, g_shelf_y, g_shelf_h;
 static int g_dirty_x0 = 1 << 30, g_dirty_y0 = 1 << 30, g_dirty_x1, g_dirty_y1;
 static SDL_Renderer *g_atlas_ren;
@@ -42,15 +36,6 @@ static bool g_atlas_full;
 static Font *g_fonts[16]; // every font sharing the atlas (UI, small, brand, mono, terminal regular + bold)
 static int g_icon_cache_n; // icons.c: rasterized icon slots, invalid after an atlas reset
 static int g_nfonts;
-
-static SDL_Texture *atlas_texture_new(int size) {
-    SDL_Texture *t = SDL_CreateTexture(g_atlas_ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, size, size);
-    if (t) {
-        SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
-        SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
-    }
-    return t;
-}
 
 static bool atlas_pack(int w, int h, int *ox, int *oy) {
     if (g_shelf_x + w + 1 > ATLAS_SIZE) {
@@ -70,7 +55,6 @@ static bool atlas_pack(int w, int h, int *ox, int *oy) {
     g_dirty_y0 = MIN(g_dirty_y0, *oy);
     g_dirty_x1 = MAX(g_dirty_x1, *ox + w);
     g_dirty_y1 = MAX(g_dirty_y1, *oy + h);
-    g_atlas_version++;
     return true;
 }
 
@@ -92,101 +76,30 @@ static void atlas_reset(void) {
     g_dirty_y0 = 0;
     g_dirty_x1 = ATLAS_SIZE;
     g_dirty_y1 = ATLAS_SIZE;
-    g_atlas_version++;
-    for (int i = 0; i < g_atlas_nslots; i++) g_atlas_slot_version[i] = 0;
     for (int i = 0; i < g_nfonts; i++) font_clear_cache(g_fonts[i]);
     g_icon_cache_n = 0;
 }
 
 static void atlas_upload(void) {
-    if (g_atlas_vulkan) return; // Vulkan uploads the whole atlas via atlas_publish()
     if (g_dirty_x1 <= g_dirty_x0 || g_dirty_y1 <= g_dirty_y0) return;
     SDL_Rect r = {g_dirty_x0, g_dirty_y0, g_dirty_x1 - g_dirty_x0, g_dirty_y1 - g_dirty_y0};
+    // Submit what's queued before changing the texture it samples: SDL 3.4's Vulkan renderer otherwise
+    // drops geometry queued earlier in the frame (rows flickered away when new glyphs appeared mid-frame).
+    SDL_FlushRenderer(g_atlas_ren);
     SDL_UpdateTexture(g_atlas_tex, &r, &g_atlas[((size_t)r.y * ATLAS_SIZE + r.x) * 4], ATLAS_SIZE * 4);
-    g_dirty_x0 = g_dirty_y0 = ATLAS_SIZE;
-    g_dirty_x1 = g_dirty_y1 = 0;
-}
-
-static u64 atlas_version(void) { return g_atlas_version; }
-static bool atlas_slot_is_current(void) { return g_atlas_slot_version[g_atlas_slot] == g_atlas_version; }
-
-// Select the atlas slot for this present. SDL's Vulkan present waits on the
-// fence for the next command buffer, so a slot used g_atlas_nslots presents
-// ago is idle when it becomes current again: no in-flight frame samples it.
-static void atlas_begin_frame(void) {
-    g_atlas_slot = g_atlas_nslots > 1 ? (int)(g_atlas_presents % (u64)g_atlas_nslots) : 0;
-    g_atlas_tex = g_atlas_slots[g_atlas_slot];
-}
-
-static void atlas_end_frame(void) { g_atlas_presents++; }
-
-// The swapchain image count can change when SDL rebuilds the swapchain. Rebuild
-// the ring (a resize-only cost) so a slot is never reused while a frame that
-// sampled it can still be in flight.
-static void atlas_sync_slots(void) {
-    if (!g_atlas_vulkan || !g_atlas_ren) return;
-    Sint64 n = SDL_GetNumberProperty(SDL_GetRendererProperties(g_atlas_ren),
-                                     SDL_PROP_RENDERER_VULKAN_SWAPCHAIN_IMAGE_COUNT_NUMBER, 0);
-    if (n < 1) return;
-    n = CLAMP(n, 1, 16);
-    if ((int)n == g_atlas_nslots) return;
-    SDL_Texture **slots = xmalloc((size_t)n * sizeof *slots);
-    u64 *versions = xmalloc((size_t)n * sizeof *versions);
-    for (int i = 0; i < (int)n; i++) {
-        slots[i] = atlas_texture_new(ATLAS_SIZE);
-        if (!slots[i]) {
-            for (int j = 0; j < i; j++) SDL_DestroyTexture(slots[j]);
-            free(slots);
-            free(versions);
-            return;
-        }
-        versions[i] = 0;
-    }
-    for (int i = 0; i < g_atlas_nslots; i++) SDL_DestroyTexture(g_atlas_slots[i]);
-    free(g_atlas_slots);
-    free(g_atlas_slot_version);
-    g_atlas_slots = slots;
-    g_atlas_slot_version = versions;
-    g_atlas_nslots = (int)n;
-    g_atlas_slot = 0;
-    g_atlas_tex = g_atlas_slots[0];
-}
-
-// Upload the whole CPU atlas once, between the discovery pass and the pass
-// that reaches the screen. No geometry in the presented pass has sampled this
-// slot yet, and the slot itself is not used by any in-flight frame.
-static void atlas_publish(void) {
-    if (g_atlas_slot_version[g_atlas_slot] == g_atlas_version) return;
-    SDL_UpdateTexture(g_atlas_tex, NULL, g_atlas, ATLAS_SIZE * 4);
-    g_atlas_slot_version[g_atlas_slot] = g_atlas_version;
     g_dirty_x0 = g_dirty_y0 = ATLAS_SIZE;
     g_dirty_x1 = g_dirty_y1 = 0;
 }
 
 static bool atlas_init(SDL_Renderer *ren) {
     g_atlas_ren = ren;
-    const char *driver = SDL_GetRendererName(ren);
-    g_atlas_vulkan = driver && (!strcmp(driver, "vulkan") || !strcmp(driver, "gpu"));
-    int nslots = 1;
-    if (g_atlas_vulkan) {
-        Sint64 n = SDL_GetNumberProperty(SDL_GetRendererProperties(ren),
-                                         SDL_PROP_RENDERER_VULKAN_SWAPCHAIN_IMAGE_COUNT_NUMBER, 3);
-        nslots = CLAMP((int)n, 1, 16);
-    }
     if (FT_Init_FreeType(&g_ft)) return false;
     FcInit();
     g_atlas = xmalloc((size_t)ATLAS_SIZE * ATLAS_SIZE * 4);
-    g_atlas_nslots = nslots;
-    g_atlas_slots = xmalloc((size_t)nslots * sizeof *g_atlas_slots);
-    g_atlas_slot_version = xmalloc((size_t)nslots * sizeof *g_atlas_slot_version);
-    for (int i = 0; i < nslots; i++) {
-        g_atlas_slots[i] = atlas_texture_new(ATLAS_SIZE);
-        if (!g_atlas_slots[i]) return false;
-        g_atlas_slot_version[i] = 0;
-    }
-    g_atlas_slot = 0;
-    g_atlas_presents = 0;
-    g_atlas_tex = g_atlas_slots[0];
+    g_atlas_tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, ATLAS_SIZE, ATLAS_SIZE);
+    if (!g_atlas_tex) return false;
+    SDL_SetTextureBlendMode(g_atlas_tex, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(g_atlas_tex, SDL_SCALEMODE_NEAREST);
     atlas_reset();
     return true;
 }
@@ -379,22 +292,10 @@ static int font_fallback(Font *f, u32 cp) {
         if (FT_Get_Char_Index(f->faces[i], cp)) return i;
     if (f->nfaces >= FONT_MAX_FACES) return -1;
     int result = -1;
-    bool private_use = (cp >= 0xe000 && cp <= 0xf8ff) || (cp >= 0xf0000 && cp <= 0x10ffff);
-    const char *override = private_use ? getenv("FE_NERD_FONT") : NULL;
-    if (override && *override) {
-        bool loaded = false;
-        for (int i = 0; i < f->nfaces; i++) loaded |= !strcmp(f->paths[i], override);
-        if (!loaded && font_add_face(f, override, 0) && FT_Get_Char_Index(f->faces[f->nfaces - 1], cp))
-            return f->nfaces - 1;
-    }
     FcPattern *pat = FcPatternCreate();
     FcCharSet *cs = FcCharSetCreate();
     FcCharSetAddChar(cs, cp);
     FcPatternAddCharSet(pat, FC_CHARSET, cs);
-    if (private_use) {
-        FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)"Symbols Nerd Font Mono");
-        FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)"Symbols Nerd Font");
-    }
     FcPatternAddBool(pat, FC_SCALABLE, FcTrue);
     FcConfigSubstitute(NULL, pat, FcMatchPattern);
     FcDefaultSubstitute(pat);
@@ -483,7 +384,6 @@ static Glyph *glyph_make(Font *f, u32 h, u32 key, int fi, FT_UInt gi) {
     FT_Face face = f->faces[fi];
     Glyph g = {0};
     g.cp = key;
-    g.missing = gi == 0;
     if (FT_HAS_COLOR(face) && FT_Load_Glyph(face, gi, FT_LOAD_COLOR | FT_LOAD_RENDER) == 0 &&
         face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) { // colour emoji: box-filter the strike down
         FT_GlyphSlot sl = face->glyph;
@@ -559,20 +459,13 @@ static Glyph *glyph_make(Font *f, u32 h, u32 key, int fi, FT_UInt gi) {
 // One frame's text + icons didn't fit: double the atlas (once; 2048^2 is plenty even at 4K).
 static bool atlas_grow(void) {
     if (g_atlas_size >= 2048) return false;
-    SDL_Texture **fresh = xmalloc((size_t)g_atlas_nslots * sizeof *fresh);
-    for (int i = 0; i < g_atlas_nslots; i++) {
-        fresh[i] = atlas_texture_new(2048);
-        if (!fresh[i]) {
-            for (int j = 0; j < i; j++) SDL_DestroyTexture(fresh[j]);
-            free(fresh);
-            return false;
-        }
-    }
-    for (int i = 0; i < g_atlas_nslots; i++) SDL_DestroyTexture(g_atlas_slots[i]);
-    memcpy(g_atlas_slots, fresh, (size_t)g_atlas_nslots * sizeof *fresh);
-    free(fresh);
+    SDL_Texture *t = SDL_CreateTexture(g_atlas_ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, 2048, 2048);
+    if (!t) return false;
+    SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
+    SDL_DestroyTexture(g_atlas_tex);
+    g_atlas_tex = t;
     g_atlas_size = 2048;
-    g_atlas_tex = g_atlas_slots[g_atlas_slot];
     free(g_atlas);
     g_atlas = xmalloc((size_t)g_atlas_size * g_atlas_size * 4);
     atlas_reset();

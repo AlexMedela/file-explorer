@@ -1,0 +1,7 @@
+<!-- File Explorer addition in the Symbols style: the trash bin with something in it (lid tipped up) -->
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M3.5 6H20.5M9 6V4.5C9 3.94772 9.44772 3.5 10 3.5H14C14.5523 3.5 15 3.94772 15 4.5V6" transform="rotate(-10 3.5 6)" stroke="#FEFEFE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M8 9.5L9.5 8L11.5 9.3L13.5 7.8L15.2 9.2L16.5 8.2" stroke="#FEFEFE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M5.5 10H18.5M5.5 10L6.5 19.1C6.6 20.18 7.5 21 8.6 21H15.4C16.5 21 17.4 20.18 17.5 19.1L18.5 10" stroke="#FEFEFE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M10 13V17.5M14 13V17.5" stroke="#FEFEFE" stroke-width="2" stroke-linecap="round"/>
+</svg>

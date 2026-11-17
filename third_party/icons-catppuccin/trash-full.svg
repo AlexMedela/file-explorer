@@ -1,0 +1,9 @@
+<!-- File Explorer addition in the Catppuccin style: the trash bin with something in it (lid tipped up) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+	<g fill="none" stroke-linecap="round" stroke-linejoin="round">
+		<path stroke="#FEFEFE" transform="rotate(-10 1.5 4)" d="M1.5 4h13M5.5 4v-1.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5" />
+		<path stroke="#FEFEFE" d="M5 6.5l1.2-1.3 1.3 1 1.5-1.2 1.3 1 1-.9" />
+		<path stroke="#FEFEFE" d="M3 6.5h10M3 6.5l.7 7a1.5 1.5 0 0 0 1.5 1.5h5.6a1.5 1.5 0 0 0 1.5-1.5l.7-7" />
+		<path stroke="#FEFEFE" d="M6.5 9v3.5M9.5 9v3.5" />
+	</g>
+</svg>

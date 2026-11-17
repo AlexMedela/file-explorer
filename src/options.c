@@ -2,18 +2,16 @@
 
 static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Integration", "Updates", "Advanced"};
 
-enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_COLOR, OK_TEXT, OK_APP_ICON };
+enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
 enum {
-    OPT_TERMINAL_PATH, OPT_THEME, OPT_ACCENT, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
-    OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
+    OPT_THEME, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
+    OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
+    OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
-    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES,
+    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
-    OPT_SYSTEM_ACCENT, OPT_SYSTEM_BACKGROUND, OPT_UNIFIED_SURFACES, OPT_SEPARATORS,
-    OPT_SIDEBAR_BRIGHTNESS, OPT_HEADER_BRIGHTNESS, OPT_MAIN_BRIGHTNESS, OPT_STATUS_BRIGHTNESS, OPT_PREVIEW_BRIGHTNESS,
-    OPT_TAB_POSITION, OPT_TAB_STYLE, OPT_SCROLL_COLOR, OPT_NAV_SELECTION_OPACITY, OPT_HEADER_LABEL, OPT_HEADER_TEXT, OPT_WINDOW_CONTROLS, OPT_HEADER_ICON, OPT_APP_ICON,
 };
 
 typedef struct {
@@ -22,12 +20,11 @@ typedef struct {
 } OptDef;
 
 static const OptDef g_opts[] = {
-    {OC_APPEARANCE, OK_CHOICE, OPT_THEME, "Theme", "Colour scheme (add your own JSON schemes below)"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_THEME, "Theme", "Colour scheme; System: light or dark as the desktop prefers, with its accent (KDE: its colours) (add your own JSON schemes below)"},
     {OC_APPEARANCE, OK_ACCENT, OPT_ACCENT, "Accent colour", "Selection, focus and highlight colour"},
-    {OC_APPEARANCE, OK_BOOL, OPT_SYSTEM_BACKGROUND, "Follow system appearance", "Automatically select the System theme; turn off to restore your previous theme"},
-    {OC_APPEARANCE, OK_BOOL, OPT_SYSTEM_ACCENT, "Match system highlight", "Follow the desktop portal accent; use the theme accent if unavailable"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders"},
-    {OC_APPEARANCE, OK_APP_ICON, OPT_APP_ICON, "Application icon", "Choose an SVG or PNG image; Use system restores the desktop icon"},
+    {OC_APPEARANCE, OK_BOOL, OPT_ACCENT_DESKTOP, "Desktop's accent colour", "Use the desktop's accent with every theme, where it has one (else the colour above)"},
+    {OC_APPEARANCE, OK_TEXT, OPT_SCROLL_COLOR, "Scrollbar colour", "Empty: Auto, the theme's own (System: the desktop's accent); or #RRGGBB / #RGB, then Apply"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders; System: the desktop's icon theme"},
     {OC_APPEARANCE, OK_CHOICE, OPT_FONT, "Font", "Interface font family"},
     {OC_APPEARANCE, OK_INT, OPT_FONT_SIZE, "Font size", "Text size at 100% zoom"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ROW_SPACING, "Row spacing", "Height of rows in the details and list views"},
@@ -37,26 +34,24 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_SIZE_BARS, "Folder size bars", "Bars behind folder sizes, relative to the largest"},
     {OC_APPEARANCE, OK_BOOL, OPT_LOAD_TIMES, "Load times", "How long the folder took to list, in the status bar"},
     {OC_APPEARANCE, OK_BOOL, OPT_SMOOTH, "Smooth scrolling", "Animate scrolling instead of jumping"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Integrated header shares the first row with tabs/navigation; Desktop title bar uses native decorations"},
-    {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_CONTROLS, "Show window controls", "Minimize, maximize and close in the integrated header; hiding them frees the row"},
-    {OC_APPEARANCE, OK_BOOL, OPT_HEADER_ICON, "Show header icon", "Show the original File-Explorer logo in the accent colour beside the header label"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_HEADER_LABEL, "Header label", "Show File-Explorer, hostname, custom text, or hide the header and use its space for the sidebar"},
-    {OC_APPEARANCE, OK_TEXT, OPT_HEADER_TEXT, "Custom header text", "Apply a custom label on the left; Default restores File-Explorer"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Cards: the open tab joins the folder below it; Pills: rounded tabs centred in a box"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: Explorer's own on every desktop (Automatic), or the desktop's title bar (System)"},
+    {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_BUTTONS, "Window buttons", "Minimise, maximise and close at the top right of Explorer's own title bar; without them, the desktop's keys close it"},
     {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Colours, padding and cursor of terminal tabs; font always follows Explorer"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_BRAND_NAME, "Name above the sidebar", "Explorer, this computer's name, your own text, or none (the sidebar then starts at the top)"},
+    {OC_APPEARANCE, OK_TEXT, OPT_BRAND_TEXT, "Your own name", "Shown above the sidebar instead of Explorer"},
+    {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "The logo before the name above the sidebar"},
+    {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED, "Unified surfaces", "Sidebar, header, preview and status bar take the file area's background; the lines between them stay"},
+    {OC_APPEARANCE, OK_BOOL, OPT_SEPARATORS, "Separator lines", "Lines between the sidebar, header, columns, preview and status bar (an edge you can drag shows on hover)"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_SIDEBAR, "Sidebar brightness", "With the name above it; darker or lighter than the theme's own colour, -30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_HEADER, "Header brightness", "Tab strip and toolbar, -30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_FILES, "File area brightness", "The background of the files, -30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_PREVIEW, "Preview panel brightness", "-30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_STATUS, "Status bar brightness", "-30% to +30%"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Font, colours, padding and cursor of terminal tabs (F4)"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_NEW, "Create theme from current colours", "Writes a JSON scheme you can edit"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_FOLDER, "Themes folder", "Open the folder and reload theme files"},
     {OC_APPEARANCE, OK_BUTTON, OPT_ICON_FOLDER, "Icon themes folder", "Add your own file icons (SVG); opens the folder and reloads them"},
-    {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED_SURFACES, "Unified surfaces", "Use one base colour for the sidebar, header, file area and status bar"},
-    {OC_APPEARANCE, OK_BOOL, OPT_SEPARATORS, "Show separator lines", "Panel edges, column dividers and header/status outlines (on by default)"},
-    {OC_APPEARANCE, OK_INT, OPT_NAV_SELECTION_OPACITY, "Navigation selection opacity", "Sidebar, configuration navigation and pill tabs: 0-100%, default 40%; hover stays at 8%"},
-    {OC_APPEARANCE, OK_INT, OPT_SIDEBAR_BRIGHTNESS, "Sidebar brightness", "Left sidebar only: negative darkens, positive lightens, zero resets"},
-    {OC_APPEARANCE, OK_INT, OPT_PREVIEW_BRIGHTNESS, "Preview panel brightness", "Right preview panel only: -30% to +30%, independent of the sidebar"},
-    {OC_APPEARANCE, OK_INT, OPT_HEADER_BRIGHTNESS, "Header brightness", "Label, navigation, tabs and window controls: -30% to +30%"},
-    {OC_APPEARANCE, OK_INT, OPT_MAIN_BRIGHTNESS, "File area brightness", "Main central window: -30% to +30%"},
-    {OC_APPEARANCE, OK_INT, OPT_STATUS_BRIGHTNESS, "Status bar brightness", "Lower status bar: -30% to +30%"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Classic tabs above navigation, or centered pills below navigation"},
-    {OC_APPEARANCE, OK_COLOR, OPT_SCROLL_COLOR, "Scrollbar colour", "Auto follows the desktop highlight, with theme fallback; enter #RRGGBB to override"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_HIDDEN, "Show hidden files", "Files and folders starting with a dot (Ctrl+H)"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_FOLDER_SIZES, "Calculate folder sizes", "Fill the Size column for folders in the background"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_GIT_STATUS, "Git status", "Mark changed, new and ignored files in Git repositories; branch in the status bar"},
@@ -77,10 +72,10 @@ static const OptDef g_opts[] = {
     {OC_VIEWS, OK_CHOICE, OPT_DEF_SORT, "Default sort", "Sort column for new tabs"},
     {OC_VIEWS, OK_BOOL, OPT_SORT_DESC, "Sort descending", "Reverse the default sort order"},
     {OC_VIEWS, OK_CHOICE, OPT_DEF_GROUP, "Default grouping", "Group items in the details view"},
-    {OC_INTEGRATION, OK_TEXT, OPT_TERMINAL_PATH, "Terminal executable", "Executable name or absolute path, without arguments; its name appears in the Open in menu"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_DEFAULT_FM, "Default file manager", "Folders from other apps open here"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_FM1, "\"Show in folder\" opens here", "From browsers and other apps"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_PICKER, "File chooser for other apps", "Their Open and Save dialogs open here"},
+    {OC_INTEGRATION, OK_CHOICE, OPT_TERMINAL, "Terminal app", "For right-click > Open in; Automatic: $TERMINAL, else the desktop's own"},
     {OC_UPDATES, OK_BUTTON, OPT_UPD_NOW, APP_LABEL " " APP_VERSION, "How this copy updates"},
     {OC_UPDATES, OK_BUTTON, OPT_UPD_HOW, "How it updates", "Where new versions come from"},
     {OC_UPDATES, OK_BUTTON, OPT_UPD_NOTES, "What's new", "Release notes of every version, on GitHub"},
@@ -94,10 +89,10 @@ static const OptDef g_opts[] = {
 
 // Section headings: each starts a card with the option it names and runs until the next one.
 static const struct { int id; const char *title; } g_opt_sections[] = {
-    {OPT_THEME, "Theme"}, {OPT_FONT, "Text"}, {OPT_DIM_INACTIVE, "Display"}, {OPT_TERM_LOOK, "Terminal"}, {OPT_THEME_NEW, "Custom themes"}, {OPT_UNIFIED_SURFACES, "Surfaces"}, {OPT_TAB_STYLE, "Tabs"}, {OPT_SCROLL_COLOR, "Scrollbars"},
+    {OPT_THEME, "Theme"}, {OPT_FONT, "Text"}, {OPT_DIM_INACTIVE, "Display"}, {OPT_UNIFIED, "Surfaces"}, {OPT_TERM_LOOK, "Terminal"}, {OPT_THEME_NEW, "Custom themes"},
     {OPT_HIDDEN, "Files and folders"}, {OPT_RESTORE, "Startup"}, {OPT_SINGLE_CLICK, "Mouse"}, {OPT_TRANSFERS, "Copying and moving"},
     {OPT_KEYS_RESET, "Shortcuts"}, {OPT_DEF_VIEW, "New folders"}, {OPT_RENDERER, "Rendering"}, {OPT_SETTINGS_FILE, "Maintenance"},
-    {OPT_IG_DEFAULT_FM, "Desktop roles (yours to give: installing never takes them)"},
+    {OPT_IG_DEFAULT_FM, "Desktop roles (yours to give: installing never takes them)"}, {OPT_TERMINAL, "External terminal"},
     {OPT_UPD_NOW, "Version"}, {OPT_IG_UPDATES, "Automatic updates"},
 };
 
@@ -111,21 +106,22 @@ static const char *g_sort_labels[SORT_COUNT] = {"Name", "Date modified", "Type",
                                                 "Permissions", "Owner"};
 static const char *g_group_labels[GROUP_COUNT] = {"None", "Date", "Type", "Size"};
 static const char *g_spacing_labels[3] = {"Compact", "Normal", "Comfortable"};
-static const char *g_title_bar_labels[] = {"Integrated header", "Desktop title bar"};
+static const char *g_title_bar_labels[] = {"Automatic", "System", "Explorer's own"}; // TITLEBAR_*
 static const char *g_renderers[] = {"auto", "vulkan", "opengl", "software"};
 static const char *g_renderer_labels[] = {"Automatic", "Vulkan", "OpenGL", "Software"};
 static const int g_transfer_counts[] = {1, 2, 4, 0}; // A.transfers_at_once (0 = no limit)
 static const char *g_transfer_labels[] = {"One at a time", "Two at a time", "Four at a time", "All at once"};
+static const char *g_tab_style_labels[] = {"Cards", "Pills"}; // TABS_*
+static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
 
 // hit parts recorded while drawing, tested on click
 enum { HP_NONE, HP_NAV, HP_TOGGLE, HP_SEG, HP_DROP, HP_MINUS, HP_PLUS, HP_SWATCH, HP_BUTTON, HP_DROPITEM, HP_SEARCH, HP_CLOSE,
-       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_EDIT_FIELD, HP_EDIT_APPLY, HP_EDIT_RESET, HP_ICON_CHOOSE };
+       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT };
 typedef struct { Rect r; int part, opt, arg; } OptHit;
 
 static struct {
     int cat;
     TextEdit search;
-    bool search_focus;
     f32 scroll, max_scroll;
     OptHit hits[256];
     int nhits;
@@ -144,14 +140,127 @@ static struct {
     // layouts page
     TextEdit lname;
     bool lname_focus;
+    // the name above the sidebar (OK_TEXT, applied as it's typed)
+    TextEdit brand;
+    bool brand_focus;
+    // the scrollbar colour (OK_TEXT, applied with Enter or Apply)
     TextEdit scroll_color;
-    bool scroll_color_focus;
-    TextEdit header_text;
-    bool header_text_focus;
-    TextEdit terminal_path;
-    bool terminal_path_focus;
-    TextEdit app_icon;
+    bool scroll_focus;
 } g_opt;
+
+// Options > Integration > Terminal app: the terminals installed (programs on $PATH), found on a worker each time
+// Options opens: the ones we know by name and those of terminal apps' .desktop entries (TerminalEmulator)
+static struct { char **v; int n; bool scanning; } g_termlist;
+
+typedef struct { char **v; int n; } TermScan;
+
+static void term_scan_add(TermScan *ts, const char *prog) {
+    struct stat st;
+    char p[PATH_MAX];
+    const char *name = path_basename(prog);
+    if (!strcmp(name, "flatpak") || !strcmp(name, "env") || !strcmp(name, "sh")) return; // (not the terminal itself)
+    if (prog[0] == '/') {
+        if (stat(prog, &st) || !S_ISREG(st.st_mode) || access(prog, X_OK)) return;
+        snprintf(p, sizeof p, "%s", prog);
+    } else {
+        const char *path = getenv("PATH");
+        char dirs[8192], *save = NULL;
+        bool found = false;
+        snprintf(dirs, sizeof dirs, "%s", path ? path : "");
+        for (char *d = strtok_r(dirs, ":", &save); d && !found; d = strtok_r(NULL, ":", &save)) {
+            snprintf(p, sizeof p, "%s/%s", d, prog);
+            found = !stat(p, &st) && S_ISREG(st.st_mode) && access(p, X_OK) == 0;
+        }
+        if (!found) return;
+        snprintf(p, sizeof p, "%s", prog);
+    }
+    for (int i = 0; i < ts->n; i++) // once each, by name (an absolute path that is the same program too)
+        if (!strcmp(path_basename(ts->v[i]), name)) return;
+    ts->v = xrealloc(ts->v, (size_t)(ts->n + 1) * sizeof *ts->v);
+    ts->v[ts->n++] = strdup(p);
+}
+
+static void term_scan_desktop_dir(TermScan *ts, const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        size_t l = strlen(e->d_name);
+        if (l < 9 || strcmp(e->d_name + l - 8, ".desktop")) continue;
+        char path[PATH_MAX], line[2048], exec[2048] = "";
+        snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        bool in_main = false, term = false, hidden = false;
+        while (fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (line[0] == '[') { in_main = !strcmp(line, "[Desktop Entry]"); continue; }
+            if (!in_main) continue;
+            if (!strncmp(line, "Exec=", 5)) snprintf(exec, sizeof exec, "%s", line + 5);
+            else if (!strncmp(line, "Categories=", 11)) term = strstr(line, "TerminalEmulator") != NULL;
+            else if (!strncmp(line, "Hidden=", 7)) hidden = !strcmp(line + 7, "true");
+        }
+        fclose(f);
+        if (!term || hidden || !exec[0]) continue;
+        const char *x = exec;
+        while (*x == ' ' || *x == '"') x++;
+        char prog[PATH_MAX];
+        snprintf(prog, sizeof prog, "%.*s", (int)strcspn(x, " \""), x);
+        if (prog[0]) term_scan_add(ts, prog);
+    }
+    closedir(d);
+}
+
+static int term_name_cmp(const void *a, const void *b) {
+    return strcasecmp(path_basename(*(char *const *)a), path_basename(*(char *const *)b));
+}
+
+static void term_scan_done(void *arg) {
+    TermScan *ts = arg;
+    for (int i = 0; i < g_termlist.n; i++) free(g_termlist.v[i]);
+    free(g_termlist.v);
+    g_termlist.v = ts->v;
+    g_termlist.n = ts->n;
+    g_termlist.scanning = false;
+    free(ts);
+    A.redraw = true;
+}
+
+static void term_scan_job(void *arg) {
+    (void)arg;
+    TermScan *ts = xcalloc(1, sizeof *ts);
+    for (size_t i = 0; i < ARRAY_COUNT(g_terminals); i++) term_scan_add(ts, g_terminals[i]);
+    const char *home = getenv("HOME") ? getenv("HOME") : "/", *xd = getenv("XDG_DATA_HOME"), *dd = getenv("XDG_DATA_DIRS");
+    char p[PATH_MAX], dirs[4096], *save = NULL;
+    if (xd && xd[0] == '/') snprintf(p, sizeof p, "%s/applications", xd);
+    else snprintf(p, sizeof p, "%s/.local/share/applications", home);
+    term_scan_desktop_dir(ts, p);
+    snprintf(dirs, sizeof dirs, "%s", dd && dd[0] ? dd : "/usr/local/share:/usr/share");
+    for (char *s = strtok_r(dirs, ":", &save); s; s = strtok_r(NULL, ":", &save)) {
+        snprintf(p, sizeof p, "%s/applications", s);
+        term_scan_desktop_dir(ts, p);
+    }
+    if (ts->n > 1) qsort(ts->v, (size_t)ts->n, sizeof *ts->v, term_name_cmp);
+    main_post(term_scan_done, ts);
+}
+
+static void term_scan_start(void) {
+    if (g_termlist.scanning) return;
+    g_termlist.scanning = true;
+    pool_submit(term_scan_job, NULL);
+}
+
+// The dropdown: Automatic, the terminals found, then the one set if it isn't among them (not installed any more).
+static bool term_choice_listed(void) {
+    for (int i = 0; i < g_termlist.n; i++)
+        if (!strcmp(g_termlist.v[i], g_external_terminal)) return true;
+    return !g_external_terminal[0];
+}
+
+static const char *term_choice(int i) {
+    if (i == 0) return "";
+    return i - 1 < g_termlist.n ? g_termlist.v[i - 1] : g_external_terminal;
+}
 
 // The description, with live state for the integration switches.
 static const char *opt_desc(const OptDef *o) {
@@ -187,12 +296,13 @@ static void opt_load_families(void) {
 
 static int opt_choice_count(int id) {
     switch (id) {
-    case OPT_TAB_POSITION: case OPT_TAB_STYLE: return 2;
     case OPT_THEME: return g_nthemes;
     case OPT_ICON_THEME: return icon_theme_count();
     case OPT_TERM_LOOK: return 2;
+    case OPT_TERMINAL: return 1 + g_termlist.n + !term_choice_listed();
     case OPT_TITLE_BAR: return (int)ARRAY_COUNT(g_title_bar_labels);
-    case OPT_HEADER_LABEL: return 4;
+    case OPT_BRAND_NAME: return (int)ARRAY_COUNT(g_brand_labels);
+    case OPT_TAB_STYLE: return (int)ARRAY_COUNT(g_tab_style_labels);
     case OPT_FONT: opt_load_families(); return 1 + g_opt.nfamilies;
     case OPT_ROW_SPACING: return 3;
     case OPT_DEF_VIEW: return ZOOM_COUNT;
@@ -206,8 +316,6 @@ static int opt_choice_count(int id) {
 
 static const char *opt_choice_label(int id, int i) {
     switch (id) {
-    case OPT_TAB_POSITION: return i == TAB_ABOVE ? "Above navigation" : "Below navigation";
-    case OPT_TAB_STYLE: return i == TAB_CLASSIC ? "Classic Explorer" : "Pills";
     case OPT_THEME: return g_themes[i].name;
     case OPT_ICON_THEME: return icon_theme_name(i);
     case OPT_TERM_LOOK: {
@@ -220,16 +328,22 @@ static const char *opt_choice_label(int id, int i) {
         return lab;
     }
     case OPT_FONT: return i == 0 ? "Automatic" : g_opt.families[i - 1];
+    case OPT_TERMINAL: {
+        if (i == 0) return "Automatic";
+        static char lab[NAME_MAX + 32];
+        const char *c = term_choice(i);
+        if (i - 1 < g_termlist.n) return path_basename(c);
+        snprintf(lab, sizeof lab, "%s (not found)", path_basename(c));
+        return lab;
+    }
     case OPT_ROW_SPACING: return g_spacing_labels[i];
     case OPT_DEF_VIEW: return g_zoom[i].label;
     case OPT_DEF_SORT: return g_sort_labels[i];
     case OPT_DEF_GROUP: return g_group_labels[i];
     case OPT_RENDERER: return g_renderer_labels[i];
     case OPT_TITLE_BAR: return g_title_bar_labels[i];
-    case OPT_HEADER_LABEL: {
-        static const char *labels[] = {"File-Explorer", "Hostname", "Custom", "Hidden"};
-        return labels[i];
-    }
+    case OPT_BRAND_NAME: return g_brand_labels[i];
+    case OPT_TAB_STYLE: return g_tab_style_labels[i];
     case OPT_TRANSFERS: return g_transfer_labels[i];
     }
     return "";
@@ -237,13 +351,17 @@ static const char *opt_choice_label(int id, int i) {
 
 static int opt_choice_get(int id) {
     switch (id) {
-    case OPT_TAB_POSITION: return g_tab_position;
-    case OPT_TAB_STYLE: return g_tab_style;
     case OPT_THEME: return g_theme_cur;
     case OPT_ICON_THEME: return g_icon_theme;
     case OPT_TERM_LOOK: return g_term_look_setting;
-    case OPT_TITLE_BAR: return A.title_bar == TITLEBAR_SYSTEM ? 1 : 0;
-    case OPT_HEADER_LABEL: return g_header_label;
+    case OPT_TERMINAL:
+        if (!g_external_terminal[0]) return 0;
+        for (int i = 0; i < g_termlist.n; i++)
+            if (!strcmp(g_termlist.v[i], g_external_terminal)) return i + 1;
+        return 1 + g_termlist.n;
+    case OPT_TITLE_BAR: return A.title_bar;
+    case OPT_BRAND_NAME: return A.brand_name;
+    case OPT_TAB_STYLE: return A.tab_style;
     case OPT_FONT:
         if (!A.ui_font[0]) return 0;
         opt_load_families();
@@ -286,13 +404,23 @@ static bool apply_ui_font(const char *family) {
 
 static void opt_choice_set(int id, int i) {
     switch (id) {
-    case OPT_TAB_POSITION: break; // Legacy option: position is determined by style.
-    case OPT_TAB_STYLE: g_tab_style = CLAMP(i, TAB_PILLS, TAB_CLASSIC); g_tab_position = g_tab_style == TAB_CLASSIC ? TAB_ABOVE : TAB_BELOW; layout(); break;
-    case OPT_THEME: theme_select(i); system_accent_start(); theme_apply(); break;
-    case OPT_ICON_THEME: icon_set_theme(i); system_accent_start(); break;
+    case OPT_THEME: g_theme_cur = i; theme_apply(); desktop_look_sync(); break;
+    case OPT_ICON_THEME: icon_set_theme(i); desktop_look_sync(); break;
     case OPT_TERM_LOOK: g_term_look_setting = i; tc_reload_all(); break;
-    case OPT_TITLE_BAR: A.title_bar = i == 1 ? TITLEBAR_SYSTEM : TITLEBAR_APP; titlebar_apply(); break;
-    case OPT_HEADER_LABEL: g_header_label = CLAMP(i, HEADER_APP, HEADER_HIDDEN); layout(); break;
+    case OPT_TERMINAL: {
+        char pick[PATH_MAX];
+        snprintf(pick, sizeof pick, "%s", term_choice(i));
+        snprintf(g_external_terminal, sizeof g_external_terminal, "%s", pick);
+        break;
+    }
+    case OPT_TITLE_BAR: A.title_bar = i; titlebar_apply(); break;
+    case OPT_TAB_STYLE: A.tab_style = i; layout(); break;
+    case OPT_BRAND_NAME:
+        A.brand_name = i;
+        g_opt.brand_focus = i == BRAND_CUSTOM; // its field appears: type the name straight away
+        g_opt.lname_focus = false;
+        layout();
+        break;
     case OPT_FONT:
         if (!apply_ui_font(i == 0 ? "" : g_opt.families[i - 1])) toast("Couldn't load that font");
         break;
@@ -314,14 +442,13 @@ static void opt_choice_set(int id, int i) {
 
 static bool opt_bool_get(int id) {
     switch (id) {
-    case OPT_WINDOW_CONTROLS: return g_show_window_controls;
-    case OPT_HEADER_ICON: return g_show_header_icon;
-    case OPT_SYSTEM_BACKGROUND: return g_match_system_background;
-    case OPT_SYSTEM_ACCENT: return g_accent_system;
-    case OPT_UNIFIED_SURFACES: return g_unified_surfaces;
-    case OPT_SEPARATORS: return g_show_separators;
     case OPT_DIM_INACTIVE: return A.dim_inactive;
     case OPT_ROUND_CORNERS: return A.round_corners;
+    case OPT_WINDOW_BUTTONS: return A.window_buttons;
+    case OPT_BRAND_LOGO: return A.brand_logo;
+    case OPT_UNIFIED: return g_unified_surfaces;
+    case OPT_SEPARATORS: return g_separators;
+    case OPT_ACCENT_DESKTOP: return g_accent_desktop;
     case OPT_ALT_ROWS: return A.alt_rows;
     case OPT_SIZE_BARS: return A.size_bars;
     case OPT_LOAD_TIMES: return A.load_times;
@@ -352,27 +479,26 @@ static bool opt_bool_get(int id) {
 
 static void opt_bool_toggle(int id) {
     switch (id) {
-    case OPT_WINDOW_CONTROLS: g_show_window_controls = !g_show_window_controls; layout(); break;
-    case OPT_HEADER_ICON: g_show_header_icon = !g_show_header_icon; break;
-    case OPT_SYSTEM_BACKGROUND:
-        theme_follow_system(!g_match_system_background);
-        if (g_match_system_background) system_accent_start();
-        theme_apply();
-        break;
-    case OPT_SYSTEM_ACCENT:
-        g_accent_system = !g_accent_system;
-        if (g_accent_system) system_accent_start();
-        theme_apply();
-        break;
-    case OPT_UNIFIED_SURFACES: g_unified_surfaces = !g_unified_surfaces; theme_apply(); break;
-    case OPT_SEPARATORS: g_show_separators = !g_show_separators; break;
     case OPT_DIM_INACTIVE: A.dim_inactive = !A.dim_inactive; break;
     case OPT_ROUND_CORNERS:
         A.round_corners = !A.round_corners;
-        // Window transparency is fixed when SDL creates the window. Keep the
-        // current mask, shadow and geometry together until the next launch.
-        toast("Rounded corners: restart to apply");
+        if (A.round_corners && !A.win_alpha && A.csd) toast("Rounded corners: after a restart");
         A.redraw = true;
+        break;
+    case OPT_WINDOW_BUTTONS:
+        A.window_buttons = !A.window_buttons;
+        layout();
+        break;
+    case OPT_BRAND_LOGO: A.brand_logo = !A.brand_logo; break;
+    case OPT_SEPARATORS: g_separators = !g_separators; break;
+    case OPT_ACCENT_DESKTOP:
+        g_accent_desktop = !g_accent_desktop;
+        theme_apply();
+        desktop_look_sync();
+        break;
+    case OPT_UNIFIED:
+        g_unified_surfaces = !g_unified_surfaces;
+        theme_apply();
         break;
     case OPT_ALT_ROWS: A.alt_rows = !A.alt_rows; break;
     case OPT_SIZE_BARS: A.size_bars = !A.size_bars; break;
@@ -415,203 +541,46 @@ static void opt_bool_toggle(int id) {
 
 static int opt_int_get(int id) {
     switch (id) {
-    case OPT_SIDEBAR_BRIGHTNESS: return g_surface_brightness[SURFACE_SIDEBAR];
-    case OPT_PREVIEW_BRIGHTNESS: return g_surface_brightness[SURFACE_PREVIEW];
-    case OPT_HEADER_BRIGHTNESS: return g_surface_brightness[SURFACE_HEADER];
-    case OPT_MAIN_BRIGHTNESS: return g_surface_brightness[SURFACE_MAIN];
-    case OPT_STATUS_BRIGHTNESS: return g_surface_brightness[SURFACE_STATUS];
-    case OPT_NAV_SELECTION_OPACITY: return g_navigation_selection_opacity;
     case OPT_FONT_SIZE: return A.font_size;
     case OPT_ZOOM: return (int)lroundf(A.zoom * 100);
     }
+    if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) return g_surface_bright[id - OPT_BRIGHT_SIDEBAR];
     return 0;
 }
 
 static void opt_int_step(int id, int dir) {
-    if (id >= OPT_SIDEBAR_BRIGHTNESS && id <= OPT_PREVIEW_BRIGHTNESS) {
-        int surface = id - OPT_SIDEBAR_BRIGHTNESS;
-        g_surface_brightness[surface] = CLAMP(g_surface_brightness[surface] + dir * 5, -30, 30);
-        theme_apply();
-        A.settings_dirty = true;
-        return;
-    }
     switch (id) {
-    case OPT_NAV_SELECTION_OPACITY:
-        g_navigation_selection_opacity = CLAMP(g_navigation_selection_opacity + dir * 5, 0, 100);
-        break;
     case OPT_FONT_SIZE:
         A.font_size = CLAMP(A.font_size + dir, 9, 24);
         reload_fonts();
         break;
     case OPT_ZOOM: set_zoom(A.zoom + 0.1f * (f32)dir); break;
     }
+    if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) {
+        int *b = &g_surface_bright[id - OPT_BRIGHT_SIDEBAR];
+        *b = CLAMP(*b + dir * 5, -30, 30);
+        theme_apply();
+    }
     A.settings_dirty = true;
 }
 
 static void opt_int_fmt(int id, char *buf, size_t cap) {
-    if (id >= OPT_SIDEBAR_BRIGHTNESS && id <= OPT_PREVIEW_BRIGHTNESS)
-        snprintf(buf, cap, "%+d%%", opt_int_get(id));
-    else if (id == OPT_ZOOM || id == OPT_NAV_SELECTION_OPACITY) snprintf(buf, cap, "%d%%", opt_int_get(id));
+    if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) snprintf(buf, cap, opt_int_get(id) ? "%+d%%" : "%d%%", opt_int_get(id));
+    else if (id == OPT_ZOOM) snprintf(buf, cap, "%d%%", opt_int_get(id));
     else snprintf(buf, cap, "%d px", opt_int_get(id));
 }
 
-static void opt_scroll_color_sync(void) {
-    char color[8] = "";
-    if (g_scroll_custom) snprintf(color, sizeof color, "#%06X", g_scroll_custom & 0xFFFFFF);
-    te_set(&g_opt.scroll_color, color, (int)strlen(color), 0);
-}
+// Scrollbar colour: Enter or Apply takes what's typed (empty: Auto); the field then shows it as saved.
 static void opt_scroll_color_apply(void) {
-    u32 color;
-    if (!scrollbar_color_parse(g_opt.scroll_color.buf, &color)) {
-        toast("Enter a hex colour such as #3DAEE9, or Auto");
-        return;
-    }
-    g_scroll_custom = color;
+    u32 c;
+    if (!scroll_color_parse(g_opt.scroll_color.buf, &c)) { toast("Scrollbar colour: #RRGGBB or #RGB (empty: Auto)"); return; }
+    g_scroll_custom = c;
     theme_apply();
-    if (!color) system_accent_start();
-    opt_scroll_color_sync();
-    g_opt.scroll_color_focus = false;
     A.settings_dirty = true;
-}
-
-static void opt_terminal_path_sync(void) {
-    te_set(&g_opt.terminal_path, g_external_terminal, (int)strlen(g_external_terminal), 0);
-}
-
-static bool opt_terminal_path_valid(const char *s) {
-    return strlen(s) < sizeof g_external_terminal && !strpbrk(s, "\n\r");
-}
-
-static void opt_terminal_path_apply(void) {
-    const char *s = g_opt.terminal_path.buf;
-    if (!opt_terminal_path_valid(s)) { toast("Enter a single executable name or absolute path"); return; }
-    char old[PATH_MAX];
-    snprintf(old, sizeof old, "%s", g_external_terminal);
-    snprintf(g_external_terminal, sizeof g_external_terminal, "%s", s);
-    char exe[PATH_MAX]; const char *name;
-    if (*s && !find_terminal(exe, sizeof exe, &name)) {
-        snprintf(g_external_terminal, sizeof g_external_terminal, "%s", old);
-        toast("Terminal executable not found or not executable");
-        return;
-    }
-    g_opt.terminal_path_focus = false;
-    A.settings_dirty = true;
-    if (*s) toast("Terminal applied: Open in %s", path_basename(g_external_terminal));
-    else toast("Terminal cleared; Open in external shell will open settings");
-}
-
-static void opt_header_text_sync(void) {
-    te_set(&g_opt.header_text, g_header_custom, (int)strlen(g_header_custom), 0);
-}
-static void opt_header_text_apply(void) {
-    if (!header_text_valid(g_opt.header_text.buf)) {
-        toast("Enter a short, single-line header label");
-        return;
-    }
-    snprintf(g_header_custom, sizeof g_header_custom, "%s", g_opt.header_text.buf);
-    g_header_label = HEADER_CUSTOM;
-    opt_header_text_sync();
-    g_opt.header_text_focus = false;
-    A.settings_dirty = true;
-}
-
-static unsigned g_opt_icon_session;
-static bool g_opt_icon_choosing;
-typedef struct {
-    unsigned session;
-    char location[PATH_MAX];
-    char *path, *error;
-} OptIconChoice;
-
-static void opt_app_icon_sync(void) {
-    te_set(&g_opt.app_icon, g_app_icon_path, (int)strlen(g_app_icon_path), 0);
-}
-static bool opt_app_icon_valid(const char *path) {
-    if (!*path) return true;
-    const char *ext = strrchr(path, '.');
-    return path[0] == '/' && !strpbrk(path, "\r\n") && ext &&
-           (!strcasecmp(ext, ".svg") || !strcasecmp(ext, ".png"));
-}
-static void opt_app_icon_apply(void) {
-    const char *path = g_opt.app_icon.buf;
-    if (!opt_app_icon_valid(path)) {
-        toast("Choose an SVG or PNG image");
-        return;
-    }
-    if (*path) {
-        u8 *pixels = system_icon_raster_path_colors(path, 64, 64, true);
-        if (!pixels) { toast("Couldn't load that icon image"); return; }
-        free(pixels);
-    }
-    snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", path);
-    g_app_icon_revision++;
-    opt_app_icon_sync();
-    A.settings_dirty = true;
-    if (!A.selftest && !A.screenshot) {
-        int result = app_icon_apply_now();
-        if (result == APP_DESKTOP_ERROR) toast("Window icon updated, but couldn't update the taskbar launcher");
-        else if (result == APP_DESKTOP_MISSING) toast("Window icon updated; export File Explorer to update its taskbar launcher");
-        else toast("Application icon updated");
-    }
-}
-
-static void opt_app_icon_chosen_main(void *userdata) {
-    OptIconChoice *choice = userdata;
-    g_opt_icon_choosing = false;
-    if (g_sheet.kind == SHEET_OPTIONS && choice->session == g_opt_icon_session) {
-        if (choice->error) toast("Couldn't open the image chooser: %s", choice->error);
-        else if (choice->path) {
-            te_set(&g_opt.app_icon, choice->path, (int)strlen(choice->path), 0);
-            opt_app_icon_apply();
-            opt_app_icon_sync();
-        }
-        A.redraw = true;
-    }
-    free(choice->path); free(choice->error); free(choice);
-}
-static void SDLCALL opt_app_icon_chosen(void *userdata, const char *const *files, int filter) {
-    (void)filter;
-    OptIconChoice *choice = userdata;
-    if (!files) choice->error = strdup(SDL_GetError());
-    else if (files[0]) choice->path = strdup(files[0]);
-    main_post(opt_app_icon_chosen_main, choice);
-}
-static void opt_app_icon_choose(void) {
-    if (g_opt_icon_choosing || A.selftest) return;
-    static const SDL_DialogFileFilter filters[] = {{"Icon images (SVG, PNG)", "svg;png"}};
-    OptIconChoice *choice = xcalloc(1, sizeof *choice);
-    choice->session = g_opt_icon_session;
-    if (g_app_icon_path[0]) snprintf(choice->location, sizeof choice->location, "%s", g_app_icon_path);
-    g_opt_icon_choosing = true;
-    SDL_ShowOpenFileDialog(opt_app_icon_chosen, choice, A.win, filters, (int)ARRAY_COUNT(filters),
-                           choice->location[0] ? choice->location : NULL, false);
-}
-
-static void opt_app_icon_preview(Rect r) {
-    static SDL_Texture *texture;
-    static unsigned revision = UINT_MAX;
-    static char theme[64];
-    static int size;
-    static u32 accent;
-    int px = MAX(1, (int)r.w);
-    if (!texture || revision != g_app_icon_revision || size != px || accent != COL_ACCENT ||
-        strcmp(theme, g_system_icon_current)) {
-        if (texture) SDL_DestroyTexture(texture);
-        texture = NULL;
-        revision = g_app_icon_revision; size = px; accent = COL_ACCENT;
-        snprintf(theme, sizeof theme, "%s", g_system_icon_current);
-        u8 *pixels = app_icon_raster(px, px);
-        SDL_Surface *surface = pixels ? SDL_CreateSurfaceFrom(px, px, SDL_PIXELFORMAT_RGBA32, pixels, px * 4) : NULL;
-        if (surface) {
-            texture = SDL_CreateTextureFromSurface(A.ren, surface);
-            SDL_DestroySurface(surface);
-        }
-        free(pixels);
-    }
-    if (texture) {
-        draw_flush();
-        SDL_RenderTexture(A.ren, texture, NULL, &(SDL_FRect){r.x, r.y, r.w, r.h});
-    }
+    char buf[16] = "";
+    if (c) snprintf(buf, sizeof buf, "#%06X", c & 0xFFFFFF);
+    te_set(&g_opt.scroll_color, buf, (int)strlen(buf), (int)strlen(buf));
+    g_opt.scroll_focus = false;
 }
 
 static void opt_button(int id) {
@@ -627,9 +596,11 @@ static void opt_button(int id) {
             if (access(path, F_OK) != 0 && theme_find(name) < 0) break;
         }
         if (!theme_export(path, name)) { toast("Couldn't write %s", path); break; }
+        for (int k = 0; k < SURF_COUNT; k++) // the scheme has these now (applied again they'd double); not the status bar's
+            if (k != SURF_STATUS) g_surface_bright[k] = 0;
         themes_scan();
         int t = theme_find(name);
-        if (t >= 0) { theme_use_capture(t); A.settings_dirty = true; }
+        if (t >= 0) { g_theme_cur = t; theme_apply(); desktop_look_sync(); A.settings_dirty = true; }
         toast("Created %s.json - edit it and reopen Options to reload", name);
         open_path(path);
         break;
@@ -652,6 +623,7 @@ static void opt_button(int id) {
         break;
     case OPT_SETTINGS_FILE: run_command(CMD_OPEN_SETTINGS); break;
     case OPT_REINDEX: run_command(CMD_REINDEX); break;
+    case OPT_SCROLL_COLOR: opt_scroll_color_apply(); break;
     case OPT_UPD_NOW: upd_button_press(); break;
     case OPT_UPD_NOTES: upd_notes(); break;
     case OPT_UPD_HOW:
@@ -665,8 +637,21 @@ static void opt_button(int id) {
     }
 }
 
-// Rows that don't apply to this copy (updating by itself: AppImage only).
+// Typing in "Your own name": applied at once, one line, cut at a whole character.
+static void opt_brand_sync(void) {
+    for (char *s = g_opt.brand.buf; *s; s++)
+        if ((unsigned char)*s < 32) *s = ' '; // (a pasted line break)
+    char *d = A.brand_text;
+    size_t n = 0;
+    for (const char *s = g_opt.brand.buf; *s && n < sizeof A.brand_text - 1; s++) d[n++] = *s;
+    if (g_opt.brand.buf[n]) while (n > 0 && ((unsigned char)d[n] & 0xC0) == 0x80) n--; // (cut inside a character)
+    d[n] = 0;
+    A.settings_dirty = true;
+}
+
+// Rows that don't apply to this copy (updating by itself: AppImage only), or to the current choice.
 static bool opt_hidden(int id) {
+    if (id == OPT_BRAND_TEXT) return A.brand_name != BRAND_CUSTOM;
     if (id == OPT_UPD_HOW) return upd_can_install(); // (the AppImage's own rows say it)
     return (id == OPT_IG_UPDATES || id == OPT_UPD_AUTO) && !upd_can_install();
 }
@@ -684,7 +669,6 @@ static bool opt_matches(const OptDef *o, const char *q) {
 // --- open / close ----------------------------------------------------------------
 
 static void options_open(void) {
-    g_opt_icon_session++;
     if (g_sheet.kind) sheet_close();
     g_sheet.kind = SHEET_OPTIONS;
     int keep = g_opt.cat;
@@ -697,10 +681,11 @@ static void options_open(void) {
     g_opt.drop_opt = -1;
     g_opt.hover_row = -1;
     g_opt.rec_def = -1;
-    opt_scroll_color_sync();
-    opt_header_text_sync();
-    opt_app_icon_sync();
-    opt_terminal_path_sync();
+    te_set(&g_opt.brand, A.brand_text, (int)strlen(A.brand_text), (int)strlen(A.brand_text));
+    char sc[16] = "";
+    if (g_scroll_custom) snprintf(sc, sizeof sc, "#%06X", g_scroll_custom & 0xFFFFFF);
+    te_set(&g_opt.scroll_color, sc, (int)strlen(sc), (int)strlen(sc));
+    term_scan_start();
     themes_scan(); // pick up new/edited theme files
     theme_apply();
     A.redraw = true;
@@ -720,7 +705,6 @@ static void opt_drop_filter(void) {
 }
 
 static void opt_drop_open(int id, Rect r) {
-    g_opt.search_focus = false;
     g_opt.drop_opt = id;
     g_opt.drop_r = r;
     te_set(&g_opt.drop_filter, "", 0, 0);
@@ -741,17 +725,6 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
     draw_rrect(kx - kr, t.y + t.h * 0.5f - kr, kr * 2, kr * 2, kr, C(on ? COL_ON_ACCENT : COL_KNOB_OFF));
 }
 
-// Apply/reset actions use a visible accent hover independent of subtle theme control shades.
-static void opt_action_button(Rect r, const char *label, bool enabled) {
-    bool hover = hand_if(enabled && A.mouse_in && in_rect(r, A.mx, A.my));
-    draw_rrect(r.x, r.y, r.w, r.h, S(7),
-               C(!enabled ? COL_CONTROL_OFF : hover ? COL_ACCENT_HOVER : COL_CONTROL));
-    Font *f = &A.font;
-    f32 width = text_width(f, label, (int)strlen(label));
-    draw_text(f, r.x + (r.w - width) * .5f, text_y(f, r.y, r.h), label, (int)strlen(label),
-              C(!enabled ? COL_TEXT_FAINT : hover ? COL_ON_ACCENT : COL_TEXT));
-}
-
 static bool opt_hover(Rect r) { return hot(r); }
 
 // Control area of one row (right-aligned inside [x, x + w]).
@@ -761,54 +734,6 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     f32 y = roundf(cy - ch * 0.5f);
     char buf[64];
     switch (o->kind) {
-    case OK_APP_ICON: {
-        f32 preview = roundf(S(34)), gap = roundf(S(6)), bx = x + preview + gap;
-        opt_app_icon_preview((Rect){x, roundf(cy - preview * 0.5f), preview, preview});
-        const char *name = g_app_icon_path[0] ? strrchr(g_app_icon_path, '/') : NULL;
-        const char *status = g_app_icon_path[0] ? (name ? name + 1 : g_app_icon_path) : "System icon";
-        draw_text_fit(fs, bx, roundf(cy - S(23)), MAX(0.f, x + w - bx), status, (int)strlen(status), C(COL_TEXT_DIM), 0);
-        const char *label = g_opt_icon_choosing ? "Choosing..." : "Choose image";
-        f32 available = MAX(0.f, x + w - bx - gap);
-        f32 choose_w = MIN(ceilf(text_width(f, label, (int)strlen(label)) + S(18)), available * 0.55f);
-        f32 reset_w = MIN(ceilf(text_width(f, "Use system", 10) + S(18)), MAX(0.f, available - choose_w));
-        Rect choose = {bx, roundf(cy - S(2)), choose_w, roundf(S(26))};
-        Rect reset = {choose.x + choose.w + gap, choose.y, reset_w, choose.h};
-        ClipSave clip = draw_clip_push((SDL_Rect){(int)bx, (int)choose.y, (int)MAX(0.f, x + w - bx), (int)choose.h});
-        sheet_button(choose, label, false, !g_opt_icon_choosing);
-        sheet_button(reset, "Use system", false, !g_opt_icon_choosing && g_app_icon_path[0]);
-        draw_clip_pop(clip);
-        if (!g_opt_icon_choosing) {
-            opt_hit(choose, HP_ICON_CHOOSE, o->id, 0);
-            if (g_app_icon_path[0]) opt_hit(reset, HP_EDIT_RESET, o->id, 0);
-        }
-        break;
-    }
-    case OK_COLOR: case OK_TEXT: {
-        bool color = o->kind == OK_COLOR, terminal = o->id == OPT_TERMINAL_PATH;
-        TextEdit *edit = terminal ? &g_opt.terminal_path : color ? &g_opt.scroll_color : &g_opt.header_text;
-        bool focus = terminal ? g_opt.terminal_path_focus : color ? g_opt.scroll_color_focus : g_opt.header_text_focus;
-        f32 gap = roundf(S(6));
-        f32 bw = MIN(ceilf(MAX(text_width(f, "Apply", 5), text_width(f, color ? "Auto" : "Default", color ? 4 : 7)) + S(24)),
-                     MAX(0.f, (w - gap * 2) * 0.5f));
-        f32 preview = color && w >= S(240) ? roundf(S(18)) : 0;
-        f32 inset = preview > 0 ? preview + gap : 0;
-        Rect reset = {x + w - bw, y, bw, ch};
-        Rect apply = {reset.x - gap - bw, y, bw, ch};
-        Rect field = {x + inset, y, MAX(0.f, apply.x - gap - x - inset), ch};
-        if (preview > 0) draw_rrect(x, cy - preview * 0.5f, preview, preview, S(4), C(COL_SCROLL));
-        sheet_field(field, edit, focus, terminal ? "/path/to/terminal" : color ? "Auto / #RRGGBB" : "Header text");
-        u32 parsed;
-        bool valid = terminal ? opt_terminal_path_valid(edit->buf) : color ? scrollbar_color_parse(edit->buf, &parsed) : header_text_valid(edit->buf);
-        if (!valid && edit->buf[0]) draw_rrect_outline(field.x, field.y, field.w, field.h, S(6), 1, C(COL_DANGER));
-        ClipSave buttons_clip = draw_clip_push((SDL_Rect){(int)apply.x, (int)y, (int)(x + w - apply.x), (int)ch});
-        opt_action_button(apply, "Apply", valid);
-        opt_action_button(reset, color ? "Auto" : "Default", true);
-        draw_clip_pop(buttons_clip);
-        opt_hit(field, HP_EDIT_FIELD, o->id, 0);
-        if (valid) opt_hit(apply, HP_EDIT_APPLY, o->id, 0);
-        opt_hit(reset, HP_EDIT_RESET, o->id, 0);
-        break;
-    }
     case OK_BOOL: {
         Rect t = {x + w - roundf(S(40)), roundf(cy - S(10)), roundf(S(40)), roundf(S(20))};
         opt_toggle_draw(t, opt_bool_get(o->id), opt_hover(t));
@@ -831,7 +756,7 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     }
     case OK_CHOICE: {
         int n = opt_choice_count(o->id), cur = opt_choice_get(o->id);
-        if (n <= 3 && o->id != OPT_THEME && o->id != OPT_FONT) { // segmented
+        if (n <= 3 && o->id != OPT_THEME && o->id != OPT_FONT && o->id != OPT_TERMINAL) { // segmented
             f32 sw = roundf(S(96)), x0 = x + w - sw * (f32)n;
             draw_rrect(x0, y, sw * (f32)n, ch, S(7), C(COL_FIELD));
             for (int i = 0; i < n; i++) {
@@ -872,7 +797,7 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             Rect r = {x0 + (sz + gap) * (f32)k, roundf(cy - sz * 0.5f), sz, sz};
             u32 col = i == 0 ? tdef : g_accents[i - 1].rgb;
             bool is_default = i == 0 || i - 1 == same;
-            bool on = !g_accent_system && ((is_default && !g_accent_custom) || (i > 0 && g_accent_custom == (0x01000000u | g_accents[i - 1].rgb)));
+            bool on = is_default && !g_accent_custom ? true : i > 0 && g_accent_custom == (0x01000000u | g_accents[i - 1].rgb);
             if (on || opt_hover(r))
                 draw_rrect_outline(r.x - S(3), r.y - S(3), sz + S(6), sz + S(6), (sz + S(6)) * 0.5f, MAX(1.f, S(1.5f)),
                                    C(on ? COL_TEXT : COL_TEXT_FAINT));
@@ -901,6 +826,21 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
         Rect r = {x + w - bw, y, bw, ch};
         sheet_button(r, l, primary, enabled);
         if (enabled) opt_hit(r, HP_BUTTON, o->id, 0);
+        break;
+    }
+    case OK_TEXT: { // the name above the sidebar, the scrollbar colour (with its Apply button)
+        if (o->id == OPT_SCROLL_COLOR) {
+            f32 bw = MAX(roundf(S(80)), text_width(f, "Apply", 5) + S(28)), fw = roundf(S(140));
+            Rect b = {x + w - bw, y, bw, ch}, r = {b.x - S(8) - fw, y, fw, ch};
+            sheet_field(r, &g_opt.scroll_color, g_opt.scroll_focus, "Auto");
+            opt_hit(r, HP_TEXT, o->id, 1);
+            sheet_button(b, "Apply", false, true);
+            opt_hit(b, HP_BUTTON, o->id, 0);
+            break;
+        }
+        Rect r = {x + w - MIN(roundf(S(260)), w), y, MIN(roundf(S(260)), w), ch};
+        sheet_field(r, &g_opt.brand, g_opt.brand_focus, APP_LABEL);
+        opt_hit(r, HP_TEXT, o->id, 0);
         break;
     }
     }
@@ -1146,10 +1086,10 @@ static void options_draw(void) {
     // search field
     f32 sw = MIN(roundf(S(300)), w * 0.45f), sh = roundf(S(30));
     Rect sr = {cr.x - S(10) - sw, r.y + pad - S(6), sw, sh};
-    bool sfocus = g_opt.drop_opt < 0 && g_opt.search_focus;
+    bool sfocus = g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus;
     sheet_field(sr, &g_opt.search, sfocus, "Search settings");
     opt_hit(sr, HP_SEARCH, -1, 0);
-    // Options navigation shares the sidebar's flat, subdued accent treatment.
+    // nav (same active style as the sidebar: accent-tinted row with a full-height accent edge)
     f32 top = r.y + pad + roundf(S(44));
     f32 navw = roundf(S(176));
     const char *q = g_opt.search.buf;
@@ -1157,11 +1097,13 @@ static void options_draw(void) {
     for (int c = 0; c < OC_COUNT; c++) {
         Rect nr = {r.x + S(12), ny, navw - S(32), roundf(S(30))}; // clear of the divider
         bool on = !q[0] && g_opt.cat == c;
-        bool hover = opt_hover(nr);
-        u32 background = navigation_surface_color(COL_POPUP, on);
-        if (on || hover) draw_rrect(nr.x, nr.y, nr.w, nr.h, S(7), C(background));
-        u32 foreground = on ? surface_foreground_color(background, false, false) : COL_TEXT_DIM;
-        draw_text(f, nr.x + S(14), text_y(f, nr.y, nr.h), g_opt_cats[c], (int)strlen(g_opt_cats[c]), C(foreground));
+        if (on) {
+            draw_rrect(nr.x, nr.y, nr.w, nr.h, S(7), C(rgb_mix(COL_SEL_IDLE, COL_ACCENT, 0.16f)));
+            ClipSave ac = draw_clip_push((SDL_Rect){(int)nr.x, (int)nr.y, (int)roundf(S(3)), (int)nr.h});
+            draw_rrect(nr.x, nr.y, nr.w, nr.h, S(7), C(COL_ACCENT));
+            draw_clip_pop(ac);
+        } else if (opt_hover(nr)) draw_rrect(nr.x, nr.y, nr.w, nr.h, S(7), C(COL_HOVER));
+        draw_text(f, nr.x + S(14), text_y(f, nr.y, nr.h), g_opt_cats[c], (int)strlen(g_opt_cats[c]), C(on ? COL_TEXT : COL_TEXT_DIM));
         opt_hit(nr, HP_NAV, -1, c);
         ny += nr.h + S(2);
     }
@@ -1276,19 +1218,16 @@ static void options_draw(void) {
 
 // --- input -----------------------------------------------------------------------
 
-static bool options_text_focus(TextEdit *edit) {
-    if (g_sheet.kind != SHEET_OPTIONS) return true;
-    if (edit != &g_opt.search && edit != &g_opt.lname && edit != &g_opt.scroll_color &&
-        edit != &g_opt.header_text && edit != &g_opt.terminal_path && edit != &g_opt.drop_filter)
-        return false;
-    if (edit == &g_opt.drop_filter) return g_opt.drop_opt >= 0;
-    if (g_opt.drop_opt >= 0) return false;
-    g_opt.search_focus = edit == &g_opt.search;
-    g_opt.lname_focus = edit == &g_opt.lname;
-    g_opt.scroll_color_focus = edit == &g_opt.scroll_color;
-    g_opt.header_text_focus = edit == &g_opt.header_text;
-    g_opt.terminal_path_focus = edit == &g_opt.terminal_path;
-    return true;
+// (sheet_text_focus) A click on a text field: the search field, the layout name, the name above the sidebar or the
+// open dropdown's filter.
+static bool options_text_focus(TextEdit *edit, bool focused) {
+    if (g_opt.rec_def >= 0) return false; // the click ends recording a shortcut first (options_click)
+    if (g_opt.drop_opt >= 0) return edit == &g_opt.drop_filter;
+    if (edit == &g_opt.search) { g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.lname_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.scroll_color) { g_opt.scroll_focus = true; g_opt.lname_focus = g_opt.brand_focus = false; return true; }
+    return focused;
 }
 
 static void options_click(f32 x, f32 y, int clicks) {
@@ -1315,41 +1254,12 @@ static void options_click(f32 x, f32 y, int clicks) {
         if (on_rec) return;
     }
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
-    g_opt.search_focus = false;
     if (sheet_scrollbar_press(x, y)) return;
-    g_opt.search_focus = g_opt.lname_focus = g_opt.scroll_color_focus = g_opt.header_text_focus = g_opt.terminal_path_focus = false;
+    g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; // a click elsewhere gives the keyboard back to the search field
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];
         if (hp->r.w <= 0 || !in_rect(hp->r, x, y)) continue;
         switch (hp->part) {
-        case HP_ICON_CHOOSE: opt_app_icon_choose(); return;
-        case HP_SEARCH: g_opt.search_focus = true; return;
-        case HP_EDIT_FIELD:
-            if (hp->opt == OPT_TERMINAL_PATH) g_opt.terminal_path_focus = true;
-            else if (hp->opt == OPT_HEADER_TEXT) g_opt.header_text_focus = true;
-            else g_opt.scroll_color_focus = true;
-            return;
-        case HP_EDIT_APPLY:
-            if (hp->opt == OPT_TERMINAL_PATH) opt_terminal_path_apply();
-            else if (hp->opt == OPT_HEADER_TEXT) opt_header_text_apply();
-            else opt_scroll_color_apply();
-            return;
-        case HP_EDIT_RESET:
-            if (hp->opt == OPT_TERMINAL_PATH) {
-                te_set(&g_opt.terminal_path, "", 0, 0);
-                opt_terminal_path_apply();
-            } else if (hp->opt == OPT_APP_ICON) {
-                te_set(&g_opt.app_icon, "", 0, 0);
-                opt_app_icon_apply();
-            } else if (hp->opt == OPT_HEADER_TEXT) {
-                header_label_defaults();
-                opt_header_text_sync();
-                A.settings_dirty = true;
-            } else {
-                te_set(&g_opt.scroll_color, "", 0, 0);
-                opt_scroll_color_apply();
-            }
-            return;
         case HP_CLOSE: sheet_close(); return;
         case HP_NAV:
             g_opt.cat = hp->arg;
@@ -1363,13 +1273,13 @@ static void options_click(f32 x, f32 y, int clicks) {
         case HP_MINUS: opt_int_step(hp->opt, -1); return;
         case HP_PLUS: opt_int_step(hp->opt, +1); return;
         case HP_SWATCH:
-            g_accent_system = false;
             g_accent_custom = hp->arg == 0 ? 0 : 0x01000000u | g_accents[hp->arg - 1].rgb;
             theme_apply();
             A.settings_dirty = true;
             return;
         case HP_BUTTON: opt_button(hp->opt); return;
         case HP_LNAME: g_opt.lname_focus = true; return;
+        case HP_TEXT: *(hp->arg ? &g_opt.scroll_focus : &g_opt.brand_focus) = true; return;
         case HP_LSAVE: opt_layout_save(); return;
         case HP_LOPEN: {
             int li = hp->arg;
@@ -1410,22 +1320,18 @@ static void options_click(f32 x, f32 y, int clicks) {
 }
 
 static void options_key(SDL_Keycode k, SDL_Keymod mod) {
-    if (g_opt.terminal_path_focus && g_opt.drop_opt < 0) {
-        if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_terminal_path_apply();
-        else if (k == SDLK_ESCAPE) { opt_terminal_path_sync(); g_opt.terminal_path_focus = false; }
-        else te_key(&g_opt.terminal_path, k, mod);
-        return;
-    }
-    if ((g_opt.scroll_color_focus || g_opt.header_text_focus) && g_opt.drop_opt < 0) {
-        if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
-            if (g_opt.header_text_focus) opt_header_text_apply(); else opt_scroll_color_apply();
-        } else if (k == SDLK_ESCAPE) {
-            opt_scroll_color_sync(); opt_header_text_sync();
-            g_opt.scroll_color_focus = g_opt.header_text_focus = false;
-        } else te_key(g_opt.header_text_focus ? &g_opt.header_text : &g_opt.scroll_color, k, mod);
-        return;
-    }
     if (g_opt.rec_def >= 0) { opt_rec_key(k, mod); return; }
+    if (g_opt.brand_focus && g_opt.drop_opt < 0) {
+        if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_ESCAPE) g_opt.brand_focus = false;
+        else if (te_key(&g_opt.brand, k, mod)) opt_brand_sync();
+        return;
+    }
+    if (g_opt.scroll_focus && g_opt.drop_opt < 0) {
+        if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_scroll_color_apply();
+        else if (k == SDLK_ESCAPE) g_opt.scroll_focus = false;
+        else te_key(&g_opt.scroll_color, k, mod);
+        return;
+    }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) {
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_layout_save();
         else if (k == SDLK_ESCAPE) g_opt.lname_focus = false;
@@ -1452,28 +1358,26 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
         else sheet_close();
         return;
     case SDLK_TAB:
-        if (!g_opt.search.buf[0]) { g_opt.cat = (g_opt.cat + (mod & SDL_KMOD_SHIFT ? OC_COUNT - 1 : 1)) % OC_COUNT; g_opt.scroll = 0; g_opt.lname_focus = g_opt.cat == OC_LAYOUTS; g_opt.search_focus = false; }
+        if (!g_opt.search.buf[0]) { g_opt.cat = (g_opt.cat + (mod & SDL_KMOD_SHIFT ? OC_COUNT - 1 : 1)) % OC_COUNT; g_opt.scroll = 0; g_opt.lname_focus = g_opt.cat == OC_LAYOUTS; }
         return;
     case SDLK_PAGEDOWN: g_opt.scroll += S(300); return;
     case SDLK_PAGEUP: g_opt.scroll -= S(300); return;
     default:
-        if (te_key(&g_opt.search, k, mod)) { g_opt.search_focus = true; g_opt.scroll = 0; }
+        if (te_key(&g_opt.search, k, mod)) g_opt.scroll = 0;
     }
 }
 
 static void options_text(const char *text) {
     if (g_opt.rec_def >= 0) return;
-    if (g_opt.terminal_path_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.terminal_path, text); return; }
-    if (g_opt.header_text_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.header_text, text); return; }
-    if (g_opt.scroll_color_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.scroll_color, text); return; }
+    if (g_opt.brand_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.brand, text); opt_brand_sync(); return; }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.lname, text); return; }
+    if (g_opt.scroll_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.scroll_color, text); return; }
     if (g_opt.drop_opt >= 0) {
         te_insert(&g_opt.drop_filter, text);
         opt_drop_filter();
         return;
     }
     te_insert(&g_opt.search, text);
-    g_opt.search_focus = true;
     g_opt.scroll = 0;
 }
 

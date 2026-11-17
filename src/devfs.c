@@ -953,8 +953,12 @@ static bool dfs_is_mount(const char *path) {
     FILE *f = fopen("/proc/self/mounts", "r");
     char line[PATH_MAX * 2], src[PATH_MAX], mp[PATH_MAX];
     bool found = false;
-    while (f && !found && fgets(line, sizeof line, f))
-        found = sscanf(line, "%4095s %4095s", src, mp) == 2 && !strcmp(mp, path);
+    while (f && !found && fgets(line, sizeof line, f)) {
+        char m2[PATH_MAX];
+        if (sscanf(line, "%4095s %4095s", src, mp) != 2) continue;
+        mount_unescape(mp, m2, sizeof m2);
+        found = !strcmp(m2, path);
+    }
     if (f) fclose(f);
     return found;
 }
@@ -979,12 +983,7 @@ static int devfs_main(int argc, char **argv) {
         while (mf && fgets(line, sizeof line, mf)) {
             if (sscanf(line, "%4095s %4095s %63s", s, m, t) != 3 || strcmp(s, src) || strcmp(t, "fuse.fe-device")) continue;
             char mp[PATH_MAX];
-            size_t o = 0;
-            for (const char *c = m; *c && o + 1 < sizeof mp; c++) {
-                if (c[0] == '\\' && isdigit((u8)c[1]) && isdigit((u8)c[2]) && isdigit((u8)c[3])) { mp[o++] = (char)((c[1] - '0') * 64 + (c[2] - '0') * 8 + (c[3] - '0')); c += 3; }
-                else mp[o++] = *c;
-            }
-            mp[o] = 0;
+            mount_unescape(m, mp, sizeof mp);
             struct statvfs sv;
             if (statvfs(mp, &sv) == 0) { fclose(mf); dfs_report("ok %s", mp); return 0; }
             pid_t pid;

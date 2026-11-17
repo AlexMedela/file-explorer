@@ -5,13 +5,6 @@ on:
   pull_request:
 
 jobs:
-  package-versions:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check release versions
-        run: sh tools/check-release-version.sh
-
   # Portable build on the distros SDL 3.2+ is packaged for; warnings fail the job.
   build:
     strategy:

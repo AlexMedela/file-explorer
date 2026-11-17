@@ -14,53 +14,29 @@ pinned folders, columns, and your tabs/split panes (`restore_session=0` to start
 (0 = all at once) and `verify_copies=0` are the transfer queue's settings. `renderer=auto` uses
 OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is resized; Vulkan can take less memory
 on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
-Options > Appearance > **Application icon** shows the current icon. Click **Choose image** to select an SVG
-or PNG; the choice applies immediately. **Use system** clears the override and follows the desktop icon theme.
-The saved `app_icon` value is the selected image path (empty for System). Missing images fall back to desktop artwork.
-
-Taskbar icons come from the desktop launcher independently of the window icon. Explorer copies the original
-artwork into the user's data directory and updates its per-user launcher to reference that copy. With Distrobox,
-it preserves the exported launch command and uses the exported desktop file's ID for window grouping. Restart
-once after installing this fix so an existing window picks up the corrected ID. No re-export is needed for each
-icon change once the launcher exists.
-
-Options > Appearance > **Title bar** has two choices:
-
-- **Integrated header** (`title_bar=app`) places minimize/maximize/close on the first tab/navigation row.
-  Tabs above navigation share the controls row; with tabs below or only one tab, navigation shares it.
-  Drag the left label or empty header space to move, double-click it to maximize, or right-click for the window menu.
-- **Desktop title bar** (`title_bar=system`) leaves decorations and buttons to the desktop. Tiling/window-manager
-  setups that omit a native title bar are supported without reserving extra space inside the app.
-
-**Show window controls** hides/shows the three app-drawn buttons in Integrated header mode. Hiding them gives their
-space back to tabs/navigation and leaves header dragging, edge resizing, shortcuts and the window menu available.
-Desktop-provided controls are configured by the window manager. App-drawn controls use the desktop icon theme's
-window-action shapes when available, with built-in vector fallbacks, independently of the selected file-icon set.
-Older `title_bar=auto` settings remain readable; the UI no longer exposes Automatic or "Explorer's own" choices.
-`FE_TITLE_BAR=app|system` still overrides the mode for one run.
-
-**Header label** chooses File-Explorer (default), Hostname, Custom or Hidden. Hidden gives the label row's height to
-the sidebar. **Custom header text** applies a custom single-line label; Default restores File-Explorer. Hostname uses
-the machine/container hostname visible to the running app. **Show header icon** places the original File-Explorer
-logo beside any visible label, tinted by the active accent colour. It can be hidden independently. Saved keys are
-`header_label=app|hostname|custom|hidden`, `header_text=...`, `show_header_icon=1|0`, and
-`show_window_controls=1|0`.
-
-`round_corners=1` (Options > Appearance > Rounded corners, off by default) rounds the window's corners
-and draws a continuous theme-coloured outline and a drop shadow with the integrated header. It stays square
-without a shadow when maximized or snapped.
-On X11 this needs a compositor and the OpenGL renderer; the shadow needs a window manager that reads
-`_GTK_FRAME_EXTENTS`. Changing this setting takes a restart in either direction: disabling it then creates an
-opaque, square window without an app-drawn shadow or shadow margin, leaving window effects to the desktop.
-`FE_SQUARE_CORNERS=1` disables both corners and the shadow for one run; `FE_NO_SHADOW=1` disables only the shadow.
-
-With a desktop corner effect, leave Rounded corners off so the desktop owns the window edge. On KDE Wayland,
-the integrated header uses a borderless window, which has no native KWin frame or shadow. If a KWin effect leaves
-an uneven edge, use a window rule for `dev.fileexplorer` to request a server-side frame and shadow, then hide the
-title bar with a window-specific override in a decoration that supports it. The effect and decoration settings
-determine the resulting outline; the app cannot draw a missing portion of a compositor-owned edge.
-For KDE-Rounded-Corners, keep its **Mark windows translucent** option on; disabling it can leave stale pixels in
-transparent corners ([upstream explanation](https://github.com/matinlotfali/KDE-Rounded-Corners/pull/434)).
+`unified_surfaces=1` (Options -> Appearance -> Unified surfaces, off by default) gives the sidebar, the header (tab
+strip and toolbar), the preview panel and the status bar the file area's background; the lines between them stay.
+`show_separators=0` (Options -> Appearance -> Separator lines, on by default) leaves out the lines between the sidebar,
+header, column headings, preview, terminal panel and status bar; an edge you can drag still lights up on hover.
+`sidebar_brightness`, `header_brightness`, `main_brightness` (the file area), `preview_brightness` and
+`status_brightness` (Options -> Appearance -> Surfaces, 0 by default) make that part darker (down to -30) or lighter
+(up to 30, in percent) than the theme's own colour.
+`tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a
+box on the tab strip, instead of the open tab as a card joining the folder below it.
+`title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling
+compositors included, so it looks the same everywhere: minimise / maximise / close at the end of the tab strip; drag
+the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.
+`system` leaves the title bar to the desktop (on a tiling compositor: no buttons at all).
+`FE_TITLE_BAR=app|system` overrides it for one run.
+`window_buttons=0` (Options -> Appearance -> Window buttons, on by default) leaves out minimise / maximise / close, for
+desktops that close and tile windows from the keyboard; the tab strip then runs to the window's edge.
+`brand_name=app|host|custom|hidden` (Options -> Appearance -> Name above the sidebar) shows Explorer, this computer's
+name, your own `brand_text=` (typed under it in Options), or nothing: the sidebar then starts at the top.
+`brand_logo=0` (Options -> Appearance -> Logo) shows that name without the logo.
+`round_corners=1` (Options -> Appearance -> Rounded corners, off by default) rounds the window's corners with Explorer's own title bar,
+and draws a drop shadow round it the way GTK apps do (square and without shadow when maximised or snapped). On X11 this
+needs a compositor (else the corners stay square) and the OpenGL renderer (Automatic picks it there); the shadow needs a
+window manager that reads `_GTK_FRAME_EXTENTS` (mutter, KWin, xfwm4 and others). Turning it on takes a restart. `FE_SQUARE_CORNERS=1` / `FE_NO_SHADOW=1` turn the corners / the shadow off for one run.
 
 **Dropping files** (Options > Behaviour > Mouse): a drop moves (copies onto another drive or from another app) unless
 Ctrl / Shift / Ctrl+Shift say copy / move / link. `drop_ask=1` ("Ask what to do when dropping files") opens a menu
@@ -76,111 +52,34 @@ zypper) update with the system and makepkg / source builds are told the command 
 
 Per-folder views live in `~/.config/file-explorer/folders.conf`, saved layouts in `layouts.conf`.
 
-**System theme and icons.** Options > Appearance > Theme > **System** uses the desktop's colors where exposed.
-KDE palette colors come from the Settings portal or shared `kdeglobals`; other desktops use their standard
-light/dark preference with an accent tint when full colors are unavailable. **Follow system appearance** automatically
-selects **System** in the Theme dropdown. Turning it off restores the previous theme; choosing a manual theme also
-turns following off. Older `match_system_background=1` settings are kept compatible and select System on startup.
-All surface brightness controls still apply afterward.
+Theme > **System** (`theme=System`) is Light or Dark as the desktop prefers (the settings portal's dark / light
+preference, else GTK's), with the desktop's accent colour where it has one (an accent picked in Options wins), and
+follows changes while the app runs. On KDE it takes KDE's colour scheme itself (view, window, text and selection
+colours from its settings portal, else `~/.config/kdeglobals` when the session is KDE).
+`system_accent=1` (Options -> Appearance -> Desktop's accent colour, off by default) uses the desktop's accent with
+every theme, where the desktop has one; otherwise the accent picked above.
 
-File icons > **System** follows the current desktop icon theme; **System: Reversal** (or another installed name)
-selects that theme explicitly. Themes are discovered from `~/.local/share/icons`, `~/.icons`, and the XDG data
-locations. Distrobox also checks `/run/host/usr/share/icons` when available. PNG/SVG files, sizes/scales and theme
-inheritance are supported; missing icons use hicolor, then bundled icons. XPM is unsupported. Install Reversal in the
-container or the shared `~/.local/share/icons` if it is not visible. Restart or open "Icon themes folder" to rescan.
-System icon choices take precedence over `FE_NERD_FONT`. See [Custom icons](custom-icons.md) for customization details.
-
-Options > Appearance > Tabs offers **Tab position** (Above navigation / Below navigation) and **Tab style**
-(Classic Explorer / Pills). Defaults are below + pills. Pills center inside a shared rounded enclosure made from
-the same background as the navigation path and search fields, share the path field's corner radius, and show their
-individual surface only on hover/selection. Pills share the manual/system accent and selection-opacity setting with sidebar/configuration navigation;
-hover uses 8% accent and selected tabs in inactive split panes use a weaker selection tint. Classic tabs restore the original
-rounded cards and outward-curving bottom corners: the active card matches navigation and has a subtle neutral contour to preserve its shape;
-inactive cards share the path/search field background, while the surrounding row matches navigation. Text and close controls maintain contrast on these backgrounds. The row appears only with
-two or more tabs in a pane, in either style/position. Ctrl+T opens another tab when the row is hidden.
-Saved keys are `tab_position=below` (`above` is also accepted) and `tab_style=pills` (`classic` is also accepted).
-
-Sidebar and configuration navigation use a uniform accent-tinted selection, without a left-edge marker.
-Selection defaults to 40% of the manual/system accent, identically in light and dark themes.
-Appearance > Navigation selection opacity adjusts it from 0% to 100% in 5% steps and also applies to pill focus; the value is saved as
-`navigation_selection_opacity=40`. Hover remains at 8%. Each fill blends against that navigation area's actual background.
-
-**Scrollbar colour** (Options > Appearance > Scrollbars): Auto derives the thumb and hover colors from the
-desktop highlight when available. Without a desktop color, it uses the selected theme's scrollbar colors.
-The input accepts `#RRGGBB` or `#RGB`; click Apply or press Enter. A custom color always takes priority, including
-in the System theme, and survives desktop color changes. Click Auto to restore automatic matching. Escape cancels
-an unapplied edit. Saved setting: `scrollbar_color=auto` or, for example, `scrollbar_color=#3DAEE9`.
-
-**Surfaces and system highlight** (Options > Appearance): "Unified surfaces" uses the theme's main background
-for the sidebar, preview, header, center and status bar (enabled by default). Independent brightness controls adjust
-each area from -30% to +30% in 5% steps; 0 restores its original brightness. The header control includes navigation,
-pill tabs and the app-drawn title strip. Sidebar and preview brightness are independent. Turning off unified surfaces
-restores the selected theme's original surface differences. Terminal content keeps its terminal palette.
-
-"Show separator lines" is **on by default**. The sidebar separator runs continuously from the integrated header
-through the sidebar. Turn the option off to hide panel/header/status borders and column dividers.
-Resize targets still work and show a highlight on hover; focus and interactive-control outlines stay visible.
-
-"Match system highlight" uses the standard XDG Settings portal's `org.freedesktop.appearance/accent-color` and
-follows live changes. The option is available on every distribution and uses optional `libdbus-1.so.3` at runtime.
-The desktop must provide xdg-desktop-portal and a backend that exposes its accent color; otherwise the theme accent
-is used. In Distrobox this reads the host desktop's session bus. Selecting a manual accent switches system matching
-off; toggling system matching off restores the previous manual choice. No KDE/GNOME-specific commands are required.
-See the [portal specification](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html).
-
-Saved keys (automatically managed by the Appearance controls):
-```ini
-unified_surfaces=1
-show_separators=1
-sidebar_brightness=0
-preview_brightness=0
-header_brightness=0
-main_brightness=0
-status_brightness=0
-system_accent=0
-match_system_background=0
-previous_theme=Dark
-scrollbar_color=auto
-header_label=app
-header_text=
-show_header_icon=1
-show_window_controls=1
-```
+`scrollbar_color=#RRGGBB` (Options -> Appearance -> Scrollbar colour: type `#RRGGBB` or `#RGB`, then Apply or Enter)
+colours the scrollbars; `auto` (the field left empty) keeps the theme's own, which under Theme > System take the
+desktop's accent colour.
 
 Colour schemes: `~/.config/file-explorer/themes/*.json` (Options → "Create theme from current colours" writes a
 starting point). Any key you leave out comes from the `base` theme:
 ```json
 { "name": "My theme", "base": "dark", "colors": { "bg": "#1b1b20", "accent": "#ff8800", "folder": "#e9b44c" } }
 ```
-Creating a theme from the current appearance bakes in the surface colors, resets their brightness controls to 0,
-and turns off Unified surfaces so those colors are not adjusted twice.
-
 The app icon follows the accent colour: in the window, and for launchers and docks through a recoloured copy at
 `~/.local/share/icons/hicolor/scalable/apps/dev.fileexplorer.svg` (none for the default Blue; delete it after
 uninstalling). Docks and launchers may only pick up a new colour once they reload their icons.
 
 Changed shortcuts are stored as `key=<command>=<keys>|<keys>` lines (only the ones that differ from the defaults).
 
-Remote servers: **Connect to server** (palette, or type `sftp://` / `smb://` ... in the path bar) lets you choose a
-connection method for each server. **GVfs** uses the installed protocol backend and exposes its mounts through FUSE.
-**KDE KIO** uses KIO Fuse and the installed worker for that protocol; KDE handles its authentication prompts.
-**System mount** uses an existing matching NFS or SMB mount from `/etc/fstab` or the current mount table. It calls
-`mount` with the configured mount point when disconnected, so your system's mount permissions and options apply.
-You can select any method to see what it needs; Connect stays disabled until the selected method is available.
-A saved server keeps its chosen method. KIO support requires KIO Fuse and its
-matching KIO worker; installing KIO alone does not make every protocol available. NFS does not require a GVfs NFS
-backend when a matching system mount or KIO worker is available.
-System NFS and SMB mounts appear in Network automatically. NFS, SMB and rclone entries in `/etc/fstab` remain there
-after unmount so they can be reconnected. The Network context menu can rescan locations. When a GVfs backend is
-missing, the connection form points to system NFS/SMB mounts or configured rclone WebDAV remotes as appropriate.
-The Connect to server form scrolls within a fixed-size dialog; the connection buttons stay visible at the bottom.
-Local NFS exports from `/etc/exports` and Samba shares from system configuration also appear in Network as folders
-marked with their sharing protocol. These rows open the local folder; they do not mount the share through the network.
-Passwords entered in this form are passed to GVfs only when it asks (SSH key
+Remote servers: **Connect to server** (palette, or type `sftp://` / `smb://` ... in the path bar) mounts SFTP, SMB,
+FTP/FTPS, WebDAV(S) and NFS through GVfs. Passwords are passed to GVfs only when it asks (SSH key
 passphrases too) and are not stored unless you tick "Remember password", which keeps them in the system keyring
 (Secret Service: gnome-keyring, KWallet, KeePassXC) - never in the app's files. Questions such as an unknown SSH host
-key are shown to you. Saved servers appear in the sidebar's Network section: a click connects using the selected
-method, right-click to edit or forget them (forgetting also removes a stored GVfs password).
+key are shown to you. Saved servers appear in the sidebar's Network section: a click connects (asking for a password
+only if the server wants one), right-click to edit or forget them (forgetting also removes the stored password). Protocols whose GVfs backend isn't installed are marked as unavailable.
 Phones and cameras plugged in with a cable show under Devices (dim until connected; click to connect, ⏏ when done).
 The app talks to them itself - no usbmuxd, libimobiledevice or GVfs needed: iPhones and iPads (usbmux, lockdown,
 AFC; the first time, unlock the iPhone and tap Trust - the pairing is kept in `~/.local/share/file-explorer/lockdown`,
@@ -205,11 +104,9 @@ the icon themes folder.
 
 The system file chooser, default file manager and phone access are in [Integration](integration.md).
 
-Cloud (sidebar → Network, shown when [rclone](https://rclone.org) is installed): every remote `rclone listremotes`
-reports - Google Drive, OneDrive, Dropbox, S3, WebDAV... - is a place. Right-click Network to run `rclone config` in a
-terminal tab or refresh remotes; each remote also has an edit button beside its disconnect button that opens the
-interactive rclone configuration in a terminal tab. The list follows rclone's configuration by itself. A click connects
-and opens it: `rclone mount` runs as a
+Cloud (sidebar → Cloud, shown when [rclone](https://rclone.org) is installed): every remote `rclone listremotes`
+reports - Google Drive, OneDrive, Dropbox, S3, WebDAV... - is a place. The + runs `rclone config` in a terminal tab to
+add one; the list follows rclone's configuration by itself. A click connects and opens it: `rclone mount` runs as a
 systemd user service (`~/.config/systemd/user/file-explorer-cloud-*.service`, `--vfs-cache-mode full`) mounted at
 `~/.local/share/file-explorer/cloud/<remote>`, so it stays mounted when the app is closed and, with "Connect at login"
 (right-click), comes up without the app. The eject button disconnects; the dot shows connecting / retrying. When a
@@ -223,125 +120,27 @@ Terminal panel: F4 shows a shell under the folder, one per tab, that follows the
 its prompt (Ctrl+Shift+F4 moves the keyboard between the two). bash, zsh and fish move quietly: the panel's shell loads
 a few lines of shell integration after your own startup files (bash: `--rcfile` that runs `~/.bashrc` first; zsh:
 `ZDOTDIR` pointing at files that run yours; fish: `-C`), kept in `$XDG_RUNTIME_DIR/file-explorer/shell`, so the prompt
-just updates and what you typed stays. Other shells, or one whose startup files fail before that, get a `cd` typed. Tabs that had it open get it back after a restart, with
+just updates and what you typed stays. Other shells, or one whose startup files fail before that, get a `cd` typed. A
+`fastfetch` your startup files or fish's greeting run is skipped in the panel (typed at its prompt, it runs). Tabs that had it open get it back after a restart, with
 a new shell; `terminal_panel_height` is its height. Terminal tabs: Shift+F4 opens a terminal tab in the current
-folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. It runs your shell and looks like your default
-terminal (xdg-terminal-exec's choice, else $TERMINAL): colours, padding, cursor and scrollback are read from
-foot, kitty, Alacritty or Ghostty config and followed live (Options > Appearance > Terminal appearance). Ctrl+Shift+C/V
+folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. The external
+terminal is `$TERMINAL`, else xdg-terminal-exec, else the desktop's own; Options > Integration > Terminal app picks one of
+the terminals installed instead (`external_terminal=`; listed are the usual ones on `$PATH` and those of terminal apps'
+`.desktop` entries), and the menu then says "Open in" its name. Terminal tabs run your shell and look like your default
+terminal (xdg-terminal-exec's choice, else $TERMINAL): font, colours, padding, cursor and scrollback are read from
+foot, kitty, Alacritty or Ghostty config (the status bar names it: "colours and font from foot") and followed live (Options > Appearance > Terminal appearance); a font with
+programming ligatures (Fira Code, JetBrains Mono...) shows them, kept to the cell grid. Ctrl+Shift+C/V
 copy and paste, Shift+PageUp/PageDown scroll back, Ctrl+Shift+W closes, Ctrl+Tab switches tabs. Built on libvterm.
 
-Terminal tabs and panels use the same font family and size as Explorer. Programming ligatures (liga, calt and
-dlig) are enabled when supported by that font. JetBrainsMono Nerd Font and its Mono variant retain programming
-ligatures through `calt`; the NL (no-ligatures) variant does not provide them. Install a Nerd Font or Symbols Nerd Font for private-use icons;
-fontconfig supplies fallback symbols, or set `FE_NERD_FONT` to a font file for an explicit override.
-Context menus show Nerd Font action icons beside their labels, with separate checkmarks for toggles. The external
-terminal uses U+E795, the filter uses U+EAF1, and sort uses U+F04BA. Apply and Default buttons highlight in the
-accent colour on hover.
-
-Right-clicking empty space opens a compact menu with **Views**, **Sort by**, and **Group by** submenus. Hover or
-click to open a submenu; Right Arrow opens it, Left Arrow or Escape returns to the parent. Views contains display
-layouts and folder-view preferences, Sort by includes direction, and Group by offers None, Date, Type and Size.
-
-Options > Integration > **Terminal executable** accepts an executable name on PATH or an absolute path
-(without arguments). Apply validates the executable and confirms the resulting menu label; errors keep the previous
-terminal selection. Default clears the selection and confirms the reset. The saved key
-is `external_terminal=...`. Before selection, **Open in external shell** opens these settings. After selection,
-the menu reads **Open in kitty** (or your chosen executable), with the U+E795 Nerd Font terminal icon. External shells retain the current folder and SSH behaviour for SFTP folders.
-
-The sort button beside the navigation bar's filter button offers Name, Date modified, Type, Size, Date created,
-Extension, Permissions and Owner, plus Ascending/Descending. Folder view preferences remember the selection.
+File icons > **System** (`icon_theme=System`) uses the desktop's icon theme for files, folders and the Trash: the one
+the settings portal names (else KDE's or GTK's settings), followed when it changes. The bundled icon shows until the
+desktop's is there, and wherever its theme has none.
 
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`
 sets the icon for any extension, and `theme.conf` (`base=Catppuccin`) picks the set the missing icons come from.
-`net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
-lists every icon name. See [Custom icons and folder badges](custom-icons.md) for
-a complete theme layout, badge sizing, overrides, and fallback rules.
-
-Folder icons keep their base artwork and show small badges at the lower right.
-Custom themes can provide these SVGs at the theme's root:
-
-| Filename | Badge |
-| --- | --- |
-| `folder-remote-smb.svg` | Samba/SMB, including Samba usershares |
-| `folder-remote-nfs.svg` | NFS exports |
-| `folder-publicshare.svg` | WebDAV and other local shares |
-| `emblem-symbolic-link.svg` | Symbolic link (folders and files) |
-| `emblem-git.svg` | Git repository folder |
-
-Use transparent backgrounds: these images overlay the base folder rather than
-replace it. Simultaneous badges stack upwards on the right in share, symlink,
-then Git order. A folder shared through multiple protocols uses SMB before NFS,
-then other shares. Git status letters/dots continue to show working-tree changes;
-the repository badge identifies the repository folder itself.
-
-Installed desktop themes use the same share and symlink names. The Git repository
-badge uses the bundled classic orange Git logo SVG unless a
-custom theme supplies `emblem-git.svg`. Missing custom share badges use
-`folder-shared` from the custom theme or its base set. Missing symlink badges use
-bundled artwork. Installed themes fall back to their folder icon for missing
-share artwork, and to bundled artwork for missing symlink emblems. Reload through "Icon themes
-folder" after editing SVGs.
-
-Text editing uses a thicker caret in the field's current text color, adapting to
-light and dark themes. The caret moves smoothly and gently pulses while idle;
-it stays solid during selection. Text selection uses the current accent color softened by a 5% blend toward the
-navigation field background, with contrasting dark or white selected text.
-
-Navigation and sidebar icons adapt to light surfaces: pale artwork is darkened
-while retaining its hue and shading, and sidebar headings/controls use stronger
-foreground contrast. Disconnected network icons remain subdued but readable.
-The adjustment is applied when drawing, so custom icon files stay unchanged and
-dark surfaces retain their original icon colors.
-
-Navigation path and search fields, the pill enclosure, and unfocused classic tabs
-share one neutral background. Focus is indicated by the accent outline.
-
-In Open with, the default-app label uses a 15% lighter accent on dark list
-backgrounds. Selected rows retain their contrasting selection text color.
-
-Trash in Quick Access has an **Empty Trash** action in its right-click menu. It empties the Trash independently of the
-current folder and active filters. The button at the bottom of the Trash view opens the same confirmation dialog.
-The dialog lists up to four names and an additional-item count. Long names end with an ellipsis inside the dialog;
-hover over an elided name to see it in full.
-
-The Trash icon in the sidebar, tabs, previews and confirmation dialog uses the selected **File icons** theme. Built-in
-sets use their bundled Trash artwork, and a custom theme can supply `trash.svg` (otherwise it uses its bundled base).
-**System** follows the desktop icon theme; **System: Theme name** uses that installed theme explicitly. System themes
-use `user-trash-full` (or `user-trash-full-symbolic`) when Trash contains items, and `user-trash` when empty. A theme
-without a full variant uses its normal bin. Zero-byte files and empty folders count as contents. The system icon's
-full/empty state updates after trashing, restoring or emptying; the Empty Trash confirmation shows the full version.
-An optional `FE_NERD_FONT` can override built-in and custom theme artwork, but a selected system theme takes precedence.
-
-Terminal ligatures can span foreground-colour changes in Fish syntax highlighting. Shaping keeps operators
-together and paints each part in its cell colour; font-weight changes still start a separate shaping run.
-
-For Fish themes that make redirections bold, add this at the bottom of
-`~/.config/fish/config.fish`, after theme setup, to keep typed arrows in one font weight:
-
-```fish
-if status is-interactive
-    set -g fish_color_redirection cyan
-end
-```
-
-Apply with `source ~/.config/fish/config.fish`. A global setting is needed when a theme
-already sets the variable globally; a universal setting alone would be shadowed.
-The current session's colours can be inspected with
-`set --show fish_color_param fish_color_redirection fish_color_error`.
-Verify the font separately with `printf '%s\n' '-> => != == === <= >='`.
-
-For Kitty, edit the host's `~/.config/kitty/kitty.conf` (Fish in a container may
-have a separate shell configuration):
-
-```conf
-font_family JetBrainsMono Nerd Font Mono
-bold_font auto
-italic_font auto
-bold_italic_font auto
-disable_ligatures never
-```
-
-Use the installed family's exact name; Kitty's `kitten choose-fonts` can select it.
-Remove any `-liga` / `-calt` overrides and open a new Kitty window. Explorer's
-terminal keeps using the font selected in its own Appearance settings.
+`trash-full.svg` is the Trash's bin when something is in it (`trash.svg` when empty; a theme with only `trash.svg`
+uses it for both). `emblem-symbolic-link.svg` and `emblem-git.svg` replace the marks on links and Git
+repositories: drawn on the icon's lower right at about a third of its size (with both, the Git one sits above);
+without them the usual marks stay. `net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
+lists every icon name.
