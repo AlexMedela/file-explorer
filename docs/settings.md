@@ -107,7 +107,7 @@ terminal is `$TERMINAL`, else xdg-terminal-exec, else the desktop's own; Options
 the terminals installed instead (`external_terminal=`; listed are the usual ones on `$PATH` and those of terminal apps'
 `.desktop` entries), and the menu then says "Open in" its name. Terminal tabs run your shell and look like your default
 terminal (xdg-terminal-exec's choice, else $TERMINAL): font, colours, padding, cursor and scrollback are read from
-foot, kitty, Alacritty or Ghostty config (the status bar names it: "look from foot") and followed live (Options > Appearance > Terminal appearance); a font with
+foot, kitty, Alacritty or Ghostty config (the status bar names it: "colours and font from foot") and followed live (Options > Appearance > Terminal appearance); a font with
 programming ligatures (Fira Code, JetBrains Mono...) shows them, kept to the cell grid. Ctrl+Shift+C/V
 copy and paste, Shift+PageUp/PageDown scroll back, Ctrl+Shift+W closes, Ctrl+Tab switches tabs. Built on libvterm.
 
