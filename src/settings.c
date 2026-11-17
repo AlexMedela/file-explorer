@@ -82,6 +82,7 @@ static void settings_defaults(void) {
     g_accent_custom = 0;
     g_unified_surfaces = false;
     g_separators = true;
+    g_scroll_custom = 0;
     memset(g_surface_bright, 0, sizeof g_surface_bright);
     A.ui_font[0] = 0;
     A.font_size = 13;
@@ -295,6 +296,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
         else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v);
         else if (!strcmp(k, "show_separators")) g_separators = atoi(v);
+        else if (!strcmp(k, "scrollbar_color")) { u32 c; if (scroll_color_parse(v, &c)) g_scroll_custom = c; }
         else if (!strcmp(k, "sidebar_brightness")) g_surface_bright[SURF_SIDEBAR] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "header_brightness")) g_surface_bright[SURF_HEADER] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "main_brightness")) g_surface_bright[SURF_FILES] = CLAMP(atoi(v), -30, 30);
@@ -516,6 +518,8 @@ static void settings_write(FILE *f) {
             A.dblclick_up, A.drop_ask, A.def_tree, A.single_instance);
     keys_save(f);
     fprintf(f, "unified_surfaces=%d\nshow_separators=%d\n", g_unified_surfaces, g_separators);
+    if (g_scroll_custom) fprintf(f, "scrollbar_color=#%06X\n", g_scroll_custom & 0xFFFFFF);
+    else fprintf(f, "scrollbar_color=auto\n");
     fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\n",
             g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_STATUS]);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);

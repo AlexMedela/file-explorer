@@ -56,6 +56,10 @@ Theme > **System** (`theme=System`) is Light or Dark as the desktop prefers (the
 preference, else GTK's), with the desktop's accent colour where it has one (an accent picked in Options wins), and
 follows changes while the app runs.
 
+`scrollbar_color=#RRGGBB` (Options -> Appearance -> Scrollbar colour: type `#RRGGBB` or `#RGB`, then Apply or Enter)
+colours the scrollbars; `auto` (the field left empty) keeps the theme's own, which under Theme > System take the
+desktop's accent colour.
+
 Colour schemes: `~/.config/file-explorer/themes/*.json` (Options → "Create theme from current colours" writes a
 starting point). Any key you leave out comes from the `base` theme:
 ```json

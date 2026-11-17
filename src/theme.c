@@ -101,6 +101,7 @@ static bool g_unified_surfaces; // Options: sidebar, header, preview and status 
 // Options > Surfaces brightness: -30..+30 % per part (darker / lighter), 0 = the theme's own colour.
 enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_STATUS, SURF_COUNT };
 static int g_surface_bright[SURF_COUNT];
+static u32 g_scroll_custom; // Options: scrollbar colour; 0 = Auto, else 0x01000000 | rgb
 static bool g_separators = true; // Options: the lines between the window's parts (a hovered / dragged edge always shows)
 static u32 g_status_bg; // the status bar: the toolbar's colour, unless its brightness moves it
 // The desktop's look, read off the UI thread (integration.c, "desktop look") only while Theme or File icons is System.
@@ -224,6 +225,30 @@ static void theme_apply(void) {
         T.sel_focus = rgb_mix(T.bg, a, light ? 0.34f : 0.52f);
         T.group_text = rgb_mix(T.text, a, 0.55f);
     }
+    // Scrollbars: a picked colour, else (Auto) the theme's own; System tints them with the desktop's accent, kept
+    // visible against the background when that accent is near black or white.
+    if (g_scroll_custom) {
+        T.scroll = g_scroll_custom & 0xFFFFFF;
+        T.scroll_hover = rgb_mix(T.scroll, T.text, 0.25f);
+    } else if (theme_is_system() && g_desktop.accent) {
+        u32 a = g_desktop.accent & 0xFFFFFF;
+        T.scroll = rgb_mix(T.bg, a, 0.55f);
+        T.scroll_hover = rgb_mix(T.bg, a, 0.80f);
+        if (fabsf(rgb_luma(T.scroll) - rgb_luma(T.bg)) < 0.10f) T.scroll = rgb_mix(T.bg, T.text, 0.35f);
+        if (fabsf(rgb_luma(T.scroll_hover) - rgb_luma(T.bg)) < 0.15f) T.scroll_hover = rgb_mix(T.bg, T.text, 0.55f);
+    }
+}
+
+// Scrollbar colour as typed or saved: "" / "auto" = Auto (*out 0), "#RRGGBB" / "#RGB" (the # optional); false if neither.
+static bool scroll_color_parse(const char *s, u32 *out) {
+    while (*s == ' ') s++;
+    if (!*s || str_ieq(s, "auto")) { *out = 0; return true; }
+    const char *h = *s == '#' ? s + 1 : s;
+    size_t n = strspn(h, "0123456789abcdefABCDEF");
+    u32 c;
+    if ((n != 3 && n != 6) || h[n + strspn(h + n, " ")] || !parse_hex_color(h, &c)) return false;
+    *out = 0x01000000u | c;
+    return true;
 }
 
 // Minimal JSON reader for colour schemes: collects every "key": "value" string pair (any nesting).

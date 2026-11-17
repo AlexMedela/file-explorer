@@ -3449,6 +3449,50 @@ static int run_selftest_m9(void) {
         g_theme_cur = saved;
         theme_apply();
     }
+    { // scrollbar colour: Auto (the theme's own; System: the desktop's accent), or #RRGGBB / #RGB typed and applied
+        int saved = g_theme_cur;
+        g_theme_cur = theme_find("Dark");
+        theme_apply();
+        ST_CHECK(!g_scroll_custom && T.scroll == g_theme_dark.scroll);
+        options_open();
+        g_opt.cat = OC_APPEARANCE;
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_TEXT, OPT_SCROLL_COLOR, 1));
+        ST_CHECK(g_opt.scroll_focus);
+        st_type("#12345"); // malformed: nothing changes
+        st_key(SDLK_RETURN, SDL_KMOD_NONE);
+        ST_CHECK(!g_scroll_custom && g_opt.scroll_focus && options_is_open());
+        te_set(&g_opt.scroll_color, "", 0, 0);
+        st_type("#f80");
+        st_frames(1);
+        st_shot("m9-scrollbar-field");
+        st_opt_click(st_opt_hit(HP_BUTTON, OPT_SCROLL_COLOR, 0)); // Apply
+        ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800) && T.scroll == 0xFF8800 && !strcmp(g_opt.scroll_color.buf, "#FF8800"));
+        settings_save();
+        settings_load();
+        theme_apply();
+        ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800) && T.scroll == 0xFF8800);
+        u32 c;
+        ST_CHECK(scroll_color_parse("auto", &c) && !c && scroll_color_parse("#000000", &c) && c == 0x01000000u);
+        ST_CHECK(!scroll_color_parse("#12", &c) && !scroll_color_parse("red", &c) && !scroll_color_parse("#1234567", &c));
+        g_desktop.accent = 0x01000000u | 0x3584E4; // Auto: only System follows the desktop's accent
+        g_scroll_custom = 0;
+        theme_apply();
+        ST_CHECK(T.scroll == g_theme_dark.scroll);
+        g_theme_cur = theme_find("System");
+        theme_apply();
+        ST_CHECK(T.scroll == rgb_mix(T.bg, 0x3584E4, 0.55f));
+        g_desktop.accent = 0x01000000u | 0x000000; // a black accent on Dark: kept visible
+        theme_apply();
+        ST_CHECK(fabsf(rgb_luma(T.scroll) - rgb_luma(T.bg)) >= 0.10f);
+        memset(&g_desktop, 0, sizeof g_desktop);
+        te_set(&g_opt.scroll_color, "", 0, 0);
+        opt_button(OPT_SCROLL_COLOR); // empty: Auto again
+        ST_CHECK(!g_scroll_custom);
+        sheet_close();
+        g_theme_cur = saved;
+        theme_apply();
+    }
 
     // font family switch (if a second family is installed)
     char *dv = font_family_file("DejaVu Sans");

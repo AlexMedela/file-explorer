@@ -5,7 +5,7 @@ static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "
 enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
 enum {
-    OPT_THEME, OPT_ACCENT, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
+    OPT_THEME, OPT_ACCENT, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
@@ -22,6 +22,7 @@ typedef struct {
 static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_THEME, "Theme", "Colour scheme; System: light or dark as the desktop prefers, with its accent (add your own JSON schemes below)"},
     {OC_APPEARANCE, OK_ACCENT, OPT_ACCENT, "Accent colour", "Selection, focus and highlight colour"},
+    {OC_APPEARANCE, OK_TEXT, OPT_SCROLL_COLOR, "Scrollbar colour", "Empty: Auto, the theme's own (System: the desktop's accent); or #RRGGBB / #RGB, then Apply"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders; System: the desktop's icon theme"},
     {OC_APPEARANCE, OK_CHOICE, OPT_FONT, "Font", "Interface font family"},
     {OC_APPEARANCE, OK_INT, OPT_FONT_SIZE, "Font size", "Text size at 100% zoom"},
@@ -141,6 +142,9 @@ static struct {
     // the name above the sidebar (OK_TEXT, applied as it's typed)
     TextEdit brand;
     bool brand_focus;
+    // the scrollbar colour (OK_TEXT, applied with Enter or Apply)
+    TextEdit scroll_color;
+    bool scroll_focus;
 } g_opt;
 
 // Options > Integration > Terminal app: the terminals installed (programs on $PATH), found on a worker each time
@@ -559,6 +563,19 @@ static void opt_int_fmt(int id, char *buf, size_t cap) {
     else snprintf(buf, cap, "%d px", opt_int_get(id));
 }
 
+// Scrollbar colour: Enter or Apply takes what's typed (empty: Auto); the field then shows it as saved.
+static void opt_scroll_color_apply(void) {
+    u32 c;
+    if (!scroll_color_parse(g_opt.scroll_color.buf, &c)) { toast("Scrollbar colour: #RRGGBB or #RGB (empty: Auto)"); return; }
+    g_scroll_custom = c;
+    theme_apply();
+    A.settings_dirty = true;
+    char buf[16] = "";
+    if (c) snprintf(buf, sizeof buf, "#%06X", c & 0xFFFFFF);
+    te_set(&g_opt.scroll_color, buf, (int)strlen(buf), (int)strlen(buf));
+    g_opt.scroll_focus = false;
+}
+
 static void opt_button(int id) {
     char dir[PATH_MAX];
     switch (id) {
@@ -599,6 +616,7 @@ static void opt_button(int id) {
         break;
     case OPT_SETTINGS_FILE: run_command(CMD_OPEN_SETTINGS); break;
     case OPT_REINDEX: run_command(CMD_REINDEX); break;
+    case OPT_SCROLL_COLOR: opt_scroll_color_apply(); break;
     case OPT_UPD_NOW: upd_button_press(); break;
     case OPT_UPD_NOTES: upd_notes(); break;
     case OPT_UPD_HOW:
@@ -657,6 +675,9 @@ static void options_open(void) {
     g_opt.hover_row = -1;
     g_opt.rec_def = -1;
     te_set(&g_opt.brand, A.brand_text, (int)strlen(A.brand_text), (int)strlen(A.brand_text));
+    char sc[16] = "";
+    if (g_scroll_custom) snprintf(sc, sizeof sc, "#%06X", g_scroll_custom & 0xFFFFFF);
+    te_set(&g_opt.scroll_color, sc, (int)strlen(sc), (int)strlen(sc));
     term_scan_start();
     themes_scan(); // pick up new/edited theme files
     theme_apply();
@@ -800,7 +821,16 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
         if (enabled) opt_hit(r, HP_BUTTON, o->id, 0);
         break;
     }
-    case OK_TEXT: { // (one so far: the name above the sidebar)
+    case OK_TEXT: { // the name above the sidebar, the scrollbar colour (with its Apply button)
+        if (o->id == OPT_SCROLL_COLOR) {
+            f32 bw = MAX(roundf(S(80)), text_width(f, "Apply", 5) + S(28)), fw = roundf(S(140));
+            Rect b = {x + w - bw, y, bw, ch}, r = {b.x - S(8) - fw, y, fw, ch};
+            sheet_field(r, &g_opt.scroll_color, g_opt.scroll_focus, "Auto");
+            opt_hit(r, HP_TEXT, o->id, 1);
+            sheet_button(b, "Apply", false, true);
+            opt_hit(b, HP_BUTTON, o->id, 0);
+            break;
+        }
         Rect r = {x + w - MIN(roundf(S(260)), w), y, MIN(roundf(S(260)), w), ch};
         sheet_field(r, &g_opt.brand, g_opt.brand_focus, APP_LABEL);
         opt_hit(r, HP_TEXT, o->id, 0);
@@ -1049,7 +1079,7 @@ static void options_draw(void) {
     // search field
     f32 sw = MIN(roundf(S(300)), w * 0.45f), sh = roundf(S(30));
     Rect sr = {cr.x - S(10) - sw, r.y + pad - S(6), sw, sh};
-    bool sfocus = g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus;
+    bool sfocus = g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus;
     sheet_field(sr, &g_opt.search, sfocus, "Search settings");
     opt_hit(sr, HP_SEARCH, -1, 0);
     // nav (same active style as the sidebar: accent-tinted row with a full-height accent edge)
@@ -1186,9 +1216,10 @@ static void options_draw(void) {
 static bool options_text_focus(TextEdit *edit, bool focused) {
     if (g_opt.rec_def >= 0) return false; // the click ends recording a shortcut first (options_click)
     if (g_opt.drop_opt >= 0) return edit == &g_opt.drop_filter;
-    if (edit == &g_opt.search) { g_opt.lname_focus = g_opt.brand_focus = false; return true; }
-    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.brand_focus = false; return true; }
-    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.lname_focus = false; return true; }
+    if (edit == &g_opt.search) { g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.lname_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.scroll_color) { g_opt.scroll_focus = true; g_opt.lname_focus = g_opt.brand_focus = false; return true; }
     return focused;
 }
 
@@ -1217,7 +1248,7 @@ static void options_click(f32 x, f32 y, int clicks) {
     }
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
     if (sheet_scrollbar_press(x, y)) return;
-    g_opt.lname_focus = g_opt.brand_focus = false; // a click elsewhere gives the keyboard back to the search field
+    g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; // a click elsewhere gives the keyboard back to the search field
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];
         if (hp->r.w <= 0 || !in_rect(hp->r, x, y)) continue;
@@ -1241,7 +1272,7 @@ static void options_click(f32 x, f32 y, int clicks) {
             return;
         case HP_BUTTON: opt_button(hp->opt); return;
         case HP_LNAME: g_opt.lname_focus = true; return;
-        case HP_TEXT: g_opt.brand_focus = true; return;
+        case HP_TEXT: *(hp->arg ? &g_opt.scroll_focus : &g_opt.brand_focus) = true; return;
         case HP_LSAVE: opt_layout_save(); return;
         case HP_LOPEN: {
             int li = hp->arg;
@@ -1288,6 +1319,12 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
         else if (te_key(&g_opt.brand, k, mod)) opt_brand_sync();
         return;
     }
+    if (g_opt.scroll_focus && g_opt.drop_opt < 0) {
+        if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_scroll_color_apply();
+        else if (k == SDLK_ESCAPE) g_opt.scroll_focus = false;
+        else te_key(&g_opt.scroll_color, k, mod);
+        return;
+    }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) {
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_layout_save();
         else if (k == SDLK_ESCAPE) g_opt.lname_focus = false;
@@ -1327,6 +1364,7 @@ static void options_text(const char *text) {
     if (g_opt.rec_def >= 0) return;
     if (g_opt.brand_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.brand, text); opt_brand_sync(); return; }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.lname, text); return; }
+    if (g_opt.scroll_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.scroll_color, text); return; }
     if (g_opt.drop_opt >= 0) {
         te_insert(&g_opt.drop_filter, text);
         opt_drop_filter();
