@@ -2,11 +2,11 @@
 
 static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Integration", "Updates", "Advanced"};
 
-enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON };
+enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
 enum {
     OPT_THEME, OPT_ACCENT, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
-    OPT_BRAND_LOGO, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
+    OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
@@ -34,6 +34,8 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: Explorer's own on every desktop (Automatic), or the desktop's title bar (System)"},
     {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_BUTTONS, "Window buttons", "Minimise, maximise and close at the top right of Explorer's own title bar; without them, the desktop's keys close it"},
     {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_BRAND_NAME, "Name above the sidebar", "Explorer, this computer's name, your own text, or none (the sidebar then starts at the top)"},
+    {OC_APPEARANCE, OK_TEXT, OPT_BRAND_TEXT, "Your own name", "Shown above the sidebar instead of Explorer"},
     {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "The logo before the name above the sidebar"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Font, colours, padding and cursor of terminal tabs (F4)"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_NEW, "Create theme from current colours", "Writes a JSON scheme you can edit"},
@@ -98,10 +100,11 @@ static const char *g_renderers[] = {"auto", "vulkan", "opengl", "software"};
 static const char *g_renderer_labels[] = {"Automatic", "Vulkan", "OpenGL", "Software"};
 static const int g_transfer_counts[] = {1, 2, 4, 0}; // A.transfers_at_once (0 = no limit)
 static const char *g_transfer_labels[] = {"One at a time", "Two at a time", "Four at a time", "All at once"};
+static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
 
 // hit parts recorded while drawing, tested on click
 enum { HP_NONE, HP_NAV, HP_TOGGLE, HP_SEG, HP_DROP, HP_MINUS, HP_PLUS, HP_SWATCH, HP_BUTTON, HP_DROPITEM, HP_SEARCH, HP_CLOSE,
-       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE };
+       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT };
 typedef struct { Rect r; int part, opt, arg; } OptHit;
 
 static struct {
@@ -125,6 +128,9 @@ static struct {
     // layouts page
     TextEdit lname;
     bool lname_focus;
+    // the name above the sidebar (OK_TEXT, applied as it's typed)
+    TextEdit brand;
+    bool brand_focus;
 } g_opt;
 
 // Options > Integration > Terminal app: the terminals installed (programs on $PATH), found on a worker each time
@@ -280,6 +286,7 @@ static int opt_choice_count(int id) {
     case OPT_TERM_LOOK: return 2;
     case OPT_TERMINAL: return 1 + g_termlist.n + !term_choice_listed();
     case OPT_TITLE_BAR: return (int)ARRAY_COUNT(g_title_bar_labels);
+    case OPT_BRAND_NAME: return (int)ARRAY_COUNT(g_brand_labels);
     case OPT_FONT: opt_load_families(); return 1 + g_opt.nfamilies;
     case OPT_ROW_SPACING: return 3;
     case OPT_DEF_VIEW: return ZOOM_COUNT;
@@ -319,6 +326,7 @@ static const char *opt_choice_label(int id, int i) {
     case OPT_DEF_GROUP: return g_group_labels[i];
     case OPT_RENDERER: return g_renderer_labels[i];
     case OPT_TITLE_BAR: return g_title_bar_labels[i];
+    case OPT_BRAND_NAME: return g_brand_labels[i];
     case OPT_TRANSFERS: return g_transfer_labels[i];
     }
     return "";
@@ -335,6 +343,7 @@ static int opt_choice_get(int id) {
             if (!strcmp(g_termlist.v[i], g_external_terminal)) return i + 1;
         return 1 + g_termlist.n;
     case OPT_TITLE_BAR: return A.title_bar;
+    case OPT_BRAND_NAME: return A.brand_name;
     case OPT_FONT:
         if (!A.ui_font[0]) return 0;
         opt_load_families();
@@ -387,6 +396,12 @@ static void opt_choice_set(int id, int i) {
         break;
     }
     case OPT_TITLE_BAR: A.title_bar = i; titlebar_apply(); break;
+    case OPT_BRAND_NAME:
+        A.brand_name = i;
+        g_opt.brand_focus = i == BRAND_CUSTOM; // its field appears: type the name straight away
+        g_opt.lname_focus = false;
+        layout();
+        break;
     case OPT_FONT:
         if (!apply_ui_font(i == 0 ? "" : g_opt.families[i - 1])) toast("Couldn't load that font");
         break;
@@ -567,8 +582,21 @@ static void opt_button(int id) {
     }
 }
 
-// Rows that don't apply to this copy (updating by itself: AppImage only).
+// Typing in "Your own name": applied at once, one line, cut at a whole character.
+static void opt_brand_sync(void) {
+    for (char *s = g_opt.brand.buf; *s; s++)
+        if ((unsigned char)*s < 32) *s = ' '; // (a pasted line break)
+    char *d = A.brand_text;
+    size_t n = 0;
+    for (const char *s = g_opt.brand.buf; *s && n < sizeof A.brand_text - 1; s++) d[n++] = *s;
+    if (g_opt.brand.buf[n]) while (n > 0 && ((unsigned char)d[n] & 0xC0) == 0x80) n--; // (cut inside a character)
+    d[n] = 0;
+    A.settings_dirty = true;
+}
+
+// Rows that don't apply to this copy (updating by itself: AppImage only), or to the current choice.
 static bool opt_hidden(int id) {
+    if (id == OPT_BRAND_TEXT) return A.brand_name != BRAND_CUSTOM;
     if (id == OPT_UPD_HOW) return upd_can_install(); // (the AppImage's own rows say it)
     return (id == OPT_IG_UPDATES || id == OPT_UPD_AUTO) && !upd_can_install();
 }
@@ -598,6 +626,7 @@ static void options_open(void) {
     g_opt.drop_opt = -1;
     g_opt.hover_row = -1;
     g_opt.rec_def = -1;
+    te_set(&g_opt.brand, A.brand_text, (int)strlen(A.brand_text), (int)strlen(A.brand_text));
     term_scan_start();
     themes_scan(); // pick up new/edited theme files
     theme_apply();
@@ -739,6 +768,12 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
         Rect r = {x + w - bw, y, bw, ch};
         sheet_button(r, l, primary, enabled);
         if (enabled) opt_hit(r, HP_BUTTON, o->id, 0);
+        break;
+    }
+    case OK_TEXT: { // (one so far: the name above the sidebar)
+        Rect r = {x + w - MIN(roundf(S(260)), w), y, MIN(roundf(S(260)), w), ch};
+        sheet_field(r, &g_opt.brand, g_opt.brand_focus, APP_LABEL);
+        opt_hit(r, HP_TEXT, o->id, 0);
         break;
     }
     }
@@ -984,7 +1019,7 @@ static void options_draw(void) {
     // search field
     f32 sw = MIN(roundf(S(300)), w * 0.45f), sh = roundf(S(30));
     Rect sr = {cr.x - S(10) - sw, r.y + pad - S(6), sw, sh};
-    bool sfocus = g_opt.drop_opt < 0 && !g_opt.lname_focus;
+    bool sfocus = g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus;
     sheet_field(sr, &g_opt.search, sfocus, "Search settings");
     opt_hit(sr, HP_SEARCH, -1, 0);
     // nav (same active style as the sidebar: accent-tinted row with a full-height accent edge)
@@ -1116,12 +1151,14 @@ static void options_draw(void) {
 
 // --- input -----------------------------------------------------------------------
 
-// (sheet_text_focus) A click on a text field: the search field, the layout name or the open dropdown's filter.
+// (sheet_text_focus) A click on a text field: the search field, the layout name, the name above the sidebar or the
+// open dropdown's filter.
 static bool options_text_focus(TextEdit *edit, bool focused) {
     if (g_opt.rec_def >= 0) return false; // the click ends recording a shortcut first (options_click)
     if (g_opt.drop_opt >= 0) return edit == &g_opt.drop_filter;
-    if (edit == &g_opt.search) { g_opt.lname_focus = false; return true; }
-    if (edit == &g_opt.lname) { g_opt.lname_focus = true; return true; }
+    if (edit == &g_opt.search) { g_opt.lname_focus = g_opt.brand_focus = false; return true; }
+    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.brand_focus = false; return true; }
+    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.lname_focus = false; return true; }
     return focused;
 }
 
@@ -1150,7 +1187,7 @@ static void options_click(f32 x, f32 y, int clicks) {
     }
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
     if (sheet_scrollbar_press(x, y)) return;
-    g_opt.lname_focus = false; // a click elsewhere gives the keyboard back to the search field
+    g_opt.lname_focus = g_opt.brand_focus = false; // a click elsewhere gives the keyboard back to the search field
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];
         if (hp->r.w <= 0 || !in_rect(hp->r, x, y)) continue;
@@ -1174,6 +1211,7 @@ static void options_click(f32 x, f32 y, int clicks) {
             return;
         case HP_BUTTON: opt_button(hp->opt); return;
         case HP_LNAME: g_opt.lname_focus = true; return;
+        case HP_TEXT: g_opt.brand_focus = true; return;
         case HP_LSAVE: opt_layout_save(); return;
         case HP_LOPEN: {
             int li = hp->arg;
@@ -1215,6 +1253,11 @@ static void options_click(f32 x, f32 y, int clicks) {
 
 static void options_key(SDL_Keycode k, SDL_Keymod mod) {
     if (g_opt.rec_def >= 0) { opt_rec_key(k, mod); return; }
+    if (g_opt.brand_focus && g_opt.drop_opt < 0) {
+        if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_ESCAPE) g_opt.brand_focus = false;
+        else if (te_key(&g_opt.brand, k, mod)) opt_brand_sync();
+        return;
+    }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) {
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_layout_save();
         else if (k == SDLK_ESCAPE) g_opt.lname_focus = false;
@@ -1252,6 +1295,7 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
 
 static void options_text(const char *text) {
     if (g_opt.rec_def >= 0) return;
+    if (g_opt.brand_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.brand, text); opt_brand_sync(); return; }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.lname, text); return; }
     if (g_opt.drop_opt >= 0) {
         te_insert(&g_opt.drop_filter, text);

@@ -136,6 +136,7 @@ typedef struct {
 // --- views -------------------------------------------------------------------
 enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
 enum { TITLEBAR_AUTO, TITLEBAR_SYSTEM, TITLEBAR_APP }; // A.title_bar
+enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
 static const struct { int view, px; const char *label; } g_zoom[] = {
     {VIEW_DETAILS, 0, "Details"},       {VIEW_LIST, 0, "List"},          {VIEW_GRID, 48, "Small icons"},
     {VIEW_GRID, 72, "Small+ icons"},    {VIEW_GRID, 96, "Medium icons"}, {VIEW_GRID, 128, "Medium+ icons"},
@@ -638,6 +639,8 @@ static struct {
     bool round_corners; // round the window's corners with our own title bar (setting)
     bool window_buttons; // minimise / maximise / close in our own title bar (setting; off: the desktop's keys close it)
     bool brand_logo;     // the logo before the name above the sidebar (setting)
+    int brand_name;      // BRAND_*: which name is shown there (setting; hidden: the sidebar starts at the top)
+    char brand_text[96]; // the name for BRAND_CUSTOM (setting)
     bool win_alpha;     // the window was created with an alpha channel (needed for rounded corners)
     bool win_shadow;    // ...and draws its own drop shadow in a margin round the window (Wayland)
     int shadow_px;      // that margin now, in pixels (0: maximised, system title bar...); A.W / A.H exclude it
@@ -1141,7 +1144,7 @@ static void layout(void) {
     f32 W = (f32)A.W, H = (f32)A.H;
     // the sidebar keeps >= 520 px for the panels when the window is narrow
     f32 tb = 0, st = picker_active() ? picker_bar_h() : roundf(S(28)), sb = roundf(MIN(S(CLAMP(A.side_w, 150.f, 480.f)), MAX(S(150), W - S(520))));
-    f32 bh = roundf(S(44)); // logo centred on the tab strip
+    f32 bh = A.brand_name == BRAND_HIDDEN ? 0 : roundf(S(44)); // logo centred on the tab strip
     A.r_brand = (Rect){0, 0, sb, bh};
     A.r_sidebar = (Rect){0, bh, sb, H - st - bh};
     if (picker_active()) A.r_sidebar.h -= picker_tab_h(); // the picker bar's title tab sits under the sidebar

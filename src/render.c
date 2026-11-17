@@ -564,9 +564,22 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
 
 static bool sidebar_edge_hot(void) { return A.drag == DRAG_SIDEBAR || (A.drag == DRAG_NONE && A.mouse_in && in_rect(A.r_sdiv, A.mx, A.my)); }
 
-// Brand header: logo + app name, pinned above the (scrolling) sidebar.
+// The name above the sidebar: the app's, the computer's, or the user's own.
+static const char *brand_label(void) {
+    static char host[256];
+    switch (A.brand_name) {
+    case BRAND_HOST:
+        if (!host[0] && gethostname(host, sizeof host - 1)) snprintf(host, sizeof host, "localhost");
+        return host;
+    case BRAND_CUSTOM: return A.brand_text[0] ? A.brand_text : APP_LABEL;
+    }
+    return APP_LABEL;
+}
+
+// Brand header: logo + name, pinned above the (scrolling) sidebar.
 static void draw_brand(void) {
     Rect r = A.r_brand;
+    if (r.h <= 0) return;
     draw_rect(r.x, r.y, r.w, r.h, C(COL_SIDEBAR));
     draw_rect(r.x + r.w - 1, r.y, 1, r.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
     f32 lh = roundf(S(17)), lw = roundf(lh * 624.f / 456.f), lx = roundf(r.x + S(18)), ly = roundf(r.y + (r.h - lh) * 0.5f);
@@ -577,7 +590,8 @@ static void draw_brand(void) {
         tx += lw + roundf(S(8));
     }
     Font *f = &A.font_brand;
-    draw_text_fit(f, tx, text_y(f, r.y, r.h), r.x + r.w - tx - S(8), APP_LABEL, (int)strlen(APP_LABEL), C(COL_TEXT), 0);
+    const char *name = brand_label();
+    draw_text_fit(f, tx, text_y(f, r.y, r.h), r.x + r.w - tx - S(8), name, (int)strlen(name), C(COL_TEXT), 0);
 }
 
 // Input method: the text being composed, in a box under the focused field (underlined, like other apps show it).

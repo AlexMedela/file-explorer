@@ -1519,12 +1519,16 @@ static int run_selftest_m5(void) {
     ST_CHECK(np && A.npanels == 2);
     A.root->ratio = 0.4f;
     A.window_buttons = A.brand_logo = false;
+    A.brand_name = BRAND_CUSTOM;
+    snprintf(A.brand_text, sizeof A.brand_text, "My files");
     settings_save();
     int ntabs0 = A.ntabs;
     settings_load(); // resets to defaults first, then reads the file
     ST_CHECK(A.show_hidden && !A.folder_sizes && A.search_recursive && A.preview_on);
-    ST_CHECK(!A.window_buttons && !A.brand_logo);
+    ST_CHECK(!A.window_buttons && !A.brand_logo && A.brand_name == BRAND_CUSTOM && !strcmp(A.brand_text, "My files"));
     A.window_buttons = A.brand_logo = true;
+    A.brand_name = BRAND_APP;
+    A.brand_text[0] = 0;
     FolderView *fv5 = folder_view_find(M5_BASE, true); // sort order is remembered per folder
     ST_CHECK(fabsf(A.zoom - 1.3f) < 0.01f && fv5 && fv5->sort == SORT_SIZE && fv5->desc);
     ST_CHECK(pin_index(M5_BASE "/sub") >= 0 && A.nsess_tabs == ntabs0 && !strncmp(A.sess_layout, "H0.400(P0,P1)", 13));
@@ -4025,6 +4029,31 @@ static int run_selftest_m9(void) {
         ST_CHECK(!A.brand_logo && A.r_brand.h > 0);
         opt_bool_toggle(OPT_BRAND_LOGO);
         ST_CHECK(A.brand_logo);
+        // the name above the sidebar: the computer's, typed in Options, or none (the sidebar takes the top)
+        ST_CHECK(!strcmp(brand_label(), APP_LABEL));
+        opt_choice_set(OPT_BRAND_NAME, BRAND_HOST);
+        ST_CHECK(brand_label()[0] && A.r_brand.h > 0);
+        options_open();
+        ST_CHECK(opt_hidden(OPT_BRAND_TEXT));
+        opt_choice_set(OPT_BRAND_NAME, BRAND_CUSTOM);
+        ST_CHECK(!opt_hidden(OPT_BRAND_TEXT) && g_opt.brand_focus && !strcmp(brand_label(), APP_LABEL)); // (nothing typed yet)
+        options_text("Work\nstation \xC3\xA9");
+        ST_CHECK(!strcmp(A.brand_text, "Work station \xC3\xA9") && !strcmp(brand_label(), A.brand_text));
+        te_set(&g_opt.search, "sidebar", 7, 7);
+        st_frames(1);
+        st_shot("m9-brand-custom");
+        options_key(SDLK_RETURN, 0);
+        ST_CHECK(!g_opt.brand_focus && options_is_open());
+        sheet_close();
+        st_frames(1);
+        st_shot("m9-brand-own");
+        opt_choice_set(OPT_BRAND_NAME, BRAND_HIDDEN);
+        ST_CHECK(A.r_brand.h == 0 && A.r_sidebar.y == 0);
+        st_frames(1);
+        st_shot("m9-brand-hidden");
+        opt_choice_set(OPT_BRAND_NAME, BRAND_APP);
+        ST_CHECK(A.r_brand.h > 0 && A.r_sidebar.y == A.r_brand.h);
+        A.brand_text[0] = 0;
         bool pv = A.preview_on;
         if (!pv) preview_toggle();
         layout();

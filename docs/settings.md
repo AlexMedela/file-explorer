@@ -21,7 +21,9 @@ the empty strip or the logo to move, double-click it to maximise, right-click fo
 `FE_TITLE_BAR=app|system` overrides it for one run.
 `window_buttons=0` (Options -> Appearance -> Window buttons, on by default) leaves out minimise / maximise / close, for
 desktops that close and tile windows from the keyboard; the tab strip then runs to the window's edge.
-`brand_logo=0` (Options -> Appearance -> Logo) shows the name above the sidebar without the logo.
+`brand_name=app|host|custom|hidden` (Options -> Appearance -> Name above the sidebar) shows Explorer, this computer's
+name, your own `brand_text=` (typed under it in Options), or nothing: the sidebar then starts at the top.
+`brand_logo=0` (Options -> Appearance -> Logo) shows that name without the logo.
 `round_corners=1` (Options -> Appearance -> Rounded corners, off by default) rounds the window's corners with Explorer's own title bar,
 and draws a drop shadow round it the way GTK apps do (square and without shadow when maximised or snapped). On X11 this
 needs a compositor (else the corners stay square) and the OpenGL renderer (Automatic picks it there); the shadow needs a

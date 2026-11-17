@@ -46,6 +46,8 @@ static void settings_defaults(void) {
     A.round_corners = false;
     A.window_buttons = true;
     A.brand_logo = true;
+    A.brand_name = BRAND_APP;
+    A.brand_text[0] = 0;
     A.ig_prev_fm[0] = 0;
     A.ig_fm1 = A.ig_asked = false;
     A.ig_check_updates = true;
@@ -272,6 +274,8 @@ static void settings_load(void) {
         else if (!strcmp(k, "round_corners")) A.round_corners = atoi(v);
         else if (!strcmp(k, "window_buttons")) A.window_buttons = atoi(v);
         else if (!strcmp(k, "brand_logo")) A.brand_logo = atoi(v);
+        else if (!strcmp(k, "brand_name")) A.brand_name = !strcmp(v, "host") ? BRAND_HOST : !strcmp(v, "custom") ? BRAND_CUSTOM : !strcmp(v, "hidden") ? BRAND_HIDDEN : BRAND_APP;
+        else if (!strcmp(k, "brand_text")) snprintf(A.brand_text, sizeof A.brand_text, "%s", v);
         else if (!strcmp(k, "alt_rows")) A.alt_rows = atoi(v);
         else if (!strcmp(k, "load_times")) A.load_times = atoi(v);
         else if (!strcmp(k, "verify_copies")) A.verify_copies = atoi(v);
@@ -513,6 +517,8 @@ static void settings_write(FILE *f) {
     fprintf(f, "round_corners=%d\n", A.round_corners);
     fprintf(f, "window_buttons=%d\n", A.window_buttons);
     fprintf(f, "brand_logo=%d\n", A.brand_logo);
+    static const char *brand_names[] = {"app", "host", "custom", "hidden"}; // BRAND_*
+    fprintf(f, "brand_name=%s\nbrand_text=%s\n", brand_names[CLAMP(A.brand_name, 0, BRAND_HIDDEN)], A.brand_text);
     fprintf(f, "dim_inactive=%d\nalt_rows=%d\nsize_bars=%d\nload_times=%d\ncolumns=", A.dim_inactive, A.alt_rows, A.size_bars, A.load_times);
     for (int i = 0; i < A.ncols; i++) {
         int c = A.cols[i];
