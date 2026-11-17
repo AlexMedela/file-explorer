@@ -27,6 +27,9 @@ GENERIC = {
                     '<path d="M12 13.6v1.8M12 17.6v1.8" stroke="#E0F2F1" stroke-width="1.5" stroke-linecap="round"/>'),
     "cloud": svg24('<path d="' + CLOUD + '" fill="#64B5F6"/>'),
     "home": svg24('<path d="M12 3.2 2.8 11h2.7v9h5v-5.5h3V20h5v-9h2.7Z" fill="#81C784"/>'),
+    # backups (Borg repositories): an archive box / a cloud with a history arrow
+    "backup": svg24('<rect x="2" y="2.5" width="20" height="5" rx="1.3" fill="#4DB6AC"/><rect x="3.5" y="8.5" width="17" height="13" rx="2" fill="#00897B"/><path d="M8.4 15a3.6 3.6 0 1 0 1.05-2.55" fill="none" stroke="#E0F2F1" stroke-width="1.9" stroke-linecap="round"/><path d="M8.9 11.05v2.25h2.25" fill="none" stroke="#E0F2F1" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 13.4v1.7l1.2.8" fill="none" stroke="#E0F2F1" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'),
+    "backup-remote": svg24('<path d="M6.3 21a5 5 0 0 1-.7-9.95A6.6 6.6 0 0 1 18.3 9.5 5.8 5.8 0 0 1 18.2 21Z" fill="#5C6BC0"/><path d="M8.4 15.4a3.6 3.6 0 1 0 1.05-2.55" fill="none" stroke="#E8EAF6" stroke-width="1.9" stroke-linecap="round"/><path d="M8.9 11.45v2.25h2.25" fill="none" stroke="#E8EAF6" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 13.8v1.7l1.2.8" fill="none" stroke="#E8EAF6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'),
     "aws": svg24('<path d="' + CLOUD + '" fill="#FF9900"/><path d="M7 15.2q5 2.6 10 0" fill="none" stroke="#232F3E" stroke-width="1.6" stroke-linecap="round"/>'
                  '<path d="M15.4 14.2l1.8.9-.6 1.9" fill="none" stroke="#232F3E" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>'),
     "windows": svg24('<path d="M3 5.2 10.6 4v7.4H3ZM11.8 3.8 21 2.5v8.9h-9.2ZM3 12.6h7.6V20L3 18.8ZM11.8 12.6H21v8.9l-9.2-1.3Z" fill="#0078D4"/>'),
@@ -43,7 +46,7 @@ BRAND = {"akamai": "0096D6", "apple": "MARK", "archlinux": "1793D1", "cloudflare
          "vultr": "007BFC"}
 GROUPS = [
     ("General", [("network", "Network"), ("tunnel", "Tunnel"), ("server", "Server"), ("vm", "Virtual machine"), ("nas", "NAS"), ("disk", "Disk"),
-                 ("cloud", "Cloud"), ("home", "Home"), ("console", "Terminal"), ("database", "Database"),
+                 ("backup", "Backup"), ("backup-remote", "Remote backup"), ("cloud", "Cloud"), ("home", "Home"), ("console", "Terminal"), ("database", "Database"),
                  ("docker", "Docker"), ("kubernetes", "Kubernetes")]),
     ("Cloud & hosting", [("aws", "AWS"), ("azure", "Azure"), ("gcp", "Google Cloud"), ("digitalocean", "DigitalOcean"),
                          ("hetzner", "Hetzner"), ("akamai", "Akamai / Linode"), ("vultr", "Vultr"), ("oracle", "Oracle Cloud"),

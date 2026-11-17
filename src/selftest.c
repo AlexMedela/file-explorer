@@ -8620,6 +8620,9 @@ static int run_selftest_borg(void) {
     int brow = -1;
     for (int i = 0; i < A.nplaces; i++) if (A.places[i].kind == PK_BORG && A.places[i].item == 0) brow = i;
     ST_CHECK(brow >= 0 && !A.places[brow].path[0] && !strcmp(A.places[brow].label, "repo2"));
+    ST_CHECK(!strcmp(borg_default_icon(A.borgs[0].repo), "backup") && net_icon_find("backup") >= 0 && net_icon_find("backup-remote") >= 0);
+    ST_CHECK(!strcmp(borg_default_icon("ssh://me@nas/srv/b"), "backup-remote"));
+    st_shot("borg-sidebar-default");
     borg_edit_open(0);
     ST_CHECK(g_sheet.kind == SHEET_BORG && !strcmp(g_sheet.cn[CN_NAME].buf, "repo2"));
     te_set(&g_sheet.cn[CN_NAME], "Server nightly", 14, 14);

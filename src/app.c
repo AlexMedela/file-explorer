@@ -2811,7 +2811,7 @@ static int borg_mount_of_saved(int i) { // the mount of a saved backup, or -1
     return -1;
 }
 
-static const char *borg_default_icon(const char *repo) { return !strncmp(repo, "ssh://", 6) || path_is_remote(repo) ? "server" : "disk"; }
+static const char *borg_default_icon(const char *repo) { return !strncmp(repo, "ssh://", 6) || path_is_remote(repo) ? "backup-remote" : "backup"; }
 
 // Rebuild the sidebar rows from the Quick Access groups + mounted drives.
 static void init_places(void) {
