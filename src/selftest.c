@@ -3058,6 +3058,107 @@ static int run_selftest_m8(void) {
         ST_CHECK(!st_exists(M8_BASE "/safe/escaped.txt") && !st_exists(M8_BASE "/escaped.txt"));
     }
 
+    // executable files: opening asks (Run / Run in terminal / [Open] / Cancel), "Don't ask again" keeps the answer,
+    // one without the executable bit runs only after "Make executable and run"; right-click > Run
+    {
+        mkdir(M8_BASE "/run", 0755);
+        static const struct { const char *name, *data; mode_t mode; } rf[] = {
+            {"prog.AppImage", "\x7f" "ELF\x02\x01", 0755}, {"dl.AppImage", "\x7f" "ELF\x02\x01", 0644},
+            {"tool.sh", "#!/bin/sh\necho hi\n", 0755}, {"notes.sh", "#!/bin/sh\necho hi\n", 0644}, {"plain.txt", "just text\n", 0755}};
+        for (size_t i = 0; i < ARRAY_COUNT(rf); i++) {
+            char fp[PATH_MAX];
+            path_join(fp, sizeof fp, M8_BASE "/run", rf[i].name);
+            FILE *rfh = fopen(fp, "w");
+            fputs(rf[i].data, rfh);
+            fclose(rfh);
+            chmod(fp, rf[i].mode);
+        }
+        pane_navigate(p, M8_BASE "/run", true); st_wait();
+        int saved_exec = A.exec_open;
+        A.exec_open = EXEC_ASK;
+        // a program: asked, then run in its folder
+        st_select(p, "prog.AppImage");
+        A.last_opened[0] = 0;
+        do_action(p, ACT_OPEN);
+        ST_CHECK(A.dlg.open && A.dlg.nbuttons == 3 && A.dlg.has_check && strstr(A.dlg.msg, "AppImage") && !A.last_opened[0]);
+        st_frames(2);
+        st_shot("run-ask");
+        dialog_choose(0);
+        ST_CHECK(!strcmp(A.last_opened, "run:" M8_BASE "/run/prog.AppImage") && A.exec_open == EXEC_ASK);
+        // Cancel: nothing
+        A.last_opened[0] = 0;
+        do_action(p, ACT_OPEN);
+        dialog_choose(A.dlg.cancel);
+        ST_CHECK(!A.dlg.open && !A.last_opened[0]);
+        // a script: Open shows it as a document
+        st_select(p, "tool.sh");
+        do_action(p, ACT_OPEN);
+        ST_CHECK(A.dlg.open && A.dlg.nbuttons == 4);
+        dialog_choose(2);
+        ST_CHECK(!strcmp(A.last_opened, M8_BASE "/run/tool.sh"));
+        // "Don't ask again" + Run in terminal: kept, and the next program runs that way without a question
+        do_action(p, ACT_OPEN);
+        A.dlg.check = true;
+        dialog_choose(1);
+        ST_CHECK(!strcmp(A.last_opened, "run-terminal:" M8_BASE "/run/tool.sh") && A.exec_open == EXEC_TERMINAL);
+        st_select(p, "prog.AppImage");
+        do_action(p, ACT_OPEN);
+        ST_CHECK(!A.dlg.open && !strcmp(A.last_opened, "run-terminal:" M8_BASE "/run/prog.AppImage"));
+        // "Open as a document": scripts open, programs still ask (nothing else opens them)
+        A.exec_open = EXEC_OPEN;
+        do_action(p, ACT_OPEN);
+        ST_CHECK(A.dlg.open);
+        dialog_choose(A.dlg.cancel);
+        st_select(p, "tool.sh");
+        do_action(p, ACT_OPEN);
+        ST_CHECK(!A.dlg.open && !strcmp(A.last_opened, M8_BASE "/run/tool.sh"));
+        A.exec_open = EXEC_ASK;
+        // a script without the executable bit, an executable text file without #!: documents, no question
+        st_select(p, "notes.sh");
+        do_action(p, ACT_OPEN);
+        ST_CHECK(!A.dlg.open && !strcmp(A.last_opened, M8_BASE "/run/notes.sh"));
+        st_select(p, "plain.txt");
+        do_action(p, ACT_OPEN);
+        ST_CHECK(!A.dlg.open && !strcmp(A.last_opened, M8_BASE "/run/plain.txt"));
+        // a downloaded AppImage (no executable bit): Cancel leaves it, "Make executable and run" runs it
+        st_select(p, "dl.AppImage");
+        A.last_opened[0] = 0;
+        do_action(p, ACT_OPEN);
+        ST_CHECK(A.dlg.open && A.dlg.icon == DI_WARN && A.dlg.nbuttons == 2 && !A.dlg.has_check);
+        st_frames(2);
+        st_shot("run-chmod");
+        dialog_choose(A.dlg.cancel);
+        struct stat rst;
+        ST_CHECK(!stat(M8_BASE "/run/dl.AppImage", &rst) && (rst.st_mode & 0777) == 0644 && !A.last_opened[0]);
+        do_action(p, ACT_OPEN);
+        dialog_choose(0);
+        ST_CHECK(!stat(M8_BASE "/run/dl.AppImage", &rst) && (rst.st_mode & 0777) == 0755);
+        ST_CHECK(!strcmp(A.last_opened, "run:" M8_BASE "/run/dl.AppImage"));
+        // right-click: Run / Run in terminal for programs and scripts only; no question for an executable one
+        st_select(p, "tool.sh");
+        menu_open(p, 50, 50, true);
+        bool has_run = false;
+        for (int k = 0; k < A.menu.n; k++) has_run |= A.menu.items[k].act == ACT_RUN_TERM;
+        ST_CHECK(has_run);
+        A.menu.open = false;
+        st_select(p, "plain.txt");
+        menu_open(p, 50, 50, true);
+        has_run = false;
+        for (int k = 0; k < A.menu.n; k++) has_run |= A.menu.items[k].act == ACT_RUN;
+        ST_CHECK(!has_run);
+        A.menu.open = false;
+        st_select(p, "tool.sh");
+        do_action(p, ACT_RUN);
+        ST_CHECK(!A.dlg.open && !strcmp(A.last_opened, "run:" M8_BASE "/run/tool.sh"));
+        st_select(p, "notes.sh");
+        do_action(p, ACT_RUN_TERM);
+        ST_CHECK(A.dlg.open && A.dlg.icon == DI_WARN);
+        dialog_choose(0);
+        ST_CHECK(!strcmp(A.last_opened, "run-terminal:" M8_BASE "/run/notes.sh"));
+        A.exec_open = saved_exec;
+        pane_navigate(p, M8_BASE, true); st_wait();
+    }
+
     st_rmrf(M8_BASE);
     if (st_fail) { fprintf(stderr, "SELFTEST-M8: %d failure(s)\n", st_fail); return 1; }
     printf("SELFTEST-M8 OK\n");

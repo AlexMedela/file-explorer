@@ -7,6 +7,8 @@
 
 - Browse BorgBackup repositories: folders that are Borg repositories (Borg 1, and Borg 2 beta) get a "Borg backup" pill; opening one shows its backups as dated folders, read-only (through `borg mount`, which needs borg's FUSE support, e.g. `python-pyfuse3`). Encrypted repositories ask for the passphrase, which can be kept in the system keyring. Inside a backup, "Compare with now" and "Restore…" work like in snapshots; copy or drag out anything else. Repositories in SFTP folders are read by borg on the server. "Add to sidebar" keeps a repository under a new Backups section, with its own name and icon, opened with a click; Borg 2 ones can stay mounted while the app runs. Thanks to @teraflop09-web.
 
+- Run AppImages, programs and scripts: opening an executable file asks "Run", "Run in terminal", "Open" (scripts) or "Cancel", with "Don't ask again" (Options > Behaviour > Programs). A downloaded AppImage without the executable bit offers "Make executable and run". Right-click > Run / Run in terminal too.
+
 **Fixed**
 - Inside a Timeshift snapshot the bar with "Compare with now" and "Restore…" shows, as it does for Snapper and ZFS.
 

@@ -65,6 +65,8 @@ static KeyDef g_keys[] = {
     K(CMD_SORT_SIZE, "sort.size", false, ""),
     K(ACT_RENAME, "file.rename", false, "F2"),
     K(ACT_OPEN_WITH, "file.open_with", false, ""),
+    K(ACT_RUN, "file.run", false, ""),
+    K(ACT_RUN_TERM, "file.run_terminal", false, ""),
     K(ACT_PROPERTIES, "file.properties", false, "Alt+Return"),
     K(ACT_COPY, "file.copy", false, "Ctrl+C"),
     K(ACT_CUT, "file.cut", false, "Ctrl+X"),
