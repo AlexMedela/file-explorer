@@ -2379,7 +2379,7 @@ static int run_selftest_m8(void) {
     // launching expands field codes (a fake app that writes its argument)
     // Exec quoting per the Desktop Entry spec: double quotes, backslash escapes, %% for a literal %
     DesktopApp fake = {"fake.desktop", "/tmp/fake.desktop", "Fake",
-                       "sh -c \"printf '%%s' \\\"$1\\\" > " M8_BASE "/launched\" sh %f", "", ";", false, false, false};
+                       "sh -c \"printf '%%s' \\\"$1\\\" > " M8_BASE "/launched\" sh %f", "", ";", false, false};
     char *files[1] = {M8_BASE "/abc.txt"};
     ST_CHECK(app_launch(&fake, files, 1));
     for (int k = 0; k < 200 && st_size(M8_BASE "/launched") <= 0; k++) SDL_Delay(5);
@@ -2430,7 +2430,7 @@ static int run_selftest_m8(void) {
 
     { // a folder opened with an app: it starts inside it; an Exec without file codes gets no argument
         DesktopApp term = {"faketerm.desktop", "/tmp/faketerm.desktop", "Fake terminal",
-                           "sh -c \"pwd > " M8_BASE "/launched; printf '%%s' \\\"$1\\\" >> " M8_BASE "/launched\" sh", "", ";", false, false, false};
+                           "sh -c \"pwd > " M8_BASE "/launched; printf '%%s' \\\"$1\\\" >> " M8_BASE "/launched\" sh", "", ";", false, false};
         char *dirs[1] = {M8_BASE "/dir"};
         ST_CHECK(app_launch(&term, dirs, 1));
         for (int k = 0; k < 200 && st_size(M8_BASE "/launched") <= 0; k++) SDL_Delay(5);
@@ -3520,67 +3520,65 @@ static int run_selftest_m9(void) {
     st_wait();
     ST_CHECK(!strcmp(active_pane()->path, M9_BASE));
 
-    // --- the external terminal (Options > Integration): empty = found as before; a chosen one is checked on Apply ---
+    // --- the external terminal (Options > Integration): Automatic = found as before, or one of those installed ---
     ST_CHECK(!g_external_terminal[0]);
     A.menu.n = 0;
     menu_terminal_items(p);
     ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in external terminal"));
     do_action(p, ACT_TERMINAL_EXTERNAL); // (recorded, not started)
     ST_CHECK(!strncmp(A.last_opened, "terminal:", 9) && !options_is_open());
-    options_open_page(OC_INTEGRATION);
-    st_frames(1);
-    Rect tfield = {0}, tapply = {0};
-    for (int k = 0; k < g_opt.nhits; k++) {
-        if (g_opt.hits[k].part == HP_EDIT_FIELD) tfield = g_opt.hits[k].r;
-        if (g_opt.hits[k].part == HP_EDIT_APPLY) tapply = g_opt.hits[k].r;
-    }
-    ST_CHECK(tfield.w > 0 && tapply.w > 0);
-    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tfield.x + S(10), tfield.y + tfield.h * 0.5f, SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
-    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tfield.x + S(10), tfield.y + tfield.h * 0.5f, SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
-    ST_CHECK(g_opt.terminal_path_focus);
-    st_write_text(M9_BASE "-bin/foot", "#!/bin/sh\n"); // a stand-in terminal (a name we know)
+    // the dropdown lists the terminals installed: by name on $PATH, or a terminal app's .desktop entry (TerminalEmulator)
+    st_write_text(M9_BASE "-bin/foot", "#!/bin/sh\n");
     chmod(M9_BASE "-bin/foot", 0755);
-    options_text(M9_BASE "-bin/foot");
-    ST_CHECK(!g_opt.search.buf[0]); // typed into the field, not the search
-    st_key(SDLK_RETURN, SDL_KMOD_NONE);
-    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "Terminal applied: Open in foot") && !g_opt.terminal_path_focus);
+    st_write_text(M9_BASE "-term/myterm", "#!/bin/sh\n");
+    chmod(M9_BASE "-term/myterm", 0755);
+    st_write_text(M9_BASE "-data/applications/myterm.desktop",
+                  "[Desktop Entry]\nType=Application\nName=My Term\nExec=\"" M9_BASE "-term/myterm\" --new\nCategories=System;TerminalEmulator;\n");
+    st_write_text(M9_BASE "-data/applications/editor.desktop", "[Desktop Entry]\nType=Application\nName=Editor\nExec=/bin/sh\nCategories=Utility;\n");
+    char *tpath0 = getenv("PATH") ? strdup(getenv("PATH")) : NULL, *tdata0 = getenv("XDG_DATA_HOME") ? strdup(getenv("XDG_DATA_HOME")) : NULL;
+    setenv("PATH", M9_BASE "-bin", 1); // (only the stand-ins)
+    setenv("XDG_DATA_HOME", M9_BASE "-data", 1);
+    options_open_page(OC_INTEGRATION);
+    for (int k = 0; k < 400 && g_termlist.scanning; k++) { st_frames(1); SDL_Delay(2); }
+    if (tpath0) setenv("PATH", tpath0, 1);
+    if (tdata0) setenv("XDG_DATA_HOME", tdata0, 1);
+    else unsetenv("XDG_DATA_HOME");
+    free(tpath0);
+    free(tdata0);
+    ST_CHECK(!g_termlist.scanning && opt_choice_count(OPT_TERMINAL) >= 3 && opt_choice_get(OPT_TERMINAL) == 0);
+    int tfoot = -1, tmy = -1;
+    for (int k = 1; k < opt_choice_count(OPT_TERMINAL); k++) {
+        if (!strcmp(opt_choice_label(OPT_TERMINAL, k), "foot")) tfoot = k;
+        if (!strcmp(opt_choice_label(OPT_TERMINAL, k), "myterm")) tmy = k;
+        ST_CHECK(strcmp(opt_choice_label(OPT_TERMINAL, k), "sh")); // not a terminal app
+    }
+    ST_CHECK(tfoot > 0 && tmy > 0 && !strcmp(opt_choice_label(OPT_TERMINAL, 0), "Automatic"));
+    st_frames(1);
+    Rect tdrop = {0};
+    for (int k = 0; k < g_opt.nhits; k++)
+        if (g_opt.hits[k].part == HP_DROP && g_opt.hits[k].opt == OPT_TERMINAL) tdrop = g_opt.hits[k].r;
+    ST_CHECK(tdrop.w > 0); // a dropdown, not segments
+    opt_drop_open(OPT_TERMINAL, tdrop);
+    for (int k = 0; k < g_opt.drop_n; k++)
+        if (g_opt.drop_map[k] == tfoot) opt_drop_pick(k);
+    ST_CHECK(!strcmp(g_external_terminal, "foot") && g_opt.drop_opt < 0 && opt_choice_get(OPT_TERMINAL) == tfoot);
+    st_shot("m9-terminal-option");
     settings_save();
     settings_load();
-    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot"));
+    ST_CHECK(!strcmp(g_external_terminal, "foot"));
     A.menu.n = 0;
     menu_terminal_items(p);
     ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in foot"));
     A.menu.n = 0;
-    te_set(&g_opt.terminal_path, "/nonexistent/terminal", 21, 0);
-    opt_terminal_path_apply();
-    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "not found"));
-    te_set(&g_opt.terminal_path, "/tmp", 4, 0); // a folder
-    opt_terminal_path_apply();
-    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "not executable"));
-    te_set(&g_opt.terminal_path, "/proc/self/exe", 14, 0); // a program, but not a terminal
-    opt_terminal_path_apply();
-    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "isn't a terminal"));
-    te_set(&g_opt.terminal_path, "sh", 2, 0); // a name on $PATH, not a terminal either
-    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tapply.x + S(4), tapply.y + S(4), SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
-    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tapply.x + S(4), tapply.y + S(4), SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
-    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/foot") && strstr(A.toast, "isn't a terminal"));
-    // a terminal we don't know by name, made one by its .desktop entry (Categories=TerminalEmulator)
-    DesktopApp myterm = {"myterm.desktop", "", "My Term", "\"" M9_BASE "-bin/myterm\" --new", "", ";", false, false, true};
-    g_apps = xrealloc(g_apps, (size_t)(g_napps + 1) * sizeof(DesktopApp));
-    g_apps[g_napps++] = myterm;
-    st_write_text(M9_BASE "-bin/myterm", "#!/bin/sh\n");
-    chmod(M9_BASE "-bin/myterm", 0755);
-    te_set(&g_opt.terminal_path, M9_BASE "-bin/myterm", (int)strlen(M9_BASE "-bin/myterm"), 0);
-    opt_terminal_path_apply();
-    g_napps--; // (its strings aren't ours to free)
+    opt_choice_set(OPT_TERMINAL, tmy); // one only its .desktop entry knows: kept by its path
     char texe[PATH_MAX];
     const char *tname = NULL;
-    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-bin/myterm") && find_terminal(texe, sizeof texe, &tname) && !strcmp(tname, "myterm"));
-    opt_terminal_path_sync();
-    st_shot("m9-terminal-option");
-    te_set(&g_opt.terminal_path, "", 0, 0); // Default
-    opt_terminal_path_apply();
-    ST_CHECK(!g_external_terminal[0] && strstr(A.toast, "Terminal cleared"));
+    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-term/myterm") && find_terminal(texe, sizeof texe, &tname) && !strcmp(tname, "myterm"));
+    snprintf(g_external_terminal, sizeof g_external_terminal, "gone-terminal"); // uninstalled since: shown, marked
+    ST_CHECK(opt_choice_get(OPT_TERMINAL) == opt_choice_count(OPT_TERMINAL) - 1 &&
+             !strcmp(opt_choice_label(OPT_TERMINAL, opt_choice_get(OPT_TERMINAL)), "gone-terminal (not found)"));
+    opt_choice_set(OPT_TERMINAL, 0);
+    ST_CHECK(!g_external_terminal[0] && opt_choice_get(OPT_TERMINAL) == 0);
     sheet_close();
     g_opt.cat = OC_APPEARANCE;
 

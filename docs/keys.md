@@ -37,7 +37,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Ctrl+Shift+C | Copy full path(s) as text |
 | F4 | **Terminal panel** under the folder (like Dolphin's): show / hide. Each tab has its own; it follows the folder both ways (going somewhere moves the shell there, a `cd` typed there moves the folder - only while the shell waits at its prompt; bash, zsh and fish move quietly, keeping what you typed, other shells get a `cd` typed); drag the line above it to resize; the × at its top right (or right-click → "Hide terminal panel") hides it like F4, `exit` closes it |
 | Ctrl+Shift+F4 | Keyboard to the terminal panel and back to the folder (shows it if hidden); a click in either side does the same |
-| Shift+F4 | Open a terminal tab here (an SSH session in SFTP folders); right-click → "Open in external terminal" for your terminal app (pick it in Options > Integration) |
+| Shift+F4 | Open a terminal tab here (an SSH session in SFTP folders); right-click → "Open in external terminal" for your terminal app (pick it in Options > Integration > Terminal app) |
 | Right-click, Menu key, Shift+F10 | Context menu (an icon per action). Views, Sort by and Group by are submenus: hover or → opens one, ← / Esc goes back |
 | Drag a file by its name | Move onto a folder, pane, or sidebar place (Ctrl = copy, Shift = move, Ctrl+Shift = link; other drives copy by default); several selected items drag together, grabbed anywhere on a selected row. With Options > Behaviour > "Ask what to do when dropping", a drop without Ctrl/Shift opens Move / Copy / Link here |
 | Drag folders by their name | Onto a panel edge (top, bottom, left, right) = open them in a new split there (snap overlay); onto the empty part of a tab bar = open them as new tabs |

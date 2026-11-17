@@ -103,12 +103,11 @@ just updates and what you typed stays. Other shells, or one whose startup files 
 `fastfetch` your startup files or fish's greeting run is skipped in the panel (typed at its prompt, it runs). Tabs that had it open get it back after a restart, with
 a new shell; `terminal_panel_height` is its height. Terminal tabs: Shift+F4 opens a terminal tab in the current
 folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. The external
-terminal is `$TERMINAL`, else xdg-terminal-exec, else the desktop's own; Options > Integration > Terminal executable
-(`external_terminal=`, a name on `$PATH` or an absolute path; Apply takes only a terminal: one of the usual
-ones, or a program a terminal app's `.desktop` entry runs) picks one instead, and the menu then
-says "Open in" its name. Terminal tabs run your shell and look like your default
+terminal is `$TERMINAL`, else xdg-terminal-exec, else the desktop's own; Options > Integration > Terminal app picks one of
+the terminals installed instead (`external_terminal=`; listed are the usual ones on `$PATH` and those of terminal apps'
+`.desktop` entries), and the menu then says "Open in" its name. Terminal tabs run your shell and look like your default
 terminal (xdg-terminal-exec's choice, else $TERMINAL): font, colours, padding, cursor and scrollback are read from
-foot, kitty, Alacritty or Ghostty config and followed live (Options > Appearance > Terminal appearance); a font with
+foot, kitty, Alacritty or Ghostty config (the status bar names it: "look from foot") and followed live (Options > Appearance > Terminal appearance); a font with
 programming ligatures (Fira Code, JetBrains Mono...) shows them, kept to the cell grid. Ctrl+Shift+C/V
 copy and paste, Shift+PageUp/PageDown scroll back, Ctrl+Shift+W closes, Ctrl+Tab switches tabs. Built on libvterm.
 
