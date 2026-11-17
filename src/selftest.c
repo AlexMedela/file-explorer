@@ -2128,6 +2128,51 @@ static int run_selftest_m7(void) {
     ST_CHECK(p->view == VIEW_DETAILS && !folder_view_find(M7_BASE, true));
     A.view_per_folder = false;
 
+    // a cut-off name shows its full text after the mouse rests on it; a name that fits doesn't; then no more waking
+    {
+        char longname[200];
+        snprintf(longname, sizeof longname, "%s", "a rather long file name with many words that cannot fit in the name column of a window, "
+                                                  "nor in two lines of a grid label, so it ends in an ellipsis.txt");
+        char path[PATH_MAX];
+        mkdir(M7_BASE "/tips", 0755);
+        snprintf(path, sizeof path, M7_BASE "/tips/%s", longname);
+        st_write(path, 10);
+        st_write(M7_BASE "/tips/short.txt", 10);
+        pane_navigate(p, M7_BASE "/tips", true); st_wait();
+        ly = &p->ly;
+        ST_CHECK(p->view == VIEW_DETAILS);
+        A.mouse_in = true;
+        A.mx = ly->col_name + S(80);
+        A.my = st_row_y(p, "short.txt");
+        st_frames(1);
+        ST_CHECK(g_fit_tip_len == 0);
+        A.my = st_row_y(p, longname);
+        st_frames(1);
+        ST_CHECK(g_fit_tip_len > 0 && !strcmp(g_fit_tip, longname) && !fit_tip_ready() && fit_tip_wait_ms() > 0);
+        SDL_Delay(600);
+        st_frames(1);
+        ST_CHECK(fit_tip_ready() && fit_tip_wait_ms() == 0);
+        // grid: hovering the first line of the label shows the whole name (not the second line's end)
+        set_zoom_level(p, 4);
+        st_wait();
+        ST_CHECK(p->view == VIEW_GRID);
+        i64 li = -1;
+        for (u32 i = 0; i < p->count; i++)
+            if (!strcmp(p->L->entries[p->order[i]].name, longname)) li = i;
+        ST_CHECK(li >= 0);
+        if (li >= 0) {
+            Rect r = item_rect(p, li);
+            A.mx = r.x + r.w * 0.5f;
+            A.my = r.y + roundf(S(8)) + roundf(S(p->icon_px)) + roundf(S(6)) + S(3);
+            st_frames(1);
+            ST_CHECK(g_fit_tip_len > 0 && !strcmp(g_fit_tip, longname));
+        }
+        A.mouse_in = false;
+        set_zoom_level(p, 0);
+        st_frames(1);
+        ST_CHECK(g_fit_tip_len == 0);
+    }
+
 m7_done:
     st_rmrf(M7_BASE);
     if (st_fail) { fprintf(stderr, "SELFTEST-M7: %d failure(s)\n", st_fail); return 1; }

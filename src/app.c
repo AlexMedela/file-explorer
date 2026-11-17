@@ -11203,6 +11203,7 @@ static void frame_draw(void) {
     g_text_field_count = 0; // (each te_draw records its field again)
     g_caret_due = 0;        // (and when its caret wants the next frame)
     draw_clip(NULL);
+    fit_tip_begin(A.mx, A.my);
     g_alpha = 1.f;
     if (A.shadow_px) { // transparent margin, opaque window (clearing ignores the viewport)
         SDL_SetRenderDrawColor(A.ren, 0, 0, 0, 0);
@@ -11217,6 +11218,7 @@ static void frame_draw(void) {
     // While a menu, the palette, a sheet or a dialog is open, nothing underneath reacts to the mouse.
     bool mouse_in = A.mouse_in;
     if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open) A.mouse_in = false;
+    fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     bool multi = A.npanels > 1;
     for (int i = 0; i < A.npanels; i++) {
         Panel *pn = A.panels[i];
@@ -11255,14 +11257,19 @@ static void frame_draw(void) {
     draw_tab_drop();
     if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open) g_text_field_count = 0; // under an overlay: no clicks
     A.mouse_in = mouse_in; // overlays get the mouse
+    fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     draw_menu();
     draw_palette();
     A.mouse_in = mouse_in && !A.dlg.open;
+    fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     sheet_draw();
     A.mouse_in = mouse_in;
+    fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     draw_dialog();
     draw_preedit();
     if (A.show_overlay) draw_overlay();
+    fit_tip_mouse(false);
+    draw_fit_tooltip();
     draw_flush();
     corners_mask();
     shadow_draw();
@@ -11945,15 +11952,17 @@ int main(int argc, char **argv) {
         SDL_Event e;
         bool got;
         int caret_ms = A.win_hidden ? 0 : caret_wait_ms(); // a text caret gliding or breathing
+        int tip_ms = A.win_hidden ? 0 : fit_tip_wait_ms();  // the full text of a cut-off label, due soon
         if (hold_ms) got = SDL_WaitEventTimeout(&e, hold_ms); // the listing's progress wakes us
         else if ((A.redraw || animating()) && !A.win_hidden) got = SDL_PollEvent(&e);
         else if (loading || A.screenshot || ops_busy() || watch_pending() || A.search_due || A.pal_pending || sheet_busy())
             got = SDL_WaitEventTimeout(&e, MIN((loading || watch_pending() || A.search_due) ? 30 : ops_moving() ? 16 : 100,
-                                               caret_ms > 0 ? caret_ms : INT_MAX));
-        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0 || caret_ms > 0) { // add-on / cloud status, .git polls, the caret
+                                               MIN(caret_ms > 0 ? caret_ms : INT_MAX, tip_ms > 0 ? tip_ms : INT_MAX)));
+        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0 || caret_ms > 0 || tip_ms > 0) {
+            // add-on / cloud status, .git polls, the caret, a tooltip
             int t = INT_MAX;
-            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms(), caret_ms};
-            for (int k = 0; k < 4; k++) if (w[k] > 0) t = MIN(t, w[k]);
+            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms(), caret_ms, tip_ms};
+            for (int k = 0; k < 5; k++) if (w[k] > 0) t = MIN(t, w[k]);
             got = SDL_WaitEventTimeout(&e, t);
         }
         else got = SDL_WaitEvent(&e);
@@ -11998,6 +12007,8 @@ int main(int argc, char **argv) {
     if (A.trash_job) { atomic_store(&A.trash_job->cancel, 1); stats_release(A.trash_job); A.trash_job = NULL; }
     recent_save();
     if (!A.screenshot) settings_save();
+    free(g_fit_tip);
+    free(g_fit_tip_prev);
     SDL_DestroyRenderer(A.ren);
     SDL_DestroyWindow(A.win);
     SDL_Quit();

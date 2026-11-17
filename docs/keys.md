@@ -125,3 +125,6 @@ opens in a terminal tab at the line; otherwise the file opens normally.
 Text fields (path bar while typing a path, inline rename, search, the palette, Options and dialog fields): a click
 places the caret, dragging selects, Shift+click extends the selection, a double-click selects a word (a password field:
 all of it), a triple-click the whole field. In a dialog, clicking another field moves the keyboard there.
+
+Resting the mouse on a name or label cut off with "…" (file names in every view, sidebar, tabs, dialogs, menus) shows
+its full text in a tooltip.

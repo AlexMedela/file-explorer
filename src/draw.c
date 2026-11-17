@@ -348,6 +348,66 @@ static f32 draw_text(Font *f, f32 x, f32 y, const char *s, int len, Color c) {
 
 #define ELLIPSIS "\xE2\x80\xA6"
 
+// One hovered, elided label per frame. The renderer draws its full text after all the normal UI
+// (draw_fit_tooltip), so the tooltip is never clipped by a pane or a sheet.
+static char *g_fit_tip, *g_fit_tip_prev;
+static int g_fit_tip_len, g_fit_tip_prev_len;
+static size_t g_fit_tip_cap, g_fit_tip_prev_cap;
+static f32 g_fit_tip_mx, g_fit_tip_my, g_fit_tip_prev_mx, g_fit_tip_prev_my;
+static bool g_fit_tip_mouse;
+static u64 g_fit_tip_since;
+
+static void fit_tip_begin(f32 mx, f32 my) {
+    g_fit_tip_len = 0;
+    g_fit_tip_mx = mx;
+    g_fit_tip_my = my;
+    g_fit_tip_mouse = false;
+}
+
+static void fit_tip_mouse(bool enabled) { g_fit_tip_mouse = enabled; } // (off while an overlay has the mouse)
+
+// The full text of a label cut off in the box x, y, w, h, if the mouse is there (and not clipped away).
+static void fit_tip_offer_box(f32 x, f32 y, f32 w, f32 h, const char *s, int len) {
+    if (!g_fit_tip_mouse || len <= 0 || g_fit_tip_mx < x || g_fit_tip_mx >= x + w || g_fit_tip_my < y || g_fit_tip_my >= y + h) return;
+    if (g_clip_on && (g_fit_tip_mx < g_clip_cur.x || g_fit_tip_mx >= g_clip_cur.x + g_clip_cur.w ||
+                      g_fit_tip_my < g_clip_cur.y || g_fit_tip_my >= g_clip_cur.y + g_clip_cur.h)) return;
+    if ((size_t)len + 1 > g_fit_tip_cap) {
+        g_fit_tip_cap = (size_t)len + 1;
+        g_fit_tip = xrealloc(g_fit_tip, g_fit_tip_cap);
+    }
+    memcpy(g_fit_tip, s, (size_t)len);
+    g_fit_tip[len] = 0;
+    g_fit_tip_len = len;
+}
+
+static void fit_tip_offer(Font *f, f32 x, f32 y, f32 w, const char *s, int len) { fit_tip_offer_box(x, y, w, f->line_h, s, len); }
+
+// Shown once the mouse rests on the same label for a moment.
+static bool fit_tip_ready(void) {
+    u64 now = now_ns();
+    bool same = g_fit_tip_len == g_fit_tip_prev_len && g_fit_tip_len > 0 && !memcmp(g_fit_tip, g_fit_tip_prev, (size_t)g_fit_tip_len) &&
+                fabsf(g_fit_tip_mx - g_fit_tip_prev_mx) < 4.f && fabsf(g_fit_tip_my - g_fit_tip_prev_my) < 4.f;
+    if (!same) {
+        if ((size_t)g_fit_tip_len + 1 > g_fit_tip_prev_cap) {
+            g_fit_tip_prev_cap = (size_t)g_fit_tip_len + 1;
+            g_fit_tip_prev = xrealloc(g_fit_tip_prev, g_fit_tip_prev_cap);
+        }
+        if (g_fit_tip_len) memcpy(g_fit_tip_prev, g_fit_tip, (size_t)g_fit_tip_len + 1);
+        g_fit_tip_prev_len = g_fit_tip_len;
+        g_fit_tip_prev_mx = g_fit_tip_mx;
+        g_fit_tip_prev_my = g_fit_tip_my;
+        g_fit_tip_since = now;
+    }
+    return g_fit_tip_len && now - g_fit_tip_since >= 550000000ull;
+}
+
+// How long the main loop may sleep before a pending tooltip is due (0: none pending).
+static int fit_tip_wait_ms(void) {
+    if (!g_fit_tip_prev_len) return 0;
+    u64 age = now_ns() - g_fit_tip_since;
+    return age < 550000000ull ? (int)((550000000ull - age) / 1000000ull) + 1 : 0;
+}
+
 // Draw text fitting maxw, eliding with "...". align: 0 left, 1 right, 2 centre.
 static void draw_text_fit(Font *f, f32 x, f32 y, f32 maxw, const char *s, int len, Color c, int align) {
     if (maxw <= 0) return;
@@ -356,6 +416,7 @@ static void draw_text_fit(Font *f, f32 x, f32 y, f32 maxw, const char *s, int le
         draw_text(f, align == 2 ? roundf(x + (maxw - w) * 0.5f) : align ? x + maxw - w : x, y, s, len, c);
         return;
     }
+    fit_tip_offer(f, x, y, maxw, s, len);
     f32 ell = text_width(f, ELLIPSIS, 3), avail = maxw - ell, acc = 0;
     if (avail <= 0) return;
     if (text_complex(s, len) && len < 4096) {
