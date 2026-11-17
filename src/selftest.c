@@ -2140,6 +2140,26 @@ m7_done:
 
 #define M8_BASE "/tmp/fe-m8-test"
 
+// Where the caret for byte offset off of a text field drawn last frame sits (x), and the field's middle (y).
+static bool st_text_at(TextEdit *t, int off, f32 *x, f32 *y) {
+    for (int i = 0; i < g_text_field_count; i++) {
+        TextFieldHit *h = &g_text_fields[i];
+        if (h->edit != t) continue;
+        f32 cx = h->masked ? utf8_index(t->buf, off) * (roundf(S(3)) * 2 + S(4)) - S(2) : text_caret_x(h->font, t->buf, (int)strlen(t->buf), off);
+        *x = h->rect.x + h->pad - t->scroll + cx;
+        *y = h->hit.y + h->hit.h * 0.5f;
+        return true;
+    }
+    return false;
+}
+
+static void st_text_click(TextEdit *t, int off, int clicks, SDL_Keymod mod) {
+    f32 x = 0, y = 0;
+    ST_CHECK(st_text_at(t, off, &x, &y));
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, x, y, SDL_BUTTON_LEFT, clicks, mod);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, x, y, SDL_BUTTON_LEFT, clicks, mod);
+}
+
 static void st_setup_m8(void) {
     st_rmrf(M8_BASE);
     mkdir(M8_BASE, 0755);
@@ -2458,6 +2478,34 @@ static int run_selftest_m8(void) {
         sel_clear(p);
     }
 
+    // Mouse in a text field (inline rename): click places the caret, drag selects, Shift-click extends,
+    // double-click picks a word, triple-click everything; none of it ends the rename
+    sel_clear(p);
+    ST_CHECK(st_select(p, "photo1.jpg"));
+    st_key(SDLK_F2, SDL_KMOD_NONE);
+    ST_CHECK(A.ren_pane == p && !strcmp(A.ren_te.buf, "photo1.jpg"));
+    st_text_click(&A.ren_te, 2, 1, 0);
+    ST_CHECK(A.ren_pane == p && A.ren_te.anchor == 2 && A.ren_te.caret == 2);
+    {
+        f32 x0 = 0, x1 = 0, y = 0;
+        ST_CHECK(st_text_at(&A.ren_te, 1, &x0, &y) && st_text_at(&A.ren_te, 5, &x1, &y));
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, x0, y, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, x1, y, 0, 0, 0);
+        ST_CHECK(A.ren_te.anchor == 1 && A.ren_te.caret == 5);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, x1, y, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, x0, y, 0, 0, 0); // released: moving no longer selects
+        ST_CHECK(A.ren_te.anchor == 1 && A.ren_te.caret == 5);
+    }
+    st_text_click(&A.ren_te, 8, 1, SDL_KMOD_SHIFT);
+    ST_CHECK(A.ren_te.anchor == 1 && A.ren_te.caret == 8);
+    st_text_click(&A.ren_te, 3, 2, 0);
+    ST_CHECK(A.ren_te.anchor == 0 && A.ren_te.caret == 6); // "photo1" (the dot ends the word)
+    st_text_click(&A.ren_te, 3, 3, 0);
+    ST_CHECK(A.ren_te.anchor == 0 && A.ren_te.caret == 10);
+    ST_CHECK(A.ren_pane == p);
+    st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+    ST_CHECK(!A.ren_pane && st_exists(M8_BASE "/photo1.jpg"));
+
     // Batch rename: F2 with several selected
     sel_clear(p);
     for (u32 i = 0; i < p->count; i++)
@@ -2469,6 +2517,11 @@ static int run_selftest_m8(void) {
     ST_CHECK(!strcmp(g_sheet.tmpl.buf, "holiday_{n:2}{ext}") && !strcmp(g_sheet.newnames[0], "holiday_01.jpg"));
     st_frames(2);
     st_shot("batchrename");
+    // a click in another field moves the keyboard there, the caret where it was clicked
+    st_text_click(&g_sheet.find, 0, 1, 0);
+    ST_CHECK(g_sheet.kind == SHEET_RENAME && g_sheet.focus == 1);
+    st_text_click(&g_sheet.tmpl, 4, 1, 0);
+    ST_CHECK(g_sheet.focus == 0 && g_sheet.tmpl.anchor == 4 && g_sheet.tmpl.caret == 4);
     // a pattern that makes every name equal is refused
     te_set(&g_sheet.tmpl, "same.jpg", 8, 8);
     rename_recompute();
@@ -3146,6 +3199,21 @@ static int run_selftest_m9(void) {
     st_key(SDLK_W, SDL_KMOD_CTRL);
     A.edit_pane = NULL;
     p = active_pane();
+    // typing a path: a click places the caret (the path bar stays open), double-click picks a folder name,
+    // triple-click the whole path
+    begin_edit(p, NULL);
+    st_frames(1);
+    {
+        int n = (int)strlen(A.edit.buf), last = (int)(strrchr(A.edit.buf, '/') - A.edit.buf);
+        st_text_click(&A.edit, last + 2, 1, 0);
+        ST_CHECK(A.edit_pane == p && A.edit.anchor == last + 2 && A.edit.caret == last + 2);
+        st_text_click(&A.edit, last + 2, 2, 0);
+        ST_CHECK(A.edit_pane == p && A.edit.anchor > last && A.edit.anchor < A.edit.caret && A.edit.caret <= n);
+        st_text_click(&A.edit, 1, 3, 0);
+        ST_CHECK(A.edit.anchor == 0 && A.edit.caret == n);
+    }
+    st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+    ST_CHECK(!A.edit_pane);
 
     // Options > Keyboard: record a new shortcut with the recorder
     options_open();
@@ -3225,6 +3293,11 @@ static int run_selftest_m9(void) {
     st_type("Solo");
     st_key(SDLK_RETURN, SDL_KMOD_NONE);
     ST_CHECK(g_nlayouts == 2 && layout_find("Solo") >= 0 && !g_opt.lname.buf[0]);
+    // a click moves the keyboard between the search field and the layout name
+    st_text_click(&g_opt.search, 0, 1, 0);
+    ST_CHECK(g_sheet.kind == SHEET_OPTIONS && !g_opt.lname_focus);
+    st_text_click(&g_opt.lname, 0, 1, 0);
+    ST_CHECK(g_sheet.kind == SHEET_OPTIONS && g_opt.lname_focus);
     st_frames(2);
     st_shot("options-layouts");
     // delete asks first
@@ -4853,6 +4926,15 @@ static int run_selftest_m10(void) {
         te_set(&g_sheet.cn[CN_PASS], "s3cret", 6, 6);
         st_frames(2);
         st_shot("connect");
+        // clicks move the keyboard between fields; in the password the caret lands between the dots and a
+        // double-click selects all of it (no words to give away)
+        st_text_click(&g_sheet.cn[CN_PASS], 2, 1, 0);
+        ST_CHECK(g_sheet.cn_focus == CN_PASS && g_sheet.cn[CN_PASS].anchor == 2 && g_sheet.cn[CN_PASS].caret == 2);
+        st_text_click(&g_sheet.cn[CN_HOST], 3, 1, 0);
+        ST_CHECK(g_sheet.cn_focus == CN_HOST && g_sheet.cn[CN_HOST].caret == 3);
+        st_text_click(&g_sheet.cn[CN_PASS], 3, 2, 0);
+        ST_CHECK(g_sheet.cn_focus == CN_PASS && g_sheet.cn[CN_PASS].anchor == 0 && g_sheet.cn[CN_PASS].caret == 6);
+        ST_CHECK(!strcmp(g_sheet.cn[CN_PASS].buf, "s3cret") && !strcmp(g_sheet.cn[CN_HOST].buf, "secure.lan"));
         st_key(SDLK_RETURN, SDL_KMOD_NONE);
         ST_CHECK(!sheet_open() && !g_sheet.cn[CN_PASS].buf[0]);
         for (int k = 0; k < 600 && A.dev_busy; k++) { st_frames(1); SDL_Delay(5); }

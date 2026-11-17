@@ -73,6 +73,7 @@ static bool queue_mouse(f32 x, f32 y) {
 }
 
 static void on_key(SDL_KeyboardEvent *k) {
+    te_pointer_up(); // a key ends a drag-selection
     Pane *p = active_pane();
     bool ctrl = k->mod & SDL_KMOD_CTRL, shift = k->mod & SDL_KMOD_SHIFT;
     A.redraw = true;
@@ -613,6 +614,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         if (b->button == SDL_BUTTON_LEFT) dialog_mouse(x, y);
         return;
     }
+    if (!A.menu.open && (sheet_open() || A.pal_open) && te_pointer_down(b)) return; // their text fields
     if (sheet_open()) { sheet_mouse(b); return; }
     if (A.qa_edit_g >= 0 && !in_rect(A.r_sidebar, x, y)) qa_edit_commit();
     if (A.pal_open) {
@@ -650,6 +652,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         }
         for (int i = 0; i < A.nops; i++)
             if (A.op_card[i].w > 0 && in_rect(A.op_card[i], x, y)) { queue_toggle(); A.q_sel = i; return; } // the card: the queue
+        if (te_pointer_down(b)) return; // path bar, rename, search fields (under the cards above)
     }
     if (A.ren_pane) {
         if (in_rect(A.ren_rect, x, y)) return;
@@ -814,6 +817,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
 }
 
 static void on_mouse_up(void) {
+    if (te_pointer_up()) return;
     if (dragout_owns_pointer()) return; // (Wayland) SDL lets go of the buttons when the compositor takes the drag
     if (A.term_mouse) { term_mouse_up(A.term_mouse, A.term_mouse_btn); A.term_mouse = NULL; return; }
     if (sheet_scrollbar_release()) return;
@@ -904,6 +908,7 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     A.my = m->y;
     A.mouse_in = true;
     A.redraw = true;
+    if (te_pointer_motion(m)) return;
     if (A.term_mouse) { term_mouse_move(A.term_mouse, m->x, m->y, true); return; }
     if (sheet_scrollbar_motion(m->y)) return;
     if (A.menu.open) menu_motion(m->x, m->y);
@@ -1216,6 +1221,7 @@ static void handle_event(SDL_Event *e) {
     case SDL_EVENT_MOUSE_MOTION: on_mouse_motion(&e->motion); break;
     case SDL_EVENT_MOUSE_WHEEL: on_wheel(&e->wheel); break;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE: A.mouse_in = false; A.redraw = true; break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST: te_pointer_up(); break;
     case SDL_EVENT_WINDOW_MINIMIZED:
     case SDL_EVENT_WINDOW_HIDDEN:
     case SDL_EVENT_WINDOW_OCCLUDED:

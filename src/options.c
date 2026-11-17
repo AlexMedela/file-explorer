@@ -971,6 +971,15 @@ static void options_draw(void) {
 
 // --- input -----------------------------------------------------------------------
 
+// (sheet_text_focus) A click on a text field: the search field, the layout name or the open dropdown's filter.
+static bool options_text_focus(TextEdit *edit, bool focused) {
+    if (g_opt.rec_def >= 0) return false; // the click ends recording a shortcut first (options_click)
+    if (g_opt.drop_opt >= 0) return edit == &g_opt.drop_filter;
+    if (edit == &g_opt.search) { g_opt.lname_focus = false; return true; }
+    if (edit == &g_opt.lname) { g_opt.lname_focus = true; return true; }
+    return focused;
+}
+
 static void options_click(f32 x, f32 y, int clicks) {
     if (g_opt.drop_opt >= 0) { // dropdown is modal: pick, or close when clicking elsewhere
         for (int k = g_opt.nhits - 1; k >= 0; k--) {

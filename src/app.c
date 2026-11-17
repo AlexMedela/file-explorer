@@ -4322,6 +4322,7 @@ static SDL_Texture *app_icon_tex(const char *icon, int px);
 static void sheet_key(SDL_Keycode k, SDL_Keymod mod);
 static void sheet_text(const char *text);
 static void sheet_mouse(SDL_MouseButtonEvent *b);
+static bool sheet_text_focus(TextEdit *edit, bool focused);
 static void sheet_wheel(f32 dy);
 static bool sheet_scrollbar_motion(f32 y);
 static bool sheet_scrollbar_release(void);
@@ -11030,6 +11031,7 @@ static void preview_update(void) {
     }
 }
 
+#include "text_pointer.c"
 #include "input.c"
 
 #include "render.c"
@@ -11192,6 +11194,7 @@ static bool animating(void) {
 }
 
 static void frame_draw(void) {
+    g_text_field_count = 0; // (each te_draw records its field again)
     draw_clip(NULL);
     g_alpha = 1.f;
     if (A.shadow_px) { // transparent margin, opaque window (clearing ignores the viewport)
@@ -11243,6 +11246,7 @@ static void frame_draw(void) {
     draw_toast();
     draw_drag_badge();
     draw_tab_drop();
+    if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open) g_text_field_count = 0; // under an overlay: no clicks
     A.mouse_in = mouse_in; // overlays get the mouse
     draw_menu();
     draw_palette();

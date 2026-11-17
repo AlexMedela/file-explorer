@@ -121,3 +121,7 @@ Opening a matching line from a contents search: if the default app for the file 
 (VS Code / VSCodium / Cursor, Zed, Sublime Text, Kate, KWrite, GNOME Text Editor, gedit, Geany, gVim, Emacs...) it opens
 at the line and column; otherwise a terminal editor in `$VISUAL` / `$EDITOR` (nvim, vim, helix, micro, nano, kak, emacs)
 opens in a terminal tab at the line; otherwise the file opens normally.
+
+Text fields (path bar while typing a path, inline rename, search, the palette, Options and dialog fields): a click
+places the caret, dragging selects, Shift+click extends the selection, a double-click selects a word (a password field:
+all of it), a triple-click the whole field. In a dialog, clicking another field moves the keyboard there.

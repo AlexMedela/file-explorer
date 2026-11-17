@@ -243,6 +243,7 @@ static void draw_xfer_icon(f32 cx, f32 cy, f32 s, Color c) {
 }
 
 static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
+    te_register(t, f, r, pad); // (clicks and drags: text_pointer.c)
     if (A.mouse_in && in_rect(r, A.mx, A.my)) A.ptr_text = true;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x + 1, (int)r.y, (int)r.w - 2, (int)r.h});
     int n = (int)strlen(t->buf);

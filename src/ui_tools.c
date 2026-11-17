@@ -250,10 +250,26 @@ static void sheet_field(Rect r, TextEdit *te, bool focused, const char *placehol
     draw_rrect(r.x, r.y, r.w, r.h, S(6), C(focused ? COL_FIELD_HOVER : COL_FIELD));
     if (focused) draw_rrect_outline(r.x, r.y, r.w, r.h, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
     if (focused) te_draw(te, &A.font, r, roundf(S(8)), C(COL_TEXT));
-    else draw_text_fit(&A.font, r.x + S(8), text_y(&A.font, r.y, r.h), r.w - S(16), te->buf, (int)strlen(te->buf), C(COL_TEXT), 0);
+    else {
+        te_register_ex(te, &A.font, r, roundf(S(8)), false, false); // a click moves the keyboard here (sheet_text_focus)
+        draw_text_fit(&A.font, r.x + S(8), text_y(&A.font, r.y, r.h), r.w - S(16), te->buf, (int)strlen(te->buf), C(COL_TEXT), 0);
+    }
     if (!te->buf[0] && placeholder)
         draw_text_fit(&A.font, r.x + S(10), text_y(&A.font, r.y, r.h), r.w - S(20), placeholder, (int)strlen(placeholder),
                       C(COL_TEXT_FAINT), 0);
+}
+
+// A password field: one dot per character, the selection and the caret among the dots (te_hit finds them the same way).
+static void te_draw_masked(TextEdit *te, Font *f, Rect fr, bool focused) {
+    te_register_ex(te, f, fr, roundf(S(10)), true, focused);
+    if (A.mouse_in && in_rect(fr, A.mx, A.my)) A.ptr_text = true;
+    int nc = 0;
+    for (const char *c = te->buf; *c; c++) nc += ((u8)*c & 0xC0) != 0x80;
+    f32 dr = roundf(S(3)), step = dr * 2 + S(4), dx = fr.x + S(10), dcy = fr.y + fr.h * 0.5f;
+    int lo = utf8_index(te->buf, MIN(te->anchor, te->caret)), hi = utf8_index(te->buf, MAX(te->anchor, te->caret));
+    if (focused && lo != hi) draw_rect(dx + lo * step - S(2), fr.y + S(4), (hi - lo) * step, fr.h - S(8), C(COL_SEL_FOCUS));
+    for (int i = 0; i < nc && dx + dr * 2 < fr.x + fr.w - S(8); i++, dx += step) draw_rrect(dx, dcy - dr, dr * 2, dr * 2, dr, C(COL_TEXT));
+    if (focused) draw_rect(roundf(MIN(fr.x + S(10) + utf8_index(te->buf, te->caret) * step - S(2), fr.x + fr.w - S(8))), fr.y + S(6), MAX(1.f, roundf(S(1.2f))), fr.h - S(12), C(COL_ACCENT));
 }
 
 // --- Open with ---------------------------------------------------------------
@@ -1460,13 +1476,8 @@ static void connect_draw(void) {
             bool foc = s->cn_focus == CN_PASS;
             draw_rrect(fr.x, fr.y, fr.w, fr.h, S(6), C(foc ? COL_FIELD_HOVER : COL_FIELD));
             if (foc) draw_rrect_outline(fr.x, fr.y, fr.w, fr.h, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
-            int nc = 0;
-            for (const char *c = s->cn[CN_PASS].buf; *c; c++) nc += ((u8)*c & 0xC0) != 0x80;
-            f32 dr = roundf(S(3)), dx = fr.x + S(10), dcy = fr.y + fr.h * 0.5f;
-            for (int i = 0; i < nc && dx + dr * 2 < fr.x + fr.w - S(8); i++, dx += dr * 2 + S(4))
-                draw_rrect(dx, dcy - dr, dr * 2, dr * 2, dr, C(COL_TEXT));
-            if (foc) draw_rect(roundf(dx), fr.y + S(6), MAX(1.f, roundf(S(1.2f))), fr.h - S(12), C(COL_ACCENT));
-            if (!nc && !foc) draw_text(f, fr.x + S(10), text_y(f, fr.y, fr.h), "asked when needed", 17, C(COL_TEXT_FAINT));
+            te_draw_masked(&s->cn[CN_PASS], f, fr, foc);
+            if (!s->cn[CN_PASS].buf[0] && !foc) draw_text(f, fr.x + S(10), text_y(f, fr.y, fr.h), "asked when needed", 17, C(COL_TEXT_FAINT));
         } else sheet_field(fr, &s->cn[k], s->cn_focus == k, ph[k]);
         row++;
     }
@@ -1593,11 +1604,7 @@ static void secret_prompt_draw(void) {
     s->cn_rf[CN_PASS] = fr;
     draw_rrect(fr.x, fr.y, fr.w, fr.h, S(6), C(COL_FIELD_HOVER));
     draw_rrect_outline(fr.x, fr.y, fr.w, fr.h, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
-    int nc = 0;
-    for (const char *c = s->cn[CN_PASS].buf; *c; c++) nc += ((u8)*c & 0xC0) != 0x80;
-    f32 dr = roundf(S(3)), dx = fr.x + S(10), dcy = fr.y + fr.h * 0.5f;
-    for (int i = 0; i < nc && dx + dr * 2 < fr.x + fr.w - S(8); i++, dx += dr * 2 + S(4)) draw_rrect(dx, dcy - dr, dr * 2, dr * 2, dr, C(COL_TEXT));
-    draw_rect(roundf(dx), fr.y + S(6), MAX(1.f, roundf(S(1.2f))), fr.h - S(12), C(COL_ACCENT));
+    te_draw_masked(&s->cn[CN_PASS], &A.font, fr, true);
     y += fh + roundf(S(14));
     s->cn_rremember_pw = (Rect){0, 0, 0, 0};
     if (secret_available()) {
@@ -1703,6 +1710,25 @@ static void sheet_text(const char *text) {
         te_insert(tes[s->focus], text);
         rename_recompute();
     }
+}
+
+// A click on one of the sheet's text fields: whether it goes to the field (te_pointer_down), moving the keyboard there
+// when it's one this sheet can focus. Otherwise the click is the sheet's (sheet_mouse).
+static bool sheet_text_focus(TextEdit *edit, bool focused) {
+    Sheet *s = &g_sheet;
+    if (s->kind == SHEET_OPTIONS) return options_text_focus(edit, focused);
+    if (s->kind == SHEET_CONNECT && !s->cn_pick) {
+        for (int k = 0; k < CN_ALL; k++)
+            if (edit == &s->cn[k] && cn_field_visible(k)) { s->cn_focus = k; return true; }
+        return false;
+    }
+    if (s->kind == SHEET_RENAME) {
+        TextEdit *tes[3] = {&s->tmpl, &s->find, &s->repl};
+        for (int i = 0; i < 3; i++)
+            if (edit == tes[i]) { s->focus = i; return true; }
+        return false;
+    }
+    return focused && !((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON) && s->cn_pick);
 }
 
 static void sheet_mouse(SDL_MouseButtonEvent *b) {
