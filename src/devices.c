@@ -320,6 +320,25 @@ static bool gvfs_fuse_ensure(void) {
 
 static char phone_kind(const char *s);
 
+// fstab and /proc mount fields escape whitespace and backslashes. Decode once
+// before matching paths, so a literal \134040 never becomes a space.
+static void network_mount_unescape(char *field) {
+    char *out = field;
+    for (const char *c = field; *c; c++) {
+        if (c[0] == '\\' && c[1] >= '0' && c[1] <= '3' &&
+            c[2] >= '0' && c[2] <= '7' && c[3] >= '0' && c[3] <= '7') {
+            int value = (c[1] - '0') * 64 + (c[2] - '0') * 8 + c[3] - '0';
+            if (value == ' ' || value == '\t' || value == '\n' || value == '\\') {
+                *out++ = (char)value;
+                c += 3;
+                continue;
+            }
+        }
+        *out++ = *c;
+    }
+    *out = 0;
+}
+
 static int network_mounts(NetMount *out, int max) {
     int n = 0;
     char gdir[PATH_MAX];
@@ -345,14 +364,9 @@ static int network_mounts(NetMount *out, int max) {
             if (strcmp(type, "fuse.sshfs") && strcmp(type, "cifs") && strcmp(type, "smb3") && strcmp(type, "nfs") &&
                 strcmp(type, "nfs4") && strcmp(type, "fuse.rclone"))
                 continue;
-            size_t o = 0;
-            char clean[PATH_MAX];
-            for (const char *c = mp; *c && o + 1 < sizeof clean; c++) {
-                if (c[0] == '\\' && c[1] == '0' && c[2] == '4' && c[3] == '0') { clean[o++] = ' '; c += 3; }
-                else clean[o++] = *c;
-            }
-            clean[o] = 0;
-            snprintf(out[n].path, sizeof out[n].path, "%s", clean);
+            network_mount_unescape(mp);
+            network_mount_unescape(src);
+            snprintf(out[n].path, sizeof out[n].path, "%s", mp);
             snprintf(out[n].label, sizeof out[n].label, "%s", src);
             out[n].sshfs = !strcmp(type, "fuse.sshfs");
             out[n].mounted = true;
@@ -368,6 +382,8 @@ static int network_mounts(NetMount *out, int max) {
             if (line[0] == '#' || sscanf(line, "%4095s %4095s %63s", src, mp, type) != 3) continue;
             if (strcmp(type, "cifs") && strcmp(type, "smb3") && strcmp(type, "nfs") && strcmp(type, "nfs4") &&
                 strcmp(type, "fuse.rclone")) continue;
+            network_mount_unescape(mp);
+            network_mount_unescape(src);
             bool found = false;
             for (int k = 0; k < n; k++) if (!strcmp(out[k].path, mp)) { found = true; break; }
             if (found) continue;

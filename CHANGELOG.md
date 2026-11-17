@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Network entries from fstab decode escaped whitespace and backslashes before
+  matching mounted folders, avoiding duplicate rows and broken reconnect paths.
 - Canceling a running operation (× on its card, or Del in the transfer queue)
   now leaves its bar where it stopped, in red, and says "Canceled", keeping the
   last item it was working on. This applies to copies, moves, deletes,

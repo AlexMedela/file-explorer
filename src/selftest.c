@@ -4539,8 +4539,17 @@ static int run_selftest_m10(void) {
     }
     ST_CHECK(st_wait_cond(c_devs, 5000));
     { // system NFS/SMB entries stay in Network even after unmount
+        char malformed[] = "\\000\\777\\04\\";
+        network_mount_unescape(malformed);
+        ST_CHECK(!strcmp(malformed, "\\000\\777\\04\\")); // No embedded NUL or partial escape decoding.
         st_write_text(M10_BASE "/fstab", "nas:/exports/team " M10_BASE "/nfs nfs defaults 0 0\n//nas/share " M10_BASE "/smb cifs user 0 0\n"
-                      "cerberus-webdav: " M10_BASE "/webdav fuse.rclone user 0 0\n");
+                      "cerberus-webdav: " M10_BASE "/webdav fuse.rclone user 0 0\n"
+                      "//nas/my\\040share " M10_BASE "/unmounted\\040share cifs user 0 0\n"
+                      "nas:/exports/team " M10_BASE "/gvfs/team\\040share nfs defaults 0 0\n"
+                      "nas:/exports/tab " M10_BASE "/with\\011tab nfs defaults 0 0\n"
+                      "nas:/exports/line " M10_BASE "/with\\012line nfs defaults 0 0\n"
+                      "nas:/exports/slash " M10_BASE "/literal\\134040 nfs defaults 0 0\n");
+        mkdir(M10_BASE "/gvfs/team share", 0755);
         setenv("FE_FSTAB", M10_BASE "/fstab", 1);
         NetMount listed[16];
         int nl = network_mounts(listed, 16), missing = 0;
@@ -4548,6 +4557,23 @@ static int run_selftest_m10(void) {
             missing += !listed[i].mounted && (!strcmp(listed[i].path, M10_BASE "/nfs") || !strcmp(listed[i].path, M10_BASE "/smb") ||
                                               !strcmp(listed[i].path, M10_BASE "/webdav"));
         ST_CHECK(missing == 3);
+        int escaped = 0, mounted_copies = 0, disconnected_copies = 0, special = 0;
+        for (int i = 0; i < nl; i++) {
+            escaped += !listed[i].mounted && !strcmp(listed[i].path, M10_BASE "/unmounted share") &&
+                       !strcmp(listed[i].label, "//nas/my share");
+            mounted_copies += listed[i].mounted && !strcmp(listed[i].path, M10_BASE "/gvfs/team share");
+            disconnected_copies += !listed[i].mounted &&
+                (!strcmp(listed[i].path, M10_BASE "/gvfs/team share") ||
+                 !strcmp(listed[i].path, M10_BASE "/gvfs/team\\040share"));
+            special += !listed[i].mounted &&
+                (!strcmp(listed[i].path, M10_BASE "/with\ttab") ||
+                 !strcmp(listed[i].path, M10_BASE "/with\nline") ||
+                 !strcmp(listed[i].path, M10_BASE "/literal\\040"));
+        }
+        ST_CHECK(escaped == 1);
+        ST_CHECK(mounted_copies == 1 && disconnected_copies == 0);
+        ST_CHECK(special == 3); // Decode once: \134040 is a literal backslash followed by 040.
+        rmdir(M10_BASE "/gvfs/team share");
         NetMount old_nets[16];
         int old_nnets = A.nnets;
         memcpy(old_nets, A.nets, sizeof old_nets);
