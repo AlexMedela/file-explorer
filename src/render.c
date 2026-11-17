@@ -1029,7 +1029,8 @@ static void draw_item_icon_big(Pane *p, Entry *e, f32 ix, f32 iy, f32 isz, bool 
         SDL_Texture *t;
         int tw, th;
         if (thumb_get(full, e->mtime, (int)isz, &t, &tw, &th)) {
-            render_tex_fit(t, tw, th, ix, iy, isz, true, cut);
+            char ext[24];
+            render_tex_fit(t, tw, th, ix, iy, isz, strcmp(path_ext_lower(name, ext, sizeof ext), "svg"), cut); // (SVGs: no frame, usually transparent)
             return;
         }
     }

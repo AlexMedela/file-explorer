@@ -1,16 +1,6 @@
 // icons.c - file-type icons (Material Icon Theme SVGs, rasterized by nanosvg into the atlas)
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-#pragma GCC diagnostic ignored "-Wmisleading-indentation"
-#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
-#define NANOSVG_IMPLEMENTATION
-#include "../third_party/nanosvg.h"
-#define NANOSVGRAST_IMPLEMENTATION
-#include "../third_party/nanosvgrast.h"
-#pragma GCC diagnostic pop
+// (nanosvg itself is compiled in svg_preview.c, included before preview.c)
 
 #include "icons_data.h"
 

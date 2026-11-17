@@ -160,6 +160,16 @@ static bool load_image(PreviewResult *r, const char *file) {
     return true;
 }
 
+// SVG drawn by nanosvg: after the thumbnailers (rsvg also draws text, filters and masks), so SVGs still get a
+// picture where none is installed.
+static bool load_svg_preview(PreviewResult *r, const char *file) {
+    u8 *px = svg_preview_pixels(file, r->max_px, &r->w, &r->h, &r->src_w, &r->src_h);
+    if (!px) return false;
+    r->rgba = px;
+    r->kind = PV_IMAGE;
+    return true;
+}
+
 static bool newer_than(const char *a, i64 mtime) {
     struct stat st;
     return stat(a, &st) == 0 && st.st_size > 0 && st.st_mtime >= mtime;
@@ -364,6 +374,7 @@ static void preview_build(PreviewResult *r) {
         r->from_thumb = true;
         return;
     }
+    if (!strcmp(ext, "svg") && load_svg_preview(r, r->path)) return;
     // text: known extension, or small file without NUL bytes
     bool textish = ext_in(ext, TEXT_EXTS) || !ext[0] || st.st_size < (1 << 20);
     if (textish && S_ISREG(st.st_mode)) {
@@ -498,6 +509,7 @@ static void thumb_build(ThumbReq *r) {
             if (stbi_info(r->path, &w, &h, &n) && (i64)w * h <= 60000000) ok = load_image(&tmp, r->path);
         }
         if (!ok) ok = try_thumbnail(&tmp, r->path, st.st_mtime, ext);
+        if (!ok && !strcmp(ext, "svg")) ok = load_svg_preview(&tmp, r->path);
     }
     if (ok && tmp.rgba) {
         r->rgba = tmp.rgba;

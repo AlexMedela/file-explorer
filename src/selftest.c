@@ -1425,8 +1425,42 @@ static int run_selftest_m5(void) {
         if (d) closedir(d);
         ST_CHECK(n >= 1);
         printf("svg thumbnail via installed thumbnailer: ok\n");
-    } else {
-        printf("note: no SVG thumbnailer produced output (kind=%d)\n", A.pv->kind);
+    } else { // none installed: drawn by nanosvg
+        ST_CHECK(A.pv->kind == PV_IMAGE && A.pv->src_w == 64 && A.pv->src_h == 64 && A.pv->rgba && A.pv->rgba[3] == 255);
+        printf("svg preview via nanosvg (no thumbnailer output)\n");
+    }
+    { // nanosvg previews directly: fitted size, colours, transparency, viewBox only, what's refused
+        const char *sp = "/tmp/fe-m5-svg-test.svg"; // (outside the listed folder: no refresh mid-test)
+        int w, h, sw, sh;
+        st_write_text(sp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"100\"><rect width=\"100\" height=\"100\" fill=\"#ff0000\"/></svg>");
+        u8 *px = svg_preview_pixels(sp, 64, &w, &h, &sw, &sh);
+        ST_CHECK(px && w == 64 && h == 32 && sw == 200 && sh == 100);
+        if (px) {
+            size_t red = ((size_t)16 * w + 16) * 4, clear = ((size_t)16 * w + 48) * 4;
+            ST_CHECK(px[red] > 240 && px[red + 3] > 240 && !px[clear + 3]);
+        }
+        free(px);
+        st_write_text(sp, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 20\"><rect width=\"10\" height=\"20\" fill=\"blue\"/></svg>");
+        px = svg_preview_pixels(sp, 64, &w, &h, &sw, &sh);
+        ST_CHECK(px && w == 32 && h == 64);
+        free(px);
+        // currentColor (local nanosvg patch): the color property, inherited from the root; black by default
+        st_write_text(sp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\" color=\"#00ff00\"><rect width=\"4\" height=\"8\" fill=\"currentColor\"/><rect x=\"4\" width=\"4\" height=\"8\" style=\"color:#0000ff\" fill=\"currentColor\"/></svg>");
+        px = svg_preview_pixels(sp, 8, &w, &h, &sw, &sh);
+        ST_CHECK(px && px[(4 * 8 + 1) * 4 + 1] > 240 && px[(4 * 8 + 1) * 4] < 16 && px[(4 * 8 + 6) * 4 + 2] > 240 && px[(4 * 8 + 6) * 4 + 1] < 16);
+        free(px);
+        st_write_text(sp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\" fill=\"currentColor\"/></svg>");
+        px = svg_preview_pixels(sp, 8, &w, &h, &sw, &sh);
+        ST_CHECK(px && px[(4 * 8 + 4) * 4] < 16 && px[(4 * 8 + 4) * 4 + 3] > 240);
+        free(px);
+        st_write_text(sp, "not an svg");
+        ST_CHECK(!svg_preview_pixels(sp, 64, &w, &h, &sw, &sh));
+        st_write_text(sp, "<svg width=\"1e999\" height=\"10\"></svg>");
+        ST_CHECK(!svg_preview_pixels(sp, 64, &w, &h, &sw, &sh));
+        st_write_text(sp, "<svg width=\"0\" height=\"0\"></svg>");
+        ST_CHECK(!svg_preview_pixels(sp, 64, &w, &h, &sw, &sh));
+        ST_CHECK(!svg_preview_pixels(sp, 50000, &w, &h, &sw, &sh));
+        unlink(sp);
     }
     // several selected -> summary
     st_key(SDLK_A, SDL_KMOD_CTRL);
