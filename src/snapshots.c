@@ -111,34 +111,102 @@ static void snap_zfs(SnapJob *j, const char *mnt, const char *rel) {
     closedir(d);
 }
 
-// Timeshift: btrfs mode keeps <base>/timeshift-btrfs/snapshots/<date>/<subvolume>/<rel>, rsync mode
-// <base>/timeshift/snapshots/<date>/localhost/<absolute path>; <base> is where Timeshift mounted the backup disk.
-static void snap_timeshift(SnapJob *j, const char *abs, const char *subvol, const char *rel) {
-    const char *run = getenv("FE_TIMESHIFT") ? getenv("FE_TIMESHIFT") : "/run/timeshift";
-    char bases[8][PATH_MAX];
+static bool snap_json_val(const char *obj, const char *end, const char *key, char *out, size_t cap);
+
+// Where Timeshift keeps snapshots: <base>/timeshift (rsync mode) and <base>/timeshift-btrfs (btrfs mode) on its backup
+// drive, <base> being / (the backup drive is the system's), where Timeshift mounts it while it runs
+// (/run/timeshift/<pid>/backup), or where the drive named in its settings (backup_device_uuid) is mounted.
+// The same drive seen twice (/ and /run/timeshift/...) is one base.
+static int ts_bases(const DuScan *t, char (*bases)[PATH_MAX], int max) {
     int nb = 0;
-    snprintf(bases[nb++], PATH_MAX, "/");
+    struct stat seen[8];
+    const char *root = getenv("FE_TIMESHIFT_ROOT") ? getenv("FE_TIMESHIFT_ROOT") : "/";
+    const char *run = getenv("FE_TIMESHIFT") ? getenv("FE_TIMESHIFT") : "/run/timeshift";
+    char cand[16][PATH_MAX];
+    int nc = 0;
+    snprintf(cand[nc++], PATH_MAX, "%s", root);
     DIR *r = opendir(run);
-    if (r) {
-        struct dirent *e;
-        while ((e = readdir(r)) && nb < 8)
-            if (e->d_name[0] != '.') snprintf(bases[nb++], PATH_MAX, "%s/%s/backup", run, e->d_name);
-        closedir(r);
+    for (struct dirent *e; r && (e = readdir(r)) && nc < 8;)
+        if (e->d_name[0] != '.') snprintf(cand[nc++], PATH_MAX, "%s/%s/backup", run, e->d_name);
+    if (r) closedir(r);
+    const char *cf = getenv("FE_TIMESHIFT_CONF") ? getenv("FE_TIMESHIFT_CONF") : "/etc/timeshift/timeshift.json";
+    FILE *f = fopen(cf, "r");
+    if (f) {
+        char js[16384], uuid[64], link[PATH_MAX], dev[PATH_MAX];
+        size_t k = fread(js, 1, sizeof js - 1, f);
+        js[k] = 0;
+        fclose(f);
+        const char *byu = getenv("FE_DISK_BY_UUID") ? getenv("FE_DISK_BY_UUID") : "/dev/disk/by-uuid";
+        if (snap_json_val(js, js + k, "backup_device_uuid", uuid, sizeof uuid) && uuid[0] && !strchr(uuid, '/')) {
+            snprintf(link, sizeof link, "%s/%s", byu, uuid);
+            if (realpath(link, dev))
+                for (int i = 0; i < t->nmounts && nc < 16; i++)
+                    if (t->mounts[i].src && !strcmp(t->mounts[i].src, dev) && !strcmp(t->mounts[i].root, "/")) snprintf(cand[nc++], PATH_MAX, "%s", t->mounts[i].mnt);
+        }
     }
+    for (int i = 0; i < nc && nb < max && nb < 8; i++) {
+        struct stat st;
+        if (stat(cand[i], &st)) continue;
+        bool dup = false;
+        for (int k = 0; k < nb; k++) dup |= seen[k].st_dev == st.st_dev && seen[k].st_ino == st.st_ino;
+        if (dup) continue;
+        seen[nb] = st;
+        snprintf(bases[nb++], PATH_MAX, "%s", cand[i]);
+    }
+    return nb;
+}
+
+// "<base>/timeshift/snapshots" (rsync = true) or "<base>/timeshift-btrfs/snapshots".
+static void ts_dir(char *out, size_t cap, const char *base, bool rsync) {
+    snprintf(out, cap, "%s%s%s/snapshots", base, base[1] ? "/" : "", rsync ? "timeshift" : "timeshift-btrfs");
+}
+
+// A snapshot's <date>/info.json: when it was taken ("created", unix seconds), "comments", and its "tags" as words:
+// newer Timeshift writes them so ("ondemand daily"), older ones as letters ("O D": on demand, boot, hourly, daily,
+// weekly, monthly). 0 when it can't be read (the folder name then).
+static i64 ts_info(const char *snapdir, char *desc, size_t dcap, char *tags, size_t tcap) {
+    char p[PATH_MAX + 16], js[8192], v[200];
+    desc[0] = tags[0] = 0;
+    snprintf(p, sizeof p, "%s/info.json", snapdir);
+    FILE *f = fopen(p, "r");
+    if (!f) return 0;
+    size_t k = fread(js, 1, sizeof js - 1, f);
+    js[k] = 0;
+    fclose(f);
+    if (snap_json_val(js, js + k, "comments", v, sizeof v)) snprintf(desc, dcap, "%s", v);
+    if (snap_json_val(js, js + k, "tags", v, sizeof v)) {
+        static const char *const w[] = {"O", "ondemand", "on demand", "B", "boot", "boot", "H", "hourly", "hourly",
+                                        "D", "daily", "daily", "W", "weekly", "weekly", "M", "monthly", "monthly"};
+        size_t o = 0;
+        for (char *tok = strtok(v, " ,"); tok; tok = strtok(NULL, " ,"))
+            for (int i = 0; i < 18; i += 3)
+                if ((!strcmp(tok, w[i]) || !strcasecmp(tok, w[i + 1])) && o + 1 < tcap) o += (size_t)snprintf(tags + o, tcap - o, "%s%s", o ? ", " : "", w[i + 2]);
+        if (o >= tcap) tags[tcap - 1] = 0;
+    }
+    return snap_json_val(js, js + k, "created", v, sizeof v) ? (i64)atoll(v) : 0;
+}
+
+// Timeshift: btrfs mode keeps <base>/timeshift-btrfs/snapshots/<date>/<subvolume>/<rel>, rsync mode
+// <base>/timeshift/snapshots/<date>/localhost/<absolute path>.
+static void snap_timeshift(SnapJob *j, const DuScan *t, const char *abs, const char *subvol, const char *rel) {
+    char bases[8][PATH_MAX];
+    int nb = ts_bases(t, bases, 8);
     for (int b = 0; b < nb; b++)
         for (int mode = 0; mode < 2; mode++) {
             if (mode == 0 && !subvol) continue;
             char dir[PATH_MAX + 64];
-            snprintf(dir, sizeof dir, "%s%s%s/snapshots", bases[b], bases[b][1] ? "/" : "", mode ? "timeshift" : "timeshift-btrfs");
+            ts_dir(dir, sizeof dir, bases[b], mode);
             DIR *d = opendir(dir);
             if (!d) { if (errno == EACCES) snap_noaccess(j, "Timeshift", dir); continue; }
             struct dirent *e;
             while ((e = readdir(d))) {
                 if (!isdigit((u8)e->d_name[0])) continue;
-                char p[PATH_MAX * 2];
-                if (mode == 0) snprintf(p, sizeof p, "%s/%s/%s%s%s", dir, e->d_name, subvol, rel[0] ? "/" : "", rel);
-                else snprintf(p, sizeof p, "%s/%s/localhost%s", dir, e->d_name, abs);
-                snap_add(j, p, "Timeshift", snap_parse_time(e->d_name, false));
+                char p[PATH_MAX * 2], sd[PATH_MAX * 2], desc[200], tags[64];
+                snprintf(sd, sizeof sd, "%s/%s", dir, e->d_name);
+                if (mode == 0) snprintf(p, sizeof p, "%s/%s%s%s", sd, subvol, rel[0] ? "/" : "", rel);
+                else snprintf(p, sizeof p, "%s/localhost%s", sd, abs);
+                i64 when = ts_info(sd, desc, sizeof desc, tags, sizeof tags);
+                snap_add(j, p, "Timeshift", when ? when : snap_parse_time(e->d_name, false));
             }
             closedir(d);
         }
@@ -177,7 +245,7 @@ static void snap_find(SnapJob *j) {
         if (!strcmp(m->fstype, "zfs")) snap_zfs(j, m->mnt, rel);
         else snap_snapper(j, m->mnt, rel);
         const char *sv = !strcmp(m->fstype, "btrfs") && m->root[0] == '/' && m->root[1] ? m->root + 1 : NULL; // "/@home" -> "@home"
-        snap_timeshift(j, j->path, sv, rel);
+        snap_timeshift(j, &t, j->path, sv, rel);
     }
     for (int i = 0; i < t.nmounts; i++) { free(t.mounts[i].root); free(t.mounts[i].mnt); free(t.mounts[i].fstype); free(t.mounts[i].src); }
     free(t.mounts);
@@ -316,23 +384,25 @@ static SnapJob *snap_start(const char *path) {
 
 typedef struct {
     int num;              // Snapper's number (0 for others)
-    char name[96];        // "#41", a ZFS snapshot's name, a Timeshift date
-    char type[16];        // single / pre / post / timeline (from cleanup) ...
+    char name[96];        // "#41", a ZFS snapshot's name, a Timeshift date (its folder name)
+    char type[16];        // single / pre / post / timeline (from cleanup) ... "zfs", "timeshift"
     int pre;              // post: its pre snapshot
     i64 when;
-    char desc[200], user[64], cleanup[24];
+    char desc[200], user[64], cleanup[24]; // (Timeshift: cleanup = its tags, "daily, weekly")
     char root[PATH_MAX];  // where the drive's root is inside it
 } SnapInfo;
 
 typedef struct SnapList {
     char path[PATH_MAX];  // what it was asked for (any folder on the drive)
     char mnt[PATH_MAX], fstype[32], config[64];
-    const char *tool;     // "Snapper", "ZFS", "Timeshift" (NULL: none found)
+    const char *tool;     // "Snapper", "ZFS", "Timeshift", "Snapper, Timeshift" ... (NULL: none found)
     _Atomic int done, refs;
     SnapInfo *s;
     int n, cap;
     bool noaccess;        // Snapper is set up but this user may not read it
     bool manage;          // snapper works for this user: create / delete / what changed
+    bool ts_manage;       // Timeshift is installed and keeps this drive: create / delete (as administrator, pkexec)
+    char tsbin[PATH_MAX]; // its program
     char note[300];
 } SnapList;
 
@@ -467,6 +537,63 @@ static int snapinfo_cmp(const void *a, const void *b) {
     return y->num - x->num;
 }
 
+// Timeshift's program (FE_TIMESHIFT_BIN in tests), found in PATH; false: not installed.
+static bool ts_bin(char *out, size_t cap) {
+    if (getenv("FE_TIMESHIFT_BIN")) { snprintf(out, cap, "%s", getenv("FE_TIMESHIFT_BIN")); return true; }
+    const char *path = getenv("PATH") ? getenv("PATH") : "/usr/local/bin:/usr/bin:/bin";
+    for (const char *p = path; *p;) {
+        const char *e = strchr(p, ':');
+        size_t n = e ? (size_t)(e - p) : strlen(p);
+        if (n) {
+            snprintf(out, cap, "%.*s/timeshift", (int)n, p);
+            if (access(out, X_OK) == 0) return true;
+        }
+        p += n + (e ? 1 : 0);
+    }
+    out[0] = 0;
+    return false;
+}
+
+// The drive's Timeshift snapshots: btrfs mode keeps its subvolume (<date>/@, <date>/@home), rsync mode the whole
+// system under <date>/localhost - the drive is at its mount point in there (often empty for /home: Timeshift
+// leaves users' files out by default).
+static void snaplist_timeshift(SnapList *l, const DuScan *t, const DuMount *m) {
+    const char *sv = !strcmp(m->fstype, "btrfs") && m->root[0] == '/' && m->root[1] ? m->root + 1 : NULL; // "/@home" -> "@home"
+    char bases[8][PATH_MAX];
+    int nb = ts_bases(t, bases, 8), n0 = l->n;
+    for (int b = 0; b < nb; b++)
+        for (int mode = 0; mode < 2; mode++) {
+            if (mode == 0 && !sv) continue;
+            char dir[PATH_MAX + 64];
+            ts_dir(dir, sizeof dir, bases[b], mode);
+            DIR *d = opendir(dir);
+            if (!d) {
+                if (errno == EACCES && !l->note[0]) snprintf(l->note, sizeof l->note, "Timeshift keeps snapshots in %s, but only the administrator can see them.", dir);
+                continue;
+            }
+            for (struct dirent *e; (e = readdir(d));) {
+                if (!isdigit((u8)e->d_name[0])) continue;
+                char sd[PATH_MAX * 2], sr[PATH_MAX * 3];
+                snprintf(sd, sizeof sd, "%s/%s", dir, e->d_name);
+                if (mode == 0) snprintf(sr, sizeof sr, "%s/%s", sd, sv);
+                else snprintf(sr, sizeof sr, "%s/localhost%s", sd, l->mnt[1] ? l->mnt : "");
+                struct stat st;
+                if (stat(sr, &st) || !S_ISDIR(st.st_mode)) continue; // (a snapshot of other subvolumes only)
+                SnapInfo *s = snaplist_add(l);
+                snprintf(s->name, sizeof s->name, "%s", e->d_name);
+                snprintf(s->type, sizeof s->type, "timeshift");
+                s->when = ts_info(sd, s->desc, sizeof s->desc, s->cleanup, sizeof s->cleanup);
+                if (!s->when) s->when = snap_parse_time(e->d_name, false);
+                snprintf(s->root, sizeof s->root, "%s", sr);
+            }
+            closedir(d);
+        }
+    if (l->n > n0) l->tool = !l->tool ? "Timeshift" : !strcmp(l->tool, "Snapper") ? "Snapper, Timeshift" : "ZFS, Timeshift";
+    // create / delete: as administrator, so only whether it's installed (and keeps this drive, or it's the system's)
+    const char *cf = getenv("FE_TIMESHIFT_CONF") ? getenv("FE_TIMESHIFT_CONF") : "/etc/timeshift/timeshift.json";
+    l->ts_manage = ts_bin(l->tsbin, sizeof l->tsbin) && (l->n > n0 || (!strcmp(l->mnt, "/") && access(cf, R_OK) == 0));
+}
+
 static void snaplist_find(SnapList *l) {
     DuScan t;
     memset(&t, 0, sizeof t);
@@ -550,32 +677,8 @@ static void snaplist_find(SnapList *l) {
                 if (d) closedir(d);
             }
         }
-        // Timeshift (btrfs mode): .../timeshift-btrfs/snapshots/<date>/<subvolume>
-        const char *sv = !strcmp(m->fstype, "btrfs") && m->root[0] == '/' && m->root[1] ? m->root + 1 : NULL;
-        const char *run = getenv("FE_TIMESHIFT") ? getenv("FE_TIMESHIFT") : "/run/timeshift";
-        DIR *r = sv && !l->n ? opendir(run) : NULL;
-        for (struct dirent *e; r && (e = readdir(r));) {
-            if (e->d_name[0] == '.') continue;
-            char dir[PATH_MAX];
-            snprintf(dir, sizeof dir, "%s/%s/backup/timeshift-btrfs/snapshots", run, e->d_name);
-            DIR *d = opendir(dir);
-            for (struct dirent *s2; d && (s2 = readdir(d));) {
-                if (!isdigit((u8)s2->d_name[0])) continue;
-                char sr[PATH_MAX * 2];
-                snprintf(sr, sizeof sr, "%s/%s/%s", dir, s2->d_name, sv);
-                struct stat st;
-                if (stat(sr, &st) || !S_ISDIR(st.st_mode)) continue; // (a snapshot of other subvolumes only)
-                SnapInfo *s = snaplist_add(l);
-                snprintf(s->name, sizeof s->name, "%s", s2->d_name);
-                snprintf(s->type, sizeof s->type, "timeshift");
-                s->when = snap_parse_time(s2->d_name, false);
-                snprintf(s->root, sizeof s->root, "%s", sr);
-            }
-            if (d) closedir(d);
-            if (l->n) l->tool = "Timeshift";
-        }
-        if (r) closedir(r);
     }
+    snaplist_timeshift(l, &t, m);
     if (l->n) qsort(l->s, (size_t)l->n, sizeof(SnapInfo), snapinfo_cmp);
 out:
     if (!l->tool && !l->note[0]) snprintf(l->note, sizeof l->note, "No snapshots of this drive (Snapper, Timeshift or ZFS).");
@@ -703,9 +806,39 @@ static SnapCmd *snap_allow_start(const char *cfg) {
     return c;
 }
 
+// Inside a Timeshift snapshot: "<base>/timeshift/snapshots/<date>/localhost[/rest]" (rsync mode: the whole system,
+// rest is where it lives now) or "<base>/timeshift-btrfs/snapshots/<date>/@[/rest]", "@home" ... (btrfs mode: Timeshift
+// only does Ubuntu's layout, @ is / and @name is /name). Plain string work: this runs every frame.
+static bool snap_where_ts(const char *path, char *root, size_t rcap, char *live, size_t lcap, char *name, size_t ncap) {
+    const char *r = strstr(path, "/timeshift/snapshots/"), *b = strstr(path, "/timeshift-btrfs/snapshots/");
+    if (!r && !b) return false;
+    const char *p = r ? r + 21 : b + 27, *e = p;
+    while (*e && *e != '/') e++;
+    if (e == p || !isdigit((u8)*p) || *e != '/') return false;
+    const char *s = e + 1, *se = s;
+    while (*se && *se != '/') se++;
+    char top[PATH_MAX];
+    if (r) {
+        if (se - s != 9 || strncmp(s, "localhost", 9)) return false;
+        top[0] = 0;
+    } else {
+        if (*s != '@') return false;
+        snprintf(top, sizeof top, "%s%.*s", se - s > 1 ? "/" : "", (int)(se - s - 1), s + 1);
+    }
+    snprintf(root, rcap, "%.*s", (int)(se - path), path);
+    snprintf(live, lcap, "%s%s", top, se);
+    if (!live[0]) snprintf(live, lcap, "/");
+    // "2026-11-01_10-00-01" -> "2026-11-01 10:00 (Timeshift)"
+    int n = (int)(e - p);
+    if (n >= 16 && p[10] == '_') snprintf(name, ncap, "%.10s %.2s:%.2s (Timeshift)", p, p + 11, p + 14);
+    else snprintf(name, ncap, "%.*s (Timeshift)", n, p);
+    return true;
+}
+
 // Where a path is when it's inside a snapshot: the snapshot's root and the live folder that root stands for.
-// "<mnt>/.snapshots/<N>/snapshot[/rest]", "<mnt>/.zfs/snapshot/<name>[/rest]".
+// "<mnt>/.snapshots/<N>/snapshot[/rest]", "<mnt>/.zfs/snapshot/<name>[/rest]", or Timeshift's (above).
 static bool snap_where(const char *path, char *root, size_t rcap, char *live, size_t lcap, char *name, size_t ncap) {
+    if (snap_where_ts(path, root, rcap, live, lcap, name, ncap)) return true;
     const char *k = strstr(path, "/.snapshots/"), *z = strstr(path, "/.zfs/snapshot/");
     const char *mk = k ? k : z;
     if (!mk) return false;

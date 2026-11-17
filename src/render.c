@@ -1831,11 +1831,15 @@ static void draw_diskuse(Pane *p, bool active) {
 static void draw_path_fit(Font *f, f32 x, f32 y, f32 maxw, const char *path, bool plain);
 static void props_date(i64 t0, char *buf, size_t cap);
 
+// The tool that took it: 0 Snapper, 1 Timeshift, 2 ZFS.
+static int snap_tool(const SnapInfo *s) { return !strcmp(s->type, "timeshift") ? 1 : !strcmp(s->type, "zfs") ? 2 : 0; }
+
 static void snap_type_label(const SnapInfo *s, char *out, size_t cap) {
     if (!strcmp(s->type, "pre")) snprintf(out, cap, "before");
     else if (!strcmp(s->type, "post")) snprintf(out, cap, "after #%d", s->pre);
     else if (!strcmp(s->cleanup, "timeline")) snprintf(out, cap, "timeline");
-    else if (!strcmp(s->type, "zfs") || !strcmp(s->type, "timeshift")) out[0] = 0;
+    else if (!strcmp(s->type, "timeshift")) snprintf(out, cap, "%s", s->cleanup); // its tags: "daily, weekly"
+    else if (!strcmp(s->type, "zfs")) out[0] = 0;
     else snprintf(out, cap, "%s", s->type[0] ? s->type : "single");
 }
 
@@ -1856,15 +1860,25 @@ static void draw_snapview(Pane *p, bool active) {
     SnapList *l = v->l;
     bool ready = l && atomic_load(&l->done);
     f32 rx = lr.x + roundf(S(6)), rw = lr.w - roundf(S(12));
-    // columns (x where each starts)
-    f32 c0 = rx + roundf(S(10)), c1 = c0 + roundf(S(96)), c2 = c1 + roundf(S(176)), c3 = c2 + roundf(S(112));
+    // columns (x where each starts): Snapper's numbers only when there are some, which tool took each snapshot only
+    // when the drive has more than one's
+    // (from the rows: a tool that's set up but lists nothing doesn't count)
+    bool nums = false, mixed = false;
+    for (int i = 0; ready && i < l->n; i++) {
+        nums |= l->s[i].num > 0;
+        mixed |= i && snap_tool(&l->s[i]) != snap_tool(&l->s[0]);
+    }
+    f32 c0 = rx + roundf(S(10)), ct = c0 + (nums || v->mode == 1 ? roundf(S(96)) : roundf(S(16) + S(14))), c1 = ct + (mixed ? roundf(S(96)) : 0),
+        c2 = c1 + roundf(S(176)), c3 = c2 + roundf(S(140));
     {
         Rect h = {lr.x, lr.y, lr.w, hh};
         if (g_separators) draw_rect(h.x, h.y + h.h - 1, h.w, 1, C(COL_BORDER));
         f32 ty = text_y(fs, h.y, h.h);
-        const char *lab[4] = {"Snapshot", "Date", "Kind", "Description"};
-        f32 cx[4] = {c0, c1, c2, c3};
+        const char *lab[5] = {"Snapshot", "Date", "Kind", "Description"};
+        f32 cx[5] = {c0, c1, c2, c3};
         int nc = 4;
+        if (!nums && v->mode == 0) lab[0] = "";
+        if (mixed) { lab[1] = "Tool"; lab[2] = "Date"; lab[3] = "Kind"; lab[4] = "Description"; cx[1] = ct; cx[2] = c1; cx[3] = c2; cx[4] = c3; nc = 5; }
         if (v->mode == 1) { lab[0] = "Path"; lab[1] = "Change"; cx[1] = rx + rw - roundf(S(120)); nc = 2; }
         for (int i = 0; i < nc; i++) {
             draw_text(fs, cx[i] + (i ? S(0) : S(16) + S(8)), ty, lab[i], (int)strlen(lab[i]), C(COL_TEXT_DIM));
@@ -1890,7 +1904,7 @@ static void draw_snapview(Pane *p, bool active) {
                 {ACT_SNAP_OPEN, "Open", s != NULL},
                 {ACT_SNAP_COMPARE, "Compare with now", s != NULL},
                 {ACT_SNAP_CHANGES, v->sel2 >= 0 ? "Changes between" : "What changed", s && l->manage},
-                {ACT_SNAP_CREATE, "Create\xE2\x80\xA6", l->manage},
+                {ACT_SNAP_CREATE, "Create\xE2\x80\xA6", l->manage || l->ts_manage},
             };
             for (int i = 3; i >= 0; i--) {
                 f32 w = roundf(text_width(f, bt[i].lb, (int)strlen(bt[i].lb)) + S(24));
@@ -1989,14 +2003,19 @@ static void draw_snapview(Pane *p, bool active) {
         f32 dr = roundf(S(4)), dx = c0 + is * 0.5f - dr, dy = roundf(y + rh * 0.5f - dr);
         if (post || pre) draw_rrect(dx, dy, dr * 2, dr * 2, dr, C(post ? COL_ACCENT : COL_TEXT_FAINT));
         else draw_rrect_outline(dx, dy, dr * 2, dr * 2, dr, MAX(1.f, S(1.2f)), C(COL_TEXT_FAINT));
-        draw_text_fit(f, c0 + is + S(8), ty, c1 - S(12) - (c0 + is + S(8)), si->num ? si->name : "", si->num ? (int)strlen(si->name) : 0, dc, 0);
+        draw_text_fit(f, c0 + is + S(8), ty, ct - S(12) - (c0 + is + S(8)), si->num ? si->name : "", si->num ? (int)strlen(si->name) : 0, dc, 0);
+        if (mixed) {
+            static const char *const who_s[] = {"Snapper", "Timeshift", "ZFS"};
+            const char *who = who_s[snap_tool(si)];
+            draw_text_fit(f, ct, ty, c1 - ct - S(14), who, (int)strlen(who), dc, 0);
+        }
         char d[64], tl[48];
         if (si->when) props_date(si->when, d, sizeof d);
         else snprintf(d, sizeof d, "%s", si->name);
         draw_text_fit(f, c1, ty, c2 - c1 - S(14), d, (int)strlen(d), tc, 0);
         snap_type_label(si, tl, sizeof tl);
         if (tl[0]) draw_text_fit(f, c2, ty, c3 - c2 - S(14), tl, (int)strlen(tl), dc, 0);
-        const char *desc = si->desc[0] ? si->desc : !strcmp(si->type, "zfs") || !strcmp(si->type, "timeshift") ? si->name : "";
+        const char *desc = si->desc[0] ? si->desc : !strcmp(si->type, "zfs") ? si->name : "";
         draw_text_fit(f, c3, ty, rx + rw - c3 - S(10), desc, (int)strlen(desc), tc, 0);
     }
     draw_clip_pop(cs);

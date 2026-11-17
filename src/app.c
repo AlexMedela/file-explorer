@@ -9817,7 +9817,9 @@ static void snap_cmd(Pane *p, int kind, const char *const *argv, size_t cap) {
     A.redraw = true;
 }
 
-static void snap_open(Pane *p, const char *root, const char *select_name) {
+static void snap_open(Pane *p, const char *root_in, const char *select_name) {
+    char root[PATH_MAX]; // (root_in may be in the list closed here)
+    snprintf(root, sizeof root, "%s", root_in);
     p->snapv = false;
     snapview_close(p);
     pane_navigate(p, root, true);
@@ -9856,12 +9858,32 @@ static void snap_changes(Pane *p) { // what changed: a post and its pre, the two
     snap_cmd(p, SC_STATUS, av, 8u << 20);
 }
 
+static void props_date(i64 t0, char *buf, size_t cap);
+
+// Timeshift's snapshots are root's: its own command, as administrator (pkexec asks for the password each time,
+// nothing is kept). Delete takes one at a time.
+static void snap_ts_cmd(Pane *p, int kind, const char *a1, const char *a2, const char *a3, const char *a4) {
+    if (!p->sv || !p->sv->l || !p->sv->l->ts_manage || p->sv->cmd || !admin_allowed()) return;
+    const char *pk = getenv("FE_PKEXEC") ? getenv("FE_PKEXEC") : "pkexec";
+    const char *in[] = {a1, a2, a3, a4, "--scripted"}, *av[8] = {pk, p->sv->l->tsbin};
+    int n = 2;
+    for (int i = 0; i < 5; i++)
+        if (in[i]) av[n++] = in[i];
+    av[n] = NULL;
+    snap_cmd(p, kind, av, 1 << 16);
+}
+
+static bool snap_is_ts(const SnapInfo *s) { return s && !strcmp(s->type, "timeshift"); }
+
+static bool snap_can_delete(SnapView *v, const SnapInfo *s) { return s && v->l && (snap_is_ts(s) ? v->l->ts_manage : v->l->manage && s->num); }
+
 static void snap_delete_cb(int choice, bool check, void *ud) {
     (void)check;
     Pane *p = ud;
     if (choice != 0 || !pane_exists(p) || !p->sv) return;
     SnapInfo *s = snap_cur(p->sv);
     if (!s) return;
+    if (snap_is_ts(s)) { snap_ts_cmd(p, SC_DELETE, "--delete", "--snapshot", s->name, NULL); return; }
     char n1[16], n2[16];
     snprintf(n1, sizeof n1, "%d", s->num);
     const char *av[] = {snapper_bin(), "-c", p->sv->l->config, "delete", n1, NULL, NULL, false};
@@ -9873,6 +9895,7 @@ static void snap_create_cb(int choice, bool check, void *ud) {
     (void)check;
     Pane *p = ud;
     if (choice != 0 || !pane_exists(p) || !p->sv || !p->sv->l) return;
+    if (!p->sv->l->manage) { snap_ts_cmd(p, SC_CREATE, "--create", "--comments", "File Explorer", NULL); return; }
     const char *av[] = {snapper_bin(), "-c", p->sv->l->config, "create", "--description", "File Explorer", "--cleanup-algorithm", "number", NULL, false};
     snap_cmd(p, SC_CREATE, av, 4096);
 }
@@ -9963,7 +9986,7 @@ static void menu_open_snap(Pane *p, f32 x, f32 y) {
     m->hover = -1;
     m->pane = p;
     SnapInfo *s = snap_cur(v);
-    bool mg = v && v->l && v->l->manage;
+    bool mg = v && v->l && v->l->manage, two = v && v->sel2 >= 0 && s && s->num && v->l->s[v->sel2].num;
     if (v && v->mode == 1) {
         menu_add("Show in the snapshot", "Enter", ACT_SNAP_OPEN, v->nch > 0);
         menu_add("Back to the snapshots", "Esc", ACT_SNAP_BACK, true);
@@ -9973,8 +9996,8 @@ static void menu_open_snap(Pane *p, f32 x, f32 y) {
         menu_add(v && v->sel2 >= 0 ? "What changed between these two" : s && !strcmp(s->type, "post") ? "What this change did" : "What changed since",
                  "", ACT_SNAP_CHANGES, s && mg);
         menu_sep();
-        menu_add(v && v->sel2 >= 0 ? "Delete these two snapshots\xE2\x80\xA6" : "Delete snapshot\xE2\x80\xA6", "Del", ACT_SNAP_DELETE, s && mg);
-        menu_add("Create snapshot now\xE2\x80\xA6", "", ACT_SNAP_CREATE, mg);
+        menu_add(two ? "Delete these two snapshots\xE2\x80\xA6" : "Delete snapshot\xE2\x80\xA6", "Del", ACT_SNAP_DELETE, v && snap_can_delete(v, s));
+        menu_add("Create snapshot now\xE2\x80\xA6", "", ACT_SNAP_CREATE, mg || (v && v->l && v->l->ts_manage));
         menu_sep();
         menu_add("Refresh", "F5", ACT_SNAP_REFRESH, true);
     }
@@ -10010,9 +10033,14 @@ static void snap_action(Pane *p, int act) {
     case ACT_SNAP_COMPARE: if (s) snap_compare(p, s->root, v->l->mnt); break;
     case ACT_SNAP_CHANGES: snap_changes(p); break;
     case ACT_SNAP_DELETE: {
-        if (!s || !v->l->manage) break;
+        if (!snap_can_delete(v, s)) break;
         char msg[400];
-        if (v->sel2 >= 0) snprintf(msg, sizeof msg, "Delete snapshots %s and %s? Their files are gone for good.", s->name, v->l->s[v->sel2].name);
+        if (snap_is_ts(s)) {
+            char d[64];
+            props_date(s->when, d, sizeof d);
+            snprintf(msg, sizeof msg, "Delete the Timeshift snapshot of %s? Its files are gone for good. Timeshift deletes it as administrator: "
+                     "you'll be asked for the password.", d);
+        } else if (v->sel2 >= 0 && v->l->s[v->sel2].num) snprintf(msg, sizeof msg, "Delete snapshots %s and %s? Their files are gone for good.", s->name, v->l->s[v->sel2].name);
         else snprintf(msg, sizeof msg, "Delete snapshot %s (%s)? Its files are gone for good.", s->name, s->desc[0] ? s->desc : s->type);
         static const char *b[] = {"Delete", "Cancel"};
         dialog_open("Delete snapshot", msg, b, 2, 0, 1, NULL, snap_delete_cb, p);
@@ -10021,9 +10049,11 @@ static void snap_action(Pane *p, int act) {
         break;
     }
     case ACT_SNAP_CREATE: {
-        if (!v || !v->l || !v->l->manage) break;
+        if (!v || !v->l || (!v->l->manage && !v->l->ts_manage)) break;
         char msg[300];
-        snprintf(msg, sizeof msg, "Take a snapshot of %s now? Snapper removes old ones like this by itself (number cleanup).", v->l->mnt);
+        if (v->l->manage) snprintf(msg, sizeof msg, "Take a snapshot of %s now? Snapper removes old ones like this by itself (number cleanup).", v->l->mnt);
+        else snprintf(msg, sizeof msg, "Take a Timeshift snapshot of the system now? It runs as administrator (you'll be asked for the password) "
+                      "and can take a while, the first one in rsync mode copies the whole system.");
         static const char *b[] = {"Create", "Cancel"};
         dialog_open("Create snapshot", msg, b, 2, 0, 1, NULL, snap_create_cb, p);
         A.dlg.icon = DI_QUESTION;
