@@ -4259,8 +4259,6 @@ static int run_kind(const char *full, bool *exec) {
     return RUN_NONE;
 }
 
-static Tab *term_tab_open(const char *dir, char *const argv[]); // (built-in terminal tabs)
-
 static void run_program(const char *full, int kind, bool term) {
     char dir[PATH_MAX]; // started in its own folder: scripts often use files next to them
     snprintf(dir, sizeof dir, "%s", full);
@@ -4269,11 +4267,12 @@ static void run_program(const char *full, int kind, bool term) {
     const char *dot = strrchr(full, '.');
     char *shell = dot && !strcasecmp(dot, ".bash") && in_path("bash") ? "bash" : "/bin/sh"; // (RUN_SHELL)
     if (A.selftest) { snprintf(A.last_opened, sizeof A.last_opened, "%s:%s%s%s", term ? "run-terminal" : "run", kind == RUN_SHELL ? shell : "", kind == RUN_SHELL ? " " : "", full); return; }
-    if (term) { // a terminal tab here; it waits for Enter when the program ends (else the tab would close), so its output can be read
+    if (term) { // the external terminal (Options > Integration > Terminal app, as Open in external terminal); it waits for
+                // Enter when the program ends (else the window would close at once), so its output can be read
         static const char wrap[] = "\"$@\"; s=$?; if [ $s -eq 0 ]; then m='Finished'; c=2; else m=\"Exited with code $s\"; c=31; fi; "
-                                   "printf '\\n\\033[%sm%s \\342\\200\\224 press Enter to close this tab\\033[0m' \"$c\" \"$m\"; read -r _";
+                                   "printf '\\n\\033[%sm%s \\342\\200\\224 press Enter to close\\033[0m' \"$c\" \"$m\"; read -r _";
         char *cmd[] = {"/bin/sh", "-c", (char *)wrap, "sh", kind == RUN_SHELL ? shell : (char *)full, kind == RUN_SHELL ? (char *)full : NULL, NULL};
-        if (!term_tab_open(dir, cmd)) toast("Couldn't open a terminal tab");
+        spawn_terminal(dir, cmd);
         return;
     }
     char *argv[] = {kind == RUN_SHELL ? shell : (char *)full, kind == RUN_SHELL ? (char *)full : NULL, NULL};
