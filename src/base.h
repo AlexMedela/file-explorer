@@ -248,6 +248,20 @@ static const char *path_basename(const char *p) {
     return (s && s[1]) ? s + 1 : p;
 }
 
+// Fields of /proc/self/mounts, mountinfo and fstab write spaces, tabs, newlines and backslashes as \ooo octal escapes.
+// Decoded once (so a literal "\134040" stays "\040"); a truncated, non-octal or \000 escape is copied as it is. out may be s (decoding in place).
+static void mount_unescape(const char *s, char *out, size_t cap) {
+    size_t o = 0;
+    for (const char *c = s; *c && o + 1 < cap; c++) {
+        if (c[0] == '\\' && c[1] >= '0' && c[1] <= '3' && c[2] >= '0' && c[2] <= '7' && c[3] >= '0' && c[3] <= '7' &&
+            (c[1] != '0' || c[2] != '0' || c[3] != '0')) {
+            out[o++] = (char)((c[1] - '0') * 64 + (c[2] - '0') * 8 + (c[3] - '0'));
+            c += 3;
+        } else out[o++] = *c;
+    }
+    out[o] = 0;
+}
+
 // ---------------------------------------------------------------------------
 // Starting programs
 // ---------------------------------------------------------------------------

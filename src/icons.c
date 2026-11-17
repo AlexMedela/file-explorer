@@ -1,16 +1,6 @@
 // icons.c - file-type icons (Material Icon Theme SVGs, rasterized by nanosvg into the atlas)
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-#pragma GCC diagnostic ignored "-Wmisleading-indentation"
-#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
-#define NANOSVG_IMPLEMENTATION
-#include "../third_party/nanosvg.h"
-#define NANOSVGRAST_IMPLEMENTATION
-#include "../third_party/nanosvgrast.h"
-#pragma GCC diagnostic pop
+// (nanosvg itself is compiled in svg_preview.c, included before preview.c)
 
 #include "icons_data.h"
 
@@ -39,10 +29,16 @@ static int g_icon_theme; // 0..ICON_THEMES-1 built in, then custom themes (icon_
 // "folder-src.svg"), "ext-<extension>.svg" for any extension, and theme.conf ("base=Catppuccin": where the
 // icons it doesn't have come from; Material by default).
 #define MAX_CUSTOM_ICON_THEMES 16
-#define ICON_EXT_BASE (ICON_COUNT + 3) // ids of a custom theme's ext-*.svg icons (after the logo and branch ids)
+// Badges on an icon's lower right that a custom theme may draw itself (freedesktop emblem names); there are no
+// built-in SVGs for them: without the theme's own, render.c draws its usual marks.
+enum { BADGE_LINK, BADGE_GIT, BADGE_COUNT };
+static const char *g_badge_names[BADGE_COUNT] = {"emblem-symbolic-link", "emblem-git"};
+#define ICON_BADGE_BASE (ICON_COUNT + 3) // ids of the badges (after the logo and branch ids)
+#define ICON_EXT_BASE (ICON_BADGE_BASE + BADGE_COUNT) // ids of a custom theme's ext-*.svg icons
 typedef struct {
     char name[64];
     int base;           // built-in theme for missing icons
+    char *badge[BADGE_COUNT]; // emblem-*.svg (NULL = the app's own mark)
     char *svg[ICON_COUNT]; // overrides (NULL = base)
     char (*ext)[32];    // ext-<x>.svg: extension (lowercase) ...
     char **ext_svg;     // ... and its SVG
@@ -52,6 +48,12 @@ static CustomIconTheme g_cit[MAX_CUSTOM_ICON_THEMES];
 static int g_ncit;
 static NSVGimage **g_ext_img; // parsed ext icons of the current custom theme
 static int g_next_img;
+
+// --- interface icons (menu actions, toolbar): built in (ui_icons.h, white strokes tinted when drawn) so they look the
+// same everywhere, whatever fonts are installed.
+#include "ui_icons.h"
+#define ICON_UI_BASE 0x200000 // icon ids of interface icon UI_*: ICON_UI_BASE + UI_*
+static NSVGimage *g_ui_img[UI_ICON_COUNT];
 
 // --- network location icons (Connect to server > Icon): built in (net_icons.h) plus net-<name>.svg files from
 // any custom icon theme folder (offered whichever file icon theme is selected). Stored by key: the built-in name,
@@ -84,21 +86,25 @@ static void net_icons_free_images(void) {
     g_net_img_n = 0;
 }
 
-static int icon_theme_count(void) { return ICON_THEMES + g_ncit; }
+// Themes: the built-in sets, the custom ones, then "System" (the desktop's icon theme, system_icons.c).
+static int icon_theme_count(void) { return ICON_THEMES + g_ncit + 1; }
+static bool icon_system_selected(void) { return g_icon_theme == ICON_THEMES + g_ncit; }
 static const char *icon_theme_name(int t) {
-    return t < ICON_THEMES ? g_icon_theme_names[t] : t < icon_theme_count() ? g_cit[t - ICON_THEMES].name : "";
+    return t < ICON_THEMES ? g_icon_theme_names[t] : t < ICON_THEMES + g_ncit ? g_cit[t - ICON_THEMES].name : t == ICON_THEMES + g_ncit ? "System" : "";
 }
-static CustomIconTheme *icon_custom(void) { return g_icon_theme >= ICON_THEMES ? &g_cit[g_icon_theme - ICON_THEMES] : NULL; }
+static CustomIconTheme *icon_custom(void) { return g_icon_theme >= ICON_THEMES && g_icon_theme < ICON_THEMES + g_ncit ? &g_cit[g_icon_theme - ICON_THEMES] : NULL; }
 static int icon_id_limit(void) { CustomIconTheme *c = icon_custom(); return ICON_EXT_BASE + (c ? c->next : 0); }
 
 // SVG text of icon id in the current theme.
 static const char *icon_src(int id) {
     CustomIconTheme *c = icon_custom();
     if (id >= ICON_EXT_BASE) return c && id - ICON_EXT_BASE < c->next ? c->ext_svg[id - ICON_EXT_BASE] : NULL;
-    if (!c) return g_icon_svg[g_icon_theme][id];
+    if (id >= ICON_BADGE_BASE) return c ? c->badge[id - ICON_BADGE_BASE] : NULL;
+    if (!c) return g_icon_svg[g_icon_theme < ICON_THEMES ? g_icon_theme : 0][id]; // (System: Material until the desktop's arrive)
     return c->svg[id] ? c->svg[id] : g_icon_svg[c->base][id];
 }
 static NSVGimage *g_icon_img[ICON_COUNT]; // parsed lazily (current theme)
+static NSVGimage *g_badge_img[BADGE_COUNT];
 static NSVGrasterizer *g_rast;
 
 static int icon_find(const char *name) {
@@ -110,6 +116,21 @@ static int icon_find(const char *name) {
         else lo = mid + 1;
     }
     return -1;
+}
+
+// Icon id of badge BADGE_* in the current theme, -1 if it has none (the caller draws the app's own mark).
+static int badge_icon(int badge) {
+    CustomIconTheme *c = icon_custom();
+    return c && c->badge[badge] ? ICON_BADGE_BASE + badge : -1;
+}
+
+// The trash's own bin (sidebar, tab, path bar): full when something is in it. A custom theme with its own bin but
+// no trash-full.svg keeps its bin rather than mixing in the built-in full one.
+static int trash_icon(bool full) {
+    int t = icon_find("trash"), f = icon_find("trash-full");
+    CustomIconTheme *c = icon_custom();
+    if (!full || f < 0 || (c && c->svg[t] && !c->svg[f])) return t;
+    return f;
 }
 
 // --- which icon for which file ---------------------------------------------
@@ -341,7 +362,11 @@ static void logo_recolor(char *svg, u32 accent) {
 static NSVGimage *icon_image(int id) {
     NSVGimage **slot;
     const char *nsrc = NULL;
-    if (id >= ICON_NET_BASE) {
+    if (id >= ICON_UI_BASE) {
+        if (id - ICON_UI_BASE >= UI_ICON_COUNT) return NULL;
+        slot = &g_ui_img[id - ICON_UI_BASE];
+        nsrc = g_ui_icons[id - ICON_UI_BASE];
+    } else if (id >= ICON_NET_BASE) {
         int k = id - ICON_NET_BASE;
         if (k >= net_icon_count()) return NULL;
         if (g_net_img_n < net_icon_count()) {
@@ -355,7 +380,8 @@ static NSVGimage *icon_image(int id) {
         int k = id - ICON_EXT_BASE;
         if (k >= g_next_img) return NULL;
         slot = &g_ext_img[k];
-    } else slot = id == ICON_LOGO ? &g_logo_img : id == ICON_LOGO_SMALL ? &g_logo_small_img : id == ICON_BRANCH ? &g_branch_img : &g_icon_img[id];
+    } else if (id >= ICON_BADGE_BASE) slot = &g_badge_img[id - ICON_BADGE_BASE];
+    else slot = id == ICON_LOGO ? &g_logo_img : id == ICON_LOGO_SMALL ? &g_logo_small_img : id == ICON_BRANCH ? &g_branch_img : &g_icon_img[id];
     if (!*slot) {
         const char *src = nsrc ? nsrc : id == ICON_LOGO ? g_logo_svg : id == ICON_LOGO_SMALL ? g_logo_small_svg
                         : id == ICON_BRANCH ? g_branch_svg : icon_src(id);
@@ -378,8 +404,16 @@ static NSVGimage *icon_image(int id) {
     return *slot;
 }
 
+#include "system_icons.c"
+
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
+    const u8 *sys = icon_system_selected() && w == h ? sysi_pixels(id, w) : NULL;
+    if (sys) {
+        u8 *buf = xmalloc((size_t)w * h * 4);
+        memcpy(buf, sys, (size_t)w * h * 4);
+        return buf;
+    }
     NSVGimage *img = icon_image(id);
     if (!img || img->width <= 0 || img->height <= 0) return NULL;
     if (!g_rast) g_rast = nsvgCreateRasterizer();
@@ -394,7 +428,7 @@ static IconSlot g_icon_cache[512];
 // g_icon_cache_n lives in font.c (reset together with the atlas)
 
 static Glyph *icon_glyph(int id, int px) {
-    if (id < 0 || (id >= icon_id_limit() && (id < ICON_NET_BASE || id >= ICON_NET_BASE + net_icon_count())) || px <= 0 || px > 256) return NULL;
+    if (id < 0 || (id >= icon_id_limit() && (id < ICON_NET_BASE || id >= ICON_NET_BASE + net_icon_count()) && (id < ICON_UI_BASE || id >= ICON_UI_BASE + UI_ICON_COUNT)) || px <= 0 || px > 256) return NULL;
     for (int i = 0; i < g_icon_cache_n; i++)
         if (g_icon_cache[i].id == id && g_icon_cache[i].px == px) return &g_icon_cache[i].g;
     if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0; // crude eviction (atlas keeps the pixels)
@@ -429,6 +463,12 @@ static bool draw_net_icon(f32 x, f32 y, f32 s, const char *key, f32 alpha) {
     if (!g) return false;
     draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, alpha});
     return true;
+}
+
+// An interface icon (UI_*) s pixels big at (x, y), tinted c.
+static void draw_ui_icon(int ui, f32 x, f32 y, f32 s, Color c) {
+    Glyph *g = ui >= 0 ? icon_glyph(ICON_UI_BASE + ui, (int)roundf(s)) : NULL;
+    if (g) draw_glyph(g, roundf(x), roundf(y), c);
 }
 
 // Large icons (grid view) get their own textures so they don't flood the glyph atlas.
@@ -468,6 +508,25 @@ static SDL_Texture *big_icon_tex(int id, int px) {
     return tex;
 }
 
+// The desktop's icon (system_icons.c) arrived: over the bundled one drawn meanwhile, in place in the atlas; big copies
+// are made again.
+static void icons_replace(int id, int px, const u8 *rgba) {
+    for (int i = 0; i < g_icon_cache_n; i++) {
+        Glyph *g = &g_icon_cache[i].g;
+        if (g_icon_cache[i].id != id || g_icon_cache[i].px != px) continue;
+        for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(g->y + y) * ATLAS_SIZE + g->x) * 4], rgba + (size_t)y * px * 4, (size_t)px * 4);
+        g_dirty_x0 = MIN(g_dirty_x0, g->x);
+        g_dirty_y0 = MIN(g_dirty_y0, g->y);
+        g_dirty_x1 = MAX(g_dirty_x1, g->x + px);
+        g_dirty_y1 = MAX(g_dirty_y1, g->y + px);
+    }
+    for (int i = 0; i < g_nbig; i++)
+        if (g_big_icons[i].id == id && g_big_icons[i].px == px) {
+            SDL_DestroyTexture(g_big_icons[i].tex);
+            g_big_icons[i--] = g_big_icons[--g_nbig];
+        }
+}
+
 // Theme changed: icons using the theme colour mark are parsed and rasterized again.
 static bool g_logo_changed; // the window icon should be rebuilt (app.c)
 
@@ -485,7 +544,8 @@ static void icons_sync_theme(void) {
     g_icon_main = COL_TEXT2;
     g_icon_bg = COL_BG;
     if (first) return;
-    bool any = false;
+    bool any = icon_system_selected(); // (the desktop's symbolic icons are drawn in the text colour)
+    if (any) sysi_reset();
     for (int i = 0; i < ICON_COUNT; i++)
         if (g_icon_img[i] && (strstr(icon_src(i), ICON_THEME_MARK) || strstr(icon_src(i), ICON_THEME_SHADE))) {
             nsvgDelete(g_icon_img[i]);
@@ -516,6 +576,10 @@ static void icons_flush(void) {
         if (g_icon_img[i]) nsvgDelete(g_icon_img[i]);
         g_icon_img[i] = NULL;
     }
+    for (int i = 0; i < BADGE_COUNT; i++) {
+        if (g_badge_img[i]) nsvgDelete(g_badge_img[i]);
+        g_badge_img[i] = NULL;
+    }
     for (int i = 0; i < g_next_img; i++)
         if (g_ext_img[i]) nsvgDelete(g_ext_img[i]);
     free(g_ext_img);
@@ -530,6 +594,7 @@ static void icons_flush(void) {
 static void icon_set_theme(int t) {
     if (t < 0 || t >= icon_theme_count() || t == g_icon_theme) return;
     g_icon_theme = t;
+    sysi_reset();
     icons_flush();
 }
 
@@ -546,6 +611,7 @@ static char *icon_read_svg(const char *path) {
 
 static void icon_custom_free(CustomIconTheme *c) {
     for (int i = 0; i < ICON_COUNT; i++) free(c->svg[i]);
+    for (int i = 0; i < BADGE_COUNT; i++) free(c->badge[i]);
     for (int k = 0; k < c->next; k++) free(c->ext_svg[k]);
     free(c->ext);
     free(c->ext_svg);
@@ -575,7 +641,7 @@ static void icon_themes_scan(const char *dir) {
         snprintf(tdir, sizeof tdir, "%s/%s", dir, de->d_name);
         struct stat st;
         if (stat(tdir, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
-        bool clash = false; // a built-in name can't be reused
+        bool clash = str_ieq(de->d_name, "System"); // a built-in name can't be reused
         for (int i = 0; i < ICON_THEMES; i++) clash |= str_ieq(de->d_name, g_icon_theme_names[i]);
         if (clash) continue;
         CustomIconTheme *c = &g_cit[g_ncit];
@@ -621,6 +687,12 @@ static void icon_themes_scan(const char *dir) {
                 c->ext_svg[c->next++] = svg;
                 found++;
             } else {
+                int b = 0;
+                while (b < BADGE_COUNT && strcmp(nm, g_badge_names[b])) b++;
+                if (b < BADGE_COUNT) {
+                    if (!c->badge[b] && (c->badge[b] = icon_read_svg(path)) != NULL) found++;
+                    continue;
+                }
                 int id = icon_find(nm);
                 if (id < 0 || c->svg[id]) continue;
                 if ((c->svg[id] = icon_read_svg(path)) != NULL) found++;
@@ -651,6 +723,11 @@ static void icon_themes_readme(const char *dir) {
                "    python.svg        replaces a built-in icon (names below)\n"
                "    folder.svg        the plain folder; folder-src.svg, folder-docs.svg... for special folders\n"
                "    ext-blend.svg     icon for one file extension (any extension, also ones the app doesn't know)\n"
+               "    trash-full.svg    the Trash's bin when something is in it (trash.svg: empty); with only\n"
+               "                      trash.svg, that one is used either way\n"
+               "    emblem-symbolic-link.svg  badge on links, emblem-git.svg  badge on Git repositories: drawn on\n"
+               "                      the icon's lower right (about a third of its size; both: the Git one above);\n"
+               "                      without them the app draws its usual marks\n"
                "    net-homelab.svg   an extra icon for network locations (Connect to server > Icon), offered\n"
                "                      whichever file icon theme is selected; a folder may hold only net-*.svg files\n\n"
                "After adding or editing files, press \"Icon themes folder\" in Options again to reload.\n\n"

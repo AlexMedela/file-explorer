@@ -14,11 +14,25 @@ pinned folders, columns, and your tabs/split panes (`restore_session=0` to start
 (0 = all at once) and `verify_copies=0` are the transfer queue's settings. `renderer=auto` uses
 OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is resized; Vulkan can take less memory
 on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
+`unified_surfaces=1` (Options -> Appearance -> Unified surfaces, off by default) gives the sidebar, the header (tab
+strip and toolbar), the preview panel and the status bar the file area's background; the lines between them stay.
+`show_separators=0` (Options -> Appearance -> Separator lines, on by default) leaves out the lines between the sidebar,
+header, column headings, preview, terminal panel and status bar; an edge you can drag still lights up on hover.
+`sidebar_brightness`, `header_brightness`, `main_brightness` (the file area), `preview_brightness` and
+`status_brightness` (Options -> Appearance -> Surfaces, 0 by default) make that part darker (down to -30) or lighter
+(up to 30, in percent) than the theme's own colour.
+`tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a
+box on the tab strip, instead of the open tab as a card joining the folder below it.
 `title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling
 compositors included, so it looks the same everywhere: minimise / maximise / close at the end of the tab strip; drag
 the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.
 `system` leaves the title bar to the desktop (on a tiling compositor: no buttons at all).
 `FE_TITLE_BAR=app|system` overrides it for one run.
+`window_buttons=0` (Options -> Appearance -> Window buttons, on by default) leaves out minimise / maximise / close, for
+desktops that close and tile windows from the keyboard; the tab strip then runs to the window's edge.
+`brand_name=app|host|custom|hidden` (Options -> Appearance -> Name above the sidebar) shows Explorer, this computer's
+name, your own `brand_text=` (typed under it in Options), or nothing: the sidebar then starts at the top.
+`brand_logo=0` (Options -> Appearance -> Logo) shows that name without the logo.
 `round_corners=1` (Options -> Appearance -> Rounded corners, off by default) rounds the window's corners with Explorer's own title bar,
 and draws a drop shadow round it the way GTK apps do (square and without shadow when maximised or snapped). On X11 this
 needs a compositor (else the corners stay square) and the OpenGL renderer (Automatic picks it there); the shadow needs a
@@ -37,6 +51,17 @@ downloads by itself, so the card only asks to restart. The AppImage's folder mus
 zypper) update with the system and makepkg / source builds are told the command to run; "Check now" works for all.
 
 Per-folder views live in `~/.config/file-explorer/folders.conf`, saved layouts in `layouts.conf`.
+
+Theme > **System** (`theme=System`) is Light or Dark as the desktop prefers (the settings portal's dark / light
+preference, else GTK's), with the desktop's accent colour where it has one (an accent picked in Options wins), and
+follows changes while the app runs. On KDE it takes KDE's colour scheme itself (view, window, text and selection
+colours from its settings portal, else `~/.config/kdeglobals` when the session is KDE).
+`system_accent=1` (Options -> Appearance -> Desktop's accent colour, off by default) uses the desktop's accent with
+every theme, where the desktop has one; otherwise the accent picked above.
+
+`scrollbar_color=#RRGGBB` (Options -> Appearance -> Scrollbar colour: type `#RRGGBB` or `#RGB`, then Apply or Enter)
+colours the scrollbars; `auto` (the field left empty) keeps the theme's own, which under Theme > System take the
+desktop's accent colour.
 
 Colour schemes: `~/.config/file-explorer/themes/*.json` (Options → "Create theme from current colours" writes a
 starting point). Any key you leave out comes from the `base` theme:
@@ -95,15 +120,27 @@ Terminal panel: F4 shows a shell under the folder, one per tab, that follows the
 its prompt (Ctrl+Shift+F4 moves the keyboard between the two). bash, zsh and fish move quietly: the panel's shell loads
 a few lines of shell integration after your own startup files (bash: `--rcfile` that runs `~/.bashrc` first; zsh:
 `ZDOTDIR` pointing at files that run yours; fish: `-C`), kept in `$XDG_RUNTIME_DIR/file-explorer/shell`, so the prompt
-just updates and what you typed stays. Other shells, or one whose startup files fail before that, get a `cd` typed. Tabs that had it open get it back after a restart, with
+just updates and what you typed stays. Other shells, or one whose startup files fail before that, get a `cd` typed. A
+`fastfetch` your startup files or fish's greeting run is skipped in the panel (typed at its prompt, it runs). Tabs that had it open get it back after a restart, with
 a new shell; `terminal_panel_height` is its height. Terminal tabs: Shift+F4 opens a terminal tab in the current
-folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. It runs your shell and looks like your default
+folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. The external
+terminal is `$TERMINAL`, else xdg-terminal-exec, else the desktop's own; Options > Integration > Terminal app picks one of
+the terminals installed instead (`external_terminal=`; listed are the usual ones on `$PATH` and those of terminal apps'
+`.desktop` entries), and the menu then says "Open in" its name. Terminal tabs run your shell and look like your default
 terminal (xdg-terminal-exec's choice, else $TERMINAL): font, colours, padding, cursor and scrollback are read from
-foot, kitty, Alacritty or Ghostty config and followed live (Options > Appearance > Terminal appearance). Ctrl+Shift+C/V
+foot, kitty, Alacritty or Ghostty config (the status bar names it: "colours and font from foot") and followed live (Options > Appearance > Terminal appearance); a font with
+programming ligatures (Fira Code, JetBrains Mono...) shows them, kept to the cell grid. Ctrl+Shift+C/V
 copy and paste, Shift+PageUp/PageDown scroll back, Ctrl+Shift+W closes, Ctrl+Tab switches tabs. Built on libvterm.
+
+File icons > **System** (`icon_theme=System`) uses the desktop's icon theme for files, folders and the Trash: the one
+the settings portal names (else KDE's or GTK's settings), followed when it changes. The bundled icon shows until the
+desktop's is there, and wherever its theme has none.
 
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`
 sets the icon for any extension, and `theme.conf` (`base=Catppuccin`) picks the set the missing icons come from.
-`net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
+`trash-full.svg` is the Trash's bin when something is in it (`trash.svg` when empty; a theme with only `trash.svg`
+uses it for both). `emblem-symbolic-link.svg` and `emblem-git.svg` replace the marks on links and Git
+repositories: drawn on the icon's lower right at about a third of its size (with both, the Git one sits above);
+without them the usual marks stay. `net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
 lists every icon name.

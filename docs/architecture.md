@@ -23,7 +23,8 @@
 - Folders refresh automatically when their contents change (inotify, debounced and throttled by scan cost);
   refreshes load in the background and swap in, so the list never flickers.
 - `src/preview.c` – preview worker (latest request wins): stb_image decode + downscale, thumbnail lookup
-  (own cache, `~/.cache/thumbnails`), installed `.thumbnailer`s with an 8 s timeout, text and folder summaries.
+  (own cache, `~/.cache/thumbnails`), installed `.thumbnailer`s with an 8 s timeout, SVGs through nanosvg when no thumbnailer drew them
+  (`src/svg_preview.c`), text and folder summaries.
 - `src/diskuse.c` – disk usage map: measures a folder tree on 4 threads into a tree of folders and their biggest files
   (the rest summed), staying on one drive (btrfs subvolumes of the same disk included); the view in `app.c` / `render.c`
   lays it out as a squarified treemap or a sunburst every frame.

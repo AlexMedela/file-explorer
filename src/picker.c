@@ -150,7 +150,7 @@ static void draw_picker_tab(Rect s, const char *cap) {
     f32 bw = roundf(tx + tw + S(4)); // body; the diagonal piece follows it
     // under the tab: the sidebar's colour and right edge, carried down to the bar
     draw_rect(0, y0, sw, th, C(COL_SIDEBAR));
-    draw_rect(sw - 1, y0, 1, th, C(COL_BORDER));
+    if (g_separators) draw_rect(sw - 1, y0, 1, th, C(COL_BORDER));
     // the outline's centre line, in the 22x24 design box: flat, soft bend, diagonal, soft bend, flat
     f32 ax = bw, ay = y0 + 0.5f, by = s.y + 0.5f, ky = (by - ay) / 23.f; // top / bottom border centre rows
     static const f32 seg[][6] = {{1, 0, 3.2f, 0, 4.2f, 2}, {14, 21.5f, 15.2f, 23, 18, 23}};
@@ -164,7 +164,7 @@ static void draw_picker_tab(Rect s, const char *cap) {
     }
     px[n] = ax + dw; py[n++] = by;
     // fill: the body, then vertical strips under the outline down through the bar's border row
-    Color tb = C(COL_TOOLBAR);
+    Color tb = C(COL_STATUS); // (merges with the bar below)
     draw_rect(0, y0, bw, th + 1, tb);
     draw_reserve(n * 2, (n - 1) * 6);
     int base = g_nv;
@@ -182,8 +182,8 @@ static void draw_picker_tab(Rect s, const char *cap) {
 static void draw_picker_bar(Rect s) {
     Font *f = &A.font, *fs = &A.font_small;
     Pane *p = active_pane();
-    draw_rect(s.x, s.y, s.w, s.h, C(COL_TOOLBAR));
-    draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
+    draw_rect(s.x, s.y, s.w, s.h, C(COL_STATUS));
+    if (g_separators) draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
     f32 pad = roundf(S(16)), bh = roundf(S(32));
     f32 by = s.y + roundf((s.h - bh) * 0.5f);
     const char *ok = g_pick == PICK_SAVE ? "Save" : g_pick == PICK_DIR ? "Choose folder" : "Open";

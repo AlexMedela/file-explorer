@@ -4,6 +4,8 @@
 
 #include <archive.h>
 #include <archive_entry.h>
+#include <langinfo.h>
+#include <locale.h>
 
 #define ARC_SEP "::"
 
@@ -49,6 +51,37 @@ static bool arc_member(const char *raw, char *out, size_t cap) {
     return true;
 }
 
+// libarchive converts entry names through the thread's LC_CTYPE. In the C locale (this program never calls setlocale) it
+// stops at the first accented name when reading, and refuses (zip) or crashes on (pax) one when writing. So archive
+// work switches its own thread to a UTF-8 locale; not the whole process, which would change regex and fnmatch.
+static locale_t g_arc_loc; // (0: none installed; names then go as their bytes)
+static pthread_once_t g_arc_loc_once = PTHREAD_ONCE_INIT;
+
+static void arc_loc_init(void) {
+    static const char *names[] = {"C.UTF-8", "C.utf8", "en_US.UTF-8", ""};
+    for (size_t i = 0; i < ARRAY_COUNT(names) && !g_arc_loc; i++) {
+        locale_t l = newlocale(LC_CTYPE_MASK, names[i], (locale_t)0);
+        if (!l) continue;
+        const char *cs = nl_langinfo_l(CODESET, l);
+        if (cs && (!strcasecmp(cs, "UTF-8") || !strcasecmp(cs, "utf8"))) g_arc_loc = l;
+        else freelocale(l);
+    }
+}
+
+// Returns what arc_utf8_end restores.
+static locale_t arc_utf8_begin(void) {
+    pthread_once(&g_arc_loc_once, arc_loc_init);
+    return g_arc_loc ? uselocale(g_arc_loc) : (locale_t)0;
+}
+
+static void arc_utf8_end(locale_t old) { if (old) uselocale(old); }
+
+// The next entry; a warning (a name it couldn't convert...) still has one.
+static int arc_next(struct archive *a, struct archive_entry **ae) {
+    int r = archive_read_next_header(a, ae);
+    return r == ARCHIVE_WARN ? ARCHIVE_OK : r;
+}
+
 static struct archive *arc_open(const char *file) {
     struct archive *a = archive_read_new();
     archive_read_support_filter_all(a);
@@ -75,11 +108,12 @@ static void arc_scan(Listing *L) {
         main_wake();
         return;
     }
+    locale_t oloc = arc_utf8_begin();
     size_t il = strlen(inner);
     int cap = 256, n = 0;
     ArcChild *kids = xmalloc((size_t)cap * sizeof(ArcChild));
     struct archive_entry *ae;
-    while (archive_read_next_header(a, &ae) == ARCHIVE_OK) {
+    while (arc_next(a, &ae) == ARCHIVE_OK) {
         if (atomic_load_explicit(&L->cancel, memory_order_relaxed)) break;
         const char *raw = archive_entry_pathname_utf8(ae);
         if (!raw) raw = archive_entry_pathname(ae);
@@ -103,6 +137,7 @@ static void arc_scan(Listing *L) {
         k->mode = (u16)(slash ? (AE_IFDIR | 0755) : archive_entry_mode(ae));
     }
     archive_read_free(a);
+    arc_utf8_end(oloc);
     // one entry per child name (folders can appear many times through their members)
     qsort(kids, (size_t)n, sizeof(ArcChild), cmp_arcchild);
     u32 cnt = 0;
@@ -158,8 +193,9 @@ static void run_extract(Op *op) {
     bool created_dst = stat(op->dst_dir, &dst_st) != 0; // a folder we make is itself the result
     mkdir_p(op->dst_dir, 0755);
     char *buf = xmalloc(1 << 18);
+    locale_t oloc = arc_utf8_begin();
     struct archive_entry *ae;
-    while (!op_cancelled(op) && archive_read_next_header(a, &ae) == ARCHIVE_OK) {
+    while (!op_cancelled(op) && arc_next(a, &ae) == ARCHIVE_OK) {
         const char *raw = archive_entry_pathname_utf8(ae);
         if (!raw) raw = archive_entry_pathname(ae);
         char m[PATH_MAX];
@@ -226,6 +262,7 @@ static void run_extract(Op *op) {
     }
     free(buf);
     archive_read_free(a);
+    arc_utf8_end(oloc);
     if (created_dst && !op->open_after && !op_cancelled(op)) { // report (and undo) the new folder, not its contents
         strv_free(op->in, op->nout);
         strv_free(op->out, op->nout);
@@ -238,74 +275,140 @@ static void run_extract(Op *op) {
 
 // --- compress ------------------------------------------------------------------
 
-static void compress_add(Op *op, struct archive *w, const char *path, const char *rel, char *buf) {
-    if (op_cancelled(op)) return;
+// What a compression is writing to, and what it couldn't read (those are left out and named at the end).
+typedef struct {
+    struct archive *w;
+    char *buf;
+    bool utf8;         // the thread's locale is UTF-8: names go in as UTF-8 (else as their bytes)
+    dev_t out_dev;     // the ".part" file being written (never added to itself)
+    ino_t out_ino;
+    int nadded, nskip; // entries written / items left out or cut short
+    char skip1[NAME_MAX + 1], skip1_why[160];
+} Compress;
+
+static void compress_note(Compress *c, const char *rel, const char *why) {
+    if (c->nskip++) return; // the first one is named
+    snprintf(c->skip1, sizeof c->skip1, "%s", rel);
+    snprintf(c->skip1_why, sizeof c->skip1_why, "%s", why && why[0] ? why : "unknown error");
+}
+
+static void compress_skip(Op *op, Compress *c, const char *rel, const char *why) {
+    compress_note(c, rel, why);
+    atomic_fetch_add(&op->files_done, 1);
+}
+
+// A write error that leaves the archive unusable (disk full...): the op fails and the partial file goes.
+static void compress_fatal(Op *op, Compress *c, const char *rel) {
+    const char *why = archive_error_string(c->w);
+    int en = archive_errno(c->w);
+    op_error(op, "Can't add \xE2\x80\x9C%s\xE2\x80\x9D: %s", rel, why && why[0] ? why : en > 0 ? strerror(en) : "write failed");
+}
+
+static void compress_add(Op *op, Compress *c, const char *path, const char *rel) {
+    if (op_cancelled(op) || op->nerr) return;
     struct stat st;
-    if (lstat(path, &st)) return;
+    if (lstat(path, &st)) { compress_skip(op, c, rel, strerror(errno)); return; } // vanished since it was picked
+    if (st.st_dev == c->out_dev && st.st_ino == c->out_ino) return; // the archive being written
+    int fd = -1;
+    if (S_ISREG(st.st_mode) && (fd = open(path, O_RDONLY | O_CLOEXEC)) < 0) { // unreadable: left out, not an empty entry
+        compress_skip(op, c, rel, strerror(errno));
+        return;
+    }
     struct archive_entry *e = archive_entry_new();
     archive_entry_copy_stat(e, &st);
-    archive_entry_set_pathname_utf8(e, rel);
+    if (c->utf8) archive_entry_set_pathname_utf8(e, rel);
+    else archive_entry_copy_pathname(e, rel); // (no UTF-8 locale: the bytes as they are, libarchive only warns)
     if (S_ISLNK(st.st_mode)) {
         char t[PATH_MAX];
         ssize_t n = readlink(path, t, sizeof t - 1);
         if (n >= 0) { t[n] = 0; archive_entry_set_symlink(e, t); }
     }
     op_set_cur(op, path_basename(path));
-    if (archive_write_header(w, e) != ARCHIVE_OK) {
-        op_error(op, "Can't add \xE2\x80\x9C%s\xE2\x80\x9D: %s", rel, archive_error_string(w));
-    } else if (S_ISREG(st.st_mode)) {
-        int fd = open(path, O_RDONLY | O_CLOEXEC);
-        if (fd >= 0) {
-            ssize_t n;
-            while ((n = read(fd, buf, 1 << 18)) > 0 && !op_cancelled(op)) {
-                archive_write_data(w, buf, (size_t)n);
-                atomic_fetch_add(&op->bytes_done, (u64)n);
-            }
-            close(fd);
-        }
-    }
+    int r = archive_write_header(c->w, e);
     archive_entry_free(e);
+    if (r == ARCHIVE_FATAL) { compress_fatal(op, c, rel); if (fd >= 0) close(fd); return; }
+    if (r < ARCHIVE_WARN) { compress_skip(op, c, rel, archive_error_string(c->w)); if (fd >= 0) close(fd); return; }
+    c->nadded++;
+    if (fd >= 0) {
+        // what the file had when it was looked at: one that grows stops there, one that shrinks or fails to read is
+        // padded out by libarchive and named at the end
+        u64 left = (u64)st.st_size;
+        ssize_t n = 0;
+        while (left && !op_cancelled(op) && (n = read(fd, c->buf, (size_t)MIN(left, (u64)(1 << 18)))) > 0) {
+            if (archive_write_data(c->w, c->buf, (size_t)n) < 0) { compress_fatal(op, c, rel); break; }
+            left -= (u64)n;
+            atomic_fetch_add(&op->bytes_done, (u64)n);
+        }
+        int en = errno;
+        close(fd);
+        if (!op->nerr && !op_cancelled(op) && left) compress_note(c, rel, n < 0 ? strerror(en) : "it got smaller while it was read");
+    }
     atomic_fetch_add(&op->files_done, 1);
     if (S_ISDIR(st.st_mode)) {
         DIR *d = opendir(path);
-        if (!d) return;
+        if (!d) { compress_note(c, rel, strerror(errno)); return; } // the folder is in the archive, what's inside it isn't
         struct dirent *de;
-        while ((de = readdir(d)) && !op_cancelled(op)) {
+        while ((de = readdir(d)) && !op_cancelled(op) && !op->nerr) {
             if (is_dot_or_dotdot(de->d_name)) continue;
             char cp[PATH_MAX], cr[PATH_MAX];
             snprintf(cp, sizeof cp, "%s/%s", path, de->d_name);
             snprintf(cr, sizeof cr, "%s/%s", rel, de->d_name);
-            compress_add(op, w, cp, cr, buf);
+            compress_add(op, c, cp, cr);
         }
         closedir(d);
     }
 }
 
-// op->src: items; op->arc: output archive path (".zip" or ".tar.gz").
+// op->src: items; op->arc: output archive path (".zip" or ".tar.gz"). Written to a ".part" file of its own (never one
+// that was already there), renamed when complete. Items that can't be read are left out and named; only a failed
+// write fails the op.
 static void run_compress(Op *op) {
     for (int i = 0; i < op->nsrc; i++) count_tree(op, AT_FDCWD, op->src[i]);
     atomic_store(&op->phase, OPS_RUNNING);
-    struct archive *w = archive_write_new();
-    size_t l = strlen(op->arc);
-    if (l > 4 && !strcmp(op->arc + l - 4, ".zip")) archive_write_set_format_zip(w);
-    else { archive_write_set_format_pax_restricted(w); archive_write_add_filter_gzip(w); }
     char tmp[PATH_MAX + 16];
-    snprintf(tmp, sizeof tmp, "%s.part", op->arc);
-    if (archive_write_open_filename(w, tmp) != ARCHIVE_OK) {
-        op_error(op, "Can't create \xE2\x80\x9C%s\xE2\x80\x9D: %s", path_basename(op->arc), archive_error_string(w));
-        archive_write_free(w);
+    int fd = -1;
+    for (int k = 0; k < 100 && fd < 0; k++) {
+        if (k) snprintf(tmp, sizeof tmp, "%s.%d.part", op->arc, k);
+        else snprintf(tmp, sizeof tmp, "%s.part", op->arc);
+        fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        if (fd < 0 && errno != EEXIST) break;
+    }
+    if (fd < 0) {
+        op_error(op, "Can't create \xE2\x80\x9C%s\xE2\x80\x9D: %s", path_basename(op->arc), strerror(errno));
         return;
     }
-    char *buf = xmalloc(1 << 18);
-    for (int i = 0; i < op->nsrc && !op_cancelled(op); i++) compress_add(op, w, op->src[i], path_basename(op->src[i]), buf);
-    free(buf);
-    archive_write_close(w);
-    archive_write_free(w);
-    if (op_cancelled(op) || op->nerr) { unlink(tmp); return; }
+    locale_t oloc = arc_utf8_begin();
+    Compress c = {.w = archive_write_new(), .buf = xmalloc(1 << 18), .utf8 = g_arc_loc != (locale_t)0};
+    struct stat ost;
+    if (!fstat(fd, &ost)) { c.out_dev = ost.st_dev; c.out_ino = ost.st_ino; }
+    size_t l = strlen(op->arc);
+    if (l > 4 && !strcmp(op->arc + l - 4, ".zip")) archive_write_set_format_zip(c.w);
+    else { archive_write_set_format_pax_restricted(c.w); archive_write_add_filter_gzip(c.w); }
+    if (archive_write_open_fd(c.w, fd) != ARCHIVE_OK) {
+        op_error(op, "Can't create \xE2\x80\x9C%s\xE2\x80\x9D: %s", path_basename(op->arc), archive_error_string(c.w) ? archive_error_string(c.w) : "write failed");
+    } else {
+        for (int i = 0; i < op->nsrc && !op_cancelled(op) && !op->nerr; i++) compress_add(op, &c, op->src[i], path_basename(op->src[i]));
+        if (archive_write_close(c.w) != ARCHIVE_OK && !op->nerr && !op_cancelled(op)) {
+            const char *why = archive_error_string(c.w);
+            op_error(op, "Can't write \xE2\x80\x9C%s\xE2\x80\x9D: %s", path_basename(op->arc), why && why[0] ? why : "write failed");
+        }
+    }
+    archive_write_free(c.w);
+    free(c.buf);
+    arc_utf8_end(oloc);
+    if (close(fd) && !op->nerr && !op_cancelled(op)) op_error(op, "Can't write \xE2\x80\x9C%s\xE2\x80\x9D: %s", path_basename(op->arc), strerror(errno));
+    if (!op->nerr && !op_cancelled(op) && !c.nadded) { // everything vanished or was unreadable: no empty archive
+        if (c.nskip) op_error(op, "Nothing to compress: \xE2\x80\x9C%s\xE2\x80\x9D (%s)", c.skip1, c.skip1_why);
+        else op_error(op, "Nothing to compress");
+    }
+    if (op_cancelled(op) || op->nerr) { unlink(tmp); return; } // only ours: it was created above, exclusively
     if (rename_noreplace(AT_FDCWD, tmp, AT_FDCWD, op->arc)) {
         op_error(op, "Can't create \xE2\x80\x9C%s\xE2\x80\x9D: %s", path_basename(op->arc), strerror(errno));
         unlink(tmp);
         return;
     }
+    if (c.nskip)
+        snprintf(op->warn, sizeof op->warn, "Compressed, %d item%s couldn't be read: \xE2\x80\x9C%s\xE2\x80\x9D (%s)%s", c.nskip,
+                 c.nskip == 1 ? "" : "s", c.skip1, c.skip1_why, c.nskip > 1 ? "\xE2\x80\xA6" : "");
     op_record(op, NULL, op->arc, NULL);
 }

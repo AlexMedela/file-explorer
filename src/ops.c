@@ -58,6 +58,7 @@ typedef struct Op {
     // results, read by the main thread after OPS_DONE
     int nerr;
     char err[512];
+    char warn[512];  // done, with something to say (OP_COMPRESS: items it couldn't read and left out)
     char **in, **out, **aux; // in = original path, out = resulting path, aux = trashinfo
     int nout, capout;
     u64 t_start, t_end;
@@ -114,7 +115,7 @@ static void op_free(Op *op) {
     free(op);
 }
 
-static bool op_cancelled(Op *op) { return atomic_load_explicit(&op->cancel, memory_order_relaxed); }
+static bool op_cancelled(const Op *op) { return atomic_load_explicit(&op->cancel, memory_order_relaxed); }
 
 static void op_error(Op *op, const char *fmt, ...) {
     char buf[512];

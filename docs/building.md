@@ -28,7 +28,7 @@ At runtime:
 - A polkit authentication agent for "Retry as administrator" (desktops ship one; on tiling compositors start e.g.
   `hyprpolkitagent` or `polkit-gnome`).
 - Optional: `xdg-utils` (files open with the default app from the desktop entries; xdg-open is the fallback), freedesktop
-  thumbnailers (ffmpegthumbnailer, evince, glycin, ...) for video/PDF/HEIF/SVG previews, `udisks2` to mount drives,
+  thumbnailers (ffmpegthumbnailer, evince, glycin, ...) for video/PDF/HEIF previews (SVGs are also drawn built in when none is installed), `udisks2` to mount drives,
   `gvfs` for network locations, `rclone` for cloud storage. Phones and cameras on a cable use the built-in connector
   (`gvfs-mtp` / `gvfs-gphoto2` are fallbacks).
 
@@ -72,11 +72,13 @@ nothing touches your settings or recent list, and a running instance is left alo
 Self-tests use private config/cache/state dirs under `/tmp`, never your real ones, and never launch
 external programs (xdg-open, terminals, new windows).
 
-Third-party: `third_party/stb_image.h` (public domain / MIT), `third_party/nanosvg*.h` (zlib),
+Third-party: `third_party/stb_image.h` (public domain / MIT), `third_party/nanosvg*.h` (zlib; local patches, marked "File Explorer": style declarations no longer read past their end, `currentColor` fills and strokes take the inherited `color`),
 file and folder icon themes (all MIT): [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme),
 [Catppuccin](https://github.com/catppuccin/vscode-icons) (mocha) and [Symbols](https://github.com/miguelsolorio/vscode-symbols);
 "Monokai" is the Symbols shapes recoloured with the Monokai palette. `tools/fetch_icons.py` downloads the sets,
 `tools/gen_icons.py` regenerates `src/icons_data.h`. Pick one with the palette ("Icon theme: …") or `icon_theme=` in settings.
 Network location icons: brand logos from [Simple Icons](https://simpleicons.org) (CC0) and Material Icon Theme (MIT),
 in `third_party/net-icons/`; `tools/gen_net_icons.py` regenerates `src/net_icons.h`. Logos are trademarks of their owners.
+Menu and toolbar icons: [Lucide](https://lucide.dev) (ISC, partly MIT from Feather) in `third_party/lucide-icons/`;
+`tools/gen_ui_icons.py` regenerates `src/ui_icons.h`.
 - `tools/mkfiles.sh DIR N` – generate a test directory with N files

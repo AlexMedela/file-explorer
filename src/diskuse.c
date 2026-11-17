@@ -121,6 +121,9 @@ static void du_mounts_parse(DuScan *s, const char *text) {
                     unsigned ma, mi;
                     unsigned long long id;
                     if (nf >= 5 && fs && src && sscanf(f[0], "%llu", &id) == 1 && sscanf(f[2], "%u:%u", &ma, &mi) == 2) {
+                        mount_unescape(f[3], f[3], strlen(f[3]) + 1); // a mount point with spaces: "/mnt/my\040disk"
+                        mount_unescape(f[4], f[4], strlen(f[4]) + 1);
+                        mount_unescape(src, src, strlen(src) + 1);
                         if (s->nmounts == cap) { cap = cap ? cap * 2 : 32; s->mounts = xrealloc(s->mounts, (size_t)cap * sizeof(DuMount)); }
                         s->mounts[s->nmounts++] = (DuMount){id, makedev(ma, mi), strdup(f[3]), strdup(f[4]), strdup(fs), strdup(src),
                                                             opt && (strstr(opt, ",compress") || !strncmp(opt, "compress", 8))};

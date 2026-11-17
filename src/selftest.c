@@ -810,6 +810,41 @@ static int run_selftest_ops(void) {
     else printf("cancelled copy left no partial file\n");
     unlink(ST_BASE "/big.bin");
     unlink(ST_XDEV "/big.bin");
+
+    // a canceled op keeps the progress it reached (by bytes, or by items for a delete), in red, marked Canceled
+    static const int ckinds[] = {OP_COPY, OP_MOVE, OP_DELETE, OP_EXTRACT, OP_COMPRESS};
+    for (int k = 0; k < (int)(sizeof ckinds / sizeof *ckinds); k++) {
+        Op *cop = xcalloc(1, sizeof *cop);
+        pthread_mutex_init(&cop->mtx, NULL);
+        cop->kind = ckinds[k];
+        cop->nsrc = 1;
+        atomic_store(&cop->bytes_total, 1000);
+        atomic_store(&cop->bytes_done, 420);
+        atomic_store(&cop->files_total, 10);
+        atomic_store(&cop->files_done, 3);
+        snprintf(cop->cur, sizeof cop->cur, "half.bin");
+        atomic_store(&cop->phase, OPS_DONE);
+        char det[600], title[256], want[64];
+        op_detail(cop, now_ns(), det, sizeof det);
+        ST_CHECK(op_frac(cop) == 1.0 && !strncmp(det, "Done", 4)); // not canceled: full
+        atomic_store(&cop->cancel, 1);
+        int pct = cop->kind == OP_DELETE ? 30 : 42;
+        ST_CHECK(fabs(op_frac(cop) - pct / 100.0) < 1e-9);
+        op_detail(cop, now_ns(), det, sizeof det);
+        snprintf(want, sizeof want, "Canceled  \xC2\xB7  %d%%  \xC2\xB7  half.bin", pct);
+        ST_CHECK(!strcmp(det, want));
+        op_title(cop, title, sizeof title);
+        ST_CHECK(!strncmp(title, "Canceled: ", 10));
+        cop->cur[0] = 0; // nothing started yet: just the percentage
+        op_detail(cop, now_ns(), det, sizeof det);
+        snprintf(want, sizeof want, "Canceled  \xC2\xB7  %d%%", pct);
+        ST_CHECK(!strcmp(det, want));
+        cop->nerr = 2;
+        op_title(cop, title, sizeof title);
+        ST_CHECK(!strcmp(title, "Canceled after 2 errors"));
+        pthread_mutex_destroy(&cop->mtx);
+        free(cop);
+    }
     st_queue();
 
     // context menus (first let the refreshes from the deletes above land: slower machines see them later)
@@ -991,6 +1026,7 @@ static bool c_hidden_size_known(void) {
 }
 
 static ssize_t st_read_text(const char *path, char *out, size_t cap); // M10
+static void st_write_text(const char *path, const char *text); // M11
 
 static int run_selftest_m4(void) {
     st_wait();
@@ -1389,8 +1425,42 @@ static int run_selftest_m5(void) {
         if (d) closedir(d);
         ST_CHECK(n >= 1);
         printf("svg thumbnail via installed thumbnailer: ok\n");
-    } else {
-        printf("note: no SVG thumbnailer produced output (kind=%d)\n", A.pv->kind);
+    } else { // none installed: drawn by nanosvg
+        ST_CHECK(A.pv->kind == PV_IMAGE && !A.pv->from_thumb && A.pv->src_w == 64 && A.pv->src_h == 64 && A.pv_tex); // (pixels went to the texture)
+        printf("svg preview via nanosvg (no thumbnailer output)\n");
+    }
+    { // nanosvg previews directly: fitted size, colours, transparency, viewBox only, what's refused
+        const char *sp = "/tmp/fe-m5-svg-test.svg"; // (outside the listed folder: no refresh mid-test)
+        int w, h, sw, sh;
+        st_write_text(sp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"100\"><rect width=\"100\" height=\"100\" fill=\"#ff0000\"/></svg>");
+        u8 *px = svg_preview_pixels(sp, 64, &w, &h, &sw, &sh);
+        ST_CHECK(px && w == 64 && h == 32 && sw == 200 && sh == 100);
+        if (px) {
+            size_t red = ((size_t)16 * w + 16) * 4, clear = ((size_t)16 * w + 48) * 4;
+            ST_CHECK(px[red] > 240 && px[red + 3] > 240 && !px[clear + 3]);
+        }
+        free(px);
+        st_write_text(sp, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 20\"><rect width=\"10\" height=\"20\" fill=\"blue\"/></svg>");
+        px = svg_preview_pixels(sp, 64, &w, &h, &sw, &sh);
+        ST_CHECK(px && w == 32 && h == 64);
+        free(px);
+        // currentColor (local nanosvg patch): the color property, inherited from the root; black by default
+        st_write_text(sp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\" color=\"#00ff00\"><rect width=\"4\" height=\"8\" fill=\"currentColor\"/><rect x=\"4\" width=\"4\" height=\"8\" style=\"color:#0000ff\" fill=\"currentColor\"/></svg>");
+        px = svg_preview_pixels(sp, 8, &w, &h, &sw, &sh);
+        ST_CHECK(px && px[(4 * 8 + 1) * 4 + 1] > 240 && px[(4 * 8 + 1) * 4] < 16 && px[(4 * 8 + 6) * 4 + 2] > 240 && px[(4 * 8 + 6) * 4 + 1] < 16);
+        free(px);
+        st_write_text(sp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\" fill=\"currentColor\"/></svg>");
+        px = svg_preview_pixels(sp, 8, &w, &h, &sw, &sh);
+        ST_CHECK(px && px[(4 * 8 + 4) * 4] < 16 && px[(4 * 8 + 4) * 4 + 3] > 240);
+        free(px);
+        st_write_text(sp, "not an svg");
+        ST_CHECK(!svg_preview_pixels(sp, 64, &w, &h, &sw, &sh));
+        st_write_text(sp, "<svg width=\"1e999\" height=\"10\"></svg>");
+        ST_CHECK(!svg_preview_pixels(sp, 64, &w, &h, &sw, &sh));
+        st_write_text(sp, "<svg width=\"0\" height=\"0\"></svg>");
+        ST_CHECK(!svg_preview_pixels(sp, 64, &w, &h, &sw, &sh));
+        ST_CHECK(!svg_preview_pixels(sp, 50000, &w, &h, &sw, &sh));
+        unlink(sp);
     }
     // several selected -> summary
     st_key(SDLK_A, SDL_KMOD_CTRL);
@@ -1448,10 +1518,20 @@ static int run_selftest_m5(void) {
     st_wait();
     ST_CHECK(np && A.npanels == 2);
     A.root->ratio = 0.4f;
+    A.window_buttons = A.brand_logo = false;
+    A.brand_name = BRAND_CUSTOM;
+    snprintf(A.brand_text, sizeof A.brand_text, "My files");
+    A.tab_style = TABS_PILLS;
     settings_save();
     int ntabs0 = A.ntabs;
     settings_load(); // resets to defaults first, then reads the file
     ST_CHECK(A.show_hidden && !A.folder_sizes && A.search_recursive && A.preview_on);
+    ST_CHECK(!A.window_buttons && !A.brand_logo && A.brand_name == BRAND_CUSTOM && !strcmp(A.brand_text, "My files"));
+    A.window_buttons = A.brand_logo = true;
+    ST_CHECK(A.tab_style == TABS_PILLS);
+    A.brand_name = BRAND_APP;
+    A.brand_text[0] = 0;
+    A.tab_style = TABS_CARDS;
     FolderView *fv5 = folder_view_find(M5_BASE, true); // sort order is remembered per folder
     ST_CHECK(fabsf(A.zoom - 1.3f) < 0.01f && fv5 && fv5->sort == SORT_SIZE && fv5->desc);
     ST_CHECK(pin_index(M5_BASE "/sub") >= 0 && A.nsess_tabs == ntabs0 && !strncmp(A.sess_layout, "H0.400(P0,P1)", 13));
@@ -1520,6 +1600,36 @@ static int run_selftest_m6(void) {
         st_key(SDLK_W, SDL_KMOD_CTRL); st_wait();
         ST_CHECK(A.ntabs == nt);
     }
+    { // Tab style Pills: apart, centred on the strip, + and split still after them; a click still switches tabs
+        int nt = A.ntabs;
+        opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
+        st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
+        st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
+        Panel *pn = A.ap;
+        Tab *a = panel_tab(pn, 0), *b = panel_tab(pn, 1), *c = panel_tab(pn, -1);
+        ST_CHECK(a && b && c && a != c && b->r.x >= a->r.x + a->r.w + S(2) && c->r.x + c->r.w <= pn->plus.x);
+        ST_CHECK(pn->plus.x + pn->plus.w <= pn->splitbtn.x && a->r.y > pn->bar.y && a->r.y + a->r.h < pn->bar.y + pn->bar.h);
+        f32 left = a->r.x - pn->bar.x, right = pn->bar.x + pn->bar.w - (c->r.x + c->r.w);
+        ST_CHECK(fabsf(left - right) < S(2) || c->r.x + c->r.w > pn->plus.x - S(20)); // centred unless + or split stop it
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, a->r.x + a->r.w * 0.5f, a->r.y + a->r.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, a->r.x + a->r.w * 0.5f, a->r.y + a->r.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_wait();
+        ST_CHECK(pn->cur == a);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, b->r.x + b->r.w * 0.5f, b->r.y + b->r.h * 0.5f, 0, 0, 0);
+        st_frames(2);
+        st_shot("tab-pills");
+        int th = g_theme_cur;
+        g_theme_cur = theme_find("Light");
+        theme_apply();
+        st_frames(2);
+        st_shot("tab-pills-light");
+        g_theme_cur = th;
+        theme_apply();
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.r_content.x + S(300), A.r_content.y + S(300), 0, 0, 0);
+        while (A.ntabs > nt) { st_key(SDLK_W, SDL_KMOD_CTRL); st_wait(); }
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        ST_CHECK(A.ntabs == nt && panel_tab(A.ap, 0)->r.y == A.ap->bar.y + roundf(S(6)));
+    }
 
     // split right (Ctrl+\) then split that one down (Ctrl+Shift+\): nested tree
     st_key(SDLK_BACKSLASH, SDL_KMOD_CTRL); st_wait();
@@ -1540,6 +1650,45 @@ static int run_selftest_m6(void) {
     st_key(SDLK_TAB, SDL_KMOD_SHIFT);
     ST_CHECK(A.ap == p0);
     ST_CHECK(p0->bar.y == p1->bar.y && p2->bar.y > p1->bar.y);
+
+    { // a click on another panel's toolbar (not on a button) makes that panel the active one
+        Rect tb = p1->cur->pane[0].ly.toolbar;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tb.x + tb.w * 0.5f, tb.y + S(2), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tb.x + tb.w * 0.5f, tb.y + S(2), SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.ap == p1);
+        panel_activate(p0);
+    }
+    { // narrow panes: back / forward / up go first, then sort, then filter + menu; the path keeps the rest
+        f32 ratio = A.root->ratio;
+        A.root->ratio = S(220) / A.root->r.w;
+        st_frames(1);
+        PaneLayout *ly = &p0->cur->pane[0].ly;
+        ST_CHECK(ly->area.w < S(240) && ly->back.w == 0 && ly->fwd.w == 0 && ly->up.w == 0 && ly->sortbtn.w > 0);
+        ST_CHECK(ly->pathbar.w > 0 && ly->pathbar.x + ly->pathbar.w <= ly->sortbtn.x && ly->sortbtn.x + ly->sortbtn.w <= ly->filterbtn.x);
+        st_shot("split-narrow");
+        Pane *np = &p0->cur->pane[0];
+        pane_navigate(np, M6_BASE, true); st_wait();
+        pane_navigate(np, M6_BASE "/a", true); st_wait();
+        st_key(SDLK_LEFT, SDL_KMOD_ALT); st_wait(); // the keys still work without the buttons
+        ST_CHECK(!strcmp(np->path, M6_BASE));
+        st_key(SDLK_RIGHT, SDL_KMOD_ALT); st_wait();
+        ST_CHECK(!strcmp(np->path, M6_BASE "/a"));
+        st_key(SDLK_UP, SDL_KMOD_ALT); st_wait();
+        ST_CHECK(!strcmp(np->path, M6_BASE));
+        Rect area = ly->area;
+        layout_pane(np, (Rect){area.x, area.y, S(110), area.h});
+        ST_CHECK(ly->back.w == 0 && ly->sortbtn.w == 0 && ly->filterbtn.w > 0 && ly->morebtn.w > 0);
+        ST_CHECK(ly->pathbar.w > 0 && ly->pathbar.x + ly->pathbar.w <= ly->filterbtn.x);
+        layout_pane(np, (Rect){area.x, area.y, S(70), area.h});
+        ST_CHECK(ly->back.w == 0 && ly->sortbtn.w == 0 && ly->filterbtn.w == 0 && ly->morebtn.w == 0);
+        ST_CHECK(ly->pathbar.w > 0 && ly->pathbar.x + ly->pathbar.w <= area.x + S(70));
+        // hidden buttons can't be clicked: where back was, the path bar starts
+        f32 bx = area.x + S(20), by = ly->pathbar.y + ly->pathbar.h * 0.5f;
+        ST_CHECK(!in_rect(ly->back, bx, by) && !in_rect(ly->filterbtn, area.x + S(50), by));
+        A.root->ratio = ratio;
+        st_frames(1);
+        ST_CHECK(p0->cur->pane[0].ly.back.w > 0 && p0->cur->pane[0].ly.sortbtn.w > 0);
+    }
 
     // tabs within a panel: Ctrl+T adds to the active panel only; Ctrl+1/Ctrl+9
     st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
@@ -1749,6 +1898,11 @@ static bool c_thumb_ready(void) {
     return false;
 }
 
+static bool c_sysi_settled(void) {
+    for (int i = 0; i < g_nsysicons; i++) if (g_sysicons[i].state == SYSI_PENDING) return false;
+    return true;
+}
+
 static int run_selftest_m7(void) {
     st_make_bmp(M7_BASE "/photo.bmp", 300, 200);
     pane_refresh(active_pane());
@@ -1780,8 +1934,8 @@ static int run_selftest_m7(void) {
         snprintf(path, sizeof path, "%s/TestIcons", dir);
         mkdir_p(path, 0700);
         const char *svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><rect width=\"16\" height=\"16\" fill=\"#ff00ff\"/></svg>";
-        const char *files[3] = {"python.svg", "ext-xyz.svg", "theme.conf"};
-        for (int k = 0; k < 3; k++) {
+        const char *files[5] = {"python.svg", "ext-xyz.svg", "theme.conf", "trash.svg", "Emblem-Git.svg"};
+        for (int k = 0; k < 5; k++) {
             snprintf(path, sizeof path, "%s/TestIcons/%s", dir, files[k]);
             FILE *f = fopen(path, "w");
             if (f) { fputs(k == 2 ? "base=Symbols\n" : svg, f); fclose(f); }
@@ -1794,9 +1948,14 @@ static int run_selftest_m7(void) {
         int py = icon_find("python"), fo = icon_find("folder");
         ST_CHECK(icon_src(py) && strstr(icon_src(py), "#ff00ff"));                    // override
         ST_CHECK(icon_src(fo) == g_icon_svg[2][fo]);                                   // missing: base (Symbols)
+        ST_CHECK(trash_icon(true) == icon_find("trash"));                              // own bin, no full one: keeps it
         int xi = icon_for_name("scene.XYZ", false);
         ST_CHECK(xi >= ICON_EXT_BASE && icon_glyph(xi, 16) && big_icon_tex(xi, 96)); // any extension
         ST_CHECK(icon_glyph(py, 16) != NULL);
+        // badges: the theme's emblem-git.svg replaces the app's Git mark; no emblem-symbolic-link.svg: the app's own
+        ST_CHECK(badge_icon(BADGE_GIT) == ICON_BADGE_BASE + BADGE_GIT && badge_icon(BADGE_LINK) < 0);
+        ST_CHECK(icon_glyph(badge_icon(BADGE_GIT), 16) && big_icon_tex(badge_icon(BADGE_GIT), 82));
+        ST_CHECK(icon_find("emblem-git") < 0 && xi != ICON_BADGE_BASE + BADGE_GIT); // (not a file icon, ids apart)
         settings_save();
         settings_load();
         ST_CHECK(!strcmp(A.icon_theme_name, "TestIcons"));
@@ -1808,6 +1967,102 @@ static int run_selftest_m7(void) {
         if (system(path)) {}
         icon_themes_reload();
         ST_CHECK(icon_theme_find("TestIcons") < 0 && g_icon_theme == 0);
+        ST_CHECK(badge_icon(BADGE_GIT) < 0 && badge_icon(BADGE_LINK) < 0 && !icon_src(ICON_BADGE_BASE)); // built in: the app's marks
+        ST_CHECK(trash_icon(true) == icon_find("trash-full") && trash_icon(false) == icon_find("trash")); // built in: both bins
+    }
+    { // File icons "System": the desktop's icon theme, looked up and drawn on a worker, over the bundled icon meanwhile
+        const char *base = "/tmp/fe-m7-sysicons";
+        char path[PATH_MAX], dirs[16384] = "", *old_home = getenv("XDG_DATA_HOME"), *old_dirs = getenv("XDG_DATA_DIRS");
+        char save_home[PATH_MAX] = "", save_dirs[4096] = "";
+        if (old_home) snprintf(save_home, sizeof save_home, "%s", old_home);
+        if (old_dirs) snprintf(save_dirs, sizeof save_dirs, "%s", old_dirs);
+        st_rmrf(base);
+        // FETheme: Directories= over 8 KB and more than 512 folders (only the last fixed one exists), then a
+        // scalable one; inherits FEParent (a PNG at 48 px)
+        snprintf(path, sizeof path, "%s/data/icons/FETheme", base);
+        mkdir_p(path, 0755);
+        FILE *f;
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/index.theme", base);
+        if ((f = fopen(path, "w"))) {
+            for (int i = 0; i < 700; i++) snprintf(dirs + strlen(dirs), sizeof dirs - strlen(dirs), "16x16/places-%03d,", i);
+            fprintf(f, "[Icon Theme]\nName=FE\nInherits=FEParent\nDirectories=%sscalable/places\n\n", dirs);
+            for (int i = 0; i < 700; i++) fprintf(f, "[16x16/places-%03d]\nSize=16\nType=Fixed\n\n", i);
+            fprintf(f, "[scalable/places]\nSize=64\nMinSize=8\nMaxSize=512\nType=Scalable\n");
+            fclose(f);
+        }
+        ST_CHECK(strlen(dirs) > 8192);
+        const char *svg16 = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#123456\"/></svg>";
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/16x16/places-699", base);
+        mkdir_p(path, 0755);
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/16x16/places-699/folder.svg", base);
+        st_write_text(path, svg16);
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/scalable/places", base);
+        mkdir_p(path, 0755);
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/scalable/places/user-home.svg", base);
+        st_write_text(path, svg16);
+        snprintf(path, sizeof path, "%s/data/icons/FEParent/48", base);
+        mkdir_p(path, 0755);
+        snprintf(path, sizeof path, "%s/data/icons/FEParent/index.theme", base);
+        st_write_text(path, "[Icon Theme]\nName=Parent\nDirectories=48\n\n[48]\nSize=48\n");
+        snprintf(path, sizeof path, "%s/data/icons/FEParent/48/text-x-generic.png", base);
+        st_make_bmp(path, 48, 48); // (stb_image goes by the contents)
+        // FEBad: a folder icon of infinite size (refused, the bundled one stays)
+        snprintf(path, sizeof path, "%s/data/icons/FEBad/16", base);
+        mkdir_p(path, 0755);
+        snprintf(path, sizeof path, "%s/data/icons/FEBad/index.theme", base);
+        st_write_text(path, "[Icon Theme]\nName=Bad\nDirectories=16\n[16]\nSize=16\n");
+        snprintf(path, sizeof path, "%s/data/icons/FEBad/16/folder.svg", base);
+        st_write_text(path, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1e999\" height=\"16\"><rect width=\"16\" height=\"16\"/></svg>");
+        snprintf(path, sizeof path, "%s/data", base);
+        setenv("XDG_DATA_HOME", path, 1);
+        setenv("XDG_DATA_DIRS", "/tmp/fe-m7-sysicons/none", 1);
+        sysi_reset();
+        char found[PATH_MAX];
+        ST_CHECK(sysi_lookup("FETheme", "folder", 16, found, sizeof found) && strstr(found, "places-699/folder.svg")); // (past 8 KB, 512 folders)
+        ST_CHECK(sysi_lookup("FETheme", "user-home", 48, found, sizeof found) && strstr(found, "scalable/places"));
+        ST_CHECK(sysi_lookup("FETheme", "text-x-generic", 16, found, sizeof found) && strstr(found, "FEParent/48")); // inherited, closest size
+        ST_CHECK(!sysi_lookup("FETheme", "no-such-icon", 16, found, sizeof found) && !sysi_lookup("FETheme", "../x", 16, found, sizeof found));
+        snprintf(path, sizeof path, "%s/data/icons/FEBad/16/folder.svg", base);
+        ST_CHECK(!sysi_raster(path, 16, 0xFFFFFF));
+        // through the UI
+        int sys = icon_theme_find("System");
+        ST_CHECK(sys == icon_theme_count() - 1 && !strcmp(icon_theme_name(sys), "System"));
+        opt_choice_set(OPT_ICON_THEME, sys);
+        ST_CHECK(icon_system_selected() && !icon_custom() && !g_dlook.running); // (no watcher in tests)
+        DesktopLook *d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.icons = "FETheme"};
+        dlook_apply(d);
+        int fo = icon_find("folder"), doc = icon_find("python"), bin = icon_find("trash");
+        Glyph *g = icon_glyph(fo, 16); // the bundled folder while the desktop's is looked up
+        ST_CHECK(g && g_nsysicons == 1 && g_sysicons[0].state == SYSI_PENDING);
+        ST_CHECK(icon_glyph(doc, 16) && big_icon_tex(doc, 96) && icon_glyph(bin, 16));
+        ST_CHECK(st_wait_cond(c_sysi_settled, 5000));
+        g = icon_glyph(fo, 16); // ... then the desktop's, copied over it in the atlas
+        ST_CHECK(g && g_atlas[((size_t)(g->y + 8) * ATLAS_SIZE + g->x + 8) * 4] == 0x12 && g_atlas[((size_t)(g->y + 8) * ATLAS_SIZE + g->x + 8) * 4 + 2] == 0x56);
+        for (int i = 0; i < g_nsysicons; i++) { // python: text-x-generic from FEParent; the bin: the theme has none
+            SysIcon *si = &g_sysicons[i];
+            if (si->id == doc) ST_CHECK(si->state == SYSI_READY);
+            if (si->id == bin) ST_CHECK(si->state == SYSI_NONE);
+        }
+        ST_CHECK(big_icon_tex(doc, 96) != NULL);
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.icons = "FEBad"}; // another desktop theme: asked again
+        dlook_apply(d);
+        ST_CHECK(g_nsysicons == 0 && icon_glyph(fo, 16));
+        ST_CHECK(st_wait_cond(c_sysi_settled, 5000));
+        for (int i = 0; i < g_nsysicons; i++) if (g_sysicons[i].id == fo) ST_CHECK(g_sysicons[i].state == SYSI_NONE && !g_sysicons[i].rgba);
+        settings_save();
+        settings_load();
+        ST_CHECK(!strcmp(A.icon_theme_name, "System"));
+        opt_choice_set(OPT_ICON_THEME, 0);
+        ST_CHECK(!icon_system_selected() && g_nsysicons == 0);
+        icon_glyph(fo, 16); // (built-in sets never ask the desktop)
+        ST_CHECK(g_nsysicons == 0);
+        if (save_home[0]) setenv("XDG_DATA_HOME", save_home, 1); else unsetenv("XDG_DATA_HOME");
+        if (save_dirs[0]) setenv("XDG_DATA_DIRS", save_dirs, 1); else unsetenv("XDG_DATA_DIRS");
+        sysi_reset();
+        memset(&g_desktop, 0, sizeof g_desktop);
+        st_rmrf(base);
     }
     { // the logo follows the accent colour (Blue = the artwork as drawn)
         u32 saved = g_accent_custom;
@@ -2053,6 +2308,51 @@ static int run_selftest_m7(void) {
     ST_CHECK(p->view == VIEW_DETAILS && !folder_view_find(M7_BASE, true));
     A.view_per_folder = false;
 
+    // a cut-off name shows its full text after the mouse rests on it; a name that fits doesn't; then no more waking
+    {
+        char longname[200];
+        snprintf(longname, sizeof longname, "%s", "a rather long file name with many words that cannot fit in the name column of a window, "
+                                                  "nor in two lines of a grid label, so it ends in an ellipsis.txt");
+        char path[PATH_MAX];
+        mkdir(M7_BASE "/tips", 0755);
+        snprintf(path, sizeof path, M7_BASE "/tips/%s", longname);
+        st_write(path, 10);
+        st_write(M7_BASE "/tips/short.txt", 10);
+        pane_navigate(p, M7_BASE "/tips", true); st_wait();
+        ly = &p->ly;
+        ST_CHECK(p->view == VIEW_DETAILS);
+        A.mouse_in = true;
+        A.mx = ly->col_name + S(80);
+        A.my = st_row_y(p, "short.txt");
+        st_frames(1);
+        ST_CHECK(g_fit_tip_len == 0);
+        A.my = st_row_y(p, longname);
+        st_frames(1);
+        ST_CHECK(g_fit_tip_len > 0 && !strcmp(g_fit_tip, longname) && !fit_tip_ready() && fit_tip_wait_ms() > 0);
+        SDL_Delay(600);
+        st_frames(1);
+        ST_CHECK(fit_tip_ready() && fit_tip_wait_ms() == 0);
+        // grid: hovering the first line of the label shows the whole name (not the second line's end)
+        set_zoom_level(p, 4);
+        st_wait();
+        ST_CHECK(p->view == VIEW_GRID);
+        i64 li = -1;
+        for (u32 i = 0; i < p->count; i++)
+            if (!strcmp(p->L->entries[p->order[i]].name, longname)) li = i;
+        ST_CHECK(li >= 0);
+        if (li >= 0) {
+            Rect r = item_rect(p, li);
+            A.mx = r.x + r.w * 0.5f;
+            A.my = r.y + roundf(S(8)) + roundf(S(p->icon_px)) + roundf(S(6)) + S(3);
+            st_frames(1);
+            ST_CHECK(g_fit_tip_len > 0 && !strcmp(g_fit_tip, longname));
+        }
+        A.mouse_in = false;
+        set_zoom_level(p, 0);
+        st_frames(1);
+        ST_CHECK(g_fit_tip_len == 0);
+    }
+
 m7_done:
     st_rmrf(M7_BASE);
     if (st_fail) { fprintf(stderr, "SELFTEST-M7: %d failure(s)\n", st_fail); return 1; }
@@ -2064,6 +2364,26 @@ m7_done:
 // --- self-test for M8: open with, properties, batch rename -------------------
 
 #define M8_BASE "/tmp/fe-m8-test"
+
+// Where the caret for byte offset off of a text field drawn last frame sits (x), and the field's middle (y).
+static bool st_text_at(TextEdit *t, int off, f32 *x, f32 *y) {
+    for (int i = 0; i < g_text_field_count; i++) {
+        TextFieldHit *h = &g_text_fields[i];
+        if (h->edit != t) continue;
+        f32 cx = h->masked ? utf8_index(t->buf, off) * (roundf(S(3)) * 2 + S(4)) - S(2) : text_caret_x(h->font, t->buf, (int)strlen(t->buf), off);
+        *x = h->rect.x + h->pad - t->scroll + cx;
+        *y = h->hit.y + h->hit.h * 0.5f;
+        return true;
+    }
+    return false;
+}
+
+static void st_text_click(TextEdit *t, int off, int clicks, SDL_Keymod mod) {
+    f32 x = 0, y = 0;
+    ST_CHECK(st_text_at(t, off, &x, &y));
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, x, y, SDL_BUTTON_LEFT, clicks, mod);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, x, y, SDL_BUTTON_LEFT, clicks, mod);
+}
 
 static void st_setup_m8(void) {
     st_rmrf(M8_BASE);
@@ -2383,6 +2703,34 @@ static int run_selftest_m8(void) {
         sel_clear(p);
     }
 
+    // Mouse in a text field (inline rename): click places the caret, drag selects, Shift-click extends,
+    // double-click picks a word, triple-click everything; none of it ends the rename
+    sel_clear(p);
+    ST_CHECK(st_select(p, "photo1.jpg"));
+    st_key(SDLK_F2, SDL_KMOD_NONE);
+    ST_CHECK(A.ren_pane == p && !strcmp(A.ren_te.buf, "photo1.jpg"));
+    st_text_click(&A.ren_te, 2, 1, 0);
+    ST_CHECK(A.ren_pane == p && A.ren_te.anchor == 2 && A.ren_te.caret == 2);
+    {
+        f32 x0 = 0, x1 = 0, y = 0;
+        ST_CHECK(st_text_at(&A.ren_te, 1, &x0, &y) && st_text_at(&A.ren_te, 5, &x1, &y));
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, x0, y, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, x1, y, 0, 0, 0);
+        ST_CHECK(A.ren_te.anchor == 1 && A.ren_te.caret == 5);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, x1, y, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, x0, y, 0, 0, 0); // released: moving no longer selects
+        ST_CHECK(A.ren_te.anchor == 1 && A.ren_te.caret == 5);
+    }
+    st_text_click(&A.ren_te, 8, 1, SDL_KMOD_SHIFT);
+    ST_CHECK(A.ren_te.anchor == 1 && A.ren_te.caret == 8);
+    st_text_click(&A.ren_te, 3, 2, 0);
+    ST_CHECK(A.ren_te.anchor == 0 && A.ren_te.caret == 6); // "photo1" (the dot ends the word)
+    st_text_click(&A.ren_te, 3, 3, 0);
+    ST_CHECK(A.ren_te.anchor == 0 && A.ren_te.caret == 10);
+    ST_CHECK(A.ren_pane == p);
+    st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+    ST_CHECK(!A.ren_pane && st_exists(M8_BASE "/photo1.jpg"));
+
     // Batch rename: F2 with several selected
     sel_clear(p);
     for (u32 i = 0; i < p->count; i++)
@@ -2394,6 +2742,11 @@ static int run_selftest_m8(void) {
     ST_CHECK(!strcmp(g_sheet.tmpl.buf, "holiday_{n:2}{ext}") && !strcmp(g_sheet.newnames[0], "holiday_01.jpg"));
     st_frames(2);
     st_shot("batchrename");
+    // a click in another field moves the keyboard there, the caret where it was clicked
+    st_text_click(&g_sheet.find, 0, 1, 0);
+    ST_CHECK(g_sheet.kind == SHEET_RENAME && g_sheet.focus == 1);
+    st_text_click(&g_sheet.tmpl, 4, 1, 0);
+    ST_CHECK(g_sheet.focus == 0 && g_sheet.tmpl.anchor == 4 && g_sheet.tmpl.caret == 4);
     // a pattern that makes every name equal is refused
     te_set(&g_sheet.tmpl, "same.jpg", 8, 8);
     rename_recompute();
@@ -2462,12 +2815,12 @@ static int run_selftest_m8(void) {
         ST_CHECK(trash_info("abc.txt", orig, sizeof orig, date, sizeof date) && !strcmp(orig, M8_BASE "/abc.txt"));
     }
     for (int k = 0; k < 300 && (A.trash_job || !A.trash_known); k++) { st_frames(1); SDL_Delay(5); }
-    ST_CHECK(A.trash_known && A.trash_size == 3); // abc.txt ("abc") is in it: the sidebar shows its size
+    ST_CHECK(A.trash_known && A.trash_size == 3 && !A.trash_empty); // abc.txt ("abc") is in it: the sidebar shows its size
     st_shot("trash");
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, p->ly.rrestore.x + 5, p->ly.rrestore.y + 5, SDL_BUTTON_LEFT, 1, 0);
     st_wait_ops();
     for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
-    ST_CHECK(A.trash_known && A.trash_size == 0); // restored: empty again
+    ST_CHECK(A.trash_known && A.trash_size == 0 && A.trash_empty); // restored: empty again (the empty bin)
     ST_CHECK(st_exists(M8_BASE "/abc.txt") && !st_exists(M8_BASE "/xdg/Trash/info/abc.txt.trashinfo") && p->count == 0);
     pane_navigate(p, M8_BASE, true); st_wait();
     st_select(p, "abc.txt");
@@ -2489,6 +2842,40 @@ static int run_selftest_m8(void) {
     st_key(SDLK_RETURN, SDL_KMOD_NONE);
     st_wait_ops();
     ST_CHECK(p->count == 0 && !st_exists(M8_BASE "/xdg/Trash/files/photo3.jpg") && !st_exists(M8_BASE "/xdg/Trash/info/photo3.jpg.trashinfo"));
+    // Empty Trash from Quick Access / the palette while another folder is open: the trash's own contents (a hidden
+    // empty file counts), never the open folder's names; asked first, read off the UI thread
+    pane_navigate(p, M8_BASE, true); st_wait();
+    for (int k = 0; k < 300 && (A.trash_job || !A.trash_known); k++) { st_frames(1); SDL_Delay(5); }
+    int te = -1;
+    menu_open_place(ti, A.r_sidebar.x + S(40), S(200));
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].act == ACT_TRASH_EMPTY) te = i;
+    ST_CHECK(A.menu.open && te >= 0 && !A.menu.items[te].enabled && A.trash_empty); // nothing in it
+    A.menu.open = false;
+    st_write(M8_BASE "/xdg/Trash/files/.hidden-trash", 0);
+    st_write(M8_BASE "/xdg/Trash/info/.hidden-trash.trashinfo", 1);
+    st_write(M8_BASE "/xdg/Trash/files/photo1.jpg", 5); // the same name as a file in the open folder
+    st_write(M8_BASE "/xdg/Trash/info/photo1.jpg.trashinfo", 1);
+    for (int k = 0; k < 400 && (A.trash_job || A.trash_empty); k++) { st_frames(1); SDL_Delay(5); } // seen by the trash's watch
+    ST_CHECK(A.trash_known && !A.trash_empty); // (another program filled it while we were elsewhere)
+    menu_open_place(ti, A.r_sidebar.x + S(40), S(200));
+    te = -1;
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].act == ACT_TRASH_EMPTY) te = i;
+    ST_CHECK(te >= 0 && A.menu.items[te].enabled && !pane_is_trash(p));
+    if (te >= 0) menu_activate(te);
+    for (int k = 0; k < 300 && !A.dlg.open; k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(A.dlg.open && !strcmp(A.dlg.title, "Empty Trash") && strstr(A.dlg.msg, "all 2 items"));
+    st_key(SDLK_RETURN, SDL_KMOD_NONE);
+    st_wait_ops();
+    ST_CHECK(!st_exists(M8_BASE "/xdg/Trash/files/.hidden-trash") && !st_exists(M8_BASE "/xdg/Trash/info/.hidden-trash.trashinfo"));
+    ST_CHECK(!st_exists(M8_BASE "/xdg/Trash/files/photo1.jpg") && st_exists(M8_BASE "/photo1.jpg"));
+    for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(A.trash_known && A.trash_empty);
+    A.toast[0] = 0;
+    do_action(p, ACT_TRASH_EMPTY); // the palette's Empty Trash on an empty trash
+    for (int k = 0; k < 300 && !A.toast[0]; k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(!A.dlg.open && !strcmp(A.toast, "The trash is already empty"));
 
     // archives: compress a folder, browse into the zip, extract, read-only, zip-slip
     pane_navigate(p, M8_BASE, true); st_wait();
@@ -2505,6 +2892,79 @@ static int run_selftest_m8(void) {
     do_action(p, ACT_COMPRESS_TGZ);
     st_wait_ops();
     ST_CHECK(st_size(M8_BASE "/proj.tar.gz") > 0);
+    { // accented names and spaces keep their bytes; an unreadable file is left out and named, the rest is there;
+      // a "<name>.part" that was already there is left alone
+        mkdir(M8_BASE "/uni", 0755);
+        mkdir(M8_BASE "/uni/sub dir", 0755);
+        st_write(M8_BASE "/uni/caf\xC3\xA9 cr\xC3\xA8me.txt", 10);
+        st_write(M8_BASE "/uni/sub dir/\xE6\x97\xA5\xE6\x9C\xAC.txt", 20);
+        st_write(M8_BASE "/uni/locked.txt", 30);
+        chmod(M8_BASE "/uni/locked.txt", 0);
+        bool locked = geteuid() != 0; // (root reads it anyway)
+        char *uni[] = {M8_BASE "/uni"};
+        for (int fmt = 0; fmt < 2; fmt++) {
+            const char *arc = fmt ? M8_BASE "/uni.tar.gz" : M8_BASE "/uni.zip";
+            char part[PATH_MAX];
+            snprintf(part, sizeof part, "%s.part", arc);
+            st_write_text(part, "mine");
+            Op *op = op_new(OP_COMPRESS, uni, 1, M8_BASE);
+            op->arc = strdup(arc);
+            run_compress(op);
+            ST_CHECK(!op->nerr && st_size(arc) > 0);
+            if (op->nerr) fprintf(stderr, "SELFTEST compress: %s\n", op->err);
+            if (locked) ST_CHECK(strstr(op->warn, "1 item couldn't be read") && strstr(op->warn, "uni/locked.txt"));
+            else ST_CHECK(!op->warn[0]);
+            char mine[16] = "";
+            st_read_text(part, mine, sizeof mine);
+            ST_CHECK(!strcmp(mine, "mine")); // untouched
+            char other[PATH_MAX + 8];
+            snprintf(other, sizeof other, "%s.1.part", arc);
+            ST_CHECK(!st_exists(other)); // ours was renamed into place
+            int seen = 0;
+            locale_t oloc = arc_utf8_begin(); // (as the app reads them)
+            struct archive *a = arc_open(arc);
+            struct archive_entry *ae;
+            while (a && arc_next(a, &ae) == ARCHIVE_OK) {
+                const char *nm = archive_entry_pathname_utf8(ae);
+                if (!nm) nm = archive_entry_pathname(ae);
+                if (!nm) continue;
+                seen |= !strcmp(nm, "uni/caf\xC3\xA9 cr\xC3\xA8me.txt") ? 1 : 0;
+                seen |= !strcmp(nm, "uni/sub dir/\xE6\x97\xA5\xE6\x9C\xAC.txt") ? 2 : 0;
+                seen |= !strcmp(nm, "uni/locked.txt") ? 4 : 0;
+            }
+            if (a) archive_read_free(a);
+            arc_utf8_end(oloc);
+            ST_CHECK((seen & 3) == 3 && (locked ? !(seen & 4) : (seen & 4)));
+            unlink(part);
+            op_free(op);
+        }
+        chmod(M8_BASE "/uni/locked.txt", 0644);
+        // everything vanished since it was picked: no empty archive, and the reason
+        char *gone[] = {M8_BASE "/missing-source"};
+        Op *op = op_new(OP_COMPRESS, gone, 1, M8_BASE);
+        op->arc = strdup(M8_BASE "/missing.zip");
+        run_compress(op);
+        ST_CHECK(op->nerr && strstr(op->err, "missing-source") && !st_exists(M8_BASE "/missing.zip") && !st_exists(M8_BASE "/missing.zip.part"));
+        op_free(op);
+        // a ".part" that is a symlink isn't written through (here to a full disk): ours gets a name of its own
+        Op *fo = op_new(OP_COMPRESS, uni, 1, M8_BASE);
+        fo->arc = strdup(M8_BASE "/full.zip");
+        if (symlink("/dev/full", M8_BASE "/full.zip.part")) {}
+        run_compress(fo);
+        ST_CHECK(!fo->nerr && st_size(M8_BASE "/full.zip") > 0 && !st_exists(M8_BASE "/full.zip.1.part"));
+        op_free(fo);
+        unlink(M8_BASE "/full.zip.part");
+        unlink(M8_BASE "/full.zip");
+        // browsing it lists every name (the C locale used to stop at the first accented one)
+        pane_navigate(p, M8_BASE "/uni.zip" ARC_SEP "uni", true);
+        st_wait();
+        ST_CHECK(p->count == (locked ? 2u : 3u) && st_row_y(p, "caf\xC3\xA9 cr\xC3\xA8me.txt") > 0 && st_row_y(p, "sub dir") > 0);
+        pane_navigate(p, M8_BASE, true);
+        st_wait();
+        unlink(M8_BASE "/uni.zip");
+        unlink(M8_BASE "/uni.tar.gz");
+        st_rmrf(M8_BASE "/uni");
+    }
     st_select(p, "proj.zip");
     st_key(SDLK_RETURN, SDL_KMOD_NONE); // Enter browses the archive
     st_wait();
@@ -2645,6 +3105,123 @@ static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
 
+    // --- the toolbar's sort button: every sort key and the direction ---
+    st_frames(1);
+    Rect sb = p->ly.sortbtn;
+    ST_CHECK(sb.w > 0 && sb.x + sb.w <= p->ly.filterbtn.x && p->ly.pathbar.x + p->ly.pathbar.w <= sb.x);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+    st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+    ST_CHECK(A.menu.open && A.menu.pane == p && A.menu.n == SORT_COUNT + 3);
+    if (A.menu.open && A.menu.n == SORT_COUNT + 3) {
+        ST_CHECK(A.menu.items[SORT_PERMS].act == ACT_SORT_BASE + SORT_PERMS && A.menu.items[A.menu.n - 1].act == ACT_SORT_DESC);
+        st_frames(1);
+        st_shot("toolbar-sort");
+        st_key(SDLK_DOWN, 0); // keyboard: down to Size, Enter picks it
+        st_key(SDLK_DOWN, 0);
+        st_key(SDLK_DOWN, 0);
+        st_key(SDLK_DOWN, 0);
+        st_key(SDLK_RETURN, 0);
+        ST_CHECK(!A.menu.open && p->sort_key == SORT_SIZE);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.menu.open && A.menu.items[SORT_SIZE].checked);
+        bool was_desc = p->sort_desc;
+        int dir = A.menu.n - (was_desc ? 2 : 1); // the other direction
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, A.menu.r.x + S(20), menu_item_y(&A.menu, dir) + S(12), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.menu.open && p->sort_key == SORT_SIZE && p->sort_desc == !was_desc);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
+        st_key(SDLK_ESCAPE, 0);
+        ST_CHECK(!A.menu.open);
+    }
+    Rect area = p->ly.area; // a narrow split: no sort button, nothing overlaps
+    layout_pane(p, (Rect){area.x, area.y, S(110), area.h});
+    ST_CHECK(p->ly.sortbtn.w == 0 && p->ly.pathbar.w >= 0 && p->ly.pathbar.x + p->ly.pathbar.w <= p->ly.filterbtn.x);
+    layout_pane(p, area);
+    pane_set_sort(p, SORT_NAME);
+    do_action(p, ACT_SORT_ASC);
+
+    // --- the folder menu's Views / Sort by / Group by submenus ---
+    st_frames(1);
+    do_action(p, ACT_SORT_DESC);
+    ST_CHECK(p->sort_desc);
+    do_action(p, ACT_SORT_ASC);
+    ST_CHECK(!p->sort_desc);
+    // Views, Sort and Group share the connected Open With submenu behavior.
+    menu_open(p, S(100), S(100), false);
+    ST_CHECK(menu_icons_in(&A.menu)); // built-in icons: shown whatever fonts are installed
+    for (int i = 0; i < UI_ICON_COUNT; i++) {
+        NSVGimage *img = icon_image(ICON_UI_BASE + i);
+        ST_CHECK(img && img->shapes);
+    }
+    int views = -1, sorts = -1, groups = -1;
+    for (int i = 0; i < A.menu.n; i++) {
+        int act = A.menu.items[i].act;
+        if (act == ACT_MENU_VIEWS) views = i;
+        if (act == ACT_MENU_SORT) sorts = i;
+        if (act == ACT_MENU_GROUP) groups = i;
+        ST_CHECK(!(act >= ACT_VIEW_BASE && act < ACT_VIEW_BASE + ZOOM_COUNT));
+    }
+    ST_CHECK(views >= 0 && sorts >= 0 && groups >= 0);
+    if (views >= 0 && sorts >= 0 && groups >= 0) {
+        ST_CHECK(A.menu.items[views].sub && A.menu.items[sorts].sub && A.menu.items[groups].sub);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), menu_item_y(&A.menu, views) + S(12), 0, 0, 0);
+        ST_CHECK(menu_sub_shown() && g_menu_sub.items[0].act == ACT_VIEW_BASE);
+        st_frames(1);
+        st_shot("menu-views");
+        st_mouse(SDL_EVENT_MOUSE_MOTION, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, 0) + S(12), 0, 0, 0);
+        ST_CHECK(g_menu_sub.hover == 0 && A.menu.open);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), menu_item_y(&A.menu, sorts) + S(12), 0, 0, 0);
+        ST_CHECK(menu_sub_shown() && g_menu_sub_of == sorts);
+        bool has_ext = false, has_perms = false;
+        for (int i = 0; i < g_menu_sub.n; i++) {
+            has_ext |= g_menu_sub.items[i].act == ACT_SORT_BASE + SORT_EXT;
+            has_perms |= g_menu_sub.items[i].act == ACT_SORT_BASE + SORT_PERMS;
+        }
+        // Extension sorts like Type; Permissions only with its column shown
+        ST_CHECK(!has_ext && has_perms == col_visible(COL_PERMS) && g_menu_sub.items[0].act == ACT_SORT_BASE + SORT_NAME);
+        int descending = g_menu_sub.n - 1;
+        ST_CHECK(g_menu_sub.items[descending].act == ACT_SORT_DESC);
+        st_shot("menu-sort");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, descending) + S(12), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.menu.open && p->sort_desc);
+        do_action(p, ACT_SORT_BASE + SORT_NAME); // picking the current key keeps its direction
+        ST_CHECK(p->sort_key == SORT_NAME && p->sort_desc);
+        do_action(p, ACT_SORT_ASC);
+
+        menu_open(p, S(100), S(100), false);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), menu_item_y(&A.menu, groups) + S(12), 0, 0, 0);
+        ST_CHECK(menu_sub_shown() && g_menu_sub_of == groups && g_menu_sub.n == GROUP_COUNT);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, GROUP_NONE) + S(12), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.menu.open && p->group == GROUP_NONE);
+
+        // the keyboard: Right opens the submenu, Left / Esc goes back, Enter picks
+        menu_open(p, S(100), S(100), false);
+        A.menu.hover = views;
+        menu_key(SDLK_RIGHT);
+        ST_CHECK(menu_sub_shown() && g_menu_sub.hover == 0);
+        menu_key(SDLK_ESCAPE);
+        ST_CHECK(A.menu.open && !menu_sub_shown());
+        A.menu.hover = sorts;
+        menu_key(SDLK_RIGHT);
+        ST_CHECK(menu_sub_shown() && g_menu_sub_of == sorts && g_menu_sub.hover == 0);
+        menu_key(SDLK_LEFT);
+        ST_CHECK(A.menu.open && !menu_sub_shown() && A.menu.hover == sorts);
+        menu_key(SDLK_RETURN); // Enter on a submenu's item opens it too
+        ST_CHECK(menu_sub_shown() && g_menu_sub.hover == 0);
+        menu_key(SDLK_DOWN);
+        ST_CHECK(g_menu_sub.hover == 1 && g_menu_sub.items[1].act == ACT_SORT_BASE + SORT_DATE);
+        menu_key(SDLK_RETURN);
+        ST_CHECK(!A.menu.open && p->sort_key == SORT_DATE);
+        pane_set_sort(p, SORT_NAME);
+        menu_open(p, S(100), S(100), false);
+        menu_key(SDLK_ESCAPE);
+        ST_CHECK(!A.menu.open);
+    }
+
     // --- themes ---
     ST_CHECK(g_nthemes >= 5 && T.bg == g_theme_dark.bg);
     st_shot("m9-dark");
@@ -2773,6 +3350,84 @@ static int run_selftest_m9(void) {
     opt_button(OPT_THEME_NEW);
     ST_CHECK(theme_find("My theme") >= 0 && g_theme_cur == theme_find("My theme"));
     sheet_close();
+    { // Theme "System": Light or Dark as the desktop says (Dark until it does), its accent unless one is picked
+        u32 saved_accent = g_accent_custom;
+        g_accent_custom = 0;
+        memset(&g_desktop, 0, sizeof g_desktop);
+        opt_choice_set(OPT_THEME, theme_find("System"));
+        ST_CHECK(theme_is_system() && T.bg == g_theme_dark.bg && T.accent == g_theme_dark.accent && !g_dlook.running); // (no watcher in tests)
+        DesktopLook *d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3584E4, .icons = "hicolor"};
+        dlook_apply(d);
+        ST_CHECK(g_desktop.known && T.bg == g_theme_light.bg && T.accent == 0x3584E4 && T.sel != g_theme_light.sel);
+        g_accent_custom = 0x01000000u | g_accents[1].rgb; // a picked accent wins
+        theme_apply();
+        ST_CHECK(T.accent == g_accents[1].rgb && T.bg == g_theme_light.bg);
+        g_accent_custom = 0;
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = false, .icons = "hicolor"}; // dark again, no accent: the theme's own
+        dlook_apply(d);
+        ST_CHECK(T.bg == g_theme_dark.bg && T.accent == g_theme_dark.accent);
+        settings_save();
+        settings_load();
+        ST_CHECK(!strcmp(A.theme_name, "System"));
+        opt_choice_set(OPT_THEME, theme_find("Nord")); // other themes ignore the desktop
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3584E4, .icons = "hicolor"};
+        dlook_apply(d);
+        ST_CHECK(!theme_is_system() && T.bg == g_themes[theme_find("Nord")].t.bg && T.accent == g_themes[theme_find("Nord")].t.accent);
+        // on KDE: its colour scheme, read only where KDE is (its portal, or kdeglobals when the session is KDE)
+        opt_choice_set(OPT_THEME, theme_find("System"));
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3DAEE9, .icons = "breeze",
+                           .kde = {0x01000000u | 0xFCFCFC, 0x01000000u | 0xEFF0F1, 0x01000000u | 0x232627, 0x01000000u | 0x3DAEE9}};
+        dlook_apply(d);
+        ST_CHECK(T.bg == 0xFCFCFC && T.sidebar == 0xEFF0F1 && T.toolbar == 0xEFF0F1 && T.text == 0x232627 && T.accent == 0x3DAEE9);
+        ST_CHECK(T.tabbar != T.toolbar && COL_STATUS == T.toolbar);
+        st_frames(2);
+        st_shot("m9-system-kde");
+        char kg[PATH_MAX], *de0 = getenv("XDG_CURRENT_DESKTOP") ? strdup(getenv("XDG_CURRENT_DESKTOP")) : NULL;
+        snprintf(kg, sizeof kg, "%s/kdeglobals", getenv("XDG_CONFIG_HOME"));
+        FILE *kf = fopen(kg, "w");
+        if (kf) {
+            fputs("[Colors:Selection]\nBackgroundNormal=61,174,233\n[Colors:View]\nBackgroundNormal=20,22,24\nForegroundNormal=252,252,252\n"
+                  "[Colors:Window]\nBackgroundNormal=32,35,38\n", kf);
+            fclose(kf);
+        }
+        DesktopLook look;
+        const char *des[3] = {"KDE", "GNOME", ""};
+        for (int k = 0; k < 3; k++) {
+            setenv("XDG_CURRENT_DESKTOP", des[k], 1);
+            dlook_get(NULL, &look);
+            if (k == 0) ST_CHECK(look.kde[KDE_VIEW] == (0x01000000u | 0x141618) && look.kde[KDE_WINDOW] == (0x01000000u | 0x202326) && !look.light &&
+                                 look.accent == (0x01000000u | 0x3DAEE9));
+            else ST_CHECK(!look.kde[KDE_VIEW] && !look.accent); // (not KDE, or not saying: the file is ignored)
+        }
+        if (de0) setenv("XDG_CURRENT_DESKTOP", de0, 1);
+        else unsetenv("XDG_CURRENT_DESKTOP");
+        free(de0);
+        unlink(kg);
+        memset(&g_desktop, 0, sizeof g_desktop);
+        theme_apply();
+        ST_CHECK(T.bg == g_theme_dark.bg && T.text == g_theme_dark.text);
+        // Desktop's accent colour (off by default): with every theme, over a picked one; none from the desktop: as before
+        opt_choice_set(OPT_THEME, theme_find("Nord"));
+        g_accent_custom = 0x01000000u | g_accents[1].rgb;
+        ST_CHECK(!g_accent_desktop);
+        opt_bool_toggle(OPT_ACCENT_DESKTOP);
+        ST_CHECK(g_accent_desktop && T.accent == g_accents[1].rgb && !g_dlook.running); // (no desktop answer yet; no watcher in tests)
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3584E4, .icons = "hicolor"};
+        dlook_apply(d);
+        ST_CHECK(T.accent == 0x3584E4 && T.bg == g_themes[theme_find("Nord")].t.bg);
+        settings_save();
+        settings_load();
+        ST_CHECK(g_accent_desktop);
+        opt_bool_toggle(OPT_ACCENT_DESKTOP);
+        ST_CHECK(!g_accent_desktop && T.accent == g_accents[1].rgb);
+        memset(&g_desktop, 0, sizeof g_desktop);
+        g_accent_custom = saved_accent;
+    }
 
     // settings round trip
     g_theme_cur = theme_find("Nord");
@@ -2794,6 +3449,99 @@ static int run_selftest_m9(void) {
     A.font_size = 13;
     reload_fonts();
     g_accent_custom = 0;
+    { // Unified surfaces (off by default): sidebar, header, preview and status bar take the file area's background
+        int saved = g_theme_cur;
+        g_theme_cur = theme_find("Dark");
+        theme_apply();
+        ST_CHECK(!g_unified_surfaces && !memcmp(&T, &g_theme_dark, sizeof T));
+        opt_bool_toggle(OPT_UNIFIED);
+        ST_CHECK(T.sidebar == T.bg && T.tabbar == T.bg && T.toolbar == T.bg && T.preview_bg == T.bg && T.border == g_theme_dark.border);
+        st_frames(2);
+        st_shot("m9-unified");
+        settings_save();
+        settings_load();
+        ST_CHECK(g_unified_surfaces);
+        opt_bool_toggle(OPT_UNIFIED);
+        ST_CHECK(!g_unified_surfaces && !memcmp(&T, &g_theme_dark, sizeof T));
+        // separator lines (on by default)
+        ST_CHECK(g_separators);
+        opt_bool_toggle(OPT_SEPARATORS);
+        st_frames(2);
+        st_shot("m9-no-separators");
+        settings_save();
+        settings_load();
+        ST_CHECK(!g_separators);
+        opt_bool_toggle(OPT_SEPARATORS);
+        ST_CHECK(g_separators);
+        // brightness per part, always from the theme's own colour; the status bar is the toolbar's until moved
+        ST_CHECK(COL_STATUS == g_theme_dark.toolbar);
+        opt_int_step(OPT_BRIGHT_SIDEBAR, +1);
+        opt_int_step(OPT_BRIGHT_SIDEBAR, +1);
+        for (int k = 0; k < 8; k++) opt_int_step(OPT_BRIGHT_STATUS, -1);
+        ST_CHECK(g_surface_bright[SURF_SIDEBAR] == 10 && T.sidebar == rgb_mix(g_theme_dark.sidebar, 0xFFFFFF, 0.10f));
+        ST_CHECK(g_surface_bright[SURF_STATUS] == -30 && COL_STATUS == rgb_mix(g_theme_dark.toolbar, 0x000000, 0.30f));
+        ST_CHECK(T.bg == g_theme_dark.bg && T.toolbar == g_theme_dark.toolbar && T.preview_bg == g_theme_dark.preview_bg);
+        char buf[16];
+        opt_int_fmt(OPT_BRIGHT_SIDEBAR, buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "+10%"));
+        st_frames(2);
+        st_shot("m9-brightness");
+        settings_save();
+        settings_load();
+        theme_apply();
+        ST_CHECK(g_surface_bright[SURF_SIDEBAR] == 10 && g_surface_bright[SURF_STATUS] == -30 && !g_surface_bright[SURF_FILES]);
+        ST_CHECK(T.sidebar == rgb_mix(g_theme_dark.sidebar, 0xFFFFFF, 0.10f));
+        u32 sidebar = T.sidebar, status = COL_STATUS;
+        opt_button(OPT_THEME_NEW); // a scheme from the current colours keeps them, without applying the brightness twice
+        ST_CHECK(!g_surface_bright[SURF_SIDEBAR] && T.sidebar == sidebar && g_surface_bright[SURF_STATUS] == -30 && COL_STATUS == status);
+        memset(g_surface_bright, 0, sizeof g_surface_bright);
+        g_theme_cur = saved;
+        theme_apply();
+    }
+    { // scrollbar colour: Auto (the theme's own; System: the desktop's accent), or #RRGGBB / #RGB typed and applied
+        int saved = g_theme_cur;
+        g_theme_cur = theme_find("Dark");
+        theme_apply();
+        ST_CHECK(!g_scroll_custom && T.scroll == g_theme_dark.scroll);
+        options_open();
+        g_opt.cat = OC_APPEARANCE;
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_TEXT, OPT_SCROLL_COLOR, 1));
+        ST_CHECK(g_opt.scroll_focus);
+        st_type("#12345"); // malformed: nothing changes
+        st_key(SDLK_RETURN, SDL_KMOD_NONE);
+        ST_CHECK(!g_scroll_custom && g_opt.scroll_focus && options_is_open());
+        te_set(&g_opt.scroll_color, "", 0, 0);
+        st_type("#f80");
+        st_frames(1);
+        st_shot("m9-scrollbar-field");
+        st_opt_click(st_opt_hit(HP_BUTTON, OPT_SCROLL_COLOR, 0)); // Apply
+        ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800) && T.scroll == 0xFF8800 && !strcmp(g_opt.scroll_color.buf, "#FF8800"));
+        settings_save();
+        settings_load();
+        theme_apply();
+        ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800) && T.scroll == 0xFF8800);
+        u32 c;
+        ST_CHECK(scroll_color_parse("auto", &c) && !c && scroll_color_parse("#000000", &c) && c == 0x01000000u);
+        ST_CHECK(!scroll_color_parse("#12", &c) && !scroll_color_parse("red", &c) && !scroll_color_parse("#1234567", &c));
+        g_desktop.accent = 0x01000000u | 0x3584E4; // Auto: only System follows the desktop's accent
+        g_scroll_custom = 0;
+        theme_apply();
+        ST_CHECK(T.scroll == g_theme_dark.scroll);
+        g_theme_cur = theme_find("System");
+        theme_apply();
+        ST_CHECK(T.scroll == rgb_mix(T.bg, 0x3584E4, 0.55f));
+        g_desktop.accent = 0x01000000u | 0x000000; // a black accent on Dark: kept visible
+        theme_apply();
+        ST_CHECK(fabsf(rgb_luma(T.scroll) - rgb_luma(T.bg)) >= 0.10f);
+        memset(&g_desktop, 0, sizeof g_desktop);
+        te_set(&g_opt.scroll_color, "", 0, 0);
+        opt_button(OPT_SCROLL_COLOR); // empty: Auto again
+        ST_CHECK(!g_scroll_custom);
+        sheet_close();
+        g_theme_cur = saved;
+        theme_apply();
+    }
 
     // font family switch (if a second family is installed)
     char *dv = font_family_file("DejaVu Sans");
@@ -2881,6 +3629,21 @@ static int run_selftest_m9(void) {
     st_key(SDLK_W, SDL_KMOD_CTRL);
     A.edit_pane = NULL;
     p = active_pane();
+    // typing a path: a click places the caret (the path bar stays open), double-click picks a folder name,
+    // triple-click the whole path
+    begin_edit(p, NULL);
+    st_frames(1);
+    {
+        int n = (int)strlen(A.edit.buf), last = (int)(strrchr(A.edit.buf, '/') - A.edit.buf);
+        st_text_click(&A.edit, last + 2, 1, 0);
+        ST_CHECK(A.edit_pane == p && A.edit.anchor == last + 2 && A.edit.caret == last + 2);
+        st_text_click(&A.edit, last + 2, 2, 0);
+        ST_CHECK(A.edit_pane == p && A.edit.anchor > last && A.edit.anchor < A.edit.caret && A.edit.caret <= n);
+        st_text_click(&A.edit, 1, 3, 0);
+        ST_CHECK(A.edit.anchor == 0 && A.edit.caret == n);
+    }
+    st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+    ST_CHECK(!A.edit_pane);
 
     // Options > Keyboard: record a new shortcut with the recorder
     options_open();
@@ -2939,6 +3702,68 @@ static int run_selftest_m9(void) {
     st_wait();
     ST_CHECK(!strcmp(active_pane()->path, M9_BASE));
 
+    // --- the external terminal (Options > Integration): Automatic = found as before, or one of those installed ---
+    ST_CHECK(!g_external_terminal[0]);
+    A.menu.n = 0;
+    menu_terminal_items(p);
+    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in external terminal"));
+    do_action(p, ACT_TERMINAL_EXTERNAL); // (recorded, not started)
+    ST_CHECK(!strncmp(A.last_opened, "terminal:", 9) && !options_is_open());
+    // the dropdown lists the terminals installed: by name on $PATH, or a terminal app's .desktop entry (TerminalEmulator)
+    st_write_text(M9_BASE "-bin/foot", "#!/bin/sh\n");
+    chmod(M9_BASE "-bin/foot", 0755);
+    st_write_text(M9_BASE "-term/myterm", "#!/bin/sh\n");
+    chmod(M9_BASE "-term/myterm", 0755);
+    st_write_text(M9_BASE "-data/applications/myterm.desktop",
+                  "[Desktop Entry]\nType=Application\nName=My Term\nExec=\"" M9_BASE "-term/myterm\" --new\nCategories=System;TerminalEmulator;\n");
+    st_write_text(M9_BASE "-data/applications/editor.desktop", "[Desktop Entry]\nType=Application\nName=Editor\nExec=/bin/sh\nCategories=Utility;\n");
+    char *tpath0 = getenv("PATH") ? strdup(getenv("PATH")) : NULL, *tdata0 = getenv("XDG_DATA_HOME") ? strdup(getenv("XDG_DATA_HOME")) : NULL;
+    setenv("PATH", M9_BASE "-bin", 1); // (only the stand-ins)
+    setenv("XDG_DATA_HOME", M9_BASE "-data", 1);
+    options_open_page(OC_INTEGRATION);
+    for (int k = 0; k < 400 && g_termlist.scanning; k++) { st_frames(1); SDL_Delay(2); }
+    if (tpath0) setenv("PATH", tpath0, 1);
+    if (tdata0) setenv("XDG_DATA_HOME", tdata0, 1);
+    else unsetenv("XDG_DATA_HOME");
+    free(tpath0);
+    free(tdata0);
+    ST_CHECK(!g_termlist.scanning && opt_choice_count(OPT_TERMINAL) >= 3 && opt_choice_get(OPT_TERMINAL) == 0);
+    int tfoot = -1, tmy = -1;
+    for (int k = 1; k < opt_choice_count(OPT_TERMINAL); k++) {
+        if (!strcmp(opt_choice_label(OPT_TERMINAL, k), "foot")) tfoot = k;
+        if (!strcmp(opt_choice_label(OPT_TERMINAL, k), "myterm")) tmy = k;
+        ST_CHECK(strcmp(opt_choice_label(OPT_TERMINAL, k), "sh")); // not a terminal app
+    }
+    ST_CHECK(tfoot > 0 && tmy > 0 && !strcmp(opt_choice_label(OPT_TERMINAL, 0), "Automatic"));
+    st_frames(1);
+    Rect tdrop = {0};
+    for (int k = 0; k < g_opt.nhits; k++)
+        if (g_opt.hits[k].part == HP_DROP && g_opt.hits[k].opt == OPT_TERMINAL) tdrop = g_opt.hits[k].r;
+    ST_CHECK(tdrop.w > 0); // a dropdown, not segments
+    opt_drop_open(OPT_TERMINAL, tdrop);
+    for (int k = 0; k < g_opt.drop_n; k++)
+        if (g_opt.drop_map[k] == tfoot) opt_drop_pick(k);
+    ST_CHECK(!strcmp(g_external_terminal, "foot") && g_opt.drop_opt < 0 && opt_choice_get(OPT_TERMINAL) == tfoot);
+    st_shot("m9-terminal-option");
+    settings_save();
+    settings_load();
+    ST_CHECK(!strcmp(g_external_terminal, "foot"));
+    A.menu.n = 0;
+    menu_terminal_items(p);
+    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in foot"));
+    A.menu.n = 0;
+    opt_choice_set(OPT_TERMINAL, tmy); // one only its .desktop entry knows: kept by its path
+    char texe[PATH_MAX];
+    const char *tname = NULL;
+    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-term/myterm") && find_terminal(texe, sizeof texe, &tname) && !strcmp(tname, "myterm"));
+    snprintf(g_external_terminal, sizeof g_external_terminal, "gone-terminal"); // uninstalled since: shown, marked
+    ST_CHECK(opt_choice_get(OPT_TERMINAL) == opt_choice_count(OPT_TERMINAL) - 1 &&
+             !strcmp(opt_choice_label(OPT_TERMINAL, opt_choice_get(OPT_TERMINAL)), "gone-terminal (not found)"));
+    opt_choice_set(OPT_TERMINAL, 0);
+    ST_CHECK(!g_external_terminal[0] && opt_choice_get(OPT_TERMINAL) == 0);
+    sheet_close();
+    g_opt.cat = OC_APPEARANCE;
+
     // --- named layouts ---
     st_wait();
     st_key(SDLK_BACKSLASH, SDL_KMOD_CTRL);
@@ -2960,6 +3785,11 @@ static int run_selftest_m9(void) {
     st_type("Solo");
     st_key(SDLK_RETURN, SDL_KMOD_NONE);
     ST_CHECK(g_nlayouts == 2 && layout_find("Solo") >= 0 && !g_opt.lname.buf[0]);
+    // a click moves the keyboard between the search field and the layout name
+    st_text_click(&g_opt.search, 0, 1, 0);
+    ST_CHECK(g_sheet.kind == SHEET_OPTIONS && !g_opt.lname_focus);
+    st_text_click(&g_opt.lname, 0, 1, 0);
+    ST_CHECK(g_sheet.kind == SHEET_OPTIONS && g_opt.lname_focus);
     st_frames(2);
     st_shot("options-layouts");
     // delete asks first
@@ -3357,6 +4187,48 @@ static int run_selftest_m9(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, wctl_button(2).x + S(20), S(15), SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
         ST_CHECK(!strcmp(A.last_opened, "window:close"));
+        opt_bool_toggle(OPT_WINDOW_BUTTONS); // without the buttons: the tab strip runs to the window's edge, nothing to press
+        ST_CHECK(!A.window_buttons && A.r_wctl.w == 0);
+        if (tr) ST_CHECK(tr->splitbtn.x + tr->splitbtn.w > A.r_content.x + A.r_content.w - S(46));
+        A.last_opened[0] = 0;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, A.W - S(20), S(15), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
+        ST_CHECK(strncmp(A.last_opened, "window:", 7) != 0);
+        st_frames(1);
+        st_shot("m9-titlebar-nobuttons");
+        opt_bool_toggle(OPT_WINDOW_BUTTONS);
+        ST_CHECK(A.window_buttons && A.r_wctl.w > 0);
+        opt_bool_toggle(OPT_BRAND_LOGO); // the name alone above the sidebar, the brand still moves the window
+        st_frames(1);
+        st_shot("m9-brand-nologo");
+        ST_CHECK(!A.brand_logo && A.r_brand.h > 0);
+        opt_bool_toggle(OPT_BRAND_LOGO);
+        ST_CHECK(A.brand_logo);
+        // the name above the sidebar: the computer's, typed in Options, or none (the sidebar takes the top)
+        ST_CHECK(!strcmp(brand_label(), APP_LABEL));
+        opt_choice_set(OPT_BRAND_NAME, BRAND_HOST);
+        ST_CHECK(brand_label()[0] && A.r_brand.h > 0);
+        options_open();
+        ST_CHECK(opt_hidden(OPT_BRAND_TEXT));
+        opt_choice_set(OPT_BRAND_NAME, BRAND_CUSTOM);
+        ST_CHECK(!opt_hidden(OPT_BRAND_TEXT) && g_opt.brand_focus && !strcmp(brand_label(), APP_LABEL)); // (nothing typed yet)
+        options_text("Work\nstation \xC3\xA9");
+        ST_CHECK(!strcmp(A.brand_text, "Work station \xC3\xA9") && !strcmp(brand_label(), A.brand_text));
+        te_set(&g_opt.search, "sidebar", 7, 7);
+        st_frames(1);
+        st_shot("m9-brand-custom");
+        options_key(SDLK_RETURN, 0);
+        ST_CHECK(!g_opt.brand_focus && options_is_open());
+        sheet_close();
+        st_frames(1);
+        st_shot("m9-brand-own");
+        opt_choice_set(OPT_BRAND_NAME, BRAND_HIDDEN);
+        ST_CHECK(A.r_brand.h == 0 && A.r_sidebar.y == 0);
+        st_frames(1);
+        st_shot("m9-brand-hidden");
+        opt_choice_set(OPT_BRAND_NAME, BRAND_APP);
+        ST_CHECK(A.r_brand.h > 0 && A.r_sidebar.y == A.r_brand.h);
+        A.brand_text[0] = 0;
         bool pv = A.preview_on;
         if (!pv) preview_toggle();
         layout();
@@ -3428,6 +4300,71 @@ static bool st_term_wait(Term *t, const char *needle) {
 
 static int run_selftest_m11(void) {
     st_wait();
+    // Exercise the same calt shaping used by the renderer with patched JetBrains
+    // families when installed; Fira Code is a useful independent ligature fixture.
+    {
+        const char *families[] = {"JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono NFM", "JetBrainsMono NF", "Fira Code"};
+        for (size_t family = 0; family < ARRAY_COUNT(families); family++) {
+            char *path = font_family_file(families[family]);
+            if (!path) continue;
+            FT_Face face;
+            if (!FT_New_Face(g_ft, path, 0, &face)) {
+                FT_Set_Pixel_Sizes(face, 0, 16);
+                hb_font_t *font = hb_ft_font_create_referenced(face);
+                const char *sequences[] = {"->", "!=", "==="};
+                for (size_t seq = 0; seq < ARRAY_COUNT(sequences); seq++) {
+                    hb_buffer_t *buf = hb_buffer_create();
+                    const char *text = sequences[seq];
+                    int len = (int)strlen(text);
+                    hb_buffer_add_utf8(buf, text, len, 0, len);
+                    term_shape_buffer(font, buf);
+                    unsigned count;
+                    hb_glyph_info_t *glyphs = hb_buffer_get_glyph_infos(buf, &count);
+                    bool changed = count != (unsigned)len;
+                    for (unsigned i = 0; i < count; i++) {
+                        ST_CHECK(glyphs[i].codepoint != 0 && glyphs[i].cluster < (unsigned)len);
+                        if (glyphs[i].cluster < (unsigned)len)
+                            changed |= glyphs[i].codepoint != FT_Get_Char_Index(face, (unsigned char)text[glyphs[i].cluster]);
+                    }
+                    ST_CHECK(changed);
+                    hb_buffer_destroy(buf);
+                }
+                hb_font_destroy(font);
+                FT_Done_Face(face);
+            }
+            free(path);
+        }
+    }
+    { // Fish can change colour between operator characters; that must not break shaping.
+        Term sample = {0};
+        sample.rows = 3; sample.cols = 8; sample.cw = 10; sample.ch = 20;
+        sample.vt = vterm_new(sample.rows, sample.cols);
+        sample.scr = vterm_obtain_screen(sample.vt);
+        vterm_screen_reset(sample.scr, 1);
+        const char *ansi = "\033[31m=\033[32m=\033[0m\r\nM\r\n\033[31mM\033[32mM";
+        vterm_input_write(sample.vt, ansi, strlen(ansi));
+        vterm_screen_flush_damage(sample.scr);
+        TCell first, second;
+        ST_CHECK(term_cell(&sample, 0, 0, &first) && term_cell(&sample, 0, 1, &second));
+        ST_CHECK(first.fg != second.fg);
+        term_fonts();
+        ST_CHECK(term_draw_run(&sample, 0, 0, 0, 14, &g_term_font) == 1);
+        ST_CHECK(term_cell_foreground(&sample, 0, 0, &first) == first.fg);
+        ST_CHECK(term_cell_foreground(&sample, 0, 1, &second) == second.fg);
+        // a glyph alone in its cell is drawn as it is: not fitted to the cell, nor cut at the run's ends
+        sample.cw = 2; // cells narrower than the glyph
+        int nv0 = g_nv;
+        ST_CHECK(term_draw_run(&sample, 1, 0, 20, 14, &g_term_font) == 0);
+        Glyph *mg = font_glyph(&g_term_font, 'M');
+        ST_CHECK(g_nv == nv0 + 4 && mg->w > 2 && fabsf((g_v[nv0 + 1].position.x - g_v[nv0].position.x) - mg->w) < 0.01f);
+        // a slight overhang into a cell of another colour stays the glyph's own colour (no seam by powerline caps)
+        sample.cw = MAX(2.f, (f32)mg->w - 1);
+        nv0 = g_nv;
+        ST_CHECK(term_draw_run(&sample, 2, 0, 40, 14, &g_term_font) == 1);
+        ST_CHECK(g_nv == nv0 + 8 && fabsf((g_v[nv0 + 1].position.x - g_v[nv0].position.x) - mg->w) < 0.01f &&
+                 g_v[nv0].color.r != g_v[nv0 + 4].color.r);
+        vterm_free(sample.vt);
+    }
     const char *cfg = "/tmp/fe-selftest-config";
     // --- the default terminal's config: foot (include + [colors-dark]), kitty, Alacritty (import), Ghostty (theme)
     st_write_text("/tmp/fe-selftest-config/xdg-terminals.list", "# preference\nfoot.desktop\n");
@@ -3674,19 +4611,29 @@ static int run_selftest_m11(void) {
         for (int k = 0; k < 400 && ft->dock; k++) { st_frames(1); SDL_Delay(5); }
         ST_CHECK(!ft->dock && !ft->dock_on && !active_term());
         // bash, zsh and fish (those installed) get the shell integration: the pane's folder changes without a cd typed
-        // at the prompt, what's typed there stays, a cd typed there still moves the pane (an empty HOME: no own config)
+        // at the prompt, what's typed there stays, a cd typed there still moves the pane. Their startup files (and
+        // fish's greeting) run fastfetch: skipped in the panel, while one typed at the prompt runs (a stand-in on $PATH)
         static const char *shells[] = {"bash", "zsh", "fish"};
-        char *home0 = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
+        char *home0 = getenv("HOME") ? strdup(getenv("HOME")) : NULL, *path0 = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
         mkdir_p(M11_BASE "/home", 0755);
+        st_write_text(M11_BASE "/bin/fastfetch", "#!/bin/sh\necho FF''RAN\n");
+        chmod(M11_BASE "/bin/fastfetch", 0755);
+        st_write_text(M11_BASE "/home/.bashrc", "fastfetch\n");
+        st_write_text(M11_BASE "/home/.zshrc", "command -v fastfetch >/dev/null && fastfetch\n");
+        st_write_text("/tmp/fe-selftest-config/fish/config.fish", "fastfetch\nfunction fish_greeting\n    fastfetch\nend\n");
+        char spath[PATH_MAX * 2];
+        snprintf(spath, sizeof spath, "%s/bin:%s", M11_BASE, path0 ? path0 : "/usr/bin:/bin");
         for (int si = 0; si < 3; si++) {
             char sp[PATH_MAX];
             if (!tool_abs(shells[si], sp, sizeof sp)) { printf("(%s not installed: its shell integration not tested)\n", shells[si]); continue; }
             setenv("FE_TERM_SHELL", sp, 1);
             setenv("HOME", M11_BASE "/home", 1);
+            setenv("PATH", spath, 1);
             pane_navigate(fp, M11_BASE, true);
             st_wait();
             dock_toggle();
             setenv("HOME", home0 ? home0 : "/", 1);
+            if (path0) setenv("PATH", path0, 1);
             Term *d = ft->dock;
             ST_CHECK(d && d->shint == si + 1);
             if (!d) continue;
@@ -3696,6 +4643,8 @@ static int run_selftest_m11(void) {
             for (int k = 0; k < 600 && stat(rp, &rst) != 0; k++) { st_frames(1); SDL_Delay(5); }
             ST_CHECK(stat(rp, &rst) == 0);
             for (int k = 0; k < 40; k++) { st_frames(1); SDL_Delay(5); } // (its first prompt)
+            ST_CHECK(st_term_find(d, "FFRAN") < 0);
+            if (st_term_find(d, "FFRAN") >= 0) printf("%s: fastfetch ran at startup\n", shells[si]);
             term_send(d, "typed");
             pane_navigate(fp, M11_BASE "/a/b", true);
             for (int k = 0; k < 600 && !(term_cwd(d, cwd, sizeof cwd) && !strcmp(cwd, M11_BASE "/a/b")); k++) { st_frames(1); SDL_Delay(5); }
@@ -3707,6 +4656,9 @@ static int run_selftest_m11(void) {
             term_send(d, "\x15" "cd ..\r");
             for (int k = 0; k < 600 && strcmp(fp->path, M11_BASE "/a"); k++) { st_frames(1); SDL_Delay(5); }
             ST_CHECK(!strcmp(fp->path, M11_BASE "/a"));
+            // typed now, it's the program again (not our function); XDG_DATA_DIRS is the user's again
+            term_send(d, "type fastfetch; env | grep -q fish-data || echo NO_FISH_DATA\r");
+            ST_CHECK(st_term_wait(d, "fastfetch is /") && st_term_wait(d, "NO_FISH_DATA"));
             char cdf[PATH_MAX];
             snprintf(cdf, sizeof cdf, "%s", d->cd_file);
             dock_free(ft);
@@ -3714,6 +4666,8 @@ static int run_selftest_m11(void) {
             ST_CHECK(stat(rp, &rst) != 0 && stat(cdf, &rst) != 0); // its files are removed with it
         }
         free(home0);
+        free(path0);
+        unlink("/tmp/fe-selftest-config/fish/config.fish");
         setenv("FE_TERM_SHELL", "/bin/sh", 1);
         // Shift+F4: a terminal tab, as F4 used to open
         st_key(SDLK_F4, SDL_KMOD_SHIFT);
@@ -4126,6 +5080,43 @@ static int run_selftest_m10(void) {
         char mux[4096] = "";
         st_read_text(M10_BASE "/tools/ssh-mux", mux, sizeof mux);
         ST_CHECK(strstr(mux, "-O check -- me@box") && strstr(mux, "-O exit -- me@box")); // its shared ssh connection too
+    }
+
+    { // mount tables write spaces, tabs, newlines and backslashes as octal escapes: decoded once, malformed ones kept
+        static const char *cases[][2] = {
+            {"/mnt/my\\040share", "/mnt/my share"}, {"a\\011b\\012c\\134d", "a\tb\nc\\d"}, {"/literal\\134040", "/literal\\040"},
+            {"/x\\043y", "/x#y"}, {"\\000\\777\\04\\", "\\000\\777\\04\\"}, {"end\\0", "end\\0"}, {"end\\04", "end\\04"},
+            {"\\", "\\"}, {"\\8\\400\\09a", "\\8\\400\\09a"}, {"", ""},
+        };
+        for (size_t i = 0; i < ARRAY_COUNT(cases); i++) {
+            char out[64];
+            mount_unescape(cases[i][0], out, sizeof out);
+            ST_CHECK(!strcmp(out, cases[i][1]));
+        }
+        char tiny[6];
+        mount_unescape("ab\\040cdefgh", tiny, sizeof tiny); // cut to the buffer, still terminated
+        ST_CHECK(!strcmp(tiny, "ab cd"));
+        char inplace[] = "/mnt/a\\040b";
+        mount_unescape(inplace, inplace, sizeof inplace);
+        ST_CHECK(!strcmp(inplace, "/mnt/a b"));
+        // network mounts with escaped fields: the folder as it is on disk, sshfs's source readable
+        st_write_text(M10_BASE "/mounts", "//nas/my\\040share " M10_BASE "/smb\\040share cifs rw 0 0\n"
+                                          "me@box:/home/me/my\\040docs " M10_BASE "/ssh\\011tab fuse.sshfs rw 0 0\n"
+                                          "nas:/x " M10_BASE "/literal\\134040 nfs rw 0 0\n"
+                                          "/dev/sda1 " M10_BASE "/not\\040network ext4 rw 0 0\n");
+        setenv("FE_NET_MOUNTS", M10_BASE "/mounts", 1);
+        NetMount nm[16];
+        int nn = network_mounts(nm, 16), found = 0;
+        unsetenv("FE_NET_MOUNTS");
+        for (int i = 0; i < nn; i++) {
+            found += !strcmp(nm[i].path, M10_BASE "/smb share") && !strcmp(nm[i].label, "//nas/my share");
+            found += !strcmp(nm[i].path, M10_BASE "/ssh\ttab") && !strcmp(nm[i].label, "me@box:/home/me/my docs") && nm[i].sshfs;
+            ST_CHECK(nm[i].sshfs == !strcmp(nm[i].path, M10_BASE "/ssh\ttab"));
+            found += !strcmp(nm[i].path, M10_BASE "/literal\\040");
+            ST_CHECK(!strstr(nm[i].path, "not network") && !strstr(nm[i].path, "\\011"));
+        }
+        ST_CHECK(found == 3);
+        unlink(M10_BASE "/mounts");
     }
 
     // phones and cameras on a cable: what the volume monitors list, matched with their folders in the FUSE bridge
@@ -4551,6 +5542,15 @@ static int run_selftest_m10(void) {
         te_set(&g_sheet.cn[CN_PASS], "s3cret", 6, 6);
         st_frames(2);
         st_shot("connect");
+        // clicks move the keyboard between fields; in the password the caret lands between the dots and a
+        // double-click selects all of it (no words to give away)
+        st_text_click(&g_sheet.cn[CN_PASS], 2, 1, 0);
+        ST_CHECK(g_sheet.cn_focus == CN_PASS && g_sheet.cn[CN_PASS].anchor == 2 && g_sheet.cn[CN_PASS].caret == 2);
+        st_text_click(&g_sheet.cn[CN_HOST], 3, 1, 0);
+        ST_CHECK(g_sheet.cn_focus == CN_HOST && g_sheet.cn[CN_HOST].caret == 3);
+        st_text_click(&g_sheet.cn[CN_PASS], 3, 2, 0);
+        ST_CHECK(g_sheet.cn_focus == CN_PASS && g_sheet.cn[CN_PASS].anchor == 0 && g_sheet.cn[CN_PASS].caret == 6);
+        ST_CHECK(!strcmp(g_sheet.cn[CN_PASS].buf, "s3cret") && !strcmp(g_sheet.cn[CN_HOST].buf, "secure.lan"));
         st_key(SDLK_RETURN, SDL_KMOD_NONE);
         ST_CHECK(!sheet_open() && !g_sheet.cn[CN_PASS].buf[0]);
         for (int k = 0; k < 600 && A.dev_busy; k++) { st_frames(1); SDL_Delay(5); }
@@ -4672,6 +5672,19 @@ static int run_selftest_m10(void) {
                      !strcmp(t.user, "al") && !strcmp(t.port, "2222") && !strcmp(t.path, "/srv/my app's dir"));
             ST_CHECK(ssh_target_for(M10_BASE "/gvfs/sftp:host=vm1.lan,user=al", &t) && !strcmp(t.path, "/"));
             ST_CHECK(!ssh_target_for(M10_BASE "/gvfs/smb-share:server=nas,share=media/x", &t) && !ssh_target_for("/home", &t));
+            { // sshfs mounts: the server from the mount's source; NFS and rclone sources look alike but aren't ssh
+                int nn = A.nnets;
+                NetMount saved[3];
+                memcpy(saved, A.nets, sizeof saved);
+                A.nets[0] = (NetMount){M10_BASE "/nfs", "nas:/exports/team", false};
+                A.nets[1] = (NetMount){M10_BASE "/drive", "gdrive:", false};
+                A.nets[2] = (NetMount){M10_BASE "/box", "me@box:/srv", true};
+                A.nnets = 3;
+                ST_CHECK(!ssh_target_for(M10_BASE "/nfs/a", &t) && !ssh_target_for(M10_BASE "/drive", &t));
+                ST_CHECK(ssh_target_for(M10_BASE "/box/www", &t) && !strcmp(t.host, "box") && !strcmp(t.user, "me") && !strcmp(t.path, "/srv/www"));
+                memcpy(A.nets, saved, sizeof saved);
+                A.nnets = nn;
+            }
             char d[PATH_MAX];
             snprintf(d, sizeof d, "%s", M10_BASE "/gvfs/sftp:host=vm1.lan,user=al,port=2222/srv/my app's dir");
             ext_terminal(d);
@@ -6179,8 +7192,10 @@ static int run_selftest_du(void) {
                             "23 21 0:34 /@snapshots /.snapshots rw shared:3 - btrfs /dev/nvme0n1p2 rw\n"
                             "24 21 259:1 / /boot rw shared:4 - vfat /dev/nvme0n1p1 rw\n"
                             "25 21 0:22 / /proc rw,nosuid - proc proc rw\n"
-                            "26 22 0:50 / /home/me/remote rw - fuse.sshfs me@host:/ rw\n");
-        ST_CHECK(t.nmounts == 6 && !strcmp(t.mounts[1].mnt, "/home") && !strcmp(t.mounts[3].fstype, "vfat"));
+                            "26 22 0:50 / /home/me/remote rw - fuse.sshfs me@host:/ rw\n"
+                            "27 21 8:17 /my\\040dir /mnt/usb\\040disk rw - ext4 /dev/sdb1 rw\n");
+        ST_CHECK(t.nmounts == 7 && !strcmp(t.mounts[1].mnt, "/home") && !strcmp(t.mounts[3].fstype, "vfat"));
+        ST_CHECK(!strcmp(t.mounts[6].mnt, "/mnt/usb disk") && !strcmp(t.mounts[6].root, "/my dir")); // (decoded)
         ST_CHECK(t.mounts[1].compressed && !t.mounts[0].compressed && !t.mounts[5].compressed);
         t.dev = makedev(0, 31);
         t.fstype = "btrfs";
@@ -6452,9 +7467,18 @@ static int run_selftest_du(void) {
     st_frames(1);
     p = active_pane();
     menu_open(p, 100, 100, false);
-    ST_CHECK(st_menu_has(ACT_DU_TOGGLE));
+    int views = -1, toggle = -1;
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].act == ACT_MENU_VIEWS && A.menu.items[i].enabled && A.menu.items[i].sub) views = i;
+    ST_CHECK(views >= 0);
+    if (views >= 0) {
+        menu_sub_open(views, false);
+        for (int i = 0; i < g_menu_sub.n; i++)
+            if (g_menu_sub.items[i].act == ACT_DU_TOGGLE && g_menu_sub.items[i].enabled) toggle = i;
+        ST_CHECK(menu_sub_shown() && toggle >= 0);
+        if (toggle >= 0) menu_sub_activate(toggle);
+    }
     A.menu.open = false;
-    do_action(p, ACT_DU_TOGGLE);
     st_frames(1);
     ST_CHECK(p->du && p->dv);
     for (int i = 0; i < A.nplaces; i++)

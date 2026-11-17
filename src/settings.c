@@ -44,6 +44,11 @@ static void settings_defaults(void) {
     A.dim_inactive = true;
     A.title_bar = TITLEBAR_AUTO;
     A.round_corners = false;
+    A.window_buttons = true;
+    A.brand_logo = true;
+    A.brand_name = BRAND_APP;
+    A.brand_text[0] = 0;
+    A.tab_style = TABS_CARDS;
     A.ig_prev_fm[0] = 0;
     A.ig_fm1 = A.ig_asked = false;
     A.ig_check_updates = true;
@@ -54,6 +59,7 @@ static void settings_defaults(void) {
     A.ndev_names = 0;
     A.devs_collapsed = A.nets_collapsed = false;
     g_term_look_setting = 0;
+    g_external_terminal[0] = 0;
     A.nservers = 0;
     addon_settings_defaults();
     g_cloud_collapsed = false;
@@ -74,6 +80,11 @@ static void settings_defaults(void) {
     A.conflict_last = CF_KEEP_BOTH;
     snprintf(A.theme_name, sizeof A.theme_name, "Dark");
     g_accent_custom = 0;
+    g_accent_desktop = false;
+    g_unified_surfaces = false;
+    g_separators = true;
+    g_scroll_custom = 0;
+    memset(g_surface_bright, 0, sizeof g_surface_bright);
     A.ui_font[0] = 0;
     A.font_size = 13;
     A.row_spacing = 1;
@@ -223,6 +234,7 @@ static void settings_load(void) {
                 A.nservers++;
             }
         } else if (!strcmp(k, "term_look")) g_term_look_setting = !strcmp(v, "app");
+        else if (!strcmp(k, "external_terminal")) snprintf(g_external_terminal, sizeof g_external_terminal, "%s", v);
         else if (!strcmp(k, "devices_collapsed")) A.devs_collapsed = atoi(v);
         else if (!strcmp(k, "network_collapsed")) A.nets_collapsed = atoi(v);
         else if (!strcmp(k, "close_to_tray")) A.close_to_tray = atoi(v);
@@ -266,6 +278,11 @@ static void settings_load(void) {
         else if (!strcmp(k, "update_seen")) snprintf(A.upd_seen, sizeof A.upd_seen, "%s", v);
         else if (!strcmp(k, "title_bar")) A.title_bar = !strcmp(v, "system") ? TITLEBAR_SYSTEM : !strcmp(v, "app") ? TITLEBAR_APP : TITLEBAR_AUTO;
         else if (!strcmp(k, "round_corners")) A.round_corners = atoi(v);
+        else if (!strcmp(k, "window_buttons")) A.window_buttons = atoi(v);
+        else if (!strcmp(k, "brand_logo")) A.brand_logo = atoi(v);
+        else if (!strcmp(k, "brand_name")) A.brand_name = !strcmp(v, "host") ? BRAND_HOST : !strcmp(v, "custom") ? BRAND_CUSTOM : !strcmp(v, "hidden") ? BRAND_HIDDEN : BRAND_APP;
+        else if (!strcmp(k, "brand_text")) snprintf(A.brand_text, sizeof A.brand_text, "%s", v);
+        else if (!strcmp(k, "tab_style")) A.tab_style = !strcmp(v, "pills") ? TABS_PILLS : TABS_CARDS;
         else if (!strcmp(k, "alt_rows")) A.alt_rows = atoi(v);
         else if (!strcmp(k, "load_times")) A.load_times = atoi(v);
         else if (!strcmp(k, "verify_copies")) A.verify_copies = atoi(v);
@@ -278,6 +295,15 @@ static void settings_load(void) {
         else if (!strcmp(k, "group")) A.def_group = CLAMP(atoi(v), 0, GROUP_COUNT - 1);
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
+        else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v);
+        else if (!strcmp(k, "show_separators")) g_separators = atoi(v);
+        else if (!strcmp(k, "system_accent")) g_accent_desktop = atoi(v);
+        else if (!strcmp(k, "scrollbar_color")) { u32 c; if (scroll_color_parse(v, &c)) g_scroll_custom = c; }
+        else if (!strcmp(k, "sidebar_brightness")) g_surface_bright[SURF_SIDEBAR] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "header_brightness")) g_surface_bright[SURF_HEADER] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "main_brightness")) g_surface_bright[SURF_FILES] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "preview_brightness")) g_surface_bright[SURF_PREVIEW] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "status_brightness")) g_surface_bright[SURF_STATUS] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "theme")) snprintf(A.theme_name, sizeof A.theme_name, "%s", v);
         else if (!strcmp(k, "accent")) {
             u32 c;
@@ -485,6 +511,7 @@ static void settings_write(FILE *f) {
     fputs(g_settings_other, f);
     cloud_settings_save(f);
     fprintf(f, "term_look=%s\n", g_term_look_setting ? "app" : "match");
+    fprintf(f, "external_terminal=%s\n", g_external_terminal);
     for (int i = 0; i < A.nservers; i++) fprintf(f, "server=%s\t%s%s%s\n", A.servers[i].name, A.servers[i].uri, A.servers[i].icon[0] ? "\t" : "", A.servers[i].icon);
     fprintf(f, "icon_theme=%s\n", icon_theme_name(g_icon_theme));
     fprintf(f, "theme=%s\nfont=%s\nfont_size=%d\nrow_spacing=%d\nsmooth_scroll=%d\n",
@@ -492,6 +519,11 @@ static void settings_write(FILE *f) {
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
             A.dblclick_up, A.drop_ask, A.def_tree, A.single_instance);
     keys_save(f);
+    fprintf(f, "unified_surfaces=%d\nshow_separators=%d\nsystem_accent=%d\n", g_unified_surfaces, g_separators, g_accent_desktop);
+    if (g_scroll_custom) fprintf(f, "scrollbar_color=#%06X\n", g_scroll_custom & 0xFFFFFF);
+    else fprintf(f, "scrollbar_color=auto\n");
+    fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\n",
+            g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_STATUS]);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
     fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",
@@ -504,6 +536,11 @@ static void settings_write(FILE *f) {
             (long long)A.ig_update_checked, A.upd_auto, A.upd_seen);
     fprintf(f, "title_bar=%s\n", A.title_bar == TITLEBAR_SYSTEM ? "system" : A.title_bar == TITLEBAR_APP ? "app" : "auto");
     fprintf(f, "round_corners=%d\n", A.round_corners);
+    fprintf(f, "window_buttons=%d\n", A.window_buttons);
+    fprintf(f, "brand_logo=%d\n", A.brand_logo);
+    static const char *brand_names[] = {"app", "host", "custom", "hidden"}; // BRAND_*
+    fprintf(f, "brand_name=%s\nbrand_text=%s\n", brand_names[CLAMP(A.brand_name, 0, BRAND_HIDDEN)], A.brand_text);
+    fprintf(f, "tab_style=%s\n", A.tab_style == TABS_PILLS ? "pills" : "cards");
     fprintf(f, "dim_inactive=%d\nalt_rows=%d\nsize_bars=%d\nload_times=%d\ncolumns=", A.dim_inactive, A.alt_rows, A.size_bars, A.load_times);
     for (int i = 0; i < A.ncols; i++) {
         int c = A.cols[i];

@@ -136,6 +136,8 @@ typedef struct {
 // --- views -------------------------------------------------------------------
 enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
 enum { TITLEBAR_AUTO, TITLEBAR_SYSTEM, TITLEBAR_APP }; // A.title_bar
+enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
+enum { TABS_CARDS, TABS_PILLS }; // A.tab_style
 static const struct { int view, px; const char *label; } g_zoom[] = {
     {VIEW_DETAILS, 0, "Details"},       {VIEW_LIST, 0, "List"},          {VIEW_GRID, 48, "Small icons"},
     {VIEW_GRID, 72, "Small+ icons"},    {VIEW_GRID, 96, "Medium icons"}, {VIEW_GRID, 128, "Medium+ icons"},
@@ -162,7 +164,7 @@ static const struct {
 };
 
 typedef struct {
-    Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, header, list, track, thumb, trashbar, rrestore, rempty;
+    Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, sortbtn, header, list, track, thumb, trashbar, rrestore, rempty;
     bool has_trashbar;
     f32 col_name;              // x of the icon inside the Name column
     f32 name_end;              // right edge of the Name column
@@ -295,6 +297,7 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
 static int term_shint_cd(Term *t, const char *dir);
 static void term_tick(void);
 static int g_term_look_setting; // Options: 0 match the default terminal, 1 the app's own theme
+static char g_external_terminal[PATH_MAX]; // Options > Integration: the external terminal (empty: found as below)
 static void term_clear_scrollback(Term *t);
 static bool term_wants_mouse(Term *t, SDL_Keymod mod);
 static bool term_has_sel(Term *t);
@@ -408,6 +411,8 @@ enum {
     ACT_COL_BASE = 200,  // + column id: toggle that column
     ACT_VIEW_BASE = 300, // + zoom level index
     ACT_SORT_BASE = 320, // + SORT_* key
+    ACT_SORT_ASC = 330, ACT_SORT_DESC,
+    ACT_MENU_VIEWS, ACT_MENU_SORT, ACT_MENU_GROUP, // items that open the Views / Sort by / Group by submenus
     ACT_GROUP_BASE = 340, // + GROUP_*
     ACT_FV_SUBFOLDERS = 360, ACT_FV_ALL, ACT_FV_RESET,
     ACT_TF_BASE = 370, ACT_TF_RESET = 373, ACT_TF_EXT_BASE = 380, // type filter
@@ -633,6 +638,11 @@ static struct {
     bool dim_inactive;
     int title_bar; // TITLEBAR_*: who draws the window's title bar (setting)
     bool round_corners; // round the window's corners with our own title bar (setting)
+    bool window_buttons; // minimise / maximise / close in our own title bar (setting; off: the desktop's keys close it)
+    bool brand_logo;     // the logo before the name above the sidebar (setting)
+    int brand_name;      // BRAND_*: which name is shown there (setting; hidden: the sidebar starts at the top)
+    char brand_text[96]; // the name for BRAND_CUSTOM (setting)
+    int tab_style;       // TABS_*: the open tab as a card joining the toolbar, or rounded pills centred in a box (setting)
     bool win_alpha;     // the window was created with an alpha channel (needed for rounded corners)
     bool win_shadow;    // ...and draws its own drop shadow in a margin round the window (Wayland)
     int shadow_px;      // that margin now, in pixels (0: maximised, system title bar...); A.W / A.H exclude it
@@ -680,7 +690,7 @@ static struct {
     Term *term_mouse;    // the terminal a mouse button went down in (gets the drag and the release)
     int term_mouse_btn;
     u64 trash_size;
-    bool trash_known, trash_again;
+    bool trash_known, trash_again, trash_empty; // trash_empty: nothing in it, not even empty files or folders
     int nservers;
     bool devs_enabled;        // off in self-tests unless faked
     bool dev_scanning, dev_rescan;
@@ -883,7 +893,23 @@ static void layout_pane(Pane *p, Rect area) {
     f32 px = ly->up.x + bs + roundf(S(8));
     ly->morebtn = (Rect){area.x + area.w - bs - roundf(S(8)), by, bs, bs};
     ly->filterbtn = (Rect){ly->morebtn.x - bs - gap, by, bs, bs};
-    ly->pathbar = (Rect){px, by, ly->filterbtn.x - px - roundf(S(4)), bs};
+    ly->sortbtn = (Rect){ly->filterbtn.x - bs - gap, by, bs, bs};
+    // A narrow split keeps the path usable: back / forward / up go first (their keys and the mouse's side buttons
+    // still work), then sort (it stays in the folder's menu), then filter and the menu (a right click on empty space).
+    f32 path_right = ly->sortbtn.x - roundf(S(4));
+    if (area.w < S(240) || path_right - px < S(80)) {
+        ly->back = ly->fwd = ly->up = (Rect){0};
+        px = area.x + roundf(S(8));
+    }
+    if (area.w < S(120) || path_right - px < S(80)) {
+        ly->sortbtn = (Rect){0};
+        path_right = ly->filterbtn.x - roundf(S(4));
+    }
+    if (area.w < S(80)) {
+        ly->morebtn = ly->filterbtn = (Rect){0};
+        path_right = area.x + area.w - roundf(S(8));
+    }
+    ly->pathbar = (Rect){px, by, MAX(0.f, path_right - px), bs};
     f32 hh = p->view == VIEW_DETAILS && !pane_du_on(p) && !pane_snap_on(p) ? roundf(S(32)) : 0; // list/grid sort from the menu, no header
     ly->header = (Rect){area.x, area.y + tb, area.w, hh};
     ly->list = (Rect){area.x, area.y + tb + hh, area.w, area.h - tb - hh};
@@ -1045,15 +1071,20 @@ static void layout_panel(Panel *pn, Rect r) {
     if (A.r_wctl.w > 0 && r.y < 1 && right > A.r_wctl.x) right = MAX(r.x + S(140), A.r_wctl.x);
     pn->splitbtn = (Rect){right - bw - roundf(S(6)), by, bw, bw};
     int n = panel_ntabs(pn);
+    bool pills = A.tab_style == TABS_PILLS;
+    f32 gap = pills ? roundf(S(4)) : 0; // (cards touch: the open one's flares cover the seams)
     f32 x0 = r.x + roundf(S(6));
     f32 avail = pn->splitbtn.x - roundf(S(6)) - (bw + roundf(S(4))) - x0;
-    f32 tw = n ? MAX(roundf(S(48)), MIN(roundf(S(200)), roundf(avail / n))) : 0;
+    f32 tw = n ? MAX(roundf(S(48)), MIN(roundf(S(200)), roundf((avail - gap * (f32)(n - 1)) / (f32)n))) : 0;
+    f32 group = n ? tw * (f32)n + gap * (f32)(n - 1) : 0;
+    if (pills) x0 = MAX(x0, MIN(roundf(r.x + (right - r.x - group) * 0.5f), x0 + avail - group)); // centred, clear of + and split
     Rect body = {r.x, r.y + tb, r.w, r.h - tb};
     int k = 0;
     for (int i = 0; i < A.ntabs; i++) {
         Tab *t = A.tabs[i];
         if (t->panel != pn) continue;
-        t->r = (Rect){x0 + k * tw, r.y + roundf(S(6)), tw, tb - roundf(S(6))};
+        t->r = pills ? (Rect){x0 + k * (tw + gap), r.y + roundf(S(5)), tw, tb - roundf(S(10))}
+                     : (Rect){x0 + k * tw, r.y + roundf(S(6)), tw, tb - roundf(S(6))};
         k++;
         Rect pb = body;
         t->dock_r = t->dock_div = t->dock_x = (Rect){0, 0, 0, 0};
@@ -1069,8 +1100,8 @@ static void layout_panel(Panel *pn, Rect r) {
         layout_pane(&t->pane[0], pb);
     }
     // + : a round button after the last tab, centred on the tab labels (clear of the active tab's flare)
-    f32 ps = roundf(S(26)), pcy = r.y + roundf(S(6)) + (tb - roundf(S(6))) * 0.5f;
-    pn->plus = (Rect){MIN(x0 + k * tw + roundf(S(10)), pn->splitbtn.x - ps - roundf(S(4))), roundf(pcy - ps * 0.5f), ps, ps};
+    f32 ps = roundf(S(26)), pcy = pills ? r.y + tb * 0.5f : r.y + roundf(S(6)) + (tb - roundf(S(6))) * 0.5f;
+    pn->plus = (Rect){MIN(x0 + group + roundf(S(10)), pn->splitbtn.x - ps - roundf(S(4))), roundf(pcy - ps * 0.5f), ps, ps};
 }
 
 static void layout_node(Node *n, Rect r) {
@@ -1120,7 +1151,7 @@ static void layout(void) {
     f32 W = (f32)A.W, H = (f32)A.H;
     // the sidebar keeps >= 520 px for the panels when the window is narrow
     f32 tb = 0, st = picker_active() ? picker_bar_h() : roundf(S(28)), sb = roundf(MIN(S(CLAMP(A.side_w, 150.f, 480.f)), MAX(S(150), W - S(520))));
-    f32 bh = roundf(S(44)); // logo centred on the tab strip
+    f32 bh = A.brand_name == BRAND_HIDDEN ? 0 : roundf(S(44)); // logo centred on the tab strip
     A.r_brand = (Rect){0, 0, sb, bh};
     A.r_sidebar = (Rect){0, bh, sb, H - st - bh};
     if (picker_active()) A.r_sidebar.h -= picker_tab_h(); // the picker bar's title tab sits under the sidebar
@@ -1138,7 +1169,7 @@ static void layout(void) {
     // own title bar: the buttons sit at the right end of the tab strips; with the preview open they get a strip of
     // tab-bar colour above it (the preview moves down to the panels' toolbars)
     A.r_wctl = A.r_wstrip = (Rect){0, 0, 0, 0};
-    if (A.csd) {
+    if (A.csd && A.window_buttons) {
         f32 bw = roundf(S(46)), bh2 = roundf(S(38));
         A.r_wctl = (Rect){W - 3 * bw, 0, 3 * bw, bh2};
         if (A.preview_on) {
@@ -1967,18 +1998,6 @@ static void toast(const char *fmt, ...);
 // never touches paths under these mount points (the list is read from /proc/self/mounts, no syscalls on them).
 static char **g_remote;
 static int g_nremote;
-
-// /proc/self/mounts writes spaces, tabs, newlines and backslashes as \ooo octal escapes (also used by rclone.c).
-static void mount_unescape(const char *s, char *out, size_t cap) {
-    size_t o = 0;
-    for (const char *c = s; *c && o + 1 < cap; c++) {
-        if (c[0] == '\\' && c[1] >= '0' && c[1] <= '3' && c[2] >= '0' && c[2] <= '7' && c[3] >= '0' && c[3] <= '7') {
-            out[o++] = (char)((c[1] - '0') * 64 + (c[2] - '0') * 8 + (c[3] - '0'));
-            c += 3;
-        } else out[o++] = *c;
-    }
-    out[o] = 0;
-}
 
 static void remote_mounts_load(void) {
     strv_free(g_remote, g_nremote);
@@ -2830,12 +2849,7 @@ static void init_places(void) {
             if (sscanf(line, "%511s %511s", dev, mnt) != 2) continue;
             if (!strncmp(mnt, "/run/media/", 11) || !strncmp(mnt, "/media/", 7) || !strncmp(mnt, "/mnt/", 5)) {
                 char clean[512];
-                size_t o = 0;
-                for (const char *c = mnt; *c && o < sizeof clean - 1; c++) {
-                    if (c[0] == '\\' && c[1] == '0' && c[2] == '4' && c[3] == '0') { clean[o++] = ' '; c += 3; }
-                    else clean[o++] = *c;
-                }
-                clean[o] = 0;
+                mount_unescape(mnt, clean, sizeof clean);
                 bool dup = false; // already listed from lsblk
                 for (int r = A.nplaces_user; r < A.nplaces && !dup; r++) dup = !strcmp(A.places[r].path, clean);
                 if (dup) continue;
@@ -4317,9 +4331,11 @@ static void band_update(Pane *p) {
 static i64 item_at(Pane *p, f32 x, f32 y);
 // ui_tools.c (included near the end of the drawing code)
 static bool sheet_open(void);
+static SDL_Texture *app_icon_tex(const char *icon, int px);
 static void sheet_key(SDL_Keycode k, SDL_Keymod mod);
 static void sheet_text(const char *text);
 static void sheet_mouse(SDL_MouseButtonEvent *b);
+static bool sheet_text_focus(TextEdit *edit, bool focused);
 static void sheet_wheel(f32 dy);
 static bool sheet_scrollbar_motion(f32 y);
 static bool sheet_scrollbar_release(void);
@@ -4717,6 +4733,7 @@ static void trash_size_refresh(void) {
 static void trash_size_poll(void) {
     if (!A.trash_job || !atomic_load(&A.trash_job->done)) return;
     A.trash_size = atomic_load(&A.trash_job->size);
+    A.trash_empty = !atomic_load(&A.trash_job->files) && atomic_load(&A.trash_job->dirs) <= 1; // (the folder itself)
     A.trash_known = true;
     stats_release(A.trash_job);
     A.trash_job = NULL;
@@ -4754,6 +4771,7 @@ static void op_finished(void *arg) {
         else if (op->kind == OP_TRASH) undo_push(U_TRASH, op->in, op->out, op->aux, op->nout);
     }
     if (op->from_cut && !op->nerr && !atomic_load(&op->cancel)) clip_clear();
+    if (op->kind == OP_COMPRESS && (op->nerr || op->warn[0])) toast("%s", op->nerr ? op->err : op->warn); // (a card without errors goes quickly)
     A.redraw = true;
 }
 
@@ -4917,8 +4935,9 @@ static void op_work(const Op *op, u64 *done, u64 *total) {
 }
 
 // How far along an op is, 0..1: by bytes (copy + verify), or by items when there are no bytes to count (deleting).
+// A canceled op keeps the fraction it reached, so its bar stops there instead of jumping to full.
 static f64 op_frac(const Op *op) {
-    if (atomic_load(&op->phase) == OPS_DONE) return 1.0;
+    if (atomic_load(&op->phase) == OPS_DONE && !op_cancelled(op)) return 1.0;
     u32 ft = atomic_load(&op->files_total), fd = atomic_load(&op->files_done);
     u64 wd, wt;
     op_work(op, &wd, &wt);
@@ -4961,6 +4980,7 @@ static void fmt_eta(char *out, size_t cap, f64 s) {
 static void op_detail(Op *op, u64 now, char *det, size_t cap) {
     int ph = atomic_load(&op->phase);
     bool done = ph == OPS_DONE;
+    bool cancelled = done && op_cancelled(op);
     u64 bt = atomic_load(&op->bytes_total), bd = atomic_load(&op->bytes_done);
     u32 ft = atomic_load(&op->files_total), fd = atomic_load(&op->files_done);
     bool by_items = op->kind == OP_DELETE || !bt;
@@ -4970,7 +4990,15 @@ static void op_detail(Op *op, u64 now, char *det, size_t cap) {
     fmt_size(a, sizeof a, bd);
     fmt_size(b, sizeof b, bt);
     u32 nv = atomic_load(&op->files_verified);
-    if (done && op->nerr) snprintf(det, cap, "%s", op->err);
+    if (cancelled) { // it stopped where it was: keep that progress, and the last item in view
+        char cur[NAME_MAX + 1];
+        pthread_mutex_lock(&op->mtx);
+        snprintf(cur, sizeof cur, "%s", op->cur);
+        pthread_mutex_unlock(&op->mtx);
+        if (cur[0]) snprintf(det, cap, "Canceled  \xC2\xB7  %d%%  \xC2\xB7  %s", pct, cur);
+        else snprintf(det, cap, "Canceled  \xC2\xB7  %d%%", pct);
+    } else if (done && op->nerr) snprintf(det, cap, "%s", op->err);
+    else if (done && op->warn[0]) snprintf(det, cap, "%s", op->warn);
     else if (done && nv) snprintf(det, cap, "Done in %.1f s  \xC2\xB7  %u file%s verified", (op->t_end - op->t_start) / 1e9, nv, nv == 1 ? "" : "s");
     else if (done) snprintf(det, cap, "Done in %.1f s", (op->t_end - op->t_start) / 1e9);
     else if (ph == OPS_COUNTING) snprintf(det, cap, "Preparing\xE2\x80\xA6 %u items", ft);
@@ -5331,6 +5359,7 @@ static void new_item(Pane *p, bool folder, const char *sub) {
 static bool ssh_target_for(const char *path, SshTarget *t) {
     if (ssh_target_gvfs(path, t)) return true;
     for (int k = 0; k < A.nnets; k++) { // sshfs: label is the source "user@host:/dir"
+        if (!A.nets[k].sshfs) continue; // (NFS "nas:/export" and rclone "remote:" look alike but have no shell)
         const char *mp = A.nets[k].path, *src = A.nets[k].label, *colon = strchr(src, ':');
         size_t ml = strlen(mp);
         if (!colon || strncmp(path, mp, ml) || (path[ml] && path[ml] != '/') || strstr(src, "://")) continue;
@@ -5345,19 +5374,37 @@ static bool ssh_target_for(const char *path, SshTarget *t) {
     return false;
 }
 
+// The terminals we know: the desktops' own and the popular ones (xdg-terminal-exec starts the user's preferred one).
+static const char *const g_terminals[] = {"xdg-terminal-exec", "ptyxis", "kgx", "gnome-terminal", "konsole", "cosmic-term",
+                                          "xfce4-terminal", "mate-terminal", "qterminal", "lxterminal", "tilix", "terminator",
+                                          "ghostty", "kitty", "alacritty", "foot", "wezterm", "rio", "st", "urxvt", "xterm"};
+
 static bool find_terminal(char *exe, size_t cap, const char **name) {
+    if (g_external_terminal[0]) { // the one chosen in Options (an absolute path or a name on $PATH), and only that
+        struct stat st;
+        if (g_external_terminal[0] == '/') {
+            snprintf(exe, cap, "%s", g_external_terminal);
+            *name = path_basename(g_external_terminal);
+            return !stat(exe, &st) && S_ISREG(st.st_mode) && access(exe, X_OK) == 0;
+        }
+        const char *paths = getenv("PATH");
+        char pe[8192], *save = NULL;
+        snprintf(pe, sizeof pe, "%s", paths ? paths : "");
+        for (char *d = strtok_r(pe, ":", &save); d; d = strtok_r(NULL, ":", &save)) {
+            snprintf(exe, cap, "%s/%s", d, g_external_terminal);
+            if (!stat(exe, &st) && S_ISREG(st.st_mode) && access(exe, X_OK) == 0) { *name = path_basename(g_external_terminal); return true; }
+        }
+        return false;
+    }
     // $TERMINAL, then xdg-terminal-exec (the user's preferred terminal, where set up), then the desktops' own
-    static const char *cands[] = {NULL, "xdg-terminal-exec", "ptyxis", "kgx", "gnome-terminal", "konsole", "cosmic-term",
-                                  "xfce4-terminal", "mate-terminal", "qterminal", "lxterminal", "tilix", "terminator",
-                                  "ghostty", "kitty", "alacritty", "foot", "wezterm", "rio", "st", "urxvt", "xterm"};
-    cands[0] = getenv("TERMINAL");
     const char *path_env = getenv("PATH");
-    for (size_t i = 0; i < ARRAY_COUNT(cands); i++) {
-        if (!cands[i] || !cands[i][0] || !path_env) continue;
+    for (size_t i = 0; i <= ARRAY_COUNT(g_terminals); i++) {
+        const char *cand = i ? g_terminals[i - 1] : getenv("TERMINAL");
+        if (!cand || !cand[0] || !path_env) continue;
         char pe[4096];
         snprintf(pe, sizeof pe, "%s", path_env);
         for (char *d = strtok(pe, ":"); d; d = strtok(NULL, ":")) {
-            snprintf(exe, cap, "%s/%s", d, cands[i]);
+            snprintf(exe, cap, "%s/%s", d, cand);
             if (access(exe, X_OK) == 0) { *name = path_basename(exe); return true; }
         }
     }
@@ -5368,7 +5415,7 @@ static bool find_terminal(char *exe, size_t cap, const char **name) {
 static void spawn_terminal(const char *dir, char *const cmd[]) {
     char exe[PATH_MAX];
     const char *name;
-    if (!find_terminal(exe, sizeof exe, &name)) { toast("No terminal found (set $TERMINAL)"); return; }
+    if (!find_terminal(exe, sizeof exe, &name)) { toast("Terminal unavailable; choose an executable in Options > Integration"); return; }
     char *argv[32];
     int n = 0;
     argv[n++] = exe;
@@ -5608,7 +5655,10 @@ static void menu_terminal_items(Pane *p) {
     } else menu_add("Open terminal tab here", "Shift+F4", ACT_TERMINAL, true);
     Tab *ct = A.ap ? A.ap->cur : NULL;
     menu_add(ct && ct->dock_on ? "Hide terminal panel" : "Show terminal panel", "F4", ACT_TERM_PANEL, ct && !ct->term);
-    menu_add("Open in external terminal", "", ACT_TERMINAL_EXTERNAL, true);
+    static char label[NAME_MAX + 32]; // the chosen terminal by name
+    if (g_external_terminal[0]) snprintf(label, sizeof label, "Open in %s", path_basename(g_external_terminal));
+    else snprintf(label, sizeof label, "Open in external terminal");
+    menu_add(label, "", ACT_TERMINAL_EXTERNAL, true);
 }
 
 // Where Ctrl+V puts things. Tree view: into the selected folder, or the subfolder a selected file sits in (rows are
@@ -5898,7 +5948,13 @@ static void do_action(Pane *p, int act) {
     default:
         if (act >= ACT_COL_BASE && act < ACT_COL_BASE + COL_COUNT) col_toggle(act - ACT_COL_BASE);
         else if (act >= ACT_VIEW_BASE && act < ACT_VIEW_BASE + ZOOM_COUNT) set_zoom_level(p, act - ACT_VIEW_BASE);
-        else if (act >= ACT_SORT_BASE && act < ACT_SORT_BASE + SORT_COUNT) pane_set_sort(p, act - ACT_SORT_BASE);
+        else if (act == ACT_SORT_ASC || act == ACT_SORT_DESC) {
+            p->sort_desc = act == ACT_SORT_DESC;
+            folder_view_remember(p);
+            pane_resort(p);
+        } else if (act >= ACT_SORT_BASE && act < ACT_SORT_BASE + SORT_COUNT) { // the menu: Ascending / Descending turn it round
+            if (p->sort_key != act - ACT_SORT_BASE) pane_set_sort(p, act - ACT_SORT_BASE);
+        }
         else if (act >= ACT_GROUP_BASE && act < ACT_GROUP_BASE + GROUP_COUNT) pane_set_group(p, act - ACT_GROUP_BASE);
         else if (act >= ACT_QA_MOVE_BASE && act < ACT_QA_MOVE_BASE + 16) qa_action(act);
         else if (act >= ACT_FV_SUBFOLDERS && act <= ACT_FV_RESET) folder_view_action(p, act);
@@ -6094,6 +6150,9 @@ static void menu_finish(f32 x, f32 y);
 static void menu_add_check_key(const char *label, int act, bool checked, int key_id);
 static void menu_open_columns(Pane *p, f32 x, f32 y);
 static void menu_add_check(const char *label, int act, bool checked, bool enabled);
+static void menu_sub_views(Pane *p);
+static void menu_sub_sort(Pane *p);
+static void menu_sub_group(Pane *p);
 
 // "Open with" submenu: apps picked for that type through "Other app..." (the sheet) before, newest first, then the
 // apps the sheet lists for it by default (its default app first). Ids are kept, not app pointers: the app list can
@@ -6101,7 +6160,7 @@ static void menu_add_check(const char *label, int act, bool checked, bool enable
 #define OW_MENU_TYPE_APPS 10 // more than this: "Other app..." has the rest
 static struct {
     char mime[160];
-    char id[OW_MENU_APPS][256], name[OW_MENU_APPS][128];
+    char id[OW_MENU_APPS][256], name[OW_MENU_APPS][128], icon[OW_MENU_APPS][128]; // icon: the .desktop Icon= (menus show it)
     int n, npick; // the first npick are picked ones, the rest the type's own
     int def;      // the type's default app's index, or -1
 } g_ow_menu;
@@ -6123,6 +6182,7 @@ static void ow_menu_add_app(const DesktopApp *a) {
         if (!strcmp(g_ow_menu.id[k], a->id)) return;
     if (g_ow_menu.n >= OW_MENU_APPS) return;
     snprintf(g_ow_menu.id[g_ow_menu.n], sizeof g_ow_menu.id[0], "%s", a->id);
+    snprintf(g_ow_menu.icon[g_ow_menu.n], sizeof g_ow_menu.icon[0], "%s", a->icon ? a->icon : "");
     snprintf(g_ow_menu.name[g_ow_menu.n++], sizeof g_ow_menu.name[0], "%s", a->name);
 }
 
@@ -6240,42 +6300,12 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         menu_add("Select all", "Ctrl+A", ACT_SELECT_ALL, p->count > 0);
         menu_add("Undo", "Ctrl+Z", ACT_UNDO, A.nundo > 0);
         menu_sep();
-        {
-            static const int lv[] = {0, 1, 2, 4, 6, 7};
-            static const char *sc[] = {"Ctrl+Shift+6", "Ctrl+Shift+5", "Ctrl+Shift+4", "Ctrl+Shift+3", "Ctrl+Shift+2", "Ctrl+Shift+1"};
-            int cur = zoom_level_of(p);
-            for (size_t i = 0; i < ARRAY_COUNT(lv); i++) {
-                menu_add_check(g_zoom[lv[i]].label, ACT_VIEW_BASE + lv[i], cur == lv[i], true);
-                A.menu.items[A.menu.n - 1].shortcut = sc[i];
-            }
-            menu_add_check("Tree view", ACT_TREE_VIEW, p->tree, !pane_is_archive(p));
-            const char *tk = keymap_label(CMD_TREE_VIEW);
-            snprintf(A.menu.scbuf[A.menu.n - 1], sizeof A.menu.scbuf[0], "%s", tk ? tk : "");
-            A.menu.items[A.menu.n - 1].shortcut = A.menu.scbuf[A.menu.n - 1];
-            menu_add_check_key("Disk usage", ACT_DU_TOGGLE, p->du, CMD_DISK_USAGE);
-            A.menu.items[A.menu.n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
-            menu_add_check_key("Snapshots of this drive", ACT_SNAP_TOGGLE, p->snapv, CMD_SNAPSHOTS);
-            A.menu.items[A.menu.n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
-        }
-        menu_sep();
-        {
-            static const int sk[] = {SORT_NAME, SORT_DATE, SORT_TYPE, SORT_SIZE};
-            static const char *sl[] = {"Sort by name", "Sort by date modified", "Sort by type", "Sort by size"};
-            for (int i = 0; i < 4; i++) menu_add_check(sl[i], ACT_SORT_BASE + sk[i], p->sort_key == sk[i], true);
-        }
-        menu_sep();
-        {
-            static const char *gl[] = {"No grouping", "Group by date", "Group by type", "Group by size"};
-            for (int g = 0; g < GROUP_COUNT; g++)
-                menu_add_check(gl[g], ACT_GROUP_BASE + g, p->group == g, p->view == VIEW_DETAILS || g == GROUP_NONE);
-        }
-        menu_sep();
-        {
-            FolderView *fv = folder_view_find(p->path, true);
-            menu_add_check("Use this view in subfolders", ACT_FV_SUBFOLDERS, fv && fv->recursive, true);
-            menu_add("Use this view everywhere", "", ACT_FV_ALL, true);
-            menu_add("Reset folder view", "", ACT_FV_RESET, fv != NULL);
-        }
+        menu_add("Views", "", ACT_MENU_VIEWS, true);
+        m->items[m->n - 1].sub = menu_sub_views;
+        menu_add("Sort by", "", ACT_MENU_SORT, true);
+        m->items[m->n - 1].sub = menu_sub_sort;
+        menu_add("Group by", "", ACT_MENU_GROUP, true);
+        m->items[m->n - 1].sub = menu_sub_group;
         menu_sep();
         menu_add(A.show_hidden ? "Hide hidden files" : "Show hidden files", "Ctrl+H", ACT_HIDDEN, true);
         menu_add("Refresh", "F5", ACT_REFRESH, true);
@@ -6303,6 +6333,68 @@ static void menu_add_check(const char *label, int act, bool checked, bool enable
     m->items[m->n++] = (MenuItem){label, "", act, enabled, false, true, checked, false, NULL, false};
 }
 
+// The folder menu's submenus: view modes, sort key + direction, grouping.
+static void menu_sub_views(Pane *p) {
+    Menu *m = g_menu_build ? g_menu_build : &A.menu;
+    static const int levels[] = {0, 1, 2, 4, 6, 7};
+    static const char *shortcuts[] = {"Ctrl+Shift+6", "Ctrl+Shift+5", "Ctrl+Shift+4", "Ctrl+Shift+3", "Ctrl+Shift+2", "Ctrl+Shift+1"};
+    int current = zoom_level_of(p);
+    for (size_t i = 0; i < ARRAY_COUNT(levels); i++) {
+        menu_add_check(g_zoom[levels[i]].label, ACT_VIEW_BASE + levels[i], current == levels[i], true);
+        m->items[m->n - 1].shortcut = shortcuts[i];
+    }
+    menu_add_check("Tree view", ACT_TREE_VIEW, p->tree, !pane_is_archive(p));
+    const char *key = keymap_label(CMD_TREE_VIEW);
+    if (key) {
+        snprintf(m->scbuf[m->n - 1], sizeof m->scbuf[0], "%s", key);
+        m->items[m->n - 1].shortcut = m->scbuf[m->n - 1];
+    }
+    menu_add_check_key("Disk usage", ACT_DU_TOGGLE, p->du, CMD_DISK_USAGE);
+    m->items[m->n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
+    menu_add_check_key("Snapshots of this drive", ACT_SNAP_TOGGLE, p->snapv, CMD_SNAPSHOTS);
+    m->items[m->n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
+    menu_sep();
+    FolderView *view = folder_view_find(p->path, true);
+    menu_add_check("Use this view in subfolders", ACT_FV_SUBFOLDERS, view && view->recursive, true);
+    menu_add("Use this view everywhere", "", ACT_FV_ALL, true);
+    menu_add("Reset folder view", "", ACT_FV_RESET, view != NULL);
+}
+
+// Name, dates, type and size always; Permissions and Owner only while their column is shown (sorting by what you can't
+// see makes little sense). Extension sorts like Type: listed only while it's the current key. all: every key (the
+// toolbar's sort button).
+static void menu_add_sort(Pane *p, bool all) {
+    static const char *labels[SORT_COUNT] = {"Name", "Date modified", "Type", "Size", "Date created", "Extension", "Permissions", "Owner"};
+    for (int i = 0; i < SORT_COUNT; i++) {
+        bool shown = all || i <= SORT_CREATED || p->sort_key == i;
+        for (int c = 0; c < COL_COUNT && !shown; c++) shown = g_coldef[c].sort == i && i != SORT_EXT && col_visible(c);
+        if (shown) menu_add_check(labels[i], ACT_SORT_BASE + i, p->sort_key == i, true);
+    }
+    menu_sep();
+    menu_add_check("Ascending", ACT_SORT_ASC, !p->sort_desc, true);
+    menu_add_check("Descending", ACT_SORT_DESC, p->sort_desc, true);
+}
+
+static void menu_sub_sort(Pane *p) { menu_add_sort(p, false); }
+
+// The toolbar's sort button: every sort key and the direction.
+static void menu_open_sort(Pane *p, f32 x, f32 y) {
+    Menu *m = &A.menu;
+    m->n = m->ninfo = 0;
+    m->hover = -1;
+    m->pane = p;
+    m->keep_open = false;
+    m->reopen = NULL;
+    menu_add_sort(p, true);
+    menu_finish(x, y);
+}
+
+static void menu_sub_group(Pane *p) {
+    static const char *labels[] = {"None", "Date", "Type", "Size"};
+    for (int g = 0; g < GROUP_COUNT; g++)
+        menu_add_check(labels[g], ACT_GROUP_BASE + g, p->group == g, p->view == VIEW_DETAILS || g == GROUP_NONE);
+}
+
 // Right-click on a column header.
 static void menu_open_columns(Pane *p, f32 x, f32 y) {
     Menu *m = &A.menu;
@@ -6324,7 +6416,7 @@ static void menu_open_columns(Pane *p, f32 x, f32 y) {
 // Stays open while toggling; opens above the button.
 static void menu_add_check_key(const char *label, int act, bool checked, int key_id) {
     menu_add_check(label, act, checked, true);
-    Menu *m = &A.menu;
+    Menu *m = g_menu_build ? g_menu_build : &A.menu;
     const char *k = keymap_label(key_id);
     if (k && m->n) {
         snprintf(m->scbuf[m->n - 1], sizeof m->scbuf[0], "%s", k);
@@ -6531,29 +6623,20 @@ static void empty_trash_cb(int choice, bool check, void *ud) {
     else op_free(op);
 }
 
-// Delete items permanently (with their .trashinfo); all = empty the trash.
-static void trash_delete(Pane *p, bool all) {
+// Ask, then delete these entries of the trash (names in its files folder) for good, with their .trashinfo;
+// all = the whole trash.
+static void trash_confirm_delete(char **names, int n, bool all) {
+    if (!n) { toast(all ? "The trash is already empty" : "Nothing selected"); return; }
     char files[PATH_MAX], info[PATH_MAX];
     trash_dirs(files, info, sizeof files);
-    int n = 0, cap = 64;
-    char **src = xmalloc((size_t)cap * sizeof(char *)), **aux = xmalloc((size_t)cap * sizeof(char *));
-    Listing *L = p->L;
-    for (u32 i = 0; L && i < (all ? L->count : p->count); i++) {
-        u32 ei = all ? i : p->order[i];
-        if (!all && !p->sel[ei] && !(p->sel_count == 0 && (i64)i == p->cursor)) continue;
-        if (n == cap) {
-            cap *= 2;
-            src = xrealloc(src, (size_t)cap * sizeof(char *));
-            aux = xrealloc(aux, (size_t)cap * sizeof(char *));
-        }
+    char **src = xmalloc((size_t)n * sizeof(char *)), **aux = xmalloc((size_t)n * sizeof(char *));
+    for (int i = 0; i < n; i++) {
         char sp[PATH_MAX], ip[PATH_MAX + NAME_MAX + 16];
-        path_join(sp, sizeof sp, files, L->entries[ei].name);
-        snprintf(ip, sizeof ip, "%s/%s.trashinfo", info, L->entries[ei].name);
-        src[n] = strdup(sp);
-        aux[n] = strdup(ip);
-        n++;
+        path_join(sp, sizeof sp, files, names[i]);
+        snprintf(ip, sizeof ip, "%s/%s.trashinfo", info, names[i]);
+        src[i] = strdup(sp);
+        aux[i] = strdup(ip);
     }
-    if (!n) { free(src); free(aux); toast(all ? "The trash is already empty" : "Nothing selected"); return; }
     Op *op = op_new(OP_DELETE, src, n, NULL);
     op->aux_in = strv_dup(aux, n);
     char msg[200];
@@ -6563,14 +6646,61 @@ static void trash_delete(Pane *p, bool all) {
     dialog_open(all ? "Empty Trash" : "Delete permanently", msg, b, 2, 0, 1, NULL, empty_trash_cb, op);
     A.dlg.icon = DI_DANGER;
     A.dlg.danger = true;
-    { // list the trashed names (as they were), not their trash-internal paths
-        char **names = xmalloc((size_t)MIN(n, 5) * sizeof(char *));
-        for (int i = 0; i < n && i < 5; i++) names[i] = src[i];
-        dialog_items(names, n, false); // (their trash-internal paths would mean nothing)
-        free(names);
-    }
+    dialog_items(src, n, false); // the trashed names (as they were), not their trash-internal paths
     strv_free(src, n);
     strv_free(aux, n);
+}
+
+// Emptying the trash from anywhere (Quick Access, palette): its folder is read on a worker, then we ask.
+typedef struct {
+    char **names;
+    int n, err;
+} TrashList;
+
+static void trash_list_done(void *arg) {
+    TrashList *t = arg;
+    if (t->err) toast("Couldn't read the Trash: %s", strerror(t->err));
+    else if (!A.dlg.open) trash_confirm_delete(t->names, t->n, true); // (another question came up meanwhile: leave it be)
+    strv_free(t->names, t->n);
+    free(t);
+}
+
+static void trash_list_job(void *arg) {
+    TrashList *t = arg;
+    char files[PATH_MAX], info[PATH_MAX];
+    trash_dirs(files, info, sizeof files);
+    DIR *d = opendir(files);
+    if (!d) { if (errno != ENOENT) t->err = errno; } // no files folder yet: nothing in the trash
+    else {
+        int cap = 0;
+        struct dirent *e;
+        for (errno = 0; (e = readdir(d)); errno = 0) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            if (t->n == cap) { cap = cap ? cap * 2 : 64; t->names = xrealloc(t->names, (size_t)cap * sizeof(char *)); }
+            t->names[t->n++] = strdup(e->d_name);
+        }
+        if (errno) t->err = errno;
+        closedir(d);
+    }
+    main_post(trash_list_done, t);
+}
+
+// Delete items permanently (with their .trashinfo); all = empty the trash, whichever folder p shows.
+static void trash_delete(Pane *p, bool all) {
+    Listing *L = p->L;
+    if (all && !(pane_is_trash(p) && L && atomic_load(&L->state) == LST_COMPLETE)) { // not listed here: read it
+        pool_submit(trash_list_job, xcalloc(1, sizeof(TrashList)));
+        return;
+    }
+    int n = 0;
+    char **names = xmalloc((size_t)MAX(1, L ? L->count : 0) * sizeof(char *));
+    for (u32 i = 0; L && i < (all ? L->count : p->count); i++) {
+        u32 ei = all ? i : p->order[i];
+        if (!all && !p->sel[ei] && !(p->sel_count == 0 && (i64)i == p->cursor)) continue;
+        names[n++] = (char *)L->entries[ei].name;
+    }
+    trash_confirm_delete(names, n, all);
+    free(names);
 }
 
 // Right-click on a tab.
@@ -6700,7 +6830,8 @@ static void menu_open_place(int idx, f32 x, f32 y) {
         menu_add("Disconnect", "", ACT_NET_DISCONNECT, true);
     } else {
         menu_add("Open in new tab", "Middle-click", ACT_PLACE_NEW_TAB, true);
-        menu_add("Disk usage\xE2\x80\xA6", "", ACT_DU_PLACE, pl->kind != PK_TRASH);
+        if (pl->kind == PK_TRASH) menu_add("Empty Trash", "", ACT_TRASH_EMPTY, !(A.trash_known && A.trash_empty));
+        else menu_add("Disk usage\xE2\x80\xA6", "", ACT_DU_PLACE, true);
         if (pl->kind == PK_DRIVE) menu_add("Snapshots\xE2\x80\xA6", "", ACT_SNAP_PLACE, true);
         if (pl->group >= 0) {
             QaGroup *g = &A.qa[pl->group];
@@ -6887,6 +7018,102 @@ static void qa_pin_paths(char **paths, int n, int g) {
     A.settings_dirty = true;
 }
 
+// The icon before a menu action (UI_*, built in: ui_icons.h), by what it does - never by its label. -1: none, for choices
+// in a list (sort keys, columns, apps...) where the check mark says enough, and for anything not listed here.
+static int menu_action_icon(const MenuItem *it) {
+    int a = it->act;
+    if (a >= ACT_VIEW_BASE && a < ACT_VIEW_BASE + ZOOM_COUNT) {
+        int lv = a - ACT_VIEW_BASE;
+        return lv == 0 ? UI_TABLE_2 : lv == 1 ? UI_LIST : UI_LAYOUT_GRID; // Details, List, icons
+    }
+    switch (a) {
+    case ACT_CUT: return UI_SCISSORS;
+    case ACT_COPY: case ACT_TERM_COPY: case ACT_COPY_PATH: case ACT_CLOUD_COPY_PATH: case ACT_GIT_COPY_BRANCH:
+    case ACT_DROP_COPY: return UI_COPY;
+    case ACT_GIT_COPY_REMOTE: case ACT_DROP_LINK: return UI_LINK;
+    case ACT_PASTE: case ACT_TERM_PASTE: return UI_CLIPBOARD_PASTE;
+    case ACT_DROP_MOVE: return UI_ARROW_RIGHT;
+    case ACT_TRASH: case ACT_TRASH_EMPTY: case ACT_NET_FORGET: case ACT_QA_GROUP_DELETE: case ACT_SNAP_DELETE: return UI_TRASH;
+    case ACT_DELETE: return UI_CIRCLE_X;
+    case ACT_TERM_CLEAR: return UI_ERASER;
+    case ACT_RENAME: case ACT_BATCH_RENAME: case ACT_DEV_RENAME: case ACT_QA_RENAME: case ACT_QA_GROUP_RENAME:
+    case ACT_NET_EDIT_SAVED: return UI_PENCIL;
+    case ACT_PROPERTIES: return UI_INFO;
+    case ACT_NEW_FOLDER: case ACT_NEW_FOLDER_IN: return UI_FOLDER_PLUS;
+    case ACT_NEW_FILE: case ACT_NEW_FILE_IN: return UI_FILE_PLUS;
+    case ACT_QA_NEW_GROUP: return UI_FOLDERS;
+    case ACT_TERMINAL: case ACT_TERMINAL_LOCAL: case ACT_SSH_TERMINAL: return UI_TERMINAL;
+    case ACT_TERM_PANEL: return UI_PANEL_BOTTOM; // a panel along the bottom
+    case ACT_TERMINAL_EXTERNAL: return UI_SQUARE_TERMINAL;
+    case ACT_OPEN: case ACT_DU_OPEN: case ACT_SNAP_OPEN: case ACT_DEV_MOUNT: return UI_FOLDER_OPEN;
+    case ACT_OPEN_WITH: return it->sub ? UI_FOLDER_OPEN : UI_ELLIPSIS; // the submenu / "Other app..."
+    case ACT_OPEN_TAB: case ACT_PLACE_NEW_TAB: case ACT_DU_OPEN_TAB: case ACT_DEV_OPEN_TAB: case ACT_CLOUD_CONNECT_TAB:
+    case ACT_TAB_NEW: return UI_SQUARE_PLUS;
+    case ACT_TAB_DUP: return UI_COPY_PLUS;
+    case ACT_TAB_WINDOW: return UI_EXTERNAL_LINK;
+    case ACT_OPEN_SPLIT_RIGHT: case ACT_TAB_SPLIT_RIGHT: return UI_COLUMNS_2;
+    case ACT_OPEN_SPLIT_DOWN: case ACT_TAB_SPLIT_DOWN: return UI_ROWS_2;
+    case ACT_TAB_CLOSE: case ACT_TAB_CLOSE_OTHERS: case ACT_TAB_CLOSE_LEFT: case ACT_TAB_CLOSE_RIGHT: case ACT_CMP_END:
+    case ACT_DROP_CANCEL: case ACT_QA_REMOVE: return UI_X;
+    case ACT_TAB_REOPEN: case ACT_UNDO: case ACT_TRASH_RESTORE: case ACT_TRASH_RESTORE_ALL: case ACT_SNAP_RESTORE:
+    case ACT_FV_RESET: case ACT_COL_RESET: case ACT_DEV_RESET_NAME: case ACT_QA_RESET_NAME: return UI_UNDO_2;
+    case ACT_MENU_VIEWS: return UI_LAYOUT_DASHBOARD;
+    case ACT_MENU_SORT: return UI_ARROW_DOWN_WIDE_NARROW;
+    case ACT_MENU_GROUP: return UI_GROUP;
+    case ACT_TREE_VIEW: return UI_LIST_TREE;
+    case ACT_DU_TOGGLE: case ACT_SNAP_TOGGLE: case ACT_SNAP_BACK: // the Views toggles; in the views themselves: back
+        return !it->checkable || a == ACT_SNAP_BACK ? UI_ARROW_LEFT : a == ACT_DU_TOGGLE ? UI_CHART_PIE : UI_ROTATE_CCW_CLOCK;
+    case ACT_DU_NEW_TAB: case ACT_DU_PLACE: return UI_CHART_PIE;
+    case ACT_SNAP_PLACE: return UI_ROTATE_CCW_CLOCK;
+    case ACT_SNAP_CREATE: return UI_CAMERA;
+    case ACT_FV_SUBFOLDERS: return UI_FOLDER_TREE;
+    case ACT_FV_ALL: return UI_GLOBE;
+    case ACT_HIDDEN: return !it->checkable && A.show_hidden ? UI_EYE_OFF : UI_EYE;
+    case ACT_PREVIEW: case ACT_DU_SHOW: return UI_EYE;
+    case ACT_REFRESH: case ACT_CLOUD_REFRESH: case ACT_GIT_REFRESH: case ACT_SNAP_REFRESH: case ACT_DU_RESCAN:
+    case ACT_CMP_AGAIN: return UI_REFRESH_CW;
+    case ACT_SELECT_ALL: return UI_SQUARE_CHECK_BIG;
+    case ACT_PIN: return UI_PIN;
+    case ACT_COMPRESS_ZIP: case ACT_COMPRESS_TGZ: case ACT_EXTRACT_SEL: case ACT_EXTRACT_HERE: case ACT_EXTRACT_ALL:
+        return UI_ARCHIVE;
+    case ACT_CMP_START: case ACT_CMP_TAB: case ACT_SNAP_COMPARE: return UI_GIT_COMPARE;
+    case ACT_CMP_SYNC_A: case ACT_CMP_SYNC_B: case ACT_CMP_SYNC_BOTH: case ACT_CMP_MIRROR_A: case ACT_CMP_MIRROR_B:
+        return UI_ARROW_RIGHT_LEFT;
+    case ACT_CMP_DIFF_ONLY: return UI_FUNNEL;
+    case ACT_CS_HERE: return UI_SEARCH;
+    case ACT_CS_OPEN_LINE: return UI_CODE;
+    case ACT_CS_FOLD_ALL: return UI_MINIMIZE_2;
+    case ACT_CS_UNFOLD_ALL: return UI_MAXIMIZE_2;
+    case ACT_QA_UP: case ACT_QA_GROUP_UP: case ACT_DU_UP: return UI_ARROW_UP;
+    case ACT_QA_DOWN: case ACT_QA_GROUP_DOWN: return UI_ARROW_DOWN;
+    case ACT_NET_NEW: case ACT_NET_CONNECT_SAVED: case ACT_CLOUD_CONNECT: return UI_PLUG;
+    case ACT_CLOUD_NEW: return UI_PLUS;
+    case ACT_CLOUD_RECONNECT: return UI_KEY_ROUND;
+    case ACT_NET_DISCONNECT: case ACT_CLOUD_DISCONNECT: case ACT_DEV_UNMOUNT: return UI_UNLINK;
+    case ACT_DEV_EJECT: return UI_EJECT;
+    case ACT_CLOUD_LOG: return UI_FILE_TEXT;
+    case ACT_GIT_OPEN_REMOTE: return UI_EXTERNAL_LINK;
+    case ACT_GIT_ROOT: return UI_FOLDER_GIT_2;
+    case ACT_GIT_STATUS: return UI_GIT_BRANCH;
+    case ACT_FOLDER_SIZES: case ACT_SIZE_BARS: return UI_CHART_COLUMN;
+    case ACT_LOAD_TIMES: return UI_CLOCK;
+    }
+    return -1;
+}
+
+static bool menu_item_is_app(const MenuItem *it) { return it->act >= ACT_OW_APP_BASE && it->act < ACT_OW_APP_BASE + g_ow_menu.n; }
+
+// Menus show those icons (render.c draws them; built in, the same everywhere); the Open with apps show their own.
+// When no item has an icon there's no icon column at all.
+static bool menu_icons_in(const Menu *m) {
+    for (int i = 0; i < m->n; i++) {
+        const MenuItem *it = &m->items[i];
+        if (it->sep || it->info || it->head) continue;
+        if (menu_item_is_app(it) || menu_action_icon(it) >= 0) return true;
+    }
+    return false;
+}
+
 // Size and place a menu at x, y (kept inside the window). x_left >= 0: no room to the right of x - it ends at
 // x_left instead (a submenu opens on the parent's other side).
 static void menu_layout(Menu *m, f32 x, f32 y, f32 x_left) {
@@ -6905,7 +7132,7 @@ static void menu_layout(Menu *m, f32 x, f32 y, f32 x_left) {
     }
     bool anycheck = false;
     for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable;
-    f32 w = roundf(lw + sw + S(64) + (anycheck ? S(14) : 0));
+    f32 w = roundf(lw + sw + S(64) + (anycheck ? S(14) : 0) + (menu_icons_in(m) ? S(26) : 0));
     if (x_left >= 0 && x + w > A.W - S(4) && x_left - w >= S(4)) x = x_left - w;
     x = MAX(S(4), MIN(x, A.W - w - S(4)));
     m->content_h = h;
@@ -7767,9 +7994,33 @@ static bool pane_watches(const Pane *p, const char *path) {
     return false;
 }
 
+// Keep watching path (adds the watch if it's new); false if it can't be watched.
+static bool watch_use(const char *path) {
+    int k = -1;
+    for (int i = 0; i < g_nw; i++)
+        if (!strcmp(g_w[i].path, path)) k = i;
+    if (k < 0 && g_nw < MAX_WATCHES) {
+        int wd = inotify_add_watch(g_ino, path, WATCH_MASK);
+        if (wd < 0) return false;
+        k = g_nw++;
+        memset(&g_w[k], 0, sizeof g_w[k]);
+        snprintf(g_w[k].path, sizeof g_w[k].path, "%s", path);
+        g_w[k].wd = wd;
+    }
+    if (k >= 0) g_w[k].used = true;
+    return k >= 0;
+}
+
 static void watch_sync(void) {
     if (g_ino < 0) return;
     for (int i = 0; i < g_nw; i++) g_w[i].used = false;
+    { // the trash too, while browsing elsewhere: its bin in the sidebar shows whether anything is in it
+        static u64 retry; // no files folder yet (nothing trashed so far): try again every few seconds, not every loop
+        char tf[PATH_MAX], ti[PATH_MAX];
+        trash_dirs(tf, ti, sizeof tf);
+        u64 now = now_ns();
+        if (now >= retry && !watch_use(tf)) retry = now + 3000000000ull;
+    }
     for (int t = 0; t < A.ntabs; t++)
         for (int j = 0; j < A.tabs[t]->npanes; j++) {
             Pane *p = &A.tabs[t]->pane[j];
@@ -7779,18 +8030,7 @@ static void watch_sync(void) {
                 char path[PATH_MAX];
                 if (x == 0) snprintf(path, sizeof path, "%s", p->path);
                 else path_join(path, sizeof path, p->path, p->expanded[x - 1]);
-                int k = -1;
-                for (int i = 0; i < g_nw; i++)
-                    if (!strcmp(g_w[i].path, path)) k = i;
-                if (k < 0 && g_nw < MAX_WATCHES) {
-                    int wd = inotify_add_watch(g_ino, path, WATCH_MASK);
-                    if (wd < 0) continue;
-                    k = g_nw++;
-                    memset(&g_w[k], 0, sizeof g_w[k]);
-                    snprintf(g_w[k].path, sizeof g_w[k].path, "%s", path);
-                    g_w[k].wd = wd;
-                }
-                if (k >= 0) g_w[k].used = true;
+                watch_use(path);
             }
         }
     int j = 0;
@@ -7833,6 +8073,7 @@ static void watch_process(void) {
         if (blocked || !(quiet || overdue) || now - w->last_refresh < gap) continue;
         w->dirty = false;
         w->last_refresh = now;
+        if (is_trash_dir(w->path)) trash_size_refresh(); // (measures it again: full or empty bin)
         for (int t = 0; t < A.ntabs; t++)
             for (int j = 0; j < A.tabs[t]->npanes; j++) {
                 Pane *p = &A.tabs[t]->pane[j];
@@ -9974,6 +10215,7 @@ static void search_toggle_recursive(Pane *p);
 static void set_zoom(f32 z);
 static void settings_save(void);
 static void settings_file(char *out, size_t cap, bool dir_only);
+static void desktop_look_sync(void); // integration.c
 
 static void run_command(int id) {
     Pane *p = active_pane();
@@ -10062,6 +10304,7 @@ static void run_command(int id) {
             if (layout_open(id - CMD_LAYOUT_BASE)) toast("Layout \xE2\x80\x9C%s\xE2\x80\x9D", g_layouts[id - CMD_LAYOUT_BASE].name);
         } else if (id >= CMD_ICON_THEME_BASE && id < CMD_ICON_THEME_BASE + ICON_THEMES) {
             icon_set_theme(id - CMD_ICON_THEME_BASE);
+            desktop_look_sync();
             toast("Icon theme: %s", g_icon_theme_names[g_icon_theme]);
             A.settings_dirty = true;
         }
@@ -10878,6 +11121,7 @@ static void preview_update(void) {
     }
 }
 
+#include "text_pointer.c"
 #include "input.c"
 
 #include "render.c"
@@ -11040,7 +11284,9 @@ static bool animating(void) {
 }
 
 static void frame_draw(void) {
+    g_text_field_count = 0; // (each te_draw records its field again)
     draw_clip(NULL);
+    fit_tip_begin(A.mx, A.my);
     g_alpha = 1.f;
     if (A.shadow_px) { // transparent margin, opaque window (clearing ignores the viewport)
         SDL_SetRenderDrawColor(A.ren, 0, 0, 0, 0);
@@ -11055,6 +11301,7 @@ static void frame_draw(void) {
     // While a menu, the palette, a sheet or a dialog is open, nothing underneath reacts to the mouse.
     bool mouse_in = A.mouse_in;
     if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open) A.mouse_in = false;
+    fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     bool multi = A.npanels > 1;
     for (int i = 0; i < A.npanels; i++) {
         Panel *pn = A.panels[i];
@@ -11067,7 +11314,7 @@ static void frame_draw(void) {
             bool dh = A.drag == DRAG_DOCK || (A.mouse_in && A.drag == DRAG_NONE && in_rect(ct->dock_div, A.mx, A.my));
             ct->dock->hint_rpad = ct->dock_x.w + roundf(S(6)); // (its scrolled-back hint goes left of the close button)
             term_draw(ct->dock, ct->dock_r, pn == A.ap && ct->dock_focus);
-            draw_rect(ct->dock_r.x, ct->dock_r.y - 1, ct->dock_r.w, 1, C(dh ? COL_ACCENT : COL_BORDER));
+            if (g_separators || dh) draw_rect(ct->dock_r.x, ct->dock_r.y - 1, ct->dock_r.w, 1, C(dh ? COL_ACCENT : COL_BORDER));
             Rect xb = ct->dock_x; // close (hides it, like F4), for those who don't use the keys
             bool xh = A.drag == DRAG_NONE && hot(xb);
             draw_rrect(xb.x, xb.y, xb.w, xb.h, xb.h * 0.5f, C(xh ? COL_CONTROL_HOVER : COL_POPUP));
@@ -11091,15 +11338,22 @@ static void frame_draw(void) {
     draw_toast();
     draw_drag_badge();
     draw_tab_drop();
+    if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open) g_text_field_count = 0; // under an overlay: no clicks
     A.mouse_in = mouse_in; // overlays get the mouse
+    fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     draw_menu();
     draw_palette();
     A.mouse_in = mouse_in && !A.dlg.open;
+    fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     sheet_draw();
     A.mouse_in = mouse_in;
+    fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     draw_dialog();
     draw_preedit();
     if (A.show_overlay) draw_overlay();
+    fit_tip_mouse(false);
+    draw_fit_tooltip();
+    draw_window_edge();
     draw_flush();
     corners_mask();
     shadow_draw();
@@ -11232,6 +11486,9 @@ static void frame(void) {
         for (int i = 0; i < A.ntabs; i++)
             if (A.tabs[i]->term && !term_settled(A.tabs[i]->term)) ready = false; // a shell prompt takes a moment
         if (git_busy() || du_busy() || snapview_busy() || (g_cmp.on && !cmp_ready())) ready = false;
+        if ((theme_is_system() || icon_system_selected()) && !g_desktop.known) ready = false; // the desktop's look
+        for (int i = 0; i < g_nsysicons; i++)
+            if (g_sysicons[i].state == SYSI_PENDING) ready = false; // and its icons
         if (ready && ++A.screenshot_frames >= 3) {
             SDL_Surface *s = SDL_RenderReadPixels(A.ren, NULL);
             if (s) {
@@ -11680,6 +11937,7 @@ int main(int argc, char **argv) {
     }
     icon_themes_reload();
     icon_set_theme(MAX(0, icon_theme_find(A.icon_theme_name)));
+    desktop_look_sync(); // (Theme or File icons "System", the desktop's accent)
     const char *mono[] = {"JetBrains Mono", "Cascadia Code", "Fira Code", "DejaVu Sans Mono", "Noto Sans Mono", "monospace"};
     A.mono_path = find_font_file(mono, (int)ARRAY_COUNT(mono));
     char *bold = font_weight_file(A.font_path, FC_WEIGHT_SEMIBOLD);
@@ -11781,14 +12039,17 @@ int main(int argc, char **argv) {
             }
         SDL_Event e;
         bool got;
+        int tip_ms = A.win_hidden ? 0 : fit_tip_wait_ms(); // the full text of a cut-off label, due soon
         if (hold_ms) got = SDL_WaitEventTimeout(&e, hold_ms); // the listing's progress wakes us
         else if ((A.redraw || animating()) && !A.win_hidden) got = SDL_PollEvent(&e);
         else if (loading || A.screenshot || ops_busy() || watch_pending() || A.search_due || A.pal_pending || sheet_busy())
-            got = SDL_WaitEventTimeout(&e, (loading || watch_pending() || A.search_due) ? 30 : ops_moving() ? 16 : 100);
-        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0) { // add-on / cloud status, .git polls
+            got = SDL_WaitEventTimeout(&e, MIN((loading || watch_pending() || A.search_due) ? 30 : ops_moving() ? 16 : 100,
+                                               tip_ms > 0 ? tip_ms : INT_MAX));
+        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0 || tip_ms > 0) {
+            // add-on / cloud status, .git polls, a tooltip
             int t = INT_MAX;
-            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms()};
-            for (int k = 0; k < 3; k++) if (w[k] > 0) t = MIN(t, w[k]);
+            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms(), tip_ms};
+            for (int k = 0; k < 4; k++) if (w[k] > 0) t = MIN(t, w[k]);
             got = SDL_WaitEventTimeout(&e, t);
         }
         else got = SDL_WaitEvent(&e);
@@ -11833,6 +12094,8 @@ int main(int argc, char **argv) {
     if (A.trash_job) { atomic_store(&A.trash_job->cancel, 1); stats_release(A.trash_job); A.trash_job = NULL; }
     recent_save();
     if (!A.screenshot) settings_save();
+    free(g_fit_tip);
+    free(g_fit_tip_prev);
     SDL_DestroyRenderer(A.ren);
     SDL_DestroyWindow(A.win);
     SDL_Quit();
