@@ -14,6 +14,8 @@ pinned folders, columns, and your tabs/split panes (`restore_session=0` to start
 (0 = all at once) and `verify_copies=0` are the transfer queue's settings. `renderer=auto` uses
 OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is resized; Vulkan can take less memory
 on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
+`tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a
+box on the tab strip, instead of the open tab as a card joining the folder below it.
 `title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling
 compositors included, so it looks the same everywhere: minimise / maximise / close at the end of the tab strip; drag
 the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.

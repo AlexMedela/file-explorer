@@ -1521,14 +1521,17 @@ static int run_selftest_m5(void) {
     A.window_buttons = A.brand_logo = false;
     A.brand_name = BRAND_CUSTOM;
     snprintf(A.brand_text, sizeof A.brand_text, "My files");
+    A.tab_style = TABS_PILLS;
     settings_save();
     int ntabs0 = A.ntabs;
     settings_load(); // resets to defaults first, then reads the file
     ST_CHECK(A.show_hidden && !A.folder_sizes && A.search_recursive && A.preview_on);
     ST_CHECK(!A.window_buttons && !A.brand_logo && A.brand_name == BRAND_CUSTOM && !strcmp(A.brand_text, "My files"));
     A.window_buttons = A.brand_logo = true;
+    ST_CHECK(A.tab_style == TABS_PILLS);
     A.brand_name = BRAND_APP;
     A.brand_text[0] = 0;
+    A.tab_style = TABS_CARDS;
     FolderView *fv5 = folder_view_find(M5_BASE, true); // sort order is remembered per folder
     ST_CHECK(fabsf(A.zoom - 1.3f) < 0.01f && fv5 && fv5->sort == SORT_SIZE && fv5->desc);
     ST_CHECK(pin_index(M5_BASE "/sub") >= 0 && A.nsess_tabs == ntabs0 && !strncmp(A.sess_layout, "H0.400(P0,P1)", 13));
@@ -1596,6 +1599,36 @@ static int run_selftest_m6(void) {
         st_mouse(SDL_EVENT_MOUSE_MOTION, A.r_content.x + S(300), A.r_content.y + S(300), 0, 0, 0);
         st_key(SDLK_W, SDL_KMOD_CTRL); st_wait();
         ST_CHECK(A.ntabs == nt);
+    }
+    { // Tab style Pills: apart, centred on the strip, + and split still after them; a click still switches tabs
+        int nt = A.ntabs;
+        opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
+        st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
+        st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
+        Panel *pn = A.ap;
+        Tab *a = panel_tab(pn, 0), *b = panel_tab(pn, 1), *c = panel_tab(pn, -1);
+        ST_CHECK(a && b && c && a != c && b->r.x >= a->r.x + a->r.w + S(2) && c->r.x + c->r.w <= pn->plus.x);
+        ST_CHECK(pn->plus.x + pn->plus.w <= pn->splitbtn.x && a->r.y > pn->bar.y && a->r.y + a->r.h < pn->bar.y + pn->bar.h);
+        f32 left = a->r.x - pn->bar.x, right = pn->bar.x + pn->bar.w - (c->r.x + c->r.w);
+        ST_CHECK(fabsf(left - right) < S(2) || c->r.x + c->r.w > pn->plus.x - S(20)); // centred unless + or split stop it
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, a->r.x + a->r.w * 0.5f, a->r.y + a->r.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, a->r.x + a->r.w * 0.5f, a->r.y + a->r.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_wait();
+        ST_CHECK(pn->cur == a);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, b->r.x + b->r.w * 0.5f, b->r.y + b->r.h * 0.5f, 0, 0, 0);
+        st_frames(2);
+        st_shot("tab-pills");
+        int th = g_theme_cur;
+        g_theme_cur = theme_find("Light");
+        theme_apply();
+        st_frames(2);
+        st_shot("tab-pills-light");
+        g_theme_cur = th;
+        theme_apply();
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.r_content.x + S(300), A.r_content.y + S(300), 0, 0, 0);
+        while (A.ntabs > nt) { st_key(SDLK_W, SDL_KMOD_CTRL); st_wait(); }
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        ST_CHECK(A.ntabs == nt && panel_tab(A.ap, 0)->r.y == A.ap->bar.y + roundf(S(6)));
     }
 
     // split right (Ctrl+\) then split that one down (Ctrl+Shift+\): nested tree

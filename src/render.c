@@ -297,11 +297,25 @@ static void draw_panel_bar(Panel *pn) {
     Font *f = &A.font;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)tb.x, (int)tb.y, (int)tb.w, (int)tb.h});
     Rect pr = pn->plus;
+    bool pills = A.tab_style == TABS_PILLS;
+    if (pills) { // Tab style Pills: a field-coloured box round the tabs, the open one tinted with the accent
+        Tab *first = panel_tab(pn, 0), *last = panel_tab(pn, -1);
+        f32 pad = roundf(S(3));
+        if (first && last)
+            draw_rrect(first->r.x - pad, first->r.y - pad, last->r.x + last->r.w - first->r.x + pad * 2, first->r.h + pad * 2, S(9), C(COL_FIELD));
+        for (int i = 0; i < A.ntabs; i++) {
+            Tab *t = A.tabs[i];
+            if (t->panel != pn) continue;
+            bool cur = pn->cur == t, hover = A.mouse_in && A.drag == DRAG_NONE && in_rect(t->r, A.mx, A.my);
+            if (cur || hover)
+                draw_rrect(t->r.x, t->r.y, t->r.w, t->r.h, S(7), C(rgb_mix(COL_FIELD, COL_ACCENT, !cur ? 0.08f : active_panel || !multi ? 0.40f : 0.24f)));
+        }
+    }
     // Backgrounds first, so the active card (and its flares) sits on top of a hovered neighbour:
     // active tab = card merging into the toolbar with outward-curving bottom corners (Chrome / Brave style);
     // hovered inactive tab = the same shape in a fainter colour.
     f32 rad = roundf(S(8));
-    for (int pass = 0; pass < 2; pass++)
+    for (int pass = 0; !pills && pass < 2; pass++)
         for (int i = 0; i < A.ntabs; i++) {
             Tab *t = A.tabs[i];
             if (t->panel != pn) continue;
@@ -343,7 +357,7 @@ static void draw_panel_bar(Panel *pn) {
         bool cur = pn->cur == t;
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my));
         bool dragging = A.drag == DRAG_TAB && A.drag_tab == t;
-        if (prev && !cur && pn->cur != prev && !hover) draw_rect(r.x - 1, r.y + S(9), 1, r.h - S(18), C(COL_FIELD));
+        if (!pills && prev && !cur && pn->cur != prev && !hover) draw_rect(r.x - 1, r.y + S(9), 1, r.h - S(18), C(COL_FIELD));
         prev = t;
         if (A.drop_tab == t) draw_rrect_outline(r.x + S(1), r.y + S(1), r.w - S(2), r.h - S(4), S(6), MAX(1.f, S(1.3f)), C(COL_ACCENT));
         if (dragging) g_alpha = 0.45f;
@@ -351,7 +365,7 @@ static void draw_panel_bar(Panel *pn) {
         char dnb[NAME_MAX + 1];
         const char *label = t->term ? term_label(t->term) : disp_name(p->path, dnb, sizeof dnb);
         // the active terminal tab sits on the terminal's own colour: use its foreground so the text stays readable
-        bool on_term = t->term && cur;
+        bool on_term = t->term && cur && !pills;
         u32 tfg = on_term ? term_fg_color() : 0, tbg = on_term ? term_bg_color() : 0;
         if (t->term) { // a small terminal: rounded box with ">_"
             Color tcc = on_term ? C(rgb_mix(tfg, tbg, 0.35f)) : C(COL_TEXT_DIM);

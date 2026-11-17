@@ -137,6 +137,7 @@ typedef struct {
 enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
 enum { TITLEBAR_AUTO, TITLEBAR_SYSTEM, TITLEBAR_APP }; // A.title_bar
 enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
+enum { TABS_CARDS, TABS_PILLS }; // A.tab_style
 static const struct { int view, px; const char *label; } g_zoom[] = {
     {VIEW_DETAILS, 0, "Details"},       {VIEW_LIST, 0, "List"},          {VIEW_GRID, 48, "Small icons"},
     {VIEW_GRID, 72, "Small+ icons"},    {VIEW_GRID, 96, "Medium icons"}, {VIEW_GRID, 128, "Medium+ icons"},
@@ -641,6 +642,7 @@ static struct {
     bool brand_logo;     // the logo before the name above the sidebar (setting)
     int brand_name;      // BRAND_*: which name is shown there (setting; hidden: the sidebar starts at the top)
     char brand_text[96]; // the name for BRAND_CUSTOM (setting)
+    int tab_style;       // TABS_*: the open tab as a card joining the toolbar, or rounded pills centred in a box (setting)
     bool win_alpha;     // the window was created with an alpha channel (needed for rounded corners)
     bool win_shadow;    // ...and draws its own drop shadow in a margin round the window (Wayland)
     int shadow_px;      // that margin now, in pixels (0: maximised, system title bar...); A.W / A.H exclude it
@@ -1069,15 +1071,20 @@ static void layout_panel(Panel *pn, Rect r) {
     if (A.r_wctl.w > 0 && r.y < 1 && right > A.r_wctl.x) right = MAX(r.x + S(140), A.r_wctl.x);
     pn->splitbtn = (Rect){right - bw - roundf(S(6)), by, bw, bw};
     int n = panel_ntabs(pn);
+    bool pills = A.tab_style == TABS_PILLS;
+    f32 gap = pills ? roundf(S(4)) : 0; // (cards touch: the open one's flares cover the seams)
     f32 x0 = r.x + roundf(S(6));
     f32 avail = pn->splitbtn.x - roundf(S(6)) - (bw + roundf(S(4))) - x0;
-    f32 tw = n ? MAX(roundf(S(48)), MIN(roundf(S(200)), roundf(avail / n))) : 0;
+    f32 tw = n ? MAX(roundf(S(48)), MIN(roundf(S(200)), roundf((avail - gap * (f32)(n - 1)) / (f32)n))) : 0;
+    f32 group = n ? tw * (f32)n + gap * (f32)(n - 1) : 0;
+    if (pills) x0 = MAX(x0, MIN(roundf(r.x + (right - r.x - group) * 0.5f), x0 + avail - group)); // centred, clear of + and split
     Rect body = {r.x, r.y + tb, r.w, r.h - tb};
     int k = 0;
     for (int i = 0; i < A.ntabs; i++) {
         Tab *t = A.tabs[i];
         if (t->panel != pn) continue;
-        t->r = (Rect){x0 + k * tw, r.y + roundf(S(6)), tw, tb - roundf(S(6))};
+        t->r = pills ? (Rect){x0 + k * (tw + gap), r.y + roundf(S(5)), tw, tb - roundf(S(10))}
+                     : (Rect){x0 + k * tw, r.y + roundf(S(6)), tw, tb - roundf(S(6))};
         k++;
         Rect pb = body;
         t->dock_r = t->dock_div = t->dock_x = (Rect){0, 0, 0, 0};
@@ -1093,8 +1100,8 @@ static void layout_panel(Panel *pn, Rect r) {
         layout_pane(&t->pane[0], pb);
     }
     // + : a round button after the last tab, centred on the tab labels (clear of the active tab's flare)
-    f32 ps = roundf(S(26)), pcy = r.y + roundf(S(6)) + (tb - roundf(S(6))) * 0.5f;
-    pn->plus = (Rect){MIN(x0 + k * tw + roundf(S(10)), pn->splitbtn.x - ps - roundf(S(4))), roundf(pcy - ps * 0.5f), ps, ps};
+    f32 ps = roundf(S(26)), pcy = pills ? r.y + tb * 0.5f : r.y + roundf(S(6)) + (tb - roundf(S(6))) * 0.5f;
+    pn->plus = (Rect){MIN(x0 + group + roundf(S(10)), pn->splitbtn.x - ps - roundf(S(4))), roundf(pcy - ps * 0.5f), ps, ps};
 }
 
 static void layout_node(Node *n, Rect r) {
