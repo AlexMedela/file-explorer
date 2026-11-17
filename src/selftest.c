@@ -2645,6 +2645,81 @@ static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
 
+    // --- the folder menu's Views / Sort by / Group by submenus ---
+    st_frames(1);
+    do_action(p, ACT_SORT_DESC);
+    ST_CHECK(p->sort_desc);
+    do_action(p, ACT_SORT_ASC);
+    ST_CHECK(!p->sort_desc);
+    // Views, Sort and Group share the connected Open With submenu behavior.
+    menu_open(p, S(100), S(100), false);
+    int views = -1, sorts = -1, groups = -1;
+    for (int i = 0; i < A.menu.n; i++) {
+        int act = A.menu.items[i].act;
+        if (act == ACT_MENU_VIEWS) views = i;
+        if (act == ACT_MENU_SORT) sorts = i;
+        if (act == ACT_MENU_GROUP) groups = i;
+        ST_CHECK(!(act >= ACT_VIEW_BASE && act < ACT_VIEW_BASE + ZOOM_COUNT));
+    }
+    ST_CHECK(views >= 0 && sorts >= 0 && groups >= 0);
+    if (views >= 0 && sorts >= 0 && groups >= 0) {
+        ST_CHECK(A.menu.items[views].sub && A.menu.items[sorts].sub && A.menu.items[groups].sub);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), menu_item_y(&A.menu, views) + S(12), 0, 0, 0);
+        ST_CHECK(menu_sub_shown() && g_menu_sub.items[0].act == ACT_VIEW_BASE);
+        st_frames(1);
+        st_shot("menu-views");
+        st_mouse(SDL_EVENT_MOUSE_MOTION, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, 0) + S(12), 0, 0, 0);
+        ST_CHECK(g_menu_sub.hover == 0 && A.menu.open);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), menu_item_y(&A.menu, sorts) + S(12), 0, 0, 0);
+        ST_CHECK(menu_sub_shown() && g_menu_sub_of == sorts);
+        bool has_ext = false, has_perms = false;
+        for (int i = 0; i < g_menu_sub.n; i++) {
+            has_ext |= g_menu_sub.items[i].act == ACT_SORT_BASE + SORT_EXT;
+            has_perms |= g_menu_sub.items[i].act == ACT_SORT_BASE + SORT_PERMS;
+        }
+        // Extension sorts like Type; Permissions only with its column shown
+        ST_CHECK(!has_ext && has_perms == col_visible(COL_PERMS) && g_menu_sub.items[0].act == ACT_SORT_BASE + SORT_NAME);
+        int descending = g_menu_sub.n - 1;
+        ST_CHECK(g_menu_sub.items[descending].act == ACT_SORT_DESC);
+        st_shot("menu-sort");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, descending) + S(12), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.menu.open && p->sort_desc);
+        do_action(p, ACT_SORT_BASE + SORT_NAME); // picking the current key keeps its direction
+        ST_CHECK(p->sort_key == SORT_NAME && p->sort_desc);
+        do_action(p, ACT_SORT_ASC);
+
+        menu_open(p, S(100), S(100), false);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, A.menu.r.x + S(20), menu_item_y(&A.menu, groups) + S(12), 0, 0, 0);
+        ST_CHECK(menu_sub_shown() && g_menu_sub_of == groups && g_menu_sub.n == GROUP_COUNT);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, GROUP_NONE) + S(12), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.menu.open && p->group == GROUP_NONE);
+
+        // the keyboard: Right opens the submenu, Left / Esc goes back, Enter picks
+        menu_open(p, S(100), S(100), false);
+        A.menu.hover = views;
+        menu_key(SDLK_RIGHT);
+        ST_CHECK(menu_sub_shown() && g_menu_sub.hover == 0);
+        menu_key(SDLK_ESCAPE);
+        ST_CHECK(A.menu.open && !menu_sub_shown());
+        A.menu.hover = sorts;
+        menu_key(SDLK_RIGHT);
+        ST_CHECK(menu_sub_shown() && g_menu_sub_of == sorts && g_menu_sub.hover == 0);
+        menu_key(SDLK_LEFT);
+        ST_CHECK(A.menu.open && !menu_sub_shown() && A.menu.hover == sorts);
+        menu_key(SDLK_RETURN); // Enter on a submenu's item opens it too
+        ST_CHECK(menu_sub_shown() && g_menu_sub.hover == 0);
+        menu_key(SDLK_DOWN);
+        ST_CHECK(g_menu_sub.hover == 1 && g_menu_sub.items[1].act == ACT_SORT_BASE + SORT_DATE);
+        menu_key(SDLK_RETURN);
+        ST_CHECK(!A.menu.open && p->sort_key == SORT_DATE);
+        pane_set_sort(p, SORT_NAME);
+        menu_open(p, S(100), S(100), false);
+        menu_key(SDLK_ESCAPE);
+        ST_CHECK(!A.menu.open);
+    }
+
     // --- themes ---
     ST_CHECK(g_nthemes >= 5 && T.bg == g_theme_dark.bg);
     st_shot("m9-dark");
@@ -6452,9 +6527,18 @@ static int run_selftest_du(void) {
     st_frames(1);
     p = active_pane();
     menu_open(p, 100, 100, false);
-    ST_CHECK(st_menu_has(ACT_DU_TOGGLE));
+    int views = -1, toggle = -1;
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].act == ACT_MENU_VIEWS && A.menu.items[i].enabled && A.menu.items[i].sub) views = i;
+    ST_CHECK(views >= 0);
+    if (views >= 0) {
+        menu_sub_open(views, false);
+        for (int i = 0; i < g_menu_sub.n; i++)
+            if (g_menu_sub.items[i].act == ACT_DU_TOGGLE && g_menu_sub.items[i].enabled) toggle = i;
+        ST_CHECK(menu_sub_shown() && toggle >= 0);
+        if (toggle >= 0) menu_sub_activate(toggle);
+    }
     A.menu.open = false;
-    do_action(p, ACT_DU_TOGGLE);
     st_frames(1);
     ST_CHECK(p->du && p->dv);
     for (int i = 0; i < A.nplaces; i++)

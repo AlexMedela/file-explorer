@@ -10,6 +10,7 @@ typedef struct {
     u16 x, y, w, h;
     i16 bx, by;
     f32 adv;
+    bool missing; // no font supplied the requested glyph
     bool color; // colour bitmap (emoji): drawn untinted
 } Glyph;
 
@@ -292,10 +293,23 @@ static int font_fallback(Font *f, u32 cp) {
         if (FT_Get_Char_Index(f->faces[i], cp)) return i;
     if (f->nfaces >= FONT_MAX_FACES) return -1;
     int result = -1;
+    // Private-use codepoints (menu action icons): a Nerd Font's symbols, or the font file FE_NERD_FONT names.
+    bool private_use = (cp >= 0xe000 && cp <= 0xf8ff) || (cp >= 0xf0000 && cp <= 0x10ffff);
+    const char *override = private_use ? getenv("FE_NERD_FONT") : NULL;
+    if (override && *override) {
+        bool loaded = false;
+        for (int i = 0; i < f->nfaces; i++) loaded |= !strcmp(f->paths[i], override);
+        if (!loaded && font_add_face(f, override, 0) && FT_Get_Char_Index(f->faces[f->nfaces - 1], cp))
+            return f->nfaces - 1;
+    }
     FcPattern *pat = FcPatternCreate();
     FcCharSet *cs = FcCharSetCreate();
     FcCharSetAddChar(cs, cp);
     FcPatternAddCharSet(pat, FC_CHARSET, cs);
+    if (private_use) {
+        FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)"Symbols Nerd Font Mono");
+        FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)"Symbols Nerd Font");
+    }
     FcPatternAddBool(pat, FC_SCALABLE, FcTrue);
     FcConfigSubstitute(NULL, pat, FcMatchPattern);
     FcDefaultSubstitute(pat);
@@ -384,6 +398,7 @@ static Glyph *glyph_make(Font *f, u32 h, u32 key, int fi, FT_UInt gi) {
     FT_Face face = f->faces[fi];
     Glyph g = {0};
     g.cp = key;
+    g.missing = gi == 0;
     if (FT_HAS_COLOR(face) && FT_Load_Glyph(face, gi, FT_LOAD_COLOR | FT_LOAD_RENDER) == 0 &&
         face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) { // colour emoji: box-filter the strike down
         FT_GlyphSlot sl = face->glyph;

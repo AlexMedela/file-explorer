@@ -323,6 +323,19 @@ static void draw_glyph(const Glyph *g, f32 x, f32 y, Color c) {
     di4(a, b, d, e);
 }
 
+static void draw_glyph_scale_xy(const Glyph *g, f32 x, f32 y, f32 sx, f32 sy, Color c) {
+    draw_reserve(4, 6);
+    f32 u0 = g->x / (f32)ATLAS_SIZE, v0 = g->y / (f32)ATLAS_SIZE;
+    f32 u1 = (g->x + g->w) / (f32)ATLAS_SIZE, v1 = (g->y + g->h) / (f32)ATLAS_SIZE;
+    int a = dv(x, y, c, u0, v0), b = dv(x + g->w * sx, y, c, u1, v0);
+    int d = dv(x + g->w * sx, y + g->h * sy, c, u1, v1), e = dv(x, y + g->h * sy, c, u0, v1);
+    di4(a, b, d, e);
+}
+
+static void draw_glyph_scaled(const Glyph *g, f32 x, f32 y, f32 scale, Color c) {
+    draw_glyph_scale_xy(g, x, y, scale, scale, c);
+}
+
 // Draw text with its line box top at y. Returns pen x after the text.
 static f32 draw_text(Font *f, f32 x, f32 y, const char *s, int len, Color c) {
     f32 bl = roundf(y + f->ascent);

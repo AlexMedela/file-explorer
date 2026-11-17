@@ -408,6 +408,8 @@ enum {
     ACT_COL_BASE = 200,  // + column id: toggle that column
     ACT_VIEW_BASE = 300, // + zoom level index
     ACT_SORT_BASE = 320, // + SORT_* key
+    ACT_SORT_ASC = 330, ACT_SORT_DESC,
+    ACT_MENU_VIEWS, ACT_MENU_SORT, ACT_MENU_GROUP, // items that open the Views / Sort by / Group by submenus
     ACT_GROUP_BASE = 340, // + GROUP_*
     ACT_FV_SUBFOLDERS = 360, ACT_FV_ALL, ACT_FV_RESET,
     ACT_TF_BASE = 370, ACT_TF_RESET = 373, ACT_TF_EXT_BASE = 380, // type filter
@@ -4317,6 +4319,7 @@ static void band_update(Pane *p) {
 static i64 item_at(Pane *p, f32 x, f32 y);
 // ui_tools.c (included near the end of the drawing code)
 static bool sheet_open(void);
+static SDL_Texture *app_icon_tex(const char *icon, int px);
 static void sheet_key(SDL_Keycode k, SDL_Keymod mod);
 static void sheet_text(const char *text);
 static void sheet_mouse(SDL_MouseButtonEvent *b);
@@ -5898,7 +5901,13 @@ static void do_action(Pane *p, int act) {
     default:
         if (act >= ACT_COL_BASE && act < ACT_COL_BASE + COL_COUNT) col_toggle(act - ACT_COL_BASE);
         else if (act >= ACT_VIEW_BASE && act < ACT_VIEW_BASE + ZOOM_COUNT) set_zoom_level(p, act - ACT_VIEW_BASE);
-        else if (act >= ACT_SORT_BASE && act < ACT_SORT_BASE + SORT_COUNT) pane_set_sort(p, act - ACT_SORT_BASE);
+        else if (act == ACT_SORT_ASC || act == ACT_SORT_DESC) {
+            p->sort_desc = act == ACT_SORT_DESC;
+            folder_view_remember(p);
+            pane_resort(p);
+        } else if (act >= ACT_SORT_BASE && act < ACT_SORT_BASE + SORT_COUNT) { // the menu: Ascending / Descending turn it round
+            if (p->sort_key != act - ACT_SORT_BASE) pane_set_sort(p, act - ACT_SORT_BASE);
+        }
         else if (act >= ACT_GROUP_BASE && act < ACT_GROUP_BASE + GROUP_COUNT) pane_set_group(p, act - ACT_GROUP_BASE);
         else if (act >= ACT_QA_MOVE_BASE && act < ACT_QA_MOVE_BASE + 16) qa_action(act);
         else if (act >= ACT_FV_SUBFOLDERS && act <= ACT_FV_RESET) folder_view_action(p, act);
@@ -6094,6 +6103,9 @@ static void menu_finish(f32 x, f32 y);
 static void menu_add_check_key(const char *label, int act, bool checked, int key_id);
 static void menu_open_columns(Pane *p, f32 x, f32 y);
 static void menu_add_check(const char *label, int act, bool checked, bool enabled);
+static void menu_sub_views(Pane *p);
+static void menu_sub_sort(Pane *p);
+static void menu_sub_group(Pane *p);
 
 // "Open with" submenu: apps picked for that type through "Other app..." (the sheet) before, newest first, then the
 // apps the sheet lists for it by default (its default app first). Ids are kept, not app pointers: the app list can
@@ -6101,7 +6113,7 @@ static void menu_add_check(const char *label, int act, bool checked, bool enable
 #define OW_MENU_TYPE_APPS 10 // more than this: "Other app..." has the rest
 static struct {
     char mime[160];
-    char id[OW_MENU_APPS][256], name[OW_MENU_APPS][128];
+    char id[OW_MENU_APPS][256], name[OW_MENU_APPS][128], icon[OW_MENU_APPS][128]; // icon: the .desktop Icon= (menus show it)
     int n, npick; // the first npick are picked ones, the rest the type's own
     int def;      // the type's default app's index, or -1
 } g_ow_menu;
@@ -6123,6 +6135,7 @@ static void ow_menu_add_app(const DesktopApp *a) {
         if (!strcmp(g_ow_menu.id[k], a->id)) return;
     if (g_ow_menu.n >= OW_MENU_APPS) return;
     snprintf(g_ow_menu.id[g_ow_menu.n], sizeof g_ow_menu.id[0], "%s", a->id);
+    snprintf(g_ow_menu.icon[g_ow_menu.n], sizeof g_ow_menu.icon[0], "%s", a->icon ? a->icon : "");
     snprintf(g_ow_menu.name[g_ow_menu.n++], sizeof g_ow_menu.name[0], "%s", a->name);
 }
 
@@ -6240,42 +6253,12 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         menu_add("Select all", "Ctrl+A", ACT_SELECT_ALL, p->count > 0);
         menu_add("Undo", "Ctrl+Z", ACT_UNDO, A.nundo > 0);
         menu_sep();
-        {
-            static const int lv[] = {0, 1, 2, 4, 6, 7};
-            static const char *sc[] = {"Ctrl+Shift+6", "Ctrl+Shift+5", "Ctrl+Shift+4", "Ctrl+Shift+3", "Ctrl+Shift+2", "Ctrl+Shift+1"};
-            int cur = zoom_level_of(p);
-            for (size_t i = 0; i < ARRAY_COUNT(lv); i++) {
-                menu_add_check(g_zoom[lv[i]].label, ACT_VIEW_BASE + lv[i], cur == lv[i], true);
-                A.menu.items[A.menu.n - 1].shortcut = sc[i];
-            }
-            menu_add_check("Tree view", ACT_TREE_VIEW, p->tree, !pane_is_archive(p));
-            const char *tk = keymap_label(CMD_TREE_VIEW);
-            snprintf(A.menu.scbuf[A.menu.n - 1], sizeof A.menu.scbuf[0], "%s", tk ? tk : "");
-            A.menu.items[A.menu.n - 1].shortcut = A.menu.scbuf[A.menu.n - 1];
-            menu_add_check_key("Disk usage", ACT_DU_TOGGLE, p->du, CMD_DISK_USAGE);
-            A.menu.items[A.menu.n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
-            menu_add_check_key("Snapshots of this drive", ACT_SNAP_TOGGLE, p->snapv, CMD_SNAPSHOTS);
-            A.menu.items[A.menu.n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
-        }
-        menu_sep();
-        {
-            static const int sk[] = {SORT_NAME, SORT_DATE, SORT_TYPE, SORT_SIZE};
-            static const char *sl[] = {"Sort by name", "Sort by date modified", "Sort by type", "Sort by size"};
-            for (int i = 0; i < 4; i++) menu_add_check(sl[i], ACT_SORT_BASE + sk[i], p->sort_key == sk[i], true);
-        }
-        menu_sep();
-        {
-            static const char *gl[] = {"No grouping", "Group by date", "Group by type", "Group by size"};
-            for (int g = 0; g < GROUP_COUNT; g++)
-                menu_add_check(gl[g], ACT_GROUP_BASE + g, p->group == g, p->view == VIEW_DETAILS || g == GROUP_NONE);
-        }
-        menu_sep();
-        {
-            FolderView *fv = folder_view_find(p->path, true);
-            menu_add_check("Use this view in subfolders", ACT_FV_SUBFOLDERS, fv && fv->recursive, true);
-            menu_add("Use this view everywhere", "", ACT_FV_ALL, true);
-            menu_add("Reset folder view", "", ACT_FV_RESET, fv != NULL);
-        }
+        menu_add("Views", "", ACT_MENU_VIEWS, true);
+        m->items[m->n - 1].sub = menu_sub_views;
+        menu_add("Sort by", "", ACT_MENU_SORT, true);
+        m->items[m->n - 1].sub = menu_sub_sort;
+        menu_add("Group by", "", ACT_MENU_GROUP, true);
+        m->items[m->n - 1].sub = menu_sub_group;
         menu_sep();
         menu_add(A.show_hidden ? "Hide hidden files" : "Show hidden files", "Ctrl+H", ACT_HIDDEN, true);
         menu_add("Refresh", "F5", ACT_REFRESH, true);
@@ -6303,6 +6286,53 @@ static void menu_add_check(const char *label, int act, bool checked, bool enable
     m->items[m->n++] = (MenuItem){label, "", act, enabled, false, true, checked, false, NULL, false};
 }
 
+// The folder menu's submenus: view modes, sort key + direction, grouping.
+static void menu_sub_views(Pane *p) {
+    Menu *m = g_menu_build ? g_menu_build : &A.menu;
+    static const int levels[] = {0, 1, 2, 4, 6, 7};
+    static const char *shortcuts[] = {"Ctrl+Shift+6", "Ctrl+Shift+5", "Ctrl+Shift+4", "Ctrl+Shift+3", "Ctrl+Shift+2", "Ctrl+Shift+1"};
+    int current = zoom_level_of(p);
+    for (size_t i = 0; i < ARRAY_COUNT(levels); i++) {
+        menu_add_check(g_zoom[levels[i]].label, ACT_VIEW_BASE + levels[i], current == levels[i], true);
+        m->items[m->n - 1].shortcut = shortcuts[i];
+    }
+    menu_add_check("Tree view", ACT_TREE_VIEW, p->tree, !pane_is_archive(p));
+    const char *key = keymap_label(CMD_TREE_VIEW);
+    if (key) {
+        snprintf(m->scbuf[m->n - 1], sizeof m->scbuf[0], "%s", key);
+        m->items[m->n - 1].shortcut = m->scbuf[m->n - 1];
+    }
+    menu_add_check_key("Disk usage", ACT_DU_TOGGLE, p->du, CMD_DISK_USAGE);
+    m->items[m->n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
+    menu_add_check_key("Snapshots of this drive", ACT_SNAP_TOGGLE, p->snapv, CMD_SNAPSHOTS);
+    m->items[m->n - 1].enabled = !pane_is_archive(p) && !pane_is_trash(p);
+    menu_sep();
+    FolderView *view = folder_view_find(p->path, true);
+    menu_add_check("Use this view in subfolders", ACT_FV_SUBFOLDERS, view && view->recursive, true);
+    menu_add("Use this view everywhere", "", ACT_FV_ALL, true);
+    menu_add("Reset folder view", "", ACT_FV_RESET, view != NULL);
+}
+
+// Name, dates, type and size always; Permissions and Owner only while their column is shown (sorting by what you can't
+// see makes little sense). Extension sorts like Type: listed only while it's the current key.
+static void menu_sub_sort(Pane *p) {
+    static const char *labels[SORT_COUNT] = {"Name", "Date modified", "Type", "Size", "Date created", "Extension", "Permissions", "Owner"};
+    for (int i = 0; i < SORT_COUNT; i++) {
+        bool shown = i <= SORT_CREATED || p->sort_key == i;
+        for (int c = 0; c < COL_COUNT && !shown; c++) shown = g_coldef[c].sort == i && i != SORT_EXT && col_visible(c);
+        if (shown) menu_add_check(labels[i], ACT_SORT_BASE + i, p->sort_key == i, true);
+    }
+    menu_sep();
+    menu_add_check("Ascending", ACT_SORT_ASC, !p->sort_desc, true);
+    menu_add_check("Descending", ACT_SORT_DESC, p->sort_desc, true);
+}
+
+static void menu_sub_group(Pane *p) {
+    static const char *labels[] = {"None", "Date", "Type", "Size"};
+    for (int g = 0; g < GROUP_COUNT; g++)
+        menu_add_check(labels[g], ACT_GROUP_BASE + g, p->group == g, p->view == VIEW_DETAILS || g == GROUP_NONE);
+}
+
 // Right-click on a column header.
 static void menu_open_columns(Pane *p, f32 x, f32 y) {
     Menu *m = &A.menu;
@@ -6324,7 +6354,7 @@ static void menu_open_columns(Pane *p, f32 x, f32 y) {
 // Stays open while toggling; opens above the button.
 static void menu_add_check_key(const char *label, int act, bool checked, int key_id) {
     menu_add_check(label, act, checked, true);
-    Menu *m = &A.menu;
+    Menu *m = g_menu_build ? g_menu_build : &A.menu;
     const char *k = keymap_label(key_id);
     if (k && m->n) {
         snprintf(m->scbuf[m->n - 1], sizeof m->scbuf[0], "%s", k);
@@ -6887,6 +6917,104 @@ static void qa_pin_paths(char **paths, int n, int g) {
     A.settings_dirty = true;
 }
 
+// The icon before a menu action (a Nerd Font codepoint), by what it does - never by its label. 0: none, for choices
+// in a list (sort keys, columns, apps...) where the check mark says enough, and for anything not listed here.
+static u32 menu_action_icon(const MenuItem *it) {
+    int a = it->act;
+    if (a >= ACT_VIEW_BASE && a < ACT_VIEW_BASE + ZOOM_COUNT) {
+        int lv = a - ACT_VIEW_BASE;
+        return lv == 0 ? 0xf00b : lv == 1 ? 0xf0ca : 0xf00a; // Details, List, icons
+    }
+    switch (a) {
+    case ACT_CUT: return 0xf0c4;
+    case ACT_COPY: case ACT_TERM_COPY: case ACT_COPY_PATH: case ACT_CLOUD_COPY_PATH: case ACT_GIT_COPY_BRANCH:
+    case ACT_DROP_COPY: return 0xf0c5;
+    case ACT_GIT_COPY_REMOTE: case ACT_DROP_LINK: return 0xf0c1;
+    case ACT_PASTE: case ACT_TERM_PASTE: return 0xf0ea;
+    case ACT_DROP_MOVE: return 0xf0ab9;
+    case ACT_TRASH: case ACT_TRASH_EMPTY: case ACT_NET_FORGET: case ACT_QA_GROUP_DELETE: case ACT_SNAP_DELETE: return 0xf1f8;
+    case ACT_DELETE: return 0xf05e8;
+    case ACT_TERM_CLEAR: return 0xf12d;
+    case ACT_RENAME: case ACT_BATCH_RENAME: case ACT_DEV_RENAME: case ACT_QA_RENAME: case ACT_QA_GROUP_RENAME:
+    case ACT_NET_EDIT_SAVED: return 0xf044;
+    case ACT_PROPERTIES: return 0xf05a;
+    case ACT_NEW_FOLDER: case ACT_NEW_FOLDER_IN: return 0xf07b;
+    case ACT_NEW_FILE: case ACT_NEW_FILE_IN: return 0xf15b;
+    case ACT_QA_NEW_GROUP: return 0xf0257;
+    case ACT_TERMINAL: case ACT_TERMINAL_LOCAL: case ACT_SSH_TERMINAL: return 0xf489;
+    case ACT_TERM_PANEL: return 0xf10a9; // a panel along the bottom
+    case ACT_TERMINAL_EXTERNAL: return 0xe795;
+    case ACT_OPEN: case ACT_DU_OPEN: case ACT_SNAP_OPEN: case ACT_DEV_MOUNT: return 0xf07c;
+    case ACT_OPEN_WITH: return it->sub ? 0xf07c : 0xf141; // the submenu / "Other app..."
+    case ACT_OPEN_TAB: case ACT_PLACE_NEW_TAB: case ACT_DU_OPEN_TAB: case ACT_DEV_OPEN_TAB: case ACT_CLOUD_CONNECT_TAB:
+    case ACT_TAB_NEW: return 0xf075c;
+    case ACT_TAB_DUP: return 0xf24d;
+    case ACT_TAB_WINDOW: return 0xf03cc;
+    case ACT_OPEN_SPLIT_RIGHT: case ACT_TAB_SPLIT_RIGHT: return 0xf0bcc;
+    case ACT_OPEN_SPLIT_DOWN: case ACT_TAB_SPLIT_DOWN: return 0xf0bcb;
+    case ACT_TAB_CLOSE: case ACT_TAB_CLOSE_OTHERS: case ACT_TAB_CLOSE_LEFT: case ACT_TAB_CLOSE_RIGHT: case ACT_CMP_END:
+    case ACT_DROP_CANCEL: case ACT_QA_REMOVE: return 0xf00d;
+    case ACT_TAB_REOPEN: case ACT_UNDO: case ACT_TRASH_RESTORE: case ACT_TRASH_RESTORE_ALL: case ACT_SNAP_RESTORE:
+    case ACT_FV_RESET: case ACT_COL_RESET: case ACT_DEV_RESET_NAME: case ACT_QA_RESET_NAME: return 0xf0e2;
+    case ACT_MENU_VIEWS: return 0xf009;
+    case ACT_MENU_SORT: return 0xf04ba;
+    case ACT_MENU_GROUP: return 0xf02c3;
+    case ACT_TREE_VIEW: return 0xf0645;
+    case ACT_DU_TOGGLE: case ACT_SNAP_TOGGLE: case ACT_SNAP_BACK: // the Views toggles; in the views themselves: back
+        return !it->checkable || a == ACT_SNAP_BACK ? 0xf060 : a == ACT_DU_TOGGLE ? 0xf200 : 0xf1da;
+    case ACT_DU_NEW_TAB: case ACT_DU_PLACE: return 0xf200;
+    case ACT_SNAP_PLACE: return 0xf1da;
+    case ACT_SNAP_CREATE: return 0xf030;
+    case ACT_FV_SUBFOLDERS: return 0xf0253;
+    case ACT_FV_ALL: return 0xf0ac;
+    case ACT_HIDDEN: return !it->checkable && A.show_hidden ? 0xf070 : 0xf06e;
+    case ACT_PREVIEW: case ACT_DU_SHOW: return 0xf06e;
+    case ACT_REFRESH: case ACT_CLOUD_REFRESH: case ACT_GIT_REFRESH: case ACT_SNAP_REFRESH: case ACT_DU_RESCAN:
+    case ACT_CMP_AGAIN: return 0xf021;
+    case ACT_SELECT_ALL: return 0xf046;
+    case ACT_PIN: return 0xf08d;
+    case ACT_COMPRESS_ZIP: case ACT_COMPRESS_TGZ: case ACT_EXTRACT_SEL: case ACT_EXTRACT_HERE: case ACT_EXTRACT_ALL:
+        return 0xf1c6;
+    case ACT_CMP_START: case ACT_CMP_TAB: case ACT_SNAP_COMPARE: return 0xf018a;
+    case ACT_CMP_SYNC_A: case ACT_CMP_SYNC_B: case ACT_CMP_SYNC_BOTH: case ACT_CMP_MIRROR_A: case ACT_CMP_MIRROR_B:
+        return 0xf0ec;
+    case ACT_CMP_DIFF_ONLY: return 0xf0b0;
+    case ACT_CS_HERE: return 0xf002;
+    case ACT_CS_OPEN_LINE: return 0xf121;
+    case ACT_CS_FOLD_ALL: return 0xf066;
+    case ACT_CS_UNFOLD_ALL: return 0xf065;
+    case ACT_QA_UP: case ACT_QA_GROUP_UP: case ACT_DU_UP: return 0xf062;
+    case ACT_QA_DOWN: case ACT_QA_GROUP_DOWN: return 0xf063;
+    case ACT_NET_NEW: case ACT_NET_CONNECT_SAVED: case ACT_CLOUD_CONNECT: return 0xf1e6;
+    case ACT_CLOUD_NEW: return 0xf067;
+    case ACT_CLOUD_RECONNECT: return 0xf084;
+    case ACT_NET_DISCONNECT: case ACT_CLOUD_DISCONNECT: case ACT_DEV_UNMOUNT: return 0xf127;
+    case ACT_DEV_EJECT: return 0xf052;
+    case ACT_CLOUD_LOG: return 0xf0f6;
+    case ACT_GIT_OPEN_REMOTE: return 0xf08e;
+    case ACT_GIT_ROOT: return 0xf0ccf;
+    case ACT_GIT_STATUS: return 0xf126;
+    case ACT_FOLDER_SIZES: case ACT_SIZE_BARS: return 0xf080;
+    case ACT_LOAD_TIMES: return 0xf017;
+    }
+    return 0;
+}
+
+static bool menu_item_is_app(const MenuItem *it) { return it->act >= ACT_OW_APP_BASE && it->act < ACT_OW_APP_BASE + g_ow_menu.n; }
+
+// Menus show those icons (render.c draws them) when a Nerd Font supplies the symbols (font.c's fallback looks for one,
+// once per glyph: they're cached); the Open with apps show their own icons, Nerd Font or not. When no item has an
+// icon there's no icon column at all: the plain layout, never placeholder boxes.
+static bool menu_icons_in(const Menu *m) {
+    bool nerd = !font_glyph(&A.font, 0xf0c5)->missing;
+    for (int i = 0; i < m->n; i++) {
+        const MenuItem *it = &m->items[i];
+        if (it->sep || it->info || it->head) continue;
+        if (menu_item_is_app(it) || (nerd && menu_action_icon(it))) return true;
+    }
+    return false;
+}
+
 // Size and place a menu at x, y (kept inside the window). x_left >= 0: no room to the right of x - it ends at
 // x_left instead (a submenu opens on the parent's other side).
 static void menu_layout(Menu *m, f32 x, f32 y, f32 x_left) {
@@ -6905,7 +7033,7 @@ static void menu_layout(Menu *m, f32 x, f32 y, f32 x_left) {
     }
     bool anycheck = false;
     for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable;
-    f32 w = roundf(lw + sw + S(64) + (anycheck ? S(14) : 0));
+    f32 w = roundf(lw + sw + S(64) + (anycheck ? S(14) : 0) + (menu_icons_in(m) ? S(26) : 0));
     if (x_left >= 0 && x + w > A.W - S(4) && x_left - w >= S(4)) x = x_left - w;
     x = MAX(S(4), MIN(x, A.W - w - S(4)));
     m->content_h = h;
