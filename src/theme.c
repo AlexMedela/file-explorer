@@ -105,7 +105,9 @@ static u32 g_scroll_custom; // Options: scrollbar colour; 0 = Auto, else 0x01000
 static bool g_separators = true; // Options: the lines between the window's parts (a hovered / dragged edge always shows)
 static u32 g_status_bg; // the status bar: the toolbar's colour, unless its brightness moves it
 // The desktop's look, read off the UI thread (integration.c, "desktop look") only while Theme or File icons is System.
-static struct { bool known, light; u32 accent; char icons[64]; } g_desktop; // accent: 0 = none, else 0x01000000 | rgb
+// accent and kde[]: 0 = none, else 0x01000000 | rgb; kde[]: KDE's colour scheme (all 0 elsewhere).
+enum { KDE_VIEW, KDE_WINDOW, KDE_TEXT, KDE_SELECTION, KDE_COLORS };
+static struct { bool known, light; u32 accent, kde[KDE_COLORS]; char icons[64]; } g_desktop;
 
 static const struct { const char *name; u32 rgb; } g_accents[] = {
     {"Blue", 0x4C9BFF}, {"Purple", 0x9D7CF4}, {"Pink", 0xE86AB8}, {"Red", 0xEF5B5B}, {"Orange", 0xF2913A},
@@ -202,10 +204,36 @@ static u32 surface_adjust(u32 c, int part) {
     return pct ? rgb_mix(c, pct < 0 ? 0x000000 : 0xFFFFFF, (f32)abs(pct) / 100.f) : c;
 }
 
+// Theme "System": Light or Dark as the desktop prefers; on KDE built from its colour scheme (view = the file area,
+// window = sidebar, header and preview, text, selection = the accent).
+static Theme theme_system(void) {
+    Theme t = g_desktop.light ? g_theme_light : g_theme_dark;
+    if (!g_desktop.kde[KDE_VIEW]) return t;
+    u32 bg = g_desktop.kde[KDE_VIEW] & 0xFFFFFF, win = g_desktop.kde[KDE_WINDOW] ? g_desktop.kde[KDE_WINDOW] & 0xFFFFFF : bg;
+    u32 text = g_desktop.kde[KDE_TEXT] ? g_desktop.kde[KDE_TEXT] & 0xFFFFFF : t.text;
+    t.bg = bg;
+    t.sidebar = t.toolbar = t.preview_bg = t.popup = win;
+    t.tabbar = rgb_mix(win, bg, 0.5f);
+    t.text = t.text_strong = text;
+    t.text2 = rgb_mix(text, bg, 0.12f);
+    t.text_dim = rgb_mix(text, bg, 0.35f);
+    t.text_faint = t.text_hidden = rgb_mix(text, bg, 0.55f);
+    t.field = rgb_mix(win, bg, 0.65f);
+    t.field_hover = t.hover = t.control = rgb_mix(win, text, 0.08f);
+    t.control_hover = t.chip = rgb_mix(win, text, 0.14f);
+    t.control_off = t.tab_hover = t.field;
+    t.border = t.popup_border = t.divider = rgb_mix(win, text, 0.18f);
+    t.sel_idle = rgb_mix(bg, text, 0.12f);
+    t.alt_row = rgb_mix(bg, text, 0.025f);
+    t.scroll = rgb_mix(bg, text, 0.30f);
+    t.scroll_hover = rgb_mix(bg, text, 0.45f);
+    return t;
+}
+
 // Recompute T from the selected theme, surfaces and accent override.
 static void theme_apply(void) {
     if (g_theme_cur < 0 || g_theme_cur >= g_nthemes) g_theme_cur = 0;
-    T = theme_is_system() ? (g_desktop.light ? g_theme_light : g_theme_dark) : g_themes[g_theme_cur].t;
+    T = theme_is_system() ? theme_system() : g_themes[g_theme_cur].t;
     if (g_unified_surfaces) T.sidebar = T.tabbar = T.toolbar = T.preview_bg = T.bg; // (the lines between them stay)
     g_status_bg = surface_adjust(T.toolbar, SURF_STATUS);
     T.sidebar = surface_adjust(T.sidebar, SURF_SIDEBAR);

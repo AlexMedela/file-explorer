@@ -20,7 +20,7 @@ typedef struct {
 } OptDef;
 
 static const OptDef g_opts[] = {
-    {OC_APPEARANCE, OK_CHOICE, OPT_THEME, "Theme", "Colour scheme; System: light or dark as the desktop prefers, with its accent (add your own JSON schemes below)"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_THEME, "Theme", "Colour scheme; System: light or dark as the desktop prefers, with its accent (KDE: its colours) (add your own JSON schemes below)"},
     {OC_APPEARANCE, OK_ACCENT, OPT_ACCENT, "Accent colour", "Selection, focus and highlight colour"},
     {OC_APPEARANCE, OK_TEXT, OPT_SCROLL_COLOR, "Scrollbar colour", "Empty: Auto, the theme's own (System: the desktop's accent); or #RRGGBB / #RGB, then Apply"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders; System: the desktop's icon theme"},

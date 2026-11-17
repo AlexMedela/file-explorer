@@ -54,7 +54,8 @@ Per-folder views live in `~/.config/file-explorer/folders.conf`, saved layouts i
 
 Theme > **System** (`theme=System`) is Light or Dark as the desktop prefers (the settings portal's dark / light
 preference, else GTK's), with the desktop's accent colour where it has one (an accent picked in Options wins), and
-follows changes while the app runs.
+follows changes while the app runs. On KDE it takes KDE's colour scheme itself (view, window, text and selection
+colours from its settings portal, else `~/.config/kdeglobals` when the session is KDE).
 
 `scrollbar_color=#RRGGBB` (Options -> Appearance -> Scrollbar colour: type `#RRGGBB` or `#RGB`, then Apply or Enter)
 colours the scrollbars; `auto` (the field left empty) keeps the theme's own, which under Theme > System take the

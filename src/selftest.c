@@ -3376,7 +3376,40 @@ static int run_selftest_m9(void) {
         *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3584E4, .icons = "hicolor"};
         dlook_apply(d);
         ST_CHECK(!theme_is_system() && T.bg == g_themes[theme_find("Nord")].t.bg && T.accent == g_themes[theme_find("Nord")].t.accent);
+        // on KDE: its colour scheme, read only where KDE is (its portal, or kdeglobals when the session is KDE)
+        opt_choice_set(OPT_THEME, theme_find("System"));
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3DAEE9, .icons = "breeze",
+                           .kde = {0x01000000u | 0xFCFCFC, 0x01000000u | 0xEFF0F1, 0x01000000u | 0x232627, 0x01000000u | 0x3DAEE9}};
+        dlook_apply(d);
+        ST_CHECK(T.bg == 0xFCFCFC && T.sidebar == 0xEFF0F1 && T.toolbar == 0xEFF0F1 && T.text == 0x232627 && T.accent == 0x3DAEE9);
+        ST_CHECK(T.tabbar != T.toolbar && COL_STATUS == T.toolbar);
+        st_frames(2);
+        st_shot("m9-system-kde");
+        char kg[PATH_MAX], *de0 = getenv("XDG_CURRENT_DESKTOP") ? strdup(getenv("XDG_CURRENT_DESKTOP")) : NULL;
+        snprintf(kg, sizeof kg, "%s/kdeglobals", getenv("XDG_CONFIG_HOME"));
+        FILE *kf = fopen(kg, "w");
+        if (kf) {
+            fputs("[Colors:Selection]\nBackgroundNormal=61,174,233\n[Colors:View]\nBackgroundNormal=20,22,24\nForegroundNormal=252,252,252\n"
+                  "[Colors:Window]\nBackgroundNormal=32,35,38\n", kf);
+            fclose(kf);
+        }
+        DesktopLook look;
+        const char *des[3] = {"KDE", "GNOME", ""};
+        for (int k = 0; k < 3; k++) {
+            setenv("XDG_CURRENT_DESKTOP", des[k], 1);
+            dlook_get(NULL, &look);
+            if (k == 0) ST_CHECK(look.kde[KDE_VIEW] == (0x01000000u | 0x141618) && look.kde[KDE_WINDOW] == (0x01000000u | 0x202326) && !look.light &&
+                                 look.accent == (0x01000000u | 0x3DAEE9));
+            else ST_CHECK(!look.kde[KDE_VIEW] && !look.accent); // (not KDE, or not saying: the file is ignored)
+        }
+        if (de0) setenv("XDG_CURRENT_DESKTOP", de0, 1);
+        else unsetenv("XDG_CURRENT_DESKTOP");
+        free(de0);
+        unlink(kg);
         memset(&g_desktop, 0, sizeof g_desktop);
+        theme_apply();
+        ST_CHECK(T.bg == g_theme_dark.bg && T.text == g_theme_dark.text);
         g_accent_custom = saved_accent;
     }
 

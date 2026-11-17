@@ -550,7 +550,7 @@ static void ig_picker_set(bool on) {
 // light, accent colour, icon theme) and listens for its changes, falling back to KDE's / GTK's config files; what
 // it finds goes to g_desktop on the main thread. Nothing is started otherwise, nor in self-tests.
 
-typedef struct { bool light; u32 accent; char icons[64]; } DesktopLook;
+typedef struct { bool light; u32 accent, kde[KDE_COLORS]; char icons[64]; } DesktopLook;
 
 static struct {
     atomic_bool running, stop;
@@ -586,6 +586,14 @@ static bool dlook_ini(const char *file, const char *group, const char *key, char
     free(line);
     fclose(f);
     return found;
+}
+
+// KDE's "r,g,b" colour values -> rgb; false if malformed.
+static bool dlook_rgb(const char *s, u32 *out) {
+    int r, g, b, n = 0;
+    if (sscanf(s, " %d , %d , %d %n", &r, &g, &b, &n) != 3 || s[n] || r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255) return false;
+    *out = (u32)r << 16 | (u32)g << 8 | (u32)b;
+    return true;
 }
 
 // Settings portal value ns/key: the reply (unref it) with *it on the innermost value; NULL if the portal / key isn't there.
@@ -647,6 +655,25 @@ static void dlook_get(void *conn, DesktopLook *d) {
     char v[256];
     const char *de = getenv("XDG_CURRENT_DESKTOP");
     bool kde = de && (strcasestr(de, "kde") || strcasestr(de, "plasma"));
+    // KDE's colour scheme (KDE_*): from its portal (others don't have these keys), else kdeglobals, on KDE only (a
+    // file left from an old Plasma install mustn't colour another desktop); the view's background is a must
+    static const char *kde_keys[KDE_COLORS][2] = {{"Colors:View", "BackgroundNormal"}, {"Colors:Window", "BackgroundNormal"},
+                                                  {"Colors:View", "ForegroundNormal"}, {"Colors:Selection", "BackgroundNormal"}};
+    for (int k = 0; k < KDE_COLORS; k++) {
+        v[0] = 0;
+        char ns[64];
+        snprintf(ns, sizeof ns, "org.kde.kdeglobals.%s", kde_keys[k][0]);
+        if (conn && (r = dlook_read(conn, ns, kde_keys[k][1], &it))) {
+            const char *s = NULL;
+            if (g_fm1.iter_get_arg_type(&it) == 's') g_fm1.iter_get_basic(&it, &s);
+            if (s) snprintf(v, sizeof v, "%s", s);
+            g_fm1.message_unref(r);
+        }
+        u32 c;
+        if (!v[0] && kde) dlook_ini("kdeglobals", kde_keys[k][0], kde_keys[k][1], v, sizeof v);
+        if (v[0] && dlook_rgb(v, &c)) d->kde[k] = 0x01000000u | c;
+    }
+    if (!d->kde[KDE_VIEW]) memset(d->kde, 0, sizeof d->kde);
     if (!d->icons[0] && kde && dlook_ini("kdeglobals", "Icons", "Theme", v, sizeof v) && sysi_component(v)) snprintf(d->icons, sizeof d->icons, "%s", v);
     static const char *gtk[] = {"gtk-4.0/settings.ini", "gtk-3.0/settings.ini"};
     for (int i = 0; i < 2; i++) {
@@ -654,16 +681,18 @@ static void dlook_get(void *conn, DesktopLook *d) {
         if (scheme <= 0 && dlook_ini(gtk[i], "Settings", "gtk-application-prefer-dark-theme", v, sizeof v)) scheme = atoi(v) || !strcasecmp(v, "true") ? 1 : 2;
     }
     if (!d->icons[0]) snprintf(d->icons, sizeof d->icons, "hicolor");
-    d->light = scheme == 2;
+    d->light = d->kde[KDE_VIEW] ? rgb_luma(d->kde[KDE_VIEW] & 0xFFFFFF) > 0.5f : scheme == 2; // (KDE: its scheme says)
+    if (!d->accent) d->accent = d->kde[KDE_SELECTION];
 }
 
 static void dlook_apply(void *arg) { // (main thread)
     DesktopLook *d = arg;
-    bool look = !g_desktop.known || g_desktop.light != d->light || g_desktop.accent != d->accent;
+    bool look = !g_desktop.known || g_desktop.light != d->light || g_desktop.accent != d->accent || memcmp(g_desktop.kde, d->kde, sizeof d->kde);
     bool icons = strcmp(g_desktop.icons, d->icons) != 0;
     g_desktop.known = true;
     g_desktop.light = d->light;
     g_desktop.accent = d->accent;
+    memcpy(g_desktop.kde, d->kde, sizeof d->kde);
     snprintf(g_desktop.icons, sizeof g_desktop.icons, "%s", d->icons);
     free(d);
     if (look && theme_is_system()) theme_apply(); // (icons follow the new colours in icons_sync_theme)
@@ -709,7 +738,7 @@ static void *dlook_thread(void *arg) {
         next = now_ns() + 5000000000ull;
         DesktopLook d;
         dlook_get(conn, &d);
-        if (!first && d.light == last.light && d.accent == last.accent && !strcmp(d.icons, last.icons)) continue;
+        if (!first && d.light == last.light && d.accent == last.accent && !memcmp(d.kde, last.kde, sizeof d.kde) && !strcmp(d.icons, last.icons)) continue;
         first = false;
         last = d;
         DesktopLook *copy = xmalloc(sizeof *copy);
