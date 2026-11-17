@@ -886,10 +886,20 @@ static void layout_pane(Pane *p, Rect area) {
     ly->morebtn = (Rect){area.x + area.w - bs - roundf(S(8)), by, bs, bs};
     ly->filterbtn = (Rect){ly->morebtn.x - bs - gap, by, bs, bs};
     ly->sortbtn = (Rect){ly->filterbtn.x - bs - gap, by, bs, bs};
+    // A narrow split keeps the path usable: back / forward / up go first (their keys and the mouse's side buttons
+    // still work), then sort (it stays in the folder's menu), then filter and the menu (a right click on empty space).
     f32 path_right = ly->sortbtn.x - roundf(S(4));
-    if (path_right - px < S(80)) { // a narrow split: the path keeps the room, sorting stays in the folder's menu
+    if (area.w < S(240) || path_right - px < S(80)) {
+        ly->back = ly->fwd = ly->up = (Rect){0};
+        px = area.x + roundf(S(8));
+    }
+    if (area.w < S(120) || path_right - px < S(80)) {
         ly->sortbtn = (Rect){0};
         path_right = ly->filterbtn.x - roundf(S(4));
+    }
+    if (area.w < S(80)) {
+        ly->morebtn = ly->filterbtn = (Rect){0};
+        path_right = area.x + area.w - roundf(S(8));
     }
     ly->pathbar = (Rect){px, by, MAX(0.f, path_right - px), bs};
     f32 hh = p->view == VIEW_DETAILS && !pane_du_on(p) && !pane_snap_on(p) ? roundf(S(32)) : 0; // list/grid sort from the menu, no header

@@ -1541,6 +1541,45 @@ static int run_selftest_m6(void) {
     ST_CHECK(A.ap == p0);
     ST_CHECK(p0->bar.y == p1->bar.y && p2->bar.y > p1->bar.y);
 
+    { // a click on another panel's toolbar (not on a button) makes that panel the active one
+        Rect tb = p1->cur->pane[0].ly.toolbar;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tb.x + tb.w * 0.5f, tb.y + S(2), SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tb.x + tb.w * 0.5f, tb.y + S(2), SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.ap == p1);
+        panel_activate(p0);
+    }
+    { // narrow panes: back / forward / up go first, then sort, then filter + menu; the path keeps the rest
+        f32 ratio = A.root->ratio;
+        A.root->ratio = S(220) / A.root->r.w;
+        st_frames(1);
+        PaneLayout *ly = &p0->cur->pane[0].ly;
+        ST_CHECK(ly->area.w < S(240) && ly->back.w == 0 && ly->fwd.w == 0 && ly->up.w == 0 && ly->sortbtn.w > 0);
+        ST_CHECK(ly->pathbar.w > 0 && ly->pathbar.x + ly->pathbar.w <= ly->sortbtn.x && ly->sortbtn.x + ly->sortbtn.w <= ly->filterbtn.x);
+        st_shot("split-narrow");
+        Pane *np = &p0->cur->pane[0];
+        pane_navigate(np, M6_BASE, true); st_wait();
+        pane_navigate(np, M6_BASE "/a", true); st_wait();
+        st_key(SDLK_LEFT, SDL_KMOD_ALT); st_wait(); // the keys still work without the buttons
+        ST_CHECK(!strcmp(np->path, M6_BASE));
+        st_key(SDLK_RIGHT, SDL_KMOD_ALT); st_wait();
+        ST_CHECK(!strcmp(np->path, M6_BASE "/a"));
+        st_key(SDLK_UP, SDL_KMOD_ALT); st_wait();
+        ST_CHECK(!strcmp(np->path, M6_BASE));
+        Rect area = ly->area;
+        layout_pane(np, (Rect){area.x, area.y, S(110), area.h});
+        ST_CHECK(ly->back.w == 0 && ly->sortbtn.w == 0 && ly->filterbtn.w > 0 && ly->morebtn.w > 0);
+        ST_CHECK(ly->pathbar.w > 0 && ly->pathbar.x + ly->pathbar.w <= ly->filterbtn.x);
+        layout_pane(np, (Rect){area.x, area.y, S(70), area.h});
+        ST_CHECK(ly->back.w == 0 && ly->sortbtn.w == 0 && ly->filterbtn.w == 0 && ly->morebtn.w == 0);
+        ST_CHECK(ly->pathbar.w > 0 && ly->pathbar.x + ly->pathbar.w <= area.x + S(70));
+        // hidden buttons can't be clicked: where back was, the path bar starts
+        f32 bx = area.x + S(20), by = ly->pathbar.y + ly->pathbar.h * 0.5f;
+        ST_CHECK(!in_rect(ly->back, bx, by) && !in_rect(ly->filterbtn, area.x + S(50), by));
+        A.root->ratio = ratio;
+        st_frames(1);
+        ST_CHECK(p0->cur->pane[0].ly.back.w > 0 && p0->cur->pane[0].ly.sortbtn.w > 0);
+    }
+
     // tabs within a panel: Ctrl+T adds to the active panel only; Ctrl+1/Ctrl+9
     st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
     pane_navigate(active_pane(), M6_BASE "/d", true); st_wait();
@@ -2676,7 +2715,7 @@ static int run_selftest_m9(void) {
         ST_CHECK(!A.menu.open);
     }
     Rect area = p->ly.area; // a narrow split: no sort button, nothing overlaps
-    layout_pane(p, (Rect){area.x, area.y, S(200), area.h});
+    layout_pane(p, (Rect){area.x, area.y, S(110), area.h});
     ST_CHECK(p->ly.sortbtn.w == 0 && p->ly.pathbar.w >= 0 && p->ly.pathbar.x + p->ly.pathbar.w <= p->ly.filterbtn.x);
     layout_pane(p, area);
     pane_set_sort(p, SORT_NAME);

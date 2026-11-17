@@ -445,13 +445,14 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
     bool enabled[3] = {p->hist_pos > 0, p->hist_pos < p->hist_n - 1, p->path[1] != 0};
     for (int i = 0; i < 3; i++) {
         Rect r = btn[i];
+        if (r.w <= 0) continue; // hidden in a narrow split
         bool hover = hand_if(A.mouse_in && in_rect(r, A.mx, A.my) && enabled[i]);
         if (hover) draw_rrect(r.x, r.y, r.w, r.h, S(6), C(COL_FIELD_HOVER));
         Color c = enabled[i] ? C(COL_TEXT) : C(COL_TEXT_FAINT);
         draw_chevron(r.x + r.w * 0.5f, r.y + r.h * 0.5f, S(11), i, MAX(1.5f, S(1.6f)), c);
     }
 
-    {   // type filter (funnel)
+    if (ly->filterbtn.w > 0) { // type filter (funnel)
         Rect fb = ly->filterbtn;
         bool on = p->tf_mode || p->tf_exts[0], hv = hot(fb);
         if (on || hv) draw_rrect(fb.x, fb.y, fb.w, fb.h, S(6), on ? CA(COL_ACCENT, 0.22f) : C(COL_FIELD_HOVER));
@@ -470,7 +471,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
         f32 is = roundf(S(18));
         draw_ui_icon(UI_ARROW_DOWN_WIDE_NARROW, sb.x + (sb.w - is) * 0.5f, sb.y + (sb.h - is) * 0.5f, is, C(COL_TEXT_DIM));
     }
-    {   // the folder's menu (three dots)
+    if (ly->morebtn.w > 0) { // the folder's menu (three dots)
         Rect mb = ly->morebtn;
         bool on = A.menu.open && A.menu.pane == p && A.menu.folder && A.menu.ox == mb.x, hv = hot(mb);
         if (on || hv) draw_rrect(mb.x, mb.y, mb.w, mb.h, S(6), C(COL_FIELD_HOVER));
@@ -479,6 +480,7 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
             draw_rrect(roundf(mb.x + (mb.w - d) * 0.5f + (f32)k * S(6)), cy, d, d, d * 0.5f, C(COL_TEXT_DIM));
     }
     Rect pb = ly->pathbar;
+    if (pb.w <= 0) { ly->has_gitchip = false; return; }
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);
     if (hover) A.ptr_text = true; // a click outside the crumbs edits the path
