@@ -58,6 +58,7 @@ typedef struct Op {
     // results, read by the main thread after OPS_DONE
     int nerr;
     char err[512];
+    char warn[512];  // done, with something to say (OP_COMPRESS: items it couldn't read and left out)
     char **in, **out, **aux; // in = original path, out = resulting path, aux = trashinfo
     int nout, capout;
     u64 t_start, t_end;

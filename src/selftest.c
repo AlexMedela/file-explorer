@@ -1026,6 +1026,7 @@ static bool c_hidden_size_known(void) {
 }
 
 static ssize_t st_read_text(const char *path, char *out, size_t cap); // M10
+static void st_write_text(const char *path, const char *text); // M11
 
 static int run_selftest_m4(void) {
     st_wait();
@@ -2579,6 +2580,79 @@ static int run_selftest_m8(void) {
     do_action(p, ACT_COMPRESS_TGZ);
     st_wait_ops();
     ST_CHECK(st_size(M8_BASE "/proj.tar.gz") > 0);
+    { // accented names and spaces keep their bytes; an unreadable file is left out and named, the rest is there;
+      // a "<name>.part" that was already there is left alone
+        mkdir(M8_BASE "/uni", 0755);
+        mkdir(M8_BASE "/uni/sub dir", 0755);
+        st_write(M8_BASE "/uni/caf\xC3\xA9 cr\xC3\xA8me.txt", 10);
+        st_write(M8_BASE "/uni/sub dir/\xE6\x97\xA5\xE6\x9C\xAC.txt", 20);
+        st_write(M8_BASE "/uni/locked.txt", 30);
+        chmod(M8_BASE "/uni/locked.txt", 0);
+        bool locked = geteuid() != 0; // (root reads it anyway)
+        char *uni[] = {M8_BASE "/uni"};
+        for (int fmt = 0; fmt < 2; fmt++) {
+            const char *arc = fmt ? M8_BASE "/uni.tar.gz" : M8_BASE "/uni.zip";
+            char part[PATH_MAX];
+            snprintf(part, sizeof part, "%s.part", arc);
+            st_write_text(part, "mine");
+            Op *op = op_new(OP_COMPRESS, uni, 1, M8_BASE);
+            op->arc = strdup(arc);
+            run_compress(op);
+            ST_CHECK(!op->nerr && st_size(arc) > 0);
+            if (op->nerr) fprintf(stderr, "SELFTEST compress: %s\n", op->err);
+            if (locked) ST_CHECK(strstr(op->warn, "1 item couldn't be read") && strstr(op->warn, "uni/locked.txt"));
+            else ST_CHECK(!op->warn[0]);
+            char mine[16] = "";
+            st_read_text(part, mine, sizeof mine);
+            ST_CHECK(!strcmp(mine, "mine")); // untouched
+            char other[PATH_MAX + 8];
+            snprintf(other, sizeof other, "%s.1.part", arc);
+            ST_CHECK(!st_exists(other)); // ours was renamed into place
+            int seen = 0;
+            locale_t oloc = arc_utf8_begin(); // (as the app reads them)
+            struct archive *a = arc_open(arc);
+            struct archive_entry *ae;
+            while (a && arc_next(a, &ae) == ARCHIVE_OK) {
+                const char *nm = archive_entry_pathname_utf8(ae);
+                if (!nm) nm = archive_entry_pathname(ae);
+                if (!nm) continue;
+                seen |= !strcmp(nm, "uni/caf\xC3\xA9 cr\xC3\xA8me.txt") ? 1 : 0;
+                seen |= !strcmp(nm, "uni/sub dir/\xE6\x97\xA5\xE6\x9C\xAC.txt") ? 2 : 0;
+                seen |= !strcmp(nm, "uni/locked.txt") ? 4 : 0;
+            }
+            if (a) archive_read_free(a);
+            arc_utf8_end(oloc);
+            ST_CHECK((seen & 3) == 3 && (locked ? !(seen & 4) : (seen & 4)));
+            unlink(part);
+            op_free(op);
+        }
+        chmod(M8_BASE "/uni/locked.txt", 0644);
+        // everything vanished since it was picked: no empty archive, and the reason
+        char *gone[] = {M8_BASE "/missing-source"};
+        Op *op = op_new(OP_COMPRESS, gone, 1, M8_BASE);
+        op->arc = strdup(M8_BASE "/missing.zip");
+        run_compress(op);
+        ST_CHECK(op->nerr && strstr(op->err, "missing-source") && !st_exists(M8_BASE "/missing.zip") && !st_exists(M8_BASE "/missing.zip.part"));
+        op_free(op);
+        // a ".part" that is a symlink isn't written through (here to a full disk): ours gets a name of its own
+        Op *fo = op_new(OP_COMPRESS, uni, 1, M8_BASE);
+        fo->arc = strdup(M8_BASE "/full.zip");
+        if (symlink("/dev/full", M8_BASE "/full.zip.part")) {}
+        run_compress(fo);
+        ST_CHECK(!fo->nerr && st_size(M8_BASE "/full.zip") > 0 && !st_exists(M8_BASE "/full.zip.1.part"));
+        op_free(fo);
+        unlink(M8_BASE "/full.zip.part");
+        unlink(M8_BASE "/full.zip");
+        // browsing it lists every name (the C locale used to stop at the first accented one)
+        pane_navigate(p, M8_BASE "/uni.zip" ARC_SEP "uni", true);
+        st_wait();
+        ST_CHECK(p->count == (locked ? 2u : 3u) && st_row_y(p, "caf\xC3\xA9 cr\xC3\xA8me.txt") > 0 && st_row_y(p, "sub dir") > 0);
+        pane_navigate(p, M8_BASE, true);
+        st_wait();
+        unlink(M8_BASE "/uni.zip");
+        unlink(M8_BASE "/uni.tar.gz");
+        st_rmrf(M8_BASE "/uni");
+    }
     st_select(p, "proj.zip");
     st_key(SDLK_RETURN, SDL_KMOD_NONE); // Enter browses the archive
     st_wait();

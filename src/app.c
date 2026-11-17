@@ -4756,6 +4756,7 @@ static void op_finished(void *arg) {
         else if (op->kind == OP_TRASH) undo_push(U_TRASH, op->in, op->out, op->aux, op->nout);
     }
     if (op->from_cut && !op->nerr && !atomic_load(&op->cancel)) clip_clear();
+    if (op->kind == OP_COMPRESS && (op->nerr || op->warn[0])) toast("%s", op->nerr ? op->err : op->warn); // (a card without errors goes quickly)
     A.redraw = true;
 }
 
@@ -4982,6 +4983,7 @@ static void op_detail(Op *op, u64 now, char *det, size_t cap) {
         if (cur[0]) snprintf(det, cap, "Canceled  \xC2\xB7  %d%%  \xC2\xB7  %s", pct, cur);
         else snprintf(det, cap, "Canceled  \xC2\xB7  %d%%", pct);
     } else if (done && op->nerr) snprintf(det, cap, "%s", op->err);
+    else if (done && op->warn[0]) snprintf(det, cap, "%s", op->warn);
     else if (done && nv) snprintf(det, cap, "Done in %.1f s  \xC2\xB7  %u file%s verified", (op->t_end - op->t_start) / 1e9, nv, nv == 1 ? "" : "s");
     else if (done) snprintf(det, cap, "Done in %.1f s", (op->t_end - op->t_start) / 1e9);
     else if (ph == OPS_COUNTING) snprintf(det, cap, "Preparing\xE2\x80\xA6 %u items", ft);
