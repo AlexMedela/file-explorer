@@ -44,7 +44,8 @@ after each drop instead: Move here, Copy here, Link here (a symbolic link to eac
 still decides at once.
 
 **Programs and scripts** (Options > Behaviour > Programs): opening an executable file (an AppImage or other program, or a
-script starting with `#!`) asks first: Run, Run in terminal (the window stays open with the exit code when it ends),
+script: starting with `#!`, or a `.sh` / `.bash` file without it, run by the shell) asks first: Run (in the background, no window: for apps), Run in terminal (the external terminal, as for "Open in external terminal" - Options > Integration >
+Terminal app; it waits for Enter when the program ends, so its output can be read),
 Open (scripts: as a document, in your editor) or Cancel. "Don't ask again" keeps that answer; `exec_open=ask|run|terminal|open`
 ("Opening programs and scripts") changes it back. Programs started this way start in their own folder. A program without
 the executable bit (an AppImage just downloaded) always asks "Make executable and run" first; a script without it opens as

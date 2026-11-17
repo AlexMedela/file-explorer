@@ -4237,10 +4237,10 @@ static void open_path(const char *full) {
     else if (!app_launch(a, files, 1)) toast("Couldn't start %s", a->name);
 }
 
-// Running executable files: programs (ELF binaries, AppImages) and scripts with a #! line. Opening one asks first
+// Running executable files: programs (ELF binaries, AppImages) and scripts (#! line, or .sh / .bash). Opening one asks first
 // (Options > Behaviour > Executable files); one without the executable bit (a downloaded AppImage) runs only after
 // "Make executable and run". Local files only: a stalled network folder would freeze the UI thread.
-enum { RUN_NONE, RUN_PROGRAM, RUN_SCRIPT };
+enum { RUN_NONE, RUN_PROGRAM, RUN_SCRIPT, RUN_SHELL }; // RUN_SHELL: a .sh / .bash without #!, run by the shell
 
 static int run_kind(const char *full, bool *exec) {
     struct stat st;
@@ -4253,26 +4253,34 @@ static int run_kind(const char *full, bool *exec) {
     close(fd);
     if (n == 4 && !memcmp(b, "\x7f" "ELF", 4)) return RUN_PROGRAM; // (AppImages are ELF files too)
     if (n >= 2 && b[0] == '#' && b[1] == '!') return RUN_SCRIPT;
+    // shells run these too (no #!: the shell itself); only by name, as on FAT / NTFS drives every file is executable
+    const char *dot = strrchr(path_basename(full), '.');
+    if (dot && (!strcasecmp(dot, ".sh") || !strcasecmp(dot, ".bash")) && (n <= 0 || file_looks_text(full))) return RUN_SHELL;
     return RUN_NONE;
 }
 
-static void run_program(const char *full, bool term) {
+static void run_program(const char *full, int kind, bool term) {
     char dir[PATH_MAX]; // started in its own folder: scripts often use files next to them
     snprintf(dir, sizeof dir, "%s", full);
     char *slash = strrchr(dir, '/');
     if (slash) slash[slash == dir] = 0;
-    if (A.selftest) { snprintf(A.last_opened, sizeof A.last_opened, "%s:%s", term ? "run-terminal" : "run", full); return; }
-    if (term) { // the window stays open when it ends, so its output can be read
-        char *cmd[] = {"/bin/sh", "-c", "\"$0\"; s=$?; printf '\\n[exited with code %s] Press Enter to close ' \"$s\"; read -r _", (char *)full, NULL};
+    const char *dot = strrchr(full, '.');
+    char *shell = dot && !strcasecmp(dot, ".bash") && in_path("bash") ? "bash" : "/bin/sh"; // (RUN_SHELL)
+    if (A.selftest) { snprintf(A.last_opened, sizeof A.last_opened, "%s:%s%s%s", term ? "run-terminal" : "run", kind == RUN_SHELL ? shell : "", kind == RUN_SHELL ? " " : "", full); return; }
+    if (term) { // the external terminal (Options > Integration > Terminal app, as Open in external terminal); it waits for
+                // Enter when the program ends (else the window would close at once), so its output can be read
+        static const char wrap[] = "\"$@\"; s=$?; if [ $s -eq 0 ]; then m='Finished'; c=2; else m=\"Exited with code $s\"; c=31; fi; "
+                                   "printf '\\n\\033[%sm%s \\342\\200\\224 press Enter to close\\033[0m' \"$c\" \"$m\"; read -r _";
+        char *cmd[] = {"/bin/sh", "-c", (char *)wrap, "sh", kind == RUN_SHELL ? shell : (char *)full, kind == RUN_SHELL ? (char *)full : NULL, NULL};
         spawn_terminal(dir, cmd);
         return;
     }
-    char *argv[] = {(char *)full, NULL};
+    char *argv[] = {kind == RUN_SHELL ? shell : (char *)full, kind == RUN_SHELL ? (char *)full : NULL, NULL};
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_addchdir_np(&fa, dir);
     pid_t pid;
-    int err = posix_spawn(&pid, full, &fa, spawn_attr(), argv, environ);
+    int err = posix_spawnp(&pid, argv[0], &fa, spawn_attr(), argv, environ);
     posix_spawn_file_actions_destroy(&fa);
     if (err) toast("Couldn't run %s: %s%s", path_basename(full), strerror(err), err == EACCES ? " (its drive may not allow programs)" : "");
 }
@@ -4290,7 +4298,7 @@ static void run_chmod_cb(int choice, bool check, void *ud) {
         toast("Can't make %s executable: %s", path_basename(g_run.path), strerror(errno));
         return;
     }
-    run_program(g_run.path, g_run.term);
+    run_program(g_run.path, g_run.kind, g_run.term);
 }
 
 // Buttons: Run, Run in terminal, [Open (scripts)], Cancel. "Don't ask again" keeps the answer (Options undoes it).
@@ -4300,7 +4308,7 @@ static void run_ask_cb(int choice, bool check, void *ud) {
     int how = choice == 0 ? EXEC_RUN : choice == 1 ? EXEC_TERMINAL : EXEC_OPEN;
     if (check) { A.exec_open = how; A.settings_dirty = true; }
     if (how == EXEC_OPEN) open_path(g_run.path);
-    else run_program(g_run.path, how == EXEC_TERMINAL);
+    else run_program(g_run.path, g_run.kind, how == EXEC_TERMINAL);
 }
 
 static void run_ask_chmod(const char *full, int kind, bool term) {
@@ -4310,7 +4318,7 @@ static void run_ask_chmod(const char *full, int kind, bool term) {
     char title[200], msg[700];
     snprintf(title, sizeof title, "\xE2\x80\x9C%s\xE2\x80\x9D isn't allowed to run", path_basename(full));
     snprintf(msg, sizeof msg, "It's a %s, but it isn't marked as executable. Make it executable and run it? Only do this if you trust where it came from.",
-             kind == RUN_SCRIPT ? "script" : "program");
+             kind != RUN_PROGRAM ? "script" : "program");
     static const char *bb[] = {"Make executable and run", "Cancel"};
     dialog_open(title, msg, bb, 2, 0, 1, NULL, run_chmod_cb, NULL);
     A.dlg.icon = DI_WARN;
@@ -4322,7 +4330,7 @@ static void run_file(const char *full, bool term) {
     int kind = run_kind(full, &exec);
     if (kind == RUN_NONE) { toast("%s isn't a program or a script", path_basename(full)); return; }
     if (!exec) run_ask_chmod(full, kind, term);
-    else run_program(full, term);
+    else run_program(full, kind, term);
 }
 
 // Opening a file: true when it was a program / script and was dealt with here (run, or a question asked).
@@ -4331,24 +4339,24 @@ static bool open_executable(const char *full) {
     int kind = run_kind(full, &exec);
     if (kind == RUN_NONE) return false;
     if (!exec) { // a script without the bit is a document to read; a program can't be anything else
-        if (kind == RUN_SCRIPT) return false;
+        if (kind != RUN_PROGRAM) return false;
         run_ask_chmod(full, kind, false);
         return true;
     }
     int how = A.exec_open;
-    if (how == EXEC_OPEN && kind == RUN_SCRIPT) return false;
-    if (how == EXEC_RUN || how == EXEC_TERMINAL) { run_program(full, how == EXEC_TERMINAL); return true; }
+    if (how == EXEC_OPEN && kind != RUN_PROGRAM) return false;
+    if (how == EXEC_RUN || how == EXEC_TERMINAL) { run_program(full, kind, how == EXEC_TERMINAL); return true; }
     snprintf(g_run.path, sizeof g_run.path, "%s", full); // ask (programs also with "Open": nothing else opens them)
     g_run.kind = kind;
     g_run.term = false;
     const char *dot = strrchr(path_basename(full), '.');
     char title[200], msg[700];
     snprintf(title, sizeof title, "Run \xE2\x80\x9C%s\xE2\x80\x9D?", path_basename(full));
-    if (kind == RUN_SCRIPT) snprintf(msg, sizeof msg, "It's an executable script. Run it, or open it to read what it does first. Only run it if you trust where it came from.");
+    if (kind != RUN_PROGRAM) snprintf(msg, sizeof msg, "It's an executable script. Run it, or open it to read what it does first. Only run it if you trust where it came from.");
     else snprintf(msg, sizeof msg, "It's a program%s. Only run it if you trust where it came from.", dot && !strcasecmp(dot, ".appimage") ? " (AppImage)" : "");
     static const char *bs[] = {"Run", "Run in terminal", "Open", "Cancel"};
     static const char *bp[] = {"Run", "Run in terminal", "Cancel"};
-    bool script = kind == RUN_SCRIPT;
+    bool script = kind != RUN_PROGRAM;
     dialog_open(title, msg, script ? bs : bp, script ? 4 : 3, 0, script ? 3 : 2, "Don't ask again", run_ask_cb, NULL);
     A.dlg.icon = DI_QUESTION;
     return true;
