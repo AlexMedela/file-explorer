@@ -205,7 +205,7 @@ static void drives_scan(DevList *L) {
 
 // --- network mounts ------------------------------------------------------------
 
-typedef struct { char path[PATH_MAX]; char label[64]; } NetMount;
+typedef struct { char path[PATH_MAX]; char label[64]; bool sshfs; } NetMount; // sshfs: label is its "user@host:/dir"
 
 // "smb-share:server=nas,share=media" -> "media on nas"; "sftp:host=box,user=me" -> "me@box"
 static void gvfs_label(const char *name, char *out, size_t cap) {
@@ -327,6 +327,7 @@ static int network_mounts(NetMount *out, int max) {
             if (de->d_name[0] == '.' || phone_kind(de->d_name)) continue; // phones are listed under Devices
             path_join(out[n].path, sizeof out[n].path, gdir, de->d_name);
             gvfs_label(de->d_name, out[n].label, sizeof out[n].label);
+            out[n].sshfs = false;
             n++;
         }
         closedir(d);
@@ -342,6 +343,7 @@ static int network_mounts(NetMount *out, int max) {
                 continue;
             mount_unescape(mp, out[n].path, sizeof out[n].path);
             mount_unescape(src, out[n].label, sizeof out[n].label); // (sshfs: user@host:/dir, which can have spaces too)
+            out[n].sshfs = !strcmp(type, "fuse.sshfs");
             n++;
         }
         fclose(f);

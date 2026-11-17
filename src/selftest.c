@@ -4421,7 +4421,8 @@ static int run_selftest_m10(void) {
         unsetenv("FE_NET_MOUNTS");
         for (int i = 0; i < nn; i++) {
             found += !strcmp(nm[i].path, M10_BASE "/smb share") && !strcmp(nm[i].label, "//nas/my share");
-            found += !strcmp(nm[i].path, M10_BASE "/ssh\ttab") && !strcmp(nm[i].label, "me@box:/home/me/my docs");
+            found += !strcmp(nm[i].path, M10_BASE "/ssh\ttab") && !strcmp(nm[i].label, "me@box:/home/me/my docs") && nm[i].sshfs;
+            ST_CHECK(nm[i].sshfs == !strcmp(nm[i].path, M10_BASE "/ssh\ttab"));
             found += !strcmp(nm[i].path, M10_BASE "/literal\\040");
             ST_CHECK(!strstr(nm[i].path, "not network") && !strstr(nm[i].path, "\\011"));
         }
@@ -4973,6 +4974,19 @@ static int run_selftest_m10(void) {
                      !strcmp(t.user, "al") && !strcmp(t.port, "2222") && !strcmp(t.path, "/srv/my app's dir"));
             ST_CHECK(ssh_target_for(M10_BASE "/gvfs/sftp:host=vm1.lan,user=al", &t) && !strcmp(t.path, "/"));
             ST_CHECK(!ssh_target_for(M10_BASE "/gvfs/smb-share:server=nas,share=media/x", &t) && !ssh_target_for("/home", &t));
+            { // sshfs mounts: the server from the mount's source; NFS and rclone sources look alike but aren't ssh
+                int nn = A.nnets;
+                NetMount saved[3];
+                memcpy(saved, A.nets, sizeof saved);
+                A.nets[0] = (NetMount){M10_BASE "/nfs", "nas:/exports/team", false};
+                A.nets[1] = (NetMount){M10_BASE "/drive", "gdrive:", false};
+                A.nets[2] = (NetMount){M10_BASE "/box", "me@box:/srv", true};
+                A.nnets = 3;
+                ST_CHECK(!ssh_target_for(M10_BASE "/nfs/a", &t) && !ssh_target_for(M10_BASE "/drive", &t));
+                ST_CHECK(ssh_target_for(M10_BASE "/box/www", &t) && !strcmp(t.host, "box") && !strcmp(t.user, "me") && !strcmp(t.path, "/srv/www"));
+                memcpy(A.nets, saved, sizeof saved);
+                A.nnets = nn;
+            }
             char d[PATH_MAX];
             snprintf(d, sizeof d, "%s", M10_BASE "/gvfs/sftp:host=vm1.lan,user=al,port=2222/srv/my app's dir");
             ext_terminal(d);

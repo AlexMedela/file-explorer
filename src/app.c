@@ -5344,6 +5344,7 @@ static void new_item(Pane *p, bool folder, const char *sub) {
 static bool ssh_target_for(const char *path, SshTarget *t) {
     if (ssh_target_gvfs(path, t)) return true;
     for (int k = 0; k < A.nnets; k++) { // sshfs: label is the source "user@host:/dir"
+        if (!A.nets[k].sshfs) continue; // (NFS "nas:/export" and rclone "remote:" look alike but have no shell)
         const char *mp = A.nets[k].path, *src = A.nets[k].label, *colon = strchr(src, ':');
         size_t ml = strlen(mp);
         if (!colon || strncmp(path, mp, ml) || (path[ml] && path[ml] != '/') || strstr(src, "://")) continue;
