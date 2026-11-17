@@ -11,11 +11,13 @@ typedef struct { int button,clicks; f32 x,y; } SDL_MouseButtonEvent;
 typedef struct { f32 x,y; } SDL_MouseMotionEvent;
 enum { SDL_BUTTON_LEFT=1, SDL_KMOD_SHIFT=1 };
 static int mods; static bool captured;
+#define S(x) ((f32)(x)) // fixed 1x scale for the standalone harness
 static int SDL_GetModState(void) { return mods; }
 static void SDL_CaptureMouse(bool capture) { captured=capture; }
 static struct { TextEdit edit,ren_te,search_te; void *edit_pane,*ren_pane,*search_pane; bool pal_open; } A;
 static bool modal;
 static bool sheet_open(void) { return modal; }
+static bool sheet_text_focus(TextEdit *edit) { (void)edit; return true; }
 static int te_prev(const TextEdit *t,int i) { if(i>0) { i--; while(i>0 && ((u8)t->buf[i]&0xc0)==0x80) i--; } return i; }
 static int te_next(const TextEdit *t,int i) { int n=(int)strlen(t->buf); if(i<n) { i++; while(i<n && ((u8)t->buf[i]&0xc0)==0x80) i++; } return i; }
 static bool te_sep(char c) { return c==' ' || c=='/' || c=='.' || c=='-' || c=='_'; }
