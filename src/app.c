@@ -682,7 +682,7 @@ static struct {
     Term *term_mouse;    // the terminal a mouse button went down in (gets the drag and the release)
     int term_mouse_btn;
     u64 trash_size;
-    bool trash_known, trash_again;
+    bool trash_known, trash_again, trash_empty; // trash_empty: nothing in it, not even empty files or folders
     int nservers;
     bool devs_enabled;        // off in self-tests unless faked
     bool dev_scanning, dev_rescan;
@@ -4720,6 +4720,7 @@ static void trash_size_refresh(void) {
 static void trash_size_poll(void) {
     if (!A.trash_job || !atomic_load(&A.trash_job->done)) return;
     A.trash_size = atomic_load(&A.trash_job->size);
+    A.trash_empty = !atomic_load(&A.trash_job->files) && atomic_load(&A.trash_job->dirs) <= 1; // (the folder itself)
     A.trash_known = true;
     stats_release(A.trash_job);
     A.trash_job = NULL;
@@ -6588,29 +6589,20 @@ static void empty_trash_cb(int choice, bool check, void *ud) {
     else op_free(op);
 }
 
-// Delete items permanently (with their .trashinfo); all = empty the trash.
-static void trash_delete(Pane *p, bool all) {
+// Ask, then delete these entries of the trash (names in its files folder) for good, with their .trashinfo;
+// all = the whole trash.
+static void trash_confirm_delete(char **names, int n, bool all) {
+    if (!n) { toast(all ? "The trash is already empty" : "Nothing selected"); return; }
     char files[PATH_MAX], info[PATH_MAX];
     trash_dirs(files, info, sizeof files);
-    int n = 0, cap = 64;
-    char **src = xmalloc((size_t)cap * sizeof(char *)), **aux = xmalloc((size_t)cap * sizeof(char *));
-    Listing *L = p->L;
-    for (u32 i = 0; L && i < (all ? L->count : p->count); i++) {
-        u32 ei = all ? i : p->order[i];
-        if (!all && !p->sel[ei] && !(p->sel_count == 0 && (i64)i == p->cursor)) continue;
-        if (n == cap) {
-            cap *= 2;
-            src = xrealloc(src, (size_t)cap * sizeof(char *));
-            aux = xrealloc(aux, (size_t)cap * sizeof(char *));
-        }
+    char **src = xmalloc((size_t)n * sizeof(char *)), **aux = xmalloc((size_t)n * sizeof(char *));
+    for (int i = 0; i < n; i++) {
         char sp[PATH_MAX], ip[PATH_MAX + NAME_MAX + 16];
-        path_join(sp, sizeof sp, files, L->entries[ei].name);
-        snprintf(ip, sizeof ip, "%s/%s.trashinfo", info, L->entries[ei].name);
-        src[n] = strdup(sp);
-        aux[n] = strdup(ip);
-        n++;
+        path_join(sp, sizeof sp, files, names[i]);
+        snprintf(ip, sizeof ip, "%s/%s.trashinfo", info, names[i]);
+        src[i] = strdup(sp);
+        aux[i] = strdup(ip);
     }
-    if (!n) { free(src); free(aux); toast(all ? "The trash is already empty" : "Nothing selected"); return; }
     Op *op = op_new(OP_DELETE, src, n, NULL);
     op->aux_in = strv_dup(aux, n);
     char msg[200];
@@ -6620,14 +6612,61 @@ static void trash_delete(Pane *p, bool all) {
     dialog_open(all ? "Empty Trash" : "Delete permanently", msg, b, 2, 0, 1, NULL, empty_trash_cb, op);
     A.dlg.icon = DI_DANGER;
     A.dlg.danger = true;
-    { // list the trashed names (as they were), not their trash-internal paths
-        char **names = xmalloc((size_t)MIN(n, 5) * sizeof(char *));
-        for (int i = 0; i < n && i < 5; i++) names[i] = src[i];
-        dialog_items(names, n, false); // (their trash-internal paths would mean nothing)
-        free(names);
-    }
+    dialog_items(src, n, false); // the trashed names (as they were), not their trash-internal paths
     strv_free(src, n);
     strv_free(aux, n);
+}
+
+// Emptying the trash from anywhere (Quick Access, palette): its folder is read on a worker, then we ask.
+typedef struct {
+    char **names;
+    int n, err;
+} TrashList;
+
+static void trash_list_done(void *arg) {
+    TrashList *t = arg;
+    if (t->err) toast("Couldn't read the Trash: %s", strerror(t->err));
+    else if (!A.dlg.open) trash_confirm_delete(t->names, t->n, true); // (another question came up meanwhile: leave it be)
+    strv_free(t->names, t->n);
+    free(t);
+}
+
+static void trash_list_job(void *arg) {
+    TrashList *t = arg;
+    char files[PATH_MAX], info[PATH_MAX];
+    trash_dirs(files, info, sizeof files);
+    DIR *d = opendir(files);
+    if (!d) { if (errno != ENOENT) t->err = errno; } // no files folder yet: nothing in the trash
+    else {
+        int cap = 0;
+        struct dirent *e;
+        for (errno = 0; (e = readdir(d)); errno = 0) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            if (t->n == cap) { cap = cap ? cap * 2 : 64; t->names = xrealloc(t->names, (size_t)cap * sizeof(char *)); }
+            t->names[t->n++] = strdup(e->d_name);
+        }
+        if (errno) t->err = errno;
+        closedir(d);
+    }
+    main_post(trash_list_done, t);
+}
+
+// Delete items permanently (with their .trashinfo); all = empty the trash, whichever folder p shows.
+static void trash_delete(Pane *p, bool all) {
+    Listing *L = p->L;
+    if (all && !(pane_is_trash(p) && L && atomic_load(&L->state) == LST_COMPLETE)) { // not listed here: read it
+        pool_submit(trash_list_job, xcalloc(1, sizeof(TrashList)));
+        return;
+    }
+    int n = 0;
+    char **names = xmalloc((size_t)MAX(1, L ? L->count : 0) * sizeof(char *));
+    for (u32 i = 0; L && i < (all ? L->count : p->count); i++) {
+        u32 ei = all ? i : p->order[i];
+        if (!all && !p->sel[ei] && !(p->sel_count == 0 && (i64)i == p->cursor)) continue;
+        names[n++] = (char *)L->entries[ei].name;
+    }
+    trash_confirm_delete(names, n, all);
+    free(names);
 }
 
 // Right-click on a tab.
@@ -6757,7 +6796,8 @@ static void menu_open_place(int idx, f32 x, f32 y) {
         menu_add("Disconnect", "", ACT_NET_DISCONNECT, true);
     } else {
         menu_add("Open in new tab", "Middle-click", ACT_PLACE_NEW_TAB, true);
-        menu_add("Disk usage\xE2\x80\xA6", "", ACT_DU_PLACE, pl->kind != PK_TRASH);
+        if (pl->kind == PK_TRASH) menu_add("Empty Trash", "", ACT_TRASH_EMPTY, !(A.trash_known && A.trash_empty));
+        else menu_add("Disk usage\xE2\x80\xA6", "", ACT_DU_PLACE, true);
         if (pl->kind == PK_DRIVE) menu_add("Snapshots\xE2\x80\xA6", "", ACT_SNAP_PLACE, true);
         if (pl->group >= 0) {
             QaGroup *g = &A.qa[pl->group];

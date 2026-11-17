@@ -2662,6 +2662,41 @@ static int run_selftest_m8(void) {
     st_key(SDLK_RETURN, SDL_KMOD_NONE);
     st_wait_ops();
     ST_CHECK(p->count == 0 && !st_exists(M8_BASE "/xdg/Trash/files/photo3.jpg") && !st_exists(M8_BASE "/xdg/Trash/info/photo3.jpg.trashinfo"));
+    // Empty Trash from Quick Access / the palette while another folder is open: the trash's own contents (a hidden
+    // empty file counts), never the open folder's names; asked first, read off the UI thread
+    pane_navigate(p, M8_BASE, true); st_wait();
+    for (int k = 0; k < 300 && (A.trash_job || !A.trash_known); k++) { st_frames(1); SDL_Delay(5); }
+    int te = -1;
+    menu_open_place(ti, A.r_sidebar.x + S(40), S(200));
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].act == ACT_TRASH_EMPTY) te = i;
+    ST_CHECK(A.menu.open && te >= 0 && !A.menu.items[te].enabled && A.trash_empty); // nothing in it
+    A.menu.open = false;
+    st_write(M8_BASE "/xdg/Trash/files/.hidden-trash", 0);
+    st_write(M8_BASE "/xdg/Trash/info/.hidden-trash.trashinfo", 1);
+    st_write(M8_BASE "/xdg/Trash/files/photo1.jpg", 5); // the same name as a file in the open folder
+    st_write(M8_BASE "/xdg/Trash/info/photo1.jpg.trashinfo", 1);
+    trash_size_refresh();
+    for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(A.trash_known && !A.trash_empty);
+    menu_open_place(ti, A.r_sidebar.x + S(40), S(200));
+    te = -1;
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].act == ACT_TRASH_EMPTY) te = i;
+    ST_CHECK(te >= 0 && A.menu.items[te].enabled && !pane_is_trash(p));
+    if (te >= 0) menu_activate(te);
+    for (int k = 0; k < 300 && !A.dlg.open; k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(A.dlg.open && !strcmp(A.dlg.title, "Empty Trash") && strstr(A.dlg.msg, "all 2 items"));
+    st_key(SDLK_RETURN, SDL_KMOD_NONE);
+    st_wait_ops();
+    ST_CHECK(!st_exists(M8_BASE "/xdg/Trash/files/.hidden-trash") && !st_exists(M8_BASE "/xdg/Trash/info/.hidden-trash.trashinfo"));
+    ST_CHECK(!st_exists(M8_BASE "/xdg/Trash/files/photo1.jpg") && st_exists(M8_BASE "/photo1.jpg"));
+    for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(A.trash_known && A.trash_empty);
+    A.toast[0] = 0;
+    do_action(p, ACT_TRASH_EMPTY); // the palette's Empty Trash on an empty trash
+    for (int k = 0; k < 300 && !A.toast[0]; k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(!A.dlg.open && !strcmp(A.toast, "The trash is already empty"));
 
     // archives: compress a folder, browse into the zip, extract, read-only, zip-slip
     pane_navigate(p, M8_BASE, true); st_wait();
