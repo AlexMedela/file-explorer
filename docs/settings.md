@@ -102,6 +102,10 @@ terminal (xdg-terminal-exec's choice, else $TERMINAL): font, colours, padding, c
 foot, kitty, Alacritty or Ghostty config and followed live (Options > Appearance > Terminal appearance). Ctrl+Shift+C/V
 copy and paste, Shift+PageUp/PageDown scroll back, Ctrl+Shift+W closes, Ctrl+Tab switches tabs. Built on libvterm.
 
+File icons > **System** (`icon_theme=System`) uses the desktop's icon theme for files, folders and the Trash: the one
+the settings portal names (else KDE's or GTK's settings), followed when it changes. The bundled icon shows until the
+desktop's is there, and wherever its theme has none.
+
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`
 sets the icon for any extension, and `theme.conf` (`base=Catppuccin`) picks the set the missing icons come from.

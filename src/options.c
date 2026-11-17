@@ -21,7 +21,7 @@ typedef struct {
 static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_THEME, "Theme", "Colour scheme (add your own JSON schemes below)"},
     {OC_APPEARANCE, OK_ACCENT, OPT_ACCENT, "Accent colour", "Selection, focus and highlight colour"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders; System: the desktop's icon theme"},
     {OC_APPEARANCE, OK_CHOICE, OPT_FONT, "Font", "Interface font family"},
     {OC_APPEARANCE, OK_INT, OPT_FONT_SIZE, "Font size", "Text size at 100% zoom"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ROW_SPACING, "Row spacing", "Height of rows in the details and list views"},
@@ -247,7 +247,7 @@ static bool apply_ui_font(const char *family) {
 static void opt_choice_set(int id, int i) {
     switch (id) {
     case OPT_THEME: g_theme_cur = i; theme_apply(); break;
-    case OPT_ICON_THEME: icon_set_theme(i); break;
+    case OPT_ICON_THEME: icon_set_theme(i); desktop_look_sync(); break;
     case OPT_TERM_LOOK: g_term_look_setting = i; tc_reload_all(); break;
     case OPT_TITLE_BAR: A.title_bar = i; titlebar_apply(); break;
     case OPT_FONT:

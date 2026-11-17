@@ -86,11 +86,13 @@ static void net_icons_free_images(void) {
     g_net_img_n = 0;
 }
 
-static int icon_theme_count(void) { return ICON_THEMES + g_ncit; }
+// Themes: the built-in sets, the custom ones, then "System" (the desktop's icon theme, system_icons.c).
+static int icon_theme_count(void) { return ICON_THEMES + g_ncit + 1; }
+static bool icon_system_selected(void) { return g_icon_theme == ICON_THEMES + g_ncit; }
 static const char *icon_theme_name(int t) {
-    return t < ICON_THEMES ? g_icon_theme_names[t] : t < icon_theme_count() ? g_cit[t - ICON_THEMES].name : "";
+    return t < ICON_THEMES ? g_icon_theme_names[t] : t < ICON_THEMES + g_ncit ? g_cit[t - ICON_THEMES].name : t == ICON_THEMES + g_ncit ? "System" : "";
 }
-static CustomIconTheme *icon_custom(void) { return g_icon_theme >= ICON_THEMES ? &g_cit[g_icon_theme - ICON_THEMES] : NULL; }
+static CustomIconTheme *icon_custom(void) { return g_icon_theme >= ICON_THEMES && g_icon_theme < ICON_THEMES + g_ncit ? &g_cit[g_icon_theme - ICON_THEMES] : NULL; }
 static int icon_id_limit(void) { CustomIconTheme *c = icon_custom(); return ICON_EXT_BASE + (c ? c->next : 0); }
 
 // SVG text of icon id in the current theme.
@@ -98,7 +100,7 @@ static const char *icon_src(int id) {
     CustomIconTheme *c = icon_custom();
     if (id >= ICON_EXT_BASE) return c && id - ICON_EXT_BASE < c->next ? c->ext_svg[id - ICON_EXT_BASE] : NULL;
     if (id >= ICON_BADGE_BASE) return c ? c->badge[id - ICON_BADGE_BASE] : NULL;
-    if (!c) return g_icon_svg[g_icon_theme][id];
+    if (!c) return g_icon_svg[g_icon_theme < ICON_THEMES ? g_icon_theme : 0][id]; // (System: Material until the desktop's arrive)
     return c->svg[id] ? c->svg[id] : g_icon_svg[c->base][id];
 }
 static NSVGimage *g_icon_img[ICON_COUNT]; // parsed lazily (current theme)
@@ -402,8 +404,16 @@ static NSVGimage *icon_image(int id) {
     return *slot;
 }
 
+#include "system_icons.c"
+
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
+    const u8 *sys = icon_system_selected() && w == h ? sysi_pixels(id, w) : NULL;
+    if (sys) {
+        u8 *buf = xmalloc((size_t)w * h * 4);
+        memcpy(buf, sys, (size_t)w * h * 4);
+        return buf;
+    }
     NSVGimage *img = icon_image(id);
     if (!img || img->width <= 0 || img->height <= 0) return NULL;
     if (!g_rast) g_rast = nsvgCreateRasterizer();
@@ -498,6 +508,25 @@ static SDL_Texture *big_icon_tex(int id, int px) {
     return tex;
 }
 
+// The desktop's icon (system_icons.c) arrived: over the bundled one drawn meanwhile, in place in the atlas; big copies
+// are made again.
+static void icons_replace(int id, int px, const u8 *rgba) {
+    for (int i = 0; i < g_icon_cache_n; i++) {
+        Glyph *g = &g_icon_cache[i].g;
+        if (g_icon_cache[i].id != id || g_icon_cache[i].px != px) continue;
+        for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(g->y + y) * ATLAS_SIZE + g->x) * 4], rgba + (size_t)y * px * 4, (size_t)px * 4);
+        g_dirty_x0 = MIN(g_dirty_x0, g->x);
+        g_dirty_y0 = MIN(g_dirty_y0, g->y);
+        g_dirty_x1 = MAX(g_dirty_x1, g->x + px);
+        g_dirty_y1 = MAX(g_dirty_y1, g->y + px);
+    }
+    for (int i = 0; i < g_nbig; i++)
+        if (g_big_icons[i].id == id && g_big_icons[i].px == px) {
+            SDL_DestroyTexture(g_big_icons[i].tex);
+            g_big_icons[i--] = g_big_icons[--g_nbig];
+        }
+}
+
 // Theme changed: icons using the theme colour mark are parsed and rasterized again.
 static bool g_logo_changed; // the window icon should be rebuilt (app.c)
 
@@ -515,7 +544,8 @@ static void icons_sync_theme(void) {
     g_icon_main = COL_TEXT2;
     g_icon_bg = COL_BG;
     if (first) return;
-    bool any = false;
+    bool any = icon_system_selected(); // (the desktop's symbolic icons are drawn in the text colour)
+    if (any) sysi_reset();
     for (int i = 0; i < ICON_COUNT; i++)
         if (g_icon_img[i] && (strstr(icon_src(i), ICON_THEME_MARK) || strstr(icon_src(i), ICON_THEME_SHADE))) {
             nsvgDelete(g_icon_img[i]);
@@ -564,6 +594,7 @@ static void icons_flush(void) {
 static void icon_set_theme(int t) {
     if (t < 0 || t >= icon_theme_count() || t == g_icon_theme) return;
     g_icon_theme = t;
+    sysi_reset();
     icons_flush();
 }
 
@@ -610,7 +641,7 @@ static void icon_themes_scan(const char *dir) {
         snprintf(tdir, sizeof tdir, "%s/%s", dir, de->d_name);
         struct stat st;
         if (stat(tdir, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
-        bool clash = false; // a built-in name can't be reused
+        bool clash = str_ieq(de->d_name, "System"); // a built-in name can't be reused
         for (int i = 0; i < ICON_THEMES; i++) clash |= str_ieq(de->d_name, g_icon_theme_names[i]);
         if (clash) continue;
         CustomIconTheme *c = &g_cit[g_ncit];

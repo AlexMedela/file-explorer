@@ -10181,6 +10181,7 @@ static void search_toggle_recursive(Pane *p);
 static void set_zoom(f32 z);
 static void settings_save(void);
 static void settings_file(char *out, size_t cap, bool dir_only);
+static void desktop_look_sync(void); // integration.c
 
 static void run_command(int id) {
     Pane *p = active_pane();
@@ -10269,6 +10270,7 @@ static void run_command(int id) {
             if (layout_open(id - CMD_LAYOUT_BASE)) toast("Layout \xE2\x80\x9C%s\xE2\x80\x9D", g_layouts[id - CMD_LAYOUT_BASE].name);
         } else if (id >= CMD_ICON_THEME_BASE && id < CMD_ICON_THEME_BASE + ICON_THEMES) {
             icon_set_theme(id - CMD_ICON_THEME_BASE);
+            desktop_look_sync();
             toast("Icon theme: %s", g_icon_theme_names[g_icon_theme]);
             A.settings_dirty = true;
         }
@@ -11449,6 +11451,9 @@ static void frame(void) {
         for (int i = 0; i < A.ntabs; i++)
             if (A.tabs[i]->term && !term_settled(A.tabs[i]->term)) ready = false; // a shell prompt takes a moment
         if (git_busy() || du_busy() || snapview_busy() || (g_cmp.on && !cmp_ready())) ready = false;
+        if (icon_system_selected() && !g_desktop.known) ready = false; // the desktop's icon theme
+        for (int i = 0; i < g_nsysicons; i++)
+            if (g_sysicons[i].state == SYSI_PENDING) ready = false; // and its icons
         if (ready && ++A.screenshot_frames >= 3) {
             SDL_Surface *s = SDL_RenderReadPixels(A.ren, NULL);
             if (s) {
@@ -11897,6 +11902,7 @@ int main(int argc, char **argv) {
     }
     icon_themes_reload();
     icon_set_theme(MAX(0, icon_theme_find(A.icon_theme_name)));
+    desktop_look_sync(); // (File icons "System")
     const char *mono[] = {"JetBrains Mono", "Cascadia Code", "Fira Code", "DejaVu Sans Mono", "Noto Sans Mono", "monospace"};
     A.mono_path = find_font_file(mono, (int)ARRAY_COUNT(mono));
     char *bold = font_weight_file(A.font_path, FC_WEIGHT_SEMIBOLD);

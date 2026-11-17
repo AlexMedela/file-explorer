@@ -1858,6 +1858,11 @@ static bool c_thumb_ready(void) {
     return false;
 }
 
+static bool c_sysi_settled(void) {
+    for (int i = 0; i < g_nsysicons; i++) if (g_sysicons[i].state == SYSI_PENDING) return false;
+    return true;
+}
+
 static int run_selftest_m7(void) {
     st_make_bmp(M7_BASE "/photo.bmp", 300, 200);
     pane_refresh(active_pane());
@@ -1924,6 +1929,100 @@ static int run_selftest_m7(void) {
         ST_CHECK(icon_theme_find("TestIcons") < 0 && g_icon_theme == 0);
         ST_CHECK(badge_icon(BADGE_GIT) < 0 && badge_icon(BADGE_LINK) < 0 && !icon_src(ICON_BADGE_BASE)); // built in: the app's marks
         ST_CHECK(trash_icon(true) == icon_find("trash-full") && trash_icon(false) == icon_find("trash")); // built in: both bins
+    }
+    { // File icons "System": the desktop's icon theme, looked up and drawn on a worker, over the bundled icon meanwhile
+        const char *base = "/tmp/fe-m7-sysicons";
+        char path[PATH_MAX], dirs[16384] = "", *old_home = getenv("XDG_DATA_HOME"), *old_dirs = getenv("XDG_DATA_DIRS");
+        char save_home[PATH_MAX] = "", save_dirs[4096] = "";
+        if (old_home) snprintf(save_home, sizeof save_home, "%s", old_home);
+        if (old_dirs) snprintf(save_dirs, sizeof save_dirs, "%s", old_dirs);
+        st_rmrf(base);
+        // FETheme: Directories= over 8 KB and more than 512 folders (only the last fixed one exists), then a
+        // scalable one; inherits FEParent (a PNG at 48 px)
+        snprintf(path, sizeof path, "%s/data/icons/FETheme", base);
+        mkdir_p(path, 0755);
+        FILE *f;
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/index.theme", base);
+        if ((f = fopen(path, "w"))) {
+            for (int i = 0; i < 700; i++) snprintf(dirs + strlen(dirs), sizeof dirs - strlen(dirs), "16x16/places-%03d,", i);
+            fprintf(f, "[Icon Theme]\nName=FE\nInherits=FEParent\nDirectories=%sscalable/places\n\n", dirs);
+            for (int i = 0; i < 700; i++) fprintf(f, "[16x16/places-%03d]\nSize=16\nType=Fixed\n\n", i);
+            fprintf(f, "[scalable/places]\nSize=64\nMinSize=8\nMaxSize=512\nType=Scalable\n");
+            fclose(f);
+        }
+        ST_CHECK(strlen(dirs) > 8192);
+        const char *svg16 = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#123456\"/></svg>";
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/16x16/places-699", base);
+        mkdir_p(path, 0755);
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/16x16/places-699/folder.svg", base);
+        st_write_text(path, svg16);
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/scalable/places", base);
+        mkdir_p(path, 0755);
+        snprintf(path, sizeof path, "%s/data/icons/FETheme/scalable/places/user-home.svg", base);
+        st_write_text(path, svg16);
+        snprintf(path, sizeof path, "%s/data/icons/FEParent/48", base);
+        mkdir_p(path, 0755);
+        snprintf(path, sizeof path, "%s/data/icons/FEParent/index.theme", base);
+        st_write_text(path, "[Icon Theme]\nName=Parent\nDirectories=48\n\n[48]\nSize=48\n");
+        snprintf(path, sizeof path, "%s/data/icons/FEParent/48/text-x-generic.png", base);
+        st_make_bmp(path, 48, 48); // (stb_image goes by the contents)
+        // FEBad: a folder icon of infinite size (refused, the bundled one stays)
+        snprintf(path, sizeof path, "%s/data/icons/FEBad/16", base);
+        mkdir_p(path, 0755);
+        snprintf(path, sizeof path, "%s/data/icons/FEBad/index.theme", base);
+        st_write_text(path, "[Icon Theme]\nName=Bad\nDirectories=16\n[16]\nSize=16\n");
+        snprintf(path, sizeof path, "%s/data/icons/FEBad/16/folder.svg", base);
+        st_write_text(path, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1e999\" height=\"16\"><rect width=\"16\" height=\"16\"/></svg>");
+        snprintf(path, sizeof path, "%s/data", base);
+        setenv("XDG_DATA_HOME", path, 1);
+        setenv("XDG_DATA_DIRS", "/tmp/fe-m7-sysicons/none", 1);
+        sysi_reset();
+        char found[PATH_MAX];
+        ST_CHECK(sysi_lookup("FETheme", "folder", 16, found, sizeof found) && strstr(found, "places-699/folder.svg")); // (past 8 KB, 512 folders)
+        ST_CHECK(sysi_lookup("FETheme", "user-home", 48, found, sizeof found) && strstr(found, "scalable/places"));
+        ST_CHECK(sysi_lookup("FETheme", "text-x-generic", 16, found, sizeof found) && strstr(found, "FEParent/48")); // inherited, closest size
+        ST_CHECK(!sysi_lookup("FETheme", "no-such-icon", 16, found, sizeof found) && !sysi_lookup("FETheme", "../x", 16, found, sizeof found));
+        snprintf(path, sizeof path, "%s/data/icons/FEBad/16/folder.svg", base);
+        ST_CHECK(!sysi_raster(path, 16, 0xFFFFFF));
+        // through the UI
+        int sys = icon_theme_find("System");
+        ST_CHECK(sys == icon_theme_count() - 1 && !strcmp(icon_theme_name(sys), "System"));
+        opt_choice_set(OPT_ICON_THEME, sys);
+        ST_CHECK(icon_system_selected() && !icon_custom() && !g_dlook.running); // (no watcher in tests)
+        DesktopLook *d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.icons = "FETheme"};
+        dlook_apply(d);
+        int fo = icon_find("folder"), doc = icon_find("python"), bin = icon_find("trash");
+        Glyph *g = icon_glyph(fo, 16); // the bundled folder while the desktop's is looked up
+        ST_CHECK(g && g_nsysicons == 1 && g_sysicons[0].state == SYSI_PENDING);
+        ST_CHECK(icon_glyph(doc, 16) && big_icon_tex(doc, 96) && icon_glyph(bin, 16));
+        ST_CHECK(st_wait_cond(c_sysi_settled, 5000));
+        g = icon_glyph(fo, 16); // ... then the desktop's, copied over it in the atlas
+        ST_CHECK(g && g_atlas[((size_t)(g->y + 8) * ATLAS_SIZE + g->x + 8) * 4] == 0x12 && g_atlas[((size_t)(g->y + 8) * ATLAS_SIZE + g->x + 8) * 4 + 2] == 0x56);
+        for (int i = 0; i < g_nsysicons; i++) { // python: text-x-generic from FEParent; the bin: the theme has none
+            SysIcon *si = &g_sysicons[i];
+            if (si->id == doc) ST_CHECK(si->state == SYSI_READY);
+            if (si->id == bin) ST_CHECK(si->state == SYSI_NONE);
+        }
+        ST_CHECK(big_icon_tex(doc, 96) != NULL);
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.icons = "FEBad"}; // another desktop theme: asked again
+        dlook_apply(d);
+        ST_CHECK(g_nsysicons == 0 && icon_glyph(fo, 16));
+        ST_CHECK(st_wait_cond(c_sysi_settled, 5000));
+        for (int i = 0; i < g_nsysicons; i++) if (g_sysicons[i].id == fo) ST_CHECK(g_sysicons[i].state == SYSI_NONE && !g_sysicons[i].rgba);
+        settings_save();
+        settings_load();
+        ST_CHECK(!strcmp(A.icon_theme_name, "System"));
+        opt_choice_set(OPT_ICON_THEME, 0);
+        ST_CHECK(!icon_system_selected() && g_nsysicons == 0);
+        icon_glyph(fo, 16); // (built-in sets never ask the desktop)
+        ST_CHECK(g_nsysicons == 0);
+        if (save_home[0]) setenv("XDG_DATA_HOME", save_home, 1); else unsetenv("XDG_DATA_HOME");
+        if (save_dirs[0]) setenv("XDG_DATA_DIRS", save_dirs, 1); else unsetenv("XDG_DATA_DIRS");
+        sysi_reset();
+        memset(&g_desktop, 0, sizeof g_desktop);
+        st_rmrf(base);
     }
     { // the logo follows the accent colour (Blue = the artwork as drawn)
         u32 saved = g_accent_custom;
@@ -3211,7 +3310,6 @@ static int run_selftest_m9(void) {
     opt_button(OPT_THEME_NEW);
     ST_CHECK(theme_find("My theme") >= 0 && g_theme_cur == theme_find("My theme"));
     sheet_close();
-
     // settings round trip
     g_theme_cur = theme_find("Nord");
     g_accent_custom = 0x01000000u | 0x123456;

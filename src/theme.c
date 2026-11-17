@@ -97,6 +97,8 @@ static int g_nthemes;
 static Theme T = g_theme_dark; // the palette everything draws with
 static int g_theme_cur;
 static u32 g_accent_custom; // 0 = theme accent, else 0x01000000 | rgb
+// The desktop's look, read off the UI thread (integration.c, "desktop look") only while File icons is System.
+static struct { bool known; char icons[64]; } g_desktop;
 
 static const struct { const char *name; u32 rgb; } g_accents[] = {
     {"Blue", 0x4C9BFF}, {"Purple", 0x9D7CF4}, {"Pink", 0xE86AB8}, {"Red", 0xEF5B5B}, {"Orange", 0xF2913A},
