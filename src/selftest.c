@@ -1889,8 +1889,8 @@ static int run_selftest_m7(void) {
         snprintf(path, sizeof path, "%s/TestIcons", dir);
         mkdir_p(path, 0700);
         const char *svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><rect width=\"16\" height=\"16\" fill=\"#ff00ff\"/></svg>";
-        const char *files[4] = {"python.svg", "ext-xyz.svg", "theme.conf", "trash.svg"};
-        for (int k = 0; k < 4; k++) {
+        const char *files[5] = {"python.svg", "ext-xyz.svg", "theme.conf", "trash.svg", "Emblem-Git.svg"};
+        for (int k = 0; k < 5; k++) {
             snprintf(path, sizeof path, "%s/TestIcons/%s", dir, files[k]);
             FILE *f = fopen(path, "w");
             if (f) { fputs(k == 2 ? "base=Symbols\n" : svg, f); fclose(f); }
@@ -1907,6 +1907,10 @@ static int run_selftest_m7(void) {
         int xi = icon_for_name("scene.XYZ", false);
         ST_CHECK(xi >= ICON_EXT_BASE && icon_glyph(xi, 16) && big_icon_tex(xi, 96)); // any extension
         ST_CHECK(icon_glyph(py, 16) != NULL);
+        // badges: the theme's emblem-git.svg replaces the app's Git mark; no emblem-symbolic-link.svg: the app's own
+        ST_CHECK(badge_icon(BADGE_GIT) == ICON_BADGE_BASE + BADGE_GIT && badge_icon(BADGE_LINK) < 0);
+        ST_CHECK(icon_glyph(badge_icon(BADGE_GIT), 16) && big_icon_tex(badge_icon(BADGE_GIT), 82));
+        ST_CHECK(icon_find("emblem-git") < 0 && xi != ICON_BADGE_BASE + BADGE_GIT); // (not a file icon, ids apart)
         settings_save();
         settings_load();
         ST_CHECK(!strcmp(A.icon_theme_name, "TestIcons"));
@@ -1918,6 +1922,7 @@ static int run_selftest_m7(void) {
         if (system(path)) {}
         icon_themes_reload();
         ST_CHECK(icon_theme_find("TestIcons") < 0 && g_icon_theme == 0);
+        ST_CHECK(badge_icon(BADGE_GIT) < 0 && badge_icon(BADGE_LINK) < 0 && !icon_src(ICON_BADGE_BASE)); // built in: the app's marks
         ST_CHECK(trash_icon(true) == icon_find("trash-full") && trash_icon(false) == icon_find("trash")); // built in: both bins
     }
     { // the logo follows the accent colour (Blue = the artwork as drawn)

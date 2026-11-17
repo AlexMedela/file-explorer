@@ -106,5 +106,7 @@ Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearanc
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`
 sets the icon for any extension, and `theme.conf` (`base=Catppuccin`) picks the set the missing icons come from.
 `trash-full.svg` is the Trash's bin when something is in it (`trash.svg` when empty; a theme with only `trash.svg`
-uses it for both). `net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
+uses it for both). `emblem-symbolic-link.svg` and `emblem-git.svg` replace the marks on links and Git
+repositories: drawn on the icon's lower right at about a third of its size (with both, the Git one sits above);
+without them the usual marks stay. `net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
 lists every icon name.

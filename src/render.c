@@ -131,6 +131,15 @@ static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
     return true;
 }
 
+// A custom icon theme's own badge (BADGE_*) on the icon at (x, y), size px: lower right, slot 1 stacked above slot 0.
+// False if the theme has none (the caller draws the app's mark).
+static bool draw_theme_badge(f32 x, f32 y, f32 size, int badge, int slot, bool hidden) {
+    int id = badge_icon(badge);
+    if (id < 0) return false;
+    f32 b = roundf(MAX(S(5), size * 0.32f));
+    return draw_icon_id(roundf(x + size - b), roundf(y + size - b * (1 + slot)), b, id, hidden);
+}
+
 // A folder: the icon set's folder icon for this name (falls back to the built-in folder).
 static void draw_dir_icon(f32 x, f32 y, f32 s, const char *name, bool hidden) {
     if (draw_icon_id(x, y, s, folder_icon_for_name(name), hidden)) return;
@@ -1212,13 +1221,15 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
                 draw_rrect(gx - S(2), gy - S(2), gr2 * 2 + S(4), gr2 * 2 + S(4), gr2 + S(2), C(COL_BG));
                 draw_rrect(gx, gy, gr2 * 2, gr2 * 2, gr2, C(cmp_marked(cs) ? cmp_color(cs) : git_color(gs)));
             }
-            if (git_entry_sub(p, e)) { // a repository: a branch mark on the icon's bottom-left corner
+            bool link = e->flags & ENT_LINK, hid = e->flags & ENT_HIDDEN;
+            bool theme_link = link && draw_theme_badge(ix, iy, isz, BADGE_LINK, 0, hid);
+            if (git_entry_sub(p, e) && !draw_theme_badge(ix, iy, isz, BADGE_GIT, link, hid)) { // a repository: a branch mark on the icon's bottom-left corner
                 f32 bs = roundf(MAX(S(18), isz * 0.3f)), bx = ix - S(2), by = iy + isz - bs + S(2);
                 draw_rrect(bx - S(2), by - S(2), bs + S(4), bs + S(4), (bs + S(4)) * 0.5f, C(COL_BG));
                 draw_rrect(bx, by, bs, bs, bs * 0.5f, C(COL_CHIP));
                 draw_branch_icon(bx + (bs - S(13)) * 0.5f, by + bs * 0.5f, C(COL_TEXT2));
             }
-            if (e->flags & ENT_LINK) {
+            if (link && !theme_link) {
                 f32 bs = roundf(MAX(S(10), isz * 0.18f));
                 draw_rrect(ix + isz - bs, iy + isz - bs, bs, bs, bs * 0.5f, C(COL_BG));
                 draw_rrect(ix + isz - bs + S(2), iy + isz - bs + S(2), bs - S(4), bs - S(4), bs * 0.4f, C(0x7FB2FF));
@@ -2111,7 +2122,7 @@ static void draw_list(Pane *p, bool active) {
         if (p->list_px >= 32) draw_item_icon_big(p, e, icx, iy, is, cut); // (big enough for thumbnails)
         else if (e->flags & ENT_DIR) draw_dir_icon(icx, iy, is, rel_base(e->name), hidden);
         else if (!draw_icon_for_name(icx, iy, is, rel_base(e->name), e->mflags & MF_EXEC)) draw_file_icon(icx, iy, is, file_color(e));
-        if (e->flags & ENT_LINK) { // small link badge
+        if ((e->flags & ENT_LINK) && !draw_theme_badge(icx, iy, is, BADGE_LINK, 0, hidden)) { // small link badge
             f32 bs = roundf(S(7));
             draw_rrect(icx + is - bs + S(2), iy + is - bs + S(1), bs, bs, bs * 0.5f, C(COL_BG));
             draw_rrect(icx + is - bs + S(3), iy + is - bs + S(2), bs - S(2), bs - S(2), bs * 0.4f, C(0x7FB2FF));
