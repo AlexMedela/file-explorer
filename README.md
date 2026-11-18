@@ -71,6 +71,8 @@ To everyone who sent code, reported bugs or asked for features:
 <a href="https://github.com/zeropaulsy"><img src="https://github.com/zeropaulsy.png?size=96" width="48" height="48" alt="@zeropaulsy" title="@zeropaulsy"></a>
 <a href="https://github.com/juangiler"><img src="https://github.com/juangiler.png?size=96" width="48" height="48" alt="@juangiler" title="@juangiler"></a>
 <a href="https://github.com/pr83-glitch"><img src="https://github.com/pr83-glitch.png?size=96" width="48" height="48" alt="@pr83-glitch" title="@pr83-glitch"></a>
+<a href="https://github.com/teraflop09-web"><img src="https://github.com/teraflop09-web.png?size=96" width="48" height="48" alt="@teraflop09-web" title="@teraflop09-web"></a>
+<a href="https://github.com/teejee2008"><img src="https://github.com/teejee2008.png?size=96" width="48" height="48" alt="@teejee2008" title="@teejee2008"></a>
 
 ## Licence
 [MIT](LICENSE). Bundled icon sets and libraries keep their own licences, listed in [Building](docs/building.md#tools-and-self-tests).
