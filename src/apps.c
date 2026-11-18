@@ -863,6 +863,59 @@ static MediaJob *media_start(const char *path, bool pdf, const char *ffprobe, co
     return j;
 }
 
+// Properties > Archive: what an archive holds, counted on a worker (every entry's header is read; for a compressed
+// tar that means decompressing all of it, so the counts show as they grow and closing Properties stops it).
+typedef struct {
+    char path[PATH_MAX];
+    _Atomic u64 size; // unpacked
+    _Atomic u32 files, dirs;
+    _Atomic int cancel, done, failed;
+    _Atomic int refs;
+} ArcInfoJob;
+
+static void arcinfo_release(ArcInfoJob *j) {
+    if (atomic_fetch_sub(&j->refs, 1) == 1) free(j);
+}
+
+static void *arcinfo_thread(void *arg) {
+    ArcInfoJob *j = arg;
+    thread_background_priority();
+    struct archive *a = arc_open(j->path);
+    if (!a) atomic_store(&j->failed, 1);
+    else {
+        locale_t oloc = arc_utf8_begin();
+        struct archive_entry *ae;
+        int r;
+        u32 tick = 0;
+        while ((r = arc_next(a, &ae)) == ARCHIVE_OK && !atomic_load_explicit(&j->cancel, memory_order_relaxed)) {
+            if (archive_entry_filetype(ae) == AE_IFDIR) atomic_fetch_add(&j->dirs, 1);
+            else {
+                atomic_fetch_add(&j->files, 1);
+                if (archive_entry_size_is_set(ae) && archive_entry_size(ae) > 0) atomic_fetch_add(&j->size, (u64)archive_entry_size(ae));
+            }
+            if (!(++tick & 1023)) main_wake(); // (a redraw now and then while it counts)
+        }
+        if (r != ARCHIVE_EOF && !atomic_load(&j->cancel) && !atomic_load(&j->files) && !atomic_load(&j->dirs)) atomic_store(&j->failed, 1);
+        arc_utf8_end(oloc);
+        archive_read_free(a);
+    }
+    atomic_store(&j->done, 1);
+    main_wake();
+    arcinfo_release(j);
+    return NULL;
+}
+
+static ArcInfoJob *arcinfo_start(const char *path) {
+    ArcInfoJob *j = xcalloc(1, sizeof *j);
+    snprintf(j->path, sizeof j->path, "%s", path);
+    atomic_init(&j->refs, 2); // UI + thread
+    pthread_t t;
+    pthread_create(&t, NULL, arcinfo_thread, j);
+    pthread_setname_np(t, "fe-arcinfo");
+    pthread_detach(t);
+    return j;
+}
+
 typedef struct {
     char path[PATH_MAX];
     char md5[33], sha256[65];

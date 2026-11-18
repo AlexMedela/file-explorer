@@ -22,6 +22,7 @@ typedef struct {
     // properties
     StatsJob *stats;
     MediaJob *media; // an image's / video's / song's / PDF's details
+    ArcInfoJob *arc; // an archive's contents
     SumJob *sum;
     struct stat st;
     i64 btime;
@@ -86,6 +87,7 @@ static void sheet_close(void) {
     explicit_bzero(s->cn[CN_PASS].buf, sizeof s->cn[CN_PASS].buf); // the typed password doesn't linger
     if (s->stats) { atomic_store(&s->stats->cancel, 1); stats_release(s->stats); }
     if (s->media) media_release(s->media);
+    if (s->arc) { atomic_store(&s->arc->cancel, 1); arcinfo_release(s->arc); }
     if (s->sum) { atomic_store(&s->sum->cancel, 1); sum_release(s->sum); }
     if (s->snap) snap_release(s->snap);
     strv_free(s->newnames, s->npaths);
@@ -467,6 +469,7 @@ static void props_open(char **paths, int n) {
         snprintf(s->mime, sizeof s->mime, "%s", mime_for_file(path_basename(paths[0]), dir));
         if (dir) s->stats = stats_start(paths, n);
         bool local = !strstr(paths[0], "::") && !path_is_remote(paths[0]); // (archive members, network folders: not read)
+        if (!dir && local && is_archive_name(paths[0])) s->arc = arcinfo_start(paths[0]);
         bool pdf = !strcmp(s->mime, "application/pdf");
         if (!dir && local && (pdf || !strncmp(s->mime, "image/", 6) || !strncmp(s->mime, "video/", 6) || !strncmp(s->mime, "audio/", 6)))
             s->media = media_start(paths[0], pdf, A.selftest ? getenv("FE_FFPROBE") : "ffprobe", A.selftest ? getenv("FE_PDFINFO") : "pdfinfo");
@@ -803,6 +806,30 @@ static void props_draw(void) {
         props_card(x, y, cw, n, rh, 0);
         for (int i = 0; i < n; i++)
             props_line(x, y + i * rh, cw, rh, lab[i], val[i], fs, i == reveal_row ? "Show" : NULL, i == reveal_row ? &s->rreveal : NULL);
+        y += n * rh + gap;
+    }
+    if (s->arc) { // Archive: what it holds, counted as it's read
+        ArcInfoJob *aj = s->arc;
+        bool done = atomic_load(&aj->done);
+        const char *lab[3];
+        char val[3][160];
+        int n = 0;
+        if (atomic_load(&aj->failed)) { lab[n] = "Contents"; snprintf(val[n++], sizeof val[0], "Can't be read"); }
+        else {
+            u64 nf = atomic_load(&aj->files), nd = atomic_load(&aj->dirs), us = atomic_load(&aj->size);
+            fmt_count(b3, nf);
+            fmt_count(b4, nd);
+            lab[n] = "Contents";
+            snprintf(val[n++], sizeof val[0], "%s file%s, %s folder%s%s", b3, nf == 1 ? "" : "s", b4, nd == 1 ? "" : "s", done ? "" : " \xE2\x80\xA6");
+            fmt_size(b2, sizeof b2, us);
+            lab[n] = "Unpacked size";
+            if (done && s->have_st && us > 0 && (u64)s->st.st_size < us) // how much it saves
+                snprintf(val[n++], sizeof val[0], "%s \xC2\xB7 packed to %d%%", b2, (int)MAX(1, (s->st.st_size * 100 + us / 2) / us));
+            else snprintf(val[n++], sizeof val[0], "%s%s", b2, done ? "" : " \xE2\x80\xA6");
+        }
+        y = props_heading(x, y, "Archive");
+        props_card(x, y, cw, n, rh, 0);
+        for (int i = 0; i < n; i++) props_line(x, y + i * rh, cw, rh, lab[i], val[i], fs, NULL, NULL);
         y += n * rh + gap;
     }
     if (s->media) { // Media: what the file holds (nothing found: no card)
@@ -2260,5 +2287,5 @@ static void sheet_wheel(f32 dy) {
 static bool sheet_busy(void) {
     Sheet *s = &g_sheet;
     return (s->stats && !atomic_load(&s->stats->done)) || (s->sum && !atomic_load(&s->sum->done)) || (s->snap && !atomic_load(&s->snap->done)) ||
-           (s->media && !atomic_load(&s->media->done));
+           (s->media && !atomic_load(&s->media->done)) || (s->arc && !atomic_load(&s->arc->done));
 }

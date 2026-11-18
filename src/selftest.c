@@ -2404,6 +2404,7 @@ static void st_setup_m8(void) {
     setenv("XDG_DATA_HOME", M8_BASE "/xdg", 1); // private trash
 }
 
+static bool c_arc_done(void) { return g_sheet.arc && atomic_load(&g_sheet.arc->done); }
 static bool c_media_done(void) { return g_sheet.media && atomic_load(&g_sheet.media->done); }
 static bool c_stats_done(void) { return g_sheet.stats && atomic_load(&g_sheet.stats->done); }
 static bool c_sum_done(void) { return g_sheet.sum && atomic_load(&g_sheet.sum->done); }
@@ -2715,6 +2716,41 @@ static int run_selftest_m8(void) {
         unlink(fp);
         unlink(pp2);
         unlink(M8_BASE "/pic.bmp");
+    }
+    { // Properties > Archive: files, folders and the unpacked size, counted on a worker; a broken one says so
+        struct archive *w = archive_write_new();
+        archive_write_set_format_zip(w);
+        archive_write_open_filename(w, M8_BASE "/box.zip");
+        static const struct { const char *name; int dir; size_t size; } ents[] = {{"d/", 1, 0}, {"d/a.txt", 0, 1000}, {"b.txt", 0, 500}};
+        char data[1000];
+        memset(data, 'x', sizeof data);
+        for (size_t i = 0; i < ARRAY_COUNT(ents); i++) {
+            struct archive_entry *e = archive_entry_new();
+            archive_entry_set_pathname(e, ents[i].name);
+            archive_entry_set_filetype(e, ents[i].dir ? AE_IFDIR : AE_IFREG);
+            archive_entry_set_perm(e, ents[i].dir ? 0755 : 0644);
+            archive_entry_set_size(e, (la_int64_t)ents[i].size);
+            archive_write_header(w, e);
+            if (ents[i].size) archive_write_data(w, data, ents[i].size);
+            archive_entry_free(e);
+        }
+        archive_write_close(w);
+        archive_write_free(w);
+        char *av[1] = {M8_BASE "/box.zip"};
+        props_open(av, 1);
+        ST_CHECK(g_sheet.arc && st_wait_cond(c_arc_done, 3000));
+        ST_CHECK(!atomic_load(&g_sheet.arc->failed) && atomic_load(&g_sheet.arc->files) == 2 && atomic_load(&g_sheet.arc->dirs) == 1 &&
+                 atomic_load(&g_sheet.arc->size) == 1500);
+        st_frames(2);
+        st_shot("properties-archive");
+        sheet_close();
+        st_write(M8_BASE "/broken.zip", 300);
+        char *bv[1] = {M8_BASE "/broken.zip"};
+        props_open(bv, 1);
+        ST_CHECK(g_sheet.arc && st_wait_cond(c_arc_done, 3000) && atomic_load(&g_sheet.arc->failed));
+        sheet_close();
+        unlink(M8_BASE "/box.zip");
+        unlink(M8_BASE "/broken.zip");
     }
     st_select(p, "abc.txt");
     do_action(p, ACT_PROPERTIES);
