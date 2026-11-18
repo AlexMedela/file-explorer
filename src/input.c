@@ -72,6 +72,25 @@ static bool queue_mouse(f32 x, f32 y) {
     return true;
 }
 
+// Quick Look has the keyboard: Esc closes it (Space too, as text: on_text), Left / Up and Right / Down show the
+// previous / next item, Page Up / Down scroll a text, Enter closes it and opens the file. Other keys do nothing.
+static bool ql_key(SDL_KeyboardEvent *k) {
+    Pane *p = active_pane();
+    i64 step = 0;
+    switch (k->key) {
+    case SDLK_ESCAPE: ql_toggle(); return true;
+    case SDLK_LEFT: case SDLK_UP: step = -1; break;
+    case SDLK_RIGHT: case SDLK_DOWN: step = 1; break;
+    case SDLK_HOME: case SDLK_END: return false; // (the list moves)
+    case SDLK_PAGEUP: A.ql_scroll = MAX(0.f, A.ql_scroll - 20); A.redraw = true; return true;
+    case SDLK_PAGEDOWN: A.ql_scroll += 20; A.redraw = true; return true;
+    case SDLK_RETURN: case SDLK_KP_ENTER: ql_toggle(); return false;
+    default: return true;
+    }
+    if (p->order && p->count) move_cursor(p, CLAMP(p->cursor + step, 0, (i64)p->count - 1), false, false);
+    return true;
+}
+
 static void on_key(SDL_KeyboardEvent *k) {
     te_pointer_up(); // a key ends a drag-selection
     Pane *p = active_pane();
@@ -82,6 +101,7 @@ static void on_key(SDL_KeyboardEvent *k) {
     if (sheet_open()) { sheet_key(k->key, k->mod); return; }
     if (A.pal_open) { pal_key(k->key, k->mod); return; }
     if (A.menu.open) { menu_key(k->key); return; }
+    if (A.ql_on && ql_key(k)) return;
     if (A.q_open && !A.ren_pane && !A.search_pane && !A.edit_pane && A.qa_edit_g < 0 && !active_term() && queue_key(k->key, k->mod)) return;
     if (A.drag != DRAG_NONE && k->key == SDLK_ESCAPE) { dragout_cancel(); drag_cancel(); return; }
     if (!A.ren_pane && A.qa_edit_g < 0 && picker_key(k)) return;
@@ -226,6 +246,7 @@ static void on_key(SDL_KeyboardEvent *k) {
 static void on_text(const char *text) {
     if (A.dlg.open || A.menu.open) return;
     if (sheet_open()) { sheet_text(text); return; }
+    if (A.ql_on) { if (text[0] == ' ') ql_toggle(); return; } // (Quick Look: Space closes it, typing does nothing)
     if (!A.pal_open && picker_text(text)) { A.redraw = true; return; }
     if (A.pal_open) {
         te_insert(&A.pal_te, text);
@@ -258,7 +279,7 @@ static void on_text(const char *text) {
     Pane *p = active_pane();
     if ((text[0] == '/' || text[0] == '~') && !A.jump[0]) { begin_edit(p, text); return; }
     if (text[0] == ' ' && A.q_open) return; // (pauses the highlighted transfer instead, see queue_key)
-    if (text[0] == ' ' && !A.jump[0]) { preview_toggle(); return; } // Space: inspector, like File Pilot
+    if (text[0] == ' ' && !A.jump[0]) { ql_toggle(); return; } // Space: Quick Look (Ctrl+I: the preview panel)
     type_to_jump(p, text);
     A.redraw = true;
 }
@@ -616,6 +637,12 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
     }
     if (!A.menu.open && (sheet_open() || A.pal_open) && te_pointer_down(b)) return; // their text fields
     if (sheet_open()) { sheet_mouse(b); return; }
+    if (A.ql_on) { // a click beside Quick Look closes it; its text's scrollbar: drag the thumb, click beside it to page
+        if (!in_rect(A.r_ql, x, y)) ql_toggle();
+        else if (b->button == SDL_BUTTON_LEFT && in_rect(A.r_ql_thumb, x, y)) { A.ql_drag = true; A.ql_drag_off = y - A.r_ql_thumb.y; }
+        else if (b->button == SDL_BUTTON_LEFT && in_rect(A.r_ql_track, x, y)) A.ql_scroll += (y < A.r_ql_thumb.y ? -1.f : 1.f) * (f32)MAX(1, A.ql_vis - 2);
+        return;
+    }
     if (A.qa_edit_g >= 0 && !in_rect(A.r_sidebar, x, y)) qa_edit_commit();
     if (A.pal_open) {
         if (in_rect(A.pal_list, x, y)) {
@@ -833,6 +860,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
 }
 
 static void on_mouse_up(void) {
+    if (A.ql_drag) { A.ql_drag = false; A.redraw = true; return; }
     if (te_pointer_up()) return;
     if (dragout_owns_pointer()) return; // (Wayland) SDL lets go of the buttons when the compositor takes the drag
     if (A.term_mouse) { term_mouse_up(A.term_mouse, A.term_mouse_btn); A.term_mouse = NULL; return; }
@@ -929,6 +957,13 @@ static void drag_items_out(Pane *p) {
 }
 
 static void on_mouse_motion(SDL_MouseMotionEvent *m) {
+    if (A.ql_drag) { // Quick Look's scrollbar thumb follows the pointer
+        Rect tr = A.r_ql_track;
+        f32 room = tr.h - A.r_ql_thumb.h;
+        if (room > 0) A.ql_scroll = (m->y - A.ql_drag_off - tr.y) / room * (f32)MAX(0, A.ql_total - A.ql_vis);
+        A.redraw = true;
+        return;
+    }
     A.mx = m->x;
     A.my = m->y;
     A.mouse_in = true;
@@ -1034,6 +1069,7 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
 
 static void on_wheel(SDL_MouseWheelEvent *w) {
     if (sheet_open()) { sheet_wheel(w->y); return; }
+    if (A.ql_on) { A.ql_scroll = MAX(0.f, A.ql_scroll - w->y * 3); A.redraw = true; return; } // (its text)
     if (A.menu.open) { // scroll a tall menu; don't scroll what's underneath
         if (menu_sub_shown() && in_rect(g_menu_sub.r, w->mouse_x, w->mouse_y)) menu_scroll_by_in(&g_menu_sub, -w->y * S(28) * 2);
         else if (in_rect(A.menu.r, w->mouse_x, w->mouse_y)) menu_scroll_by(-w->y * S(28) * 2);
