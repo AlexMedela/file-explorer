@@ -275,18 +275,20 @@ static void run_extract(Op *op) {
 
 // --- compress ------------------------------------------------------------------
 
-// Formats a compression can write (the Compress to submenu / the Compress sheet), and three levels each.
+// Formats a compression can write (the Compress to submenu / the Compress sheet): the levels they take, and three of
+// them by name (the sheet's Fast / Normal / Best; the submenu uses Normal).
 enum { ARC_FMT_AUTO, ARC_ZIP, ARC_TGZ, ARC_TXZ, ARC_TZST, ARC_7Z, ARC_NFMT };
-enum { ARC_LVL_NORMAL, ARC_LVL_FAST, ARC_LVL_BEST, ARC_NLVL }; // (NORMAL first: a zeroed op gets the usual level)
+enum { ARC_LVL_NORMAL, ARC_LVL_FAST, ARC_LVL_BEST, ARC_NLVL, ARC_LVL_CUSTOM = ARC_NLVL }; // CUSTOM: a number of one's own
 static const struct {
     const char *ext, *label, *hint, *key; // key: its name in settings.conf
     int level[ARC_NLVL];                  // libarchive compression-level per ARC_LVL_*
+    int lo, hi;                           // the levels offered
 } g_arc_fmts[ARC_NFMT] = {
-    [ARC_ZIP] = {".zip", "ZIP", "Opens everywhere, Windows and macOS included", "zip", {6, 1, 9}},
-    [ARC_TGZ] = {".tar.gz", "tar.gz", "The usual Linux archive, fast, keeps permissions", "tar.gz", {6, 1, 9}},
-    [ARC_TXZ] = {".tar.xz", "tar.xz", "Smaller than tar.gz, slower to make", "tar.xz", {6, 1, 9}},
-    [ARC_TZST] = {".tar.zst", "tar.zst", "Small and fast to make and to open, on every core", "tar.zst", {9, 3, 19}},
-    [ARC_7Z] = {".7z", "7z", "Usually the smallest (LZMA2), slow to make", "7z", {6, 1, 9}},
+    [ARC_ZIP] = {".zip", "ZIP", "Opens everywhere, Windows and macOS included", "zip", {6, 1, 9}, 1, 9},
+    [ARC_TGZ] = {".tar.gz", "tar.gz", "The usual Linux archive, fast, keeps permissions", "tar.gz", {6, 1, 9}, 1, 9},
+    [ARC_TXZ] = {".tar.xz", "tar.xz", "Smaller than tar.gz, slower to make", "tar.xz", {6, 1, 9}, 1, 9},
+    [ARC_TZST] = {".tar.zst", "tar.zst", "Small and fast to make and to open, on every core", "tar.zst", {9, 3, 19}, 1, 22},
+    [ARC_7Z] = {".7z", "7z", "Usually the smallest (LZMA2), slow to make", "7z", {6, 1, 9}, 1, 9},
 };
 static const char *g_arc_lvl_names[ARC_NLVL] = {"Normal", "Fast", "Best"};
 
@@ -302,9 +304,10 @@ static int arc_fmt_of_name(const char *name) {
 
 // Format, filter and their options on a new writer. An option this libarchive doesn't know (zstd threads before 3.6...)
 // is left at its default: the archive is still right, only slower or a bit bigger.
-static void arc_write_setup(struct archive *w, int fmt, int lvl) {
+// level: libarchive's compression-level (0: the format's Normal).
+static void arc_write_setup(struct archive *w, int fmt, int level) {
     char lv[8];
-    snprintf(lv, sizeof lv, "%d", g_arc_fmts[fmt].level[lvl]);
+    snprintf(lv, sizeof lv, "%d", level ? CLAMP(level, g_arc_fmts[fmt].lo, g_arc_fmts[fmt].hi) : g_arc_fmts[fmt].level[ARC_LVL_NORMAL]);
     switch (fmt) {
     case ARC_ZIP:
         archive_write_set_format_zip(w);
@@ -433,7 +436,7 @@ static void run_compress(Op *op) {
     struct stat ost;
     if (!fstat(fd, &ost)) { c.out_dev = ost.st_dev; c.out_ino = ost.st_ino; }
     int fmt = op->arc_fmt > ARC_FMT_AUTO && op->arc_fmt < ARC_NFMT ? op->arc_fmt : arc_fmt_of_name(op->arc);
-    arc_write_setup(c.w, fmt, op->arc_level >= 0 && op->arc_level < ARC_NLVL ? op->arc_level : ARC_LVL_NORMAL);
+    arc_write_setup(c.w, fmt, op->arc_level);
     if (archive_write_open_fd(c.w, fd) != ARCHIVE_OK) {
         op_error(op, "Can't create \xE2\x80\x9C%s\xE2\x80\x9D: %s", path_basename(op->arc), archive_error_string(c.w) ? archive_error_string(c.w) : "write failed");
     } else {

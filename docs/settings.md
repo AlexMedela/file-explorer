@@ -12,7 +12,7 @@ the previous file is kept as `settings.conf.bak` when that happens.
 palette). Remembers zoom, hidden files, folder sizes, search scope, sort order
 (`folders_first=0` mixes folders and files), preview panel, window size,
 `compress_format=zip` and `compress_level=normal` (the Compress sheet's last choice: `zip`, `tar.gz`, `tar.xz`,
-`tar.zst`, `7z`; `fast`, `normal`, `best`),
+`tar.zst`, `7z`; `fast`, `normal`, `best` or a level number),
 pinned folders, columns, and your tabs/split panes (`restore_session=0` to start fresh). `transfers_at_once=1`
 (0 = all at once) and `verify_copies=0` are the transfer queue's settings. `renderer=auto` uses
 OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is resized; Vulkan can take less memory

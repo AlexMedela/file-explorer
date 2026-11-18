@@ -1523,7 +1523,7 @@ static int run_selftest_m5(void) {
     A.brand_name = BRAND_CUSTOM;
     snprintf(A.brand_text, sizeof A.brand_text, "My files");
     A.tab_style = TABS_PILLS;
-    A.compress_fmt = ARC_TXZ, A.compress_level = ARC_LVL_BEST;
+    A.compress_fmt = ARC_TXZ, A.compress_level = ARC_LVL_CUSTOM, A.compress_num = 4;
     settings_save();
     int ntabs0 = A.ntabs;
     settings_load(); // resets to defaults first, then reads the file
@@ -1531,7 +1531,7 @@ static int run_selftest_m5(void) {
     ST_CHECK(!A.window_buttons && !A.brand_logo && A.brand_name == BRAND_CUSTOM && !strcmp(A.brand_text, "My files"));
     A.window_buttons = A.brand_logo = true;
     ST_CHECK(A.tab_style == TABS_PILLS);
-    ST_CHECK(A.compress_fmt == ARC_TXZ && A.compress_level == ARC_LVL_BEST);
+    ST_CHECK(A.compress_fmt == ARC_TXZ && A.compress_level == ARC_LVL_CUSTOM && A.compress_num == 4);
     A.brand_name = BRAND_APP;
     A.brand_text[0] = 0;
     A.tab_style = TABS_CARDS;
@@ -2927,7 +2927,17 @@ static int run_selftest_m8(void) {
         ST_CHECK(g_sheet.cz_fmt == ARC_TZST);
         sheet_key(SDLK_DOWN, SDL_KMOD_NONE); // -> level
         sheet_key(SDLK_RIGHT, SDL_KMOD_NONE);
+        ST_CHECK(g_sheet.cz_lvl == ARC_LVL_BEST && compress_number() == 19 && g_sheet.cz_kb);
+        sheet_key(SDLK_PLUS, SDL_KMOD_NONE); // a number of one's own...
+        ST_CHECK(g_sheet.cz_lvl == ARC_LVL_CUSTOM && compress_number() == 20);
+        sheet_key(SDLK_MINUS, SDL_KMOD_NONE); // ...back on Best's
         ST_CHECK(g_sheet.cz_lvl == ARC_LVL_BEST);
+        for (int k = 0; k < 5; k++) sheet_key(SDLK_PLUS, SDL_KMOD_NONE);
+        ST_CHECK(g_sheet.cz_lvl == ARC_LVL_CUSTOM && compress_number() == 22); // (zstd's highest)
+        sheet_key(SDLK_MINUS, SDL_KMOD_NONE);
+        st_frames(1); // (where the buttons are)
+        compress_click(g_sheet.cz_rminus.x + 2, g_sheet.cz_rminus.y + 2); // the stepper's button; a click: no outline
+        ST_CHECK(compress_number() == 20 && !g_sheet.cz_kb && g_sheet.cz_focus == 2);
         st_shot("compress-sheet");
         sheet_key(SDLK_TAB, SDL_KMOD_NONE); // -> name (wraps)
         ST_CHECK(g_sheet.cz_focus == 0);
@@ -2940,10 +2950,15 @@ static int run_selftest_m8(void) {
         sheet_key(SDLK_RETURN, SDL_KMOD_NONE);
         st_wait_ops();
         ST_CHECK(g_sheet.kind == SHEET_NONE && st_size(M8_BASE "/packed.tar.zst") > 0 && !st_exists(M8_BASE "/packed.tar.zst.tar.zst"));
-        ST_CHECK(A.compress_fmt == ARC_TZST && A.compress_level == ARC_LVL_BEST);
+        ST_CHECK(A.compress_fmt == ARC_TZST && A.compress_level == ARC_LVL_CUSTOM && A.compress_num == 20);
         st_select(p, "proj");
         do_action(p, ACT_COMPRESS_CUSTOM);
-        ST_CHECK(g_sheet.cz_fmt == ARC_TZST && g_sheet.cz_lvl == ARC_LVL_BEST); // offered again
+        ST_CHECK(g_sheet.cz_fmt == ARC_TZST && compress_number() == 20); // offered again
+        st_frames(1); // (where the buttons are)
+        compress_click(g_sheet.cz_rfmt[ARC_ZIP].x + 2, g_sheet.cz_rfmt[ARC_ZIP].y + 2);
+        ST_CHECK(g_sheet.cz_fmt == ARC_ZIP && compress_number() == 9); // (within ZIP's levels)
+        compress_click(g_sheet.cz_rlvl[0].x + 2, g_sheet.cz_rlvl[0].y + 2);
+        ST_CHECK(g_sheet.cz_lvl == ARC_LVL_FAST && compress_number() == 1);
         sheet_key(SDLK_ESCAPE, SDL_KMOD_NONE);
         ST_CHECK(g_sheet.kind == SHEET_NONE);
     }
@@ -2962,7 +2977,7 @@ static int run_selftest_m8(void) {
             const char *arc = b ? M8_BASE "/words-best.tar.zst" : M8_BASE "/words-fast.tar.zst";
             Op *op = op_new(OP_COMPRESS, wp, 1, M8_BASE);
             op->arc = strdup(arc);
-            op->arc_fmt = ARC_TZST, op->arc_level = b ? ARC_LVL_BEST : ARC_LVL_FAST;
+            op->arc_fmt = ARC_TZST, op->arc_level = b ? 19 : 3;
             run_compress(op);
             ST_CHECK(!op->nerr);
             op_free(op);

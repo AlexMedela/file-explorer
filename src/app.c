@@ -525,7 +525,8 @@ static struct {
     bool verify_copies;   // setting: checksum every copied file against its original
     int transfers_at_once; // setting: big transfers running together (0 = no limit, all at once)
     int conflict_last;    // the conflict answer picked last time (CF_*), offered first next time
-    int compress_fmt, compress_level; // the Compress sheet's last choice (ARC_FMT_* / ARC_LVL_*), offered next time
+    int compress_fmt, compress_level, compress_num; // the Compress sheet's last choice (ARC_FMT_*, ARC_LVL_*, the number for
+                                                    // ARC_LVL_CUSTOM), offered next time
     UndoRec undo[UNDO_MAX];
     int nundo;
     Dialog dlg;
@@ -6330,8 +6331,8 @@ static void compress_default_name(Pane *p, char **paths, int n, char *base, size
     else snprintf(base, cap, "%s", p->path[1] ? path_basename(p->path) : "archive");
 }
 
-// Compresses paths into "<dir>/<base><format's ext>" (a new name if that's taken).
-static void compress_start(const char *dir, char **paths, int n, const char *base, int fmt, int lvl) {
+// Compresses paths into "<dir>/<base><format's ext>" (a new name if that's taken) at level (0: the format's usual).
+static void compress_start(const char *dir, char **paths, int n, const char *base, int fmt, int level) {
     char want[NAME_MAX + 16], nn[NAME_MAX + 1], out[PATH_MAX];
     snprintf(want, sizeof want, "%s%s", base, g_arc_fmts[fmt].ext);
     int dfd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
@@ -6341,7 +6342,7 @@ static void compress_start(const char *dir, char **paths, int n, const char *bas
     path_join(out, sizeof out, dir, nn);
     Op *op = op_new(OP_COMPRESS, paths, n, dir);
     op->arc = strdup(out);
-    op->arc_fmt = fmt, op->arc_level = lvl;
+    op->arc_fmt = fmt, op->arc_level = level;
     ops_start(op);
 }
 
@@ -6391,7 +6392,7 @@ static void arc_action(Pane *p, int act) {
         if (!n) return;
         char base[NAME_MAX + 1];
         compress_default_name(p, paths, n, base, sizeof base);
-        compress_start(p->path, paths, n, base, act - ACT_COMPRESS_BASE, ARC_LVL_NORMAL);
+        compress_start(p->path, paths, n, base, act - ACT_COMPRESS_BASE, 0);
         strv_free(paths, n);
     }
 }
