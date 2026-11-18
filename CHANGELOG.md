@@ -25,6 +25,16 @@
 
 - "Folders first" can be turned off, to mix folders and files (Sort menus, Options > Views); with it on, Group by date puts the folders in their own group on top. The toolbar's sort button offers the same choices as the right-click Sort by. Thanks to @teraflop09-web.
 
+- A refreshed look: the colours and accent follow the desktop's light / dark setting (KDE colour schemes too); Options > Appearance can unify the surfaces, make the sidebar, header, file area, preview and status bar lighter or darker, hide the separator lines, set the selection's strength and the scrollbar colour; tabs come as cards or pills and their row hides while a panel has one tab; the window buttons sit in the tab row, with the "Explorer" label and logo optional; Views, Sort by and Group by are submenus; text fields select with the mouse and long labels show in full on hover. Thanks to @juangiler.
+
+- Network lists saved servers, mounted shares, the SMB / NFS shares of this computer and rclone remotes together; a server can be connected through GVfs, KDE's KIO Fuse or a system mount, remembered per server, and stays listed to reconnect after unmounting. Thanks to @juangiler.
+
+- Smooth scrolling everywhere: Options, Properties, Open with, menus, Quick Look text and the rename list ease like the file panes; a quick run of wheel notches scrolls further each time, and a touchpad follows the fingers and glides on after a flick.
+
+- Compare with… opens a small dialog with both folders: the other one can be typed or edited, with folder suggestions as you type, instead of a fixed list of tabs and recent folders.
+
+- Menu switches with an icon (View, Features, Cloud's Connect at login…) show "on" by turning the icon accent-coloured instead of a check mark.
+
 **Fixed**
 - Inside a Timeshift snapshot the bar with "Compare with now" and "Restore…" shows, as it does for Snapper and ZFS.
 - Dragging files to other apps on Wayland: a drag can switch workspaces (Super / Alt hands it to the desktop, so a workspace shortcut no longer drops it where the pointer is), and after a drop into an app that never says it's done, clicks no longer start a selection box that follows the mouse (Esc also ends such a drag). Thanks to @pr83-glitch.
@@ -32,6 +42,11 @@
 - In the Save dialog, selecting a file puts its name in the file name field (its name without the extension selected), to save over it or name the new file after it; a name typed afterwards stays until another file is selected. The name can also be a path (`sub/name`, as a file in the tree view fills in, or a full one) into a folder that exists. Thanks to @pr83-glitch.
 - Extract here with several archives selected unpacks every one of them (each into its own folder), not only the last one clicked; the menu says how many. Thanks to @pr83-glitch.
 - With the terminal panel (F4) open, the status bar keeps the folder's item count, size slider and view buttons (it showed the terminal's details over them, while clicks still went to the hidden buttons), and a prompt that starts with an empty line (starship's `add_newline`) starts on the panel's top row.
+- On small or scaled screens (e.g. 200% on a Surface) a window snapped to half the screen fits: the minimum window size is capped at half the display. Thanks to @zeropaulsy.
+- Empty Trash works whichever panel is active and its icon shows whether the trash is full; a cancelled copy or move stays at the progress it reached, marked cancelled; failed compressions say why and leave no half-written archive, and non-ASCII names inside archives are kept; the free space of `/` is right; network mounts whose path has spaces no longer show up twice; text on Vulkan no longer flickers or garbles. Thanks to @juangiler.
+- Split right / down no longer squeezes a panel below a usable size: the split goes to a panel that has room, or the button dims and says so when none has.
+- The search field in Options no longer looks active as soon as it opens: it takes the keyboard when clicked or typed into.
+- The app no longer quits silently when a helper program it writes to has already exited.
 
 ## 0.11.2
 
