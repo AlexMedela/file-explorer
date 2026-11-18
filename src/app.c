@@ -7547,21 +7547,26 @@ static int menu_arrow_at(f32 y) { return menu_arrow_at_in(&A.menu, y); }
 
 // Wheel scrolling of what has no scroll target of its own (sheets, menus): the wheel moves a target and frames
 // ease the value toward it, like the panes (Smooth scrolling). One at a time; anything else that moves the value
-// (a key, a scrollbar drag, the clamp when drawn) ends it. hi: the largest value (1e9f: clamped when drawn).
-static struct { f32 *v, to, last; } g_glide;
-static void glide_by(f32 *v, f32 d, f32 hi) {
+// (a key, a scrollbar drag, the clamp when drawn) ends it. hi: the largest value (1e9f: clamped when drawn);
+// eps: how close counts as there (half a pixel; less for values in lines).
+static struct { f32 *v, to, last, eps; } g_glide;
+static bool g_wheel_direct; // this wheel movement shows at once (a touchpad, momentum: already smooth)
+static bool g_wheel_smooth; // the wheel event reached a view that scrolls smoothly (what momentum may carry on)
+static void glide_by_eps(f32 *v, f32 d, f32 hi, f32 eps) {
     f32 base = g_glide.v == v && *v == g_glide.last ? g_glide.to : *v;
     f32 to = CLAMP(base + d, 0.f, MAX(0.f, hi));
     A.redraw = true;
-    if (!A.smooth_scroll) { *v = to; g_glide.v = NULL; return; }
-    g_glide.v = v, g_glide.to = to, g_glide.last = *v;
+    g_wheel_smooth = true;
+    if (!A.smooth_scroll || g_wheel_direct) { *v = to; g_glide.v = NULL; return; }
+    g_glide.v = v, g_glide.to = to, g_glide.last = *v, g_glide.eps = eps;
 }
-static bool glide_on(void) { return g_glide.v && *g_glide.v == g_glide.last && fabsf(g_glide.to - *g_glide.v) > 0.5f; }
+static void glide_by(f32 *v, f32 d, f32 hi) { glide_by_eps(v, d, hi, 0.5f); }
+static bool glide_on(void) { return g_glide.v && *g_glide.v == g_glide.last && fabsf(g_glide.to - *g_glide.v) > g_glide.eps; }
 static void glide_step(f32 dt) {
     if (!glide_on()) { g_glide.v = NULL; return; }
     f32 *v = g_glide.v;
     *v += (g_glide.to - *v) * (1.f - expf(-dt * 22.f));
-    if (fabsf(g_glide.to - *v) <= 0.5f) *v = g_glide.to;
+    if (fabsf(g_glide.to - *v) <= g_glide.eps) *v = g_glide.to;
     g_glide.last = *v;
 }
 
@@ -11992,7 +11997,7 @@ static bool menu_autoscrolling(void) {
 
 static bool animating(void) {
     if (band_autoscrolling() || menu_autoscrolling()) return true;
-    if (fabsf(A.side_scroll_target - A.side_scroll) > 0.5f || glide_on()) return true;
+    if (fabsf(A.side_scroll_target - A.side_scroll) > 0.5f || glide_on() || wheel_busy()) return true;
     for (int i = 0; i < A.npanels; i++) {
         Pane *p = A.panels[i]->cur ? &A.panels[i]->cur->pane[0] : NULL;
         if (p && fabs(p->scroll_target - p->scroll) > 0.5) return true;
@@ -12175,6 +12180,7 @@ static void frame(void) {
         A.side_scroll += A.smooth_scroll ? (A.side_scroll_target - A.side_scroll) * (1.f - expf(-dt * 22.f)) : A.side_scroll_target - A.side_scroll;
         if (fabsf(A.side_scroll_target - A.side_scroll) <= 0.5f) A.side_scroll = A.side_scroll_target;
     }
+    wheel_tick(dt);
     glide_step(dt);
     layout();
 

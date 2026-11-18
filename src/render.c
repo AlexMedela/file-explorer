@@ -3888,9 +3888,10 @@ static void draw_quicklook(void) {
             b.w -= sbw + S(8);
         }
         const char *s0 = pv->text;
-        for (int k = 0; k < (int)A.ql_scroll && s0; k++) { s0 = strchr(s0, '\n'); if (s0) s0++; }
-        int lineno = (pv->first_line > 0 ? pv->first_line : 1) + (int)A.ql_scroll;
-        for (f32 y = b.y; s0 && *s0 && y < b.y + b.h - lh * 0.5f; y += lh) {
+        int first = (int)A.ql_scroll; // (a fraction of a line while it scrolls)
+        for (int k = 0; k < first && s0; k++) { s0 = strchr(s0, '\n'); if (s0) s0++; }
+        int lineno = (pv->first_line > 0 ? pv->first_line : 1) + first;
+        for (f32 y = b.y - roundf((A.ql_scroll - (f32)first) * lh); s0 && *s0 && y < r.y + r.h; y += lh) {
             const char *eol = strchr(s0, '\n');
             int len = eol ? (int)(eol - s0) : (int)strlen(s0);
             char num[16], exp[2048];

@@ -102,6 +102,33 @@ static int run_selftest(void) {
     p = active_pane();
     ST_CHECK(p->count == total);
 
+    { // the wheel: a quick run of notches goes further; a touchpad moves the view at once and carries on when it lets go
+        SDL_MouseWheelEvent wv;
+        SDL_zero(wv);
+        wv.mouse_x = p->ly.list.x + S(40), wv.mouse_y = p->ly.list.y + S(40), wv.y = -1;
+        on_wheel(&wv);
+        f64 step = p->scroll_target;
+        ST_CHECK(step > 0 && p->scroll < step); // (eases there)
+        for (int k = 0; k < 9; k++) on_wheel(&wv);
+        ST_CHECK(p->scroll_target > step * 12);
+        st_settle();
+        ST_CHECK(p->scroll == p->scroll_target);
+        f64 at = p->scroll;
+        wv.y = -0.37f; // (a touchpad: any fraction)
+        on_wheel(&wv);
+        ST_CHECK(p->scroll == p->scroll_target && p->scroll > at);
+        for (int k = 0; k < 8; k++) { SDL_Delay(5); on_wheel(&wv); }
+        f64 lifted = p->scroll;
+        SDL_Delay(60);
+        st_frames(3);
+        ST_CHECK(g_wf.coast && p->scroll > lifted && p->scroll == p->scroll_target);
+        wv.y = 1; // the wheel (or a click, a key) stops it
+        on_wheel(&wv);
+        ST_CHECK(!g_wf.coast);
+        st_settle();
+        p->scroll = p->scroll_target = 0;
+    }
+
     // rubber band from the Size column, 10 rows, then autoscroll below the list
     PaneLayout *ly = &p->ly;
     f32 sx0 = 0;

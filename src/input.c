@@ -82,8 +82,8 @@ static bool ql_key(SDL_KeyboardEvent *k) {
     case SDLK_LEFT: case SDLK_UP: step = -1; break;
     case SDLK_RIGHT: case SDLK_DOWN: step = 1; break;
     case SDLK_HOME: case SDLK_END: return false; // (the list moves)
-    case SDLK_PAGEUP: A.ql_scroll = MAX(0.f, A.ql_scroll - 20); A.redraw = true; return true;
-    case SDLK_PAGEDOWN: A.ql_scroll += 20; A.redraw = true; return true;
+    case SDLK_PAGEUP: glide_by_eps(&A.ql_scroll, -20, (f32)MAX(0, A.ql_total - A.ql_vis), 0.01f); return true;
+    case SDLK_PAGEDOWN: glide_by_eps(&A.ql_scroll, 20, (f32)MAX(0, A.ql_total - A.ql_vis), 0.01f); return true;
     case SDLK_RETURN: case SDLK_KP_ENTER: ql_toggle(); return false;
     default: return true;
     }
@@ -1067,14 +1067,15 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     A.cursor_ew = want; // applied after the next frame's drawing (cursor_apply), which also knows what's clickable
 }
 
-static void on_wheel(SDL_MouseWheelEvent *w) {
-    if (sheet_open()) { sheet_wheel(w->y); return; }
-    if (A.ql_on) { A.ql_scroll = MAX(0.f, A.ql_scroll - w->y * 3); A.redraw = true; return; } // (its text)
+// wy: w->y for what scrolls smoothly (sped up by a quick run of notches); the rest steps by w->y
+static void wheel_route(SDL_MouseWheelEvent *w, f32 wy) {
+    if (sheet_open()) { sheet_wheel(wy); return; }
+    if (A.ql_on) { glide_by_eps(&A.ql_scroll, -wy * 3, (f32)MAX(0, A.ql_total - A.ql_vis), 0.01f); return; } // (its text, in lines)
     if (A.menu.open) { // scroll a tall menu; don't scroll what's underneath
-        if (menu_sub_shown() && in_rect(g_menu_sub.r, w->mouse_x, w->mouse_y)) glide_by(&g_menu_sub.scroll, -w->y * S(28) * 2, g_menu_sub.content_h - g_menu_sub.r.h);
+        if (menu_sub_shown() && in_rect(g_menu_sub.r, w->mouse_x, w->mouse_y)) glide_by(&g_menu_sub.scroll, -wy * S(28) * 2, g_menu_sub.content_h - g_menu_sub.r.h);
         else if (in_rect(A.menu.r, w->mouse_x, w->mouse_y)) {
             if (g_menu_sub.open && w->y != 0) menu_sub_close(); // (it would no longer sit next to its item)
-            glide_by(&A.menu.scroll, -w->y * S(28) * 2, A.menu.content_h - A.menu.r.h);
+            glide_by(&A.menu.scroll, -wy * S(28) * 2, A.menu.content_h - A.menu.r.h);
         }
         return;
     }
@@ -1109,16 +1110,86 @@ static void on_wheel(SDL_MouseWheelEvent *w) {
         return;
     }
     if (in_rect(A.r_sidebar, w->mouse_x, w->mouse_y)) {
-        A.side_scroll_target = CLAMP(A.side_scroll_target - w->y * S(60), 0.f, MAX(0.f, A.side_content_h - A.r_sidebar.h));
-        A.redraw = true;
+        A.side_scroll_target = CLAMP(A.side_scroll_target - wy * S(60), 0.f, MAX(0.f, A.side_content_h - A.r_sidebar.h));
+        if (g_wheel_direct) A.side_scroll = A.side_scroll_target;
+        g_wheel_smooth = A.redraw = true;
         return;
     }
     Pane *p = pane_at(w->mouse_x, w->mouse_y);
     if (!p) return;
-    p->scroll_target -= (f64)w->y * (p->ly.per_row > 1 ? p->ly.cell_h * 0.75 : p->ly.row_h * 3.0);
+    p->scroll_target -= (f64)wy * (p->ly.per_row > 1 ? p->ly.cell_h * 0.75 : p->ly.row_h * 3.0);
     p->scroll_target = CLAMP(p->scroll_target, 0.0, max_scroll(p));
-    A.redraw = true;
+    if (g_wheel_direct) p->scroll = p->scroll_target;
+    g_wheel_smooth = A.redraw = true;
 }
+
+// --- wheel feel ---
+// A mouse wheel moves in whole notches (or eighths, hi-res wheels): the view eases there, and a quick run of
+// notches one way goes further each time. A touchpad sends any fraction: the view follows it at once, and when
+// the fingers lift at speed it carries on (momentum), slowing down. Both only with Smooth scrolling.
+static struct {
+    u64 notch_t; f32 notch_dir, streak; // the run of notches
+    u64 t[32]; f32 y[32]; int n;         // the touchpad's recent movement (its speed when the fingers lift)
+    u64 last; f32 mx, my;
+    f32 vel; bool coast;                 // momentum, wheel units a second
+} g_wf;
+
+static bool wheel_is_pad(f32 y) { return fabsf(y * 8.f - roundf(y * 8.f)) > 0.01f; }
+
+static void wheel_stop(void) { g_wf.coast = false, g_wf.n = 0; }
+
+static void on_wheel(SDL_MouseWheelEvent *w) {
+    bool pad = w->y != 0 && wheel_is_pad(w->y);
+    f32 wy = w->y;
+    u64 t = now_ns();
+    g_wf.coast = false; // the hand takes over from momentum
+    if (pad) {
+        if (t - g_wf.last > 100000000ull) g_wf.n = 0; // a new swipe
+        if (g_wf.n == (int)ARRAY_COUNT(g_wf.t)) {
+            memmove(g_wf.t, g_wf.t + 1, sizeof g_wf.t - sizeof g_wf.t[0]);
+            memmove(g_wf.y, g_wf.y + 1, sizeof g_wf.y - sizeof g_wf.y[0]);
+            g_wf.n--;
+        }
+        g_wf.t[g_wf.n] = t, g_wf.y[g_wf.n++] = w->y;
+        g_wf.last = t, g_wf.mx = w->mouse_x, g_wf.my = w->mouse_y;
+    } else if (w->y != 0) {
+        g_wf.n = 0;
+        bool run = t - g_wf.notch_t < 200000000ull && (w->y > 0) == (g_wf.notch_dir > 0);
+        g_wf.streak = run ? g_wf.streak + fabsf(w->y) : fabsf(w->y);
+        g_wf.notch_t = t, g_wf.notch_dir = w->y;
+        if (A.smooth_scroll) wy *= 1.f + MIN(MAX(0.f, g_wf.streak - 3.f) * 0.15f, 2.f); // up to 3x after ~16 quick notches
+    }
+    g_wheel_direct = pad, g_wheel_smooth = false;
+    wheel_route(w, wy);
+    g_wheel_direct = false;
+    if (!g_wheel_smooth) g_wf.n = 0; // (momentum only for views that scroll smoothly)
+}
+
+// Every frame: a swipe that ended at speed starts momentum; momentum moves the view under the pointer.
+static void wheel_tick(f32 dt) {
+    u64 t = now_ns();
+    if (g_wf.n && t - g_wf.last > 50000000ull) { // no movement for a moment: the fingers lifted (or rest)
+        int i = g_wf.n - 1;
+        f32 sum = 0;
+        while (i > 0 && g_wf.t[g_wf.n - 1] - g_wf.t[i - 1] <= 100000000ull) sum += g_wf.y[i--]; // its last tenth of a second
+        f32 span = (f32)((g_wf.t[g_wf.n - 1] - g_wf.t[i]) / 1e9);
+        g_wf.n = 0;
+        if (span > 0.02f && A.smooth_scroll && !(SDL_GetModState() & SDL_KMOD_CTRL)) {
+            g_wf.vel = sum / span;
+            g_wf.coast = fabsf(g_wf.vel) > 4.f;
+        }
+    }
+    if (!g_wf.coast) return;
+    g_wf.vel *= expf(-dt * 4.f);
+    if (fabsf(g_wf.vel) < 0.5f) { g_wf.coast = false; return; }
+    SDL_MouseWheelEvent e = {.type = SDL_EVENT_MOUSE_WHEEL, .y = g_wf.vel * dt, .mouse_x = g_wf.mx, .mouse_y = g_wf.my};
+    g_wheel_direct = true, g_wheel_smooth = false;
+    wheel_route(&e, e.y);
+    g_wheel_direct = false;
+    if (!g_wheel_smooth) g_wf.coast = false; // (what's under the pointer changed)
+}
+
+static bool wheel_busy(void) { return g_wf.coast || g_wf.n; }
 
 static void reload_fonts(void) {
     font_set_px(&A.font, (int)roundf((f32)A.font_size * A.scale));
@@ -1200,6 +1271,7 @@ static void on_text_editing(const char *text) {
 
 static void window_close_requested(void);
 static void handle_event(SDL_Event *e) {
+    if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_KEY_DOWN) wheel_stop(); // a click or a key stops momentum
     if (A.win_shadow) window_size_update(); // (the viewport the coordinates go through)
     SDL_ConvertEventToRenderCoordinates(A.ren, e);
     layout();
