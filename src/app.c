@@ -429,7 +429,7 @@ enum {
     ACT_DEV_MOUNT = 500, ACT_DEV_UNMOUNT, ACT_DEV_EJECT, ACT_NET_DISCONNECT, ACT_DEV_OPEN_TAB,
     ACT_DEV_RENAME, ACT_DEV_RESET_NAME, ACT_DEV_SECTION_TOGGLE, ACT_NET_CONNECT_SAVED, ACT_NET_FORGET, ACT_NET_EDIT_SAVED, ACT_NET_NEW,
     ACT_OW_APP_BASE = 520, // + index of an app in the Open with submenu (up to OW_MENU_APPS, below 540)
-    ACT_CMP_PICK_BASE = 560, // + "Compare with..." folder index (up to 12)
+    ACT_CMP_DIALOG = 560,    // "Compare with...": the dialog with both folders
     ACT_ADDON_BASE = 580, ACT_ADDON_LAST = 599, // add-ons' actions (addons.c)
     ACT_CLOUD_NEW = 540, ACT_CLOUD_REFRESH, ACT_CLOUD_SECTION_TOGGLE, ACT_CLOUD_CONNECT, ACT_CLOUD_CONNECT_TAB, ACT_CLOUD_DISCONNECT,
     ACT_CLOUD_LOGIN, ACT_CLOUD_RECONNECT, ACT_CLOUD_LOG, ACT_CLOUD_COPY_PATH,
@@ -891,8 +891,7 @@ static void cmp_filter(Pane *p);
 static void cmp_after_op(Op *op);
 static void cmp_action(Pane *p, int act);
 static void cmp_run(void);
-static void menu_open_cmp_pick(Pane *p, f32 x, f32 y);
-static void menu_sub_cmp_pick(Pane *p);
+static void compare_sheet_open(Pane *p);
 static f64 content_h(const Pane *p) { return (f64)item_rows(p) * p->ly.cell_h + p->ly.pad * 2; }
 
 static f64 max_scroll(const Pane *p) { return MAX(0.0, content_h(p) - p->ly.list.h); }
@@ -6313,7 +6312,7 @@ static void do_action(Pane *p, int act) {
         else if (act >= ACT_TF_BASE && act < ACT_TF_BASE + 3) { p->tf_mode = act - ACT_TF_BASE; pane_resort(p); }
         else if (act == ACT_TF_RESET) { p->tf_mode = 0; p->tf_exts[0] = 0; pane_resort(p); }
         else if (act >= ACT_TF_EXT_BASE && act < ACT_TF_EXT_BASE + g_ntf) tf_toggle(p, g_tf_keys[act - ACT_TF_EXT_BASE]);
-        else if (act >= ACT_CMP_PICK_BASE && act < ACT_CMP_PICK_BASE + 12) cmp_action(p, act);
+        else if (act == ACT_CMP_DIALOG) cmp_action(p, act);
         else if (act >= ACT_OW_APP_BASE && act < ACT_OW_APP_BASE + OW_MENU_APPS) open_with_menu_app(p, act - ACT_OW_APP_BASE);
         else if (act == ACT_TRASH_RESTORE) trash_restore(p, false);
         else if (act == ACT_TRASH_RESTORE_ALL) trash_restore(p, true);
@@ -6741,14 +6740,11 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         menu_add(A.show_hidden ? "Hide hidden files" : "Show hidden files", "Ctrl+H", ACT_HIDDEN, true);
         menu_add("Refresh", "F5", ACT_REFRESH, true);
         if (cmp_side(p) >= 0) menu_add("End compare", "", ACT_CMP_END, true);
-        else if (A.npanels > 1) {
-            menu_add("Compare with the other panel", "", ACT_CMP_START, !pane_is_archive(p) && !pane_is_trash(p));
+        else {
+            menu_add("Compare with\xE2\x80\xA6", "", ACT_CMP_DIALOG, !pane_is_archive(p) && !pane_is_trash(p));
             const char *ck = keymap_label(CMD_COMPARE);
             snprintf(A.menu.scbuf[A.menu.n - 1], sizeof A.menu.scbuf[0], "%s", ck ? ck : "");
             A.menu.items[A.menu.n - 1].shortcut = A.menu.scbuf[A.menu.n - 1];
-        } else { // one panel: which folder, in a submenu
-            menu_add("Compare with", "", ACT_CMP_START, !pane_is_archive(p) && !pane_is_trash(p));
-            A.menu.items[A.menu.n - 1].sub = menu_sub_cmp_pick;
         }
         menu_sep();
         menu_add(pin_index(p->path) >= 0 ? "Unpin this folder" : "Pin this folder", "Ctrl+D", ACT_PIN, true);
@@ -7536,7 +7532,7 @@ static int menu_action_icon(const MenuItem *it) {
     case ACT_COMPRESS_MENU: case ACT_COMPRESS_CUSTOM: case ACT_COMPRESS_BASE + ARC_ZIP ... ACT_COMPRESS_BASE + ARC_NFMT - 1:
     case ACT_EXTRACT_SEL: case ACT_EXTRACT_HERE: case ACT_EXTRACT_ALL:
         return UI_ARCHIVE;
-    case ACT_CMP_START: case ACT_CMP_TAB: case ACT_SNAP_COMPARE: return UI_GIT_COMPARE;
+    case ACT_CMP_START: case ACT_CMP_DIALOG: case ACT_CMP_TAB: case ACT_SNAP_COMPARE: return UI_GIT_COMPARE;
     case ACT_CMP_SYNC_A: case ACT_CMP_SYNC_B: case ACT_CMP_SYNC_BOTH: case ACT_CMP_MIRROR_A: case ACT_CMP_MIRROR_B:
         return UI_ARROW_RIGHT_LEFT;
     case ACT_CMP_DIFF_ONLY: return UI_FUNNEL;
@@ -9696,9 +9692,6 @@ static struct {
     CmpJob *old;                // the previous one, shown until the new one is done
     bool diff_only, contents;
     u32 cnt[2][4];              // per side: only here, newer here, differ (same date), file vs folder
-    char pick[12][PATH_MAX];    // "Compare with" submenu: folders offered
-    char plabel[12][160];       // how they're shown (~ for home)
-    int npick;
 } g_cmp;
 
 static int cmp_side(const Pane *p) {
@@ -10036,7 +10029,7 @@ static void cmp_after_op(Op *op) {
     if (hit) cmp_run();
 }
 
-// Start: two panels -> the active one and its neighbour; one panel -> pick the other folder (opens a split).
+// Start: two panels -> the active one and its neighbour; one panel -> the dialog for the other folder (opens a split).
 static void cmp_toggle(void) {
     if (g_cmp.on) { cmp_end(); return; }
     Panel *ord[MAX_PANELS];
@@ -10047,67 +10040,7 @@ static void cmp_toggle(void) {
         cmp_start(A.ap->cur, o->cur);
         return;
     }
-    Pane *p = active_pane();
-    if (!p) return;
-    f32 y = p->cursor >= 0 ? item_rect(p, p->cursor).y + p->ly.cell_h : p->ly.list.y; // where Shift+F10's menu opens
-    menu_open_cmp_pick(p, p->ly.col_name + S(40), CLAMP(y, p->ly.list.y, p->ly.list.y + p->ly.list.h));
-}
-
-static void cmp_pick_add(const char *path, const char *cur) {
-    if (g_cmp.npick >= 12 || !path[0] || !strcmp(path, cur) || strstr(path, "::") || du_under(cur, path) || du_under(path, cur)) return;
-    for (int i = 0; i < g_cmp.npick; i++)
-        if (!strcmp(g_cmp.pick[i], path)) return;
-    snprintf(g_cmp.pick[g_cmp.npick++], PATH_MAX, "%s", path);
-}
-
-// The folders to compare with, in sections: other tabs, drives, recent folders.
-static void cmp_pick_items(Pane *p) {
-    g_cmp.npick = 0;
-    for (int i = 0; i < A.ntabs; i++)
-        if (!A.tabs[i]->term) cmp_pick_add(A.tabs[i]->pane[0].path, p->path);
-    int ntabs = g_cmp.npick;
-    for (int i = A.nplaces_user; i < A.nplaces; i++)
-        if (A.places[i].kind == PK_DRIVE && A.places[i].removable) cmp_pick_add(A.places[i].path, p->path);
-    int ndrives = g_cmp.npick;
-    for (int i = 0; i < g_nrecent && g_cmp.npick < 12; i++) cmp_pick_add(g_recent[i], p->path);
-    for (int i = 0; i < g_cmp.npick; i++) {
-        if (i == 0 || i == ntabs || i == ndrives) {
-            if (i) menu_sep();
-            menu_add_head(i < ntabs ? "Open tabs" : i < ndrives ? "Drives" : "Recent folders");
-        }
-        tilde_path(g_cmp.pick[i], g_cmp.plabel[i], sizeof g_cmp.plabel[0]);
-        menu_add(g_cmp.plabel[i], "", ACT_CMP_PICK_BASE + i, true);
-    }
-    if (!g_cmp.npick) menu_add("Open the other folder in a second panel (Ctrl+\\)", "", -1, false);
-}
-
-static void menu_sub_cmp_pick(Pane *p) { cmp_pick_items(p); }
-
-// From the keyboard with one panel: the same list as a menu of its own.
-static void menu_open_cmp_pick(Pane *p, f32 x, f32 y) {
-    Menu *m = &A.menu;
-    m->keep_open = false;
-    m->reopen = NULL;
-    m->n = m->ninfo = 0;
-    m->hover = -1;
-    m->pane = p;
-    menu_add_info("Compare", path_basename(p->path));
-    menu_sep();
-    cmp_pick_items(p);
-    menu_finish(x, y);
-}
-
-static void cmp_pick(int i) {
-    if (i < 0 || i >= g_cmp.npick || !A.ap) return;
-    Tab *cur = A.ap->cur;
-    char path[PATH_MAX];
-    snprintf(path, sizeof path, "%s", g_cmp.pick[i]);
-    Tab *other = NULL; // an open tab in this panel moves into the split; anything else opens there
-    for (int k = 0; k < A.ntabs; k++)
-        if (A.tabs[k] != cur && A.tabs[k]->panel == A.ap && !A.tabs[k]->term && !strcmp(A.tabs[k]->pane[0].path, path)) other = A.tabs[k];
-    Panel *np = panel_split(A.ap, ZONE_RIGHT, other, path);
-    if (!np) return;
-    cmp_start(cur, np->cur);
+    if (active_pane()) compare_sheet_open(active_pane());
 }
 
 // Right-click a tab -> "Compare with current tab".
@@ -10160,7 +10093,7 @@ static void cmp_action(Pane *p, int act) {
     case ACT_CMP_CONTENTS: g_cmp.contents = !g_cmp.contents; if (g_cmp.on) cmp_run(); break;
     case ACT_CMP_AGAIN: if (g_cmp.on) cmp_run(); break;
     default:
-        if (act >= ACT_CMP_PICK_BASE && act < ACT_CMP_PICK_BASE + 12) cmp_pick(act - ACT_CMP_PICK_BASE);
+        if (act == ACT_CMP_DIALOG) compare_sheet_open(p);
         break;
     }
     (void)p;
@@ -12823,6 +12756,11 @@ int main(int argc, char **argv) {
     if (A.screenshot && getenv("FE_SHOT_CMP") && A.npanels > 1) { // visual checks of folder compare ("diff": differences only)
         g_cmp.diff_only = !strcmp(getenv("FE_SHOT_CMP"), "diff");
         cmp_start(A.panels[0]->cur, A.panels[1]->cur);
+    }
+    if (A.screenshot && getenv("FE_SHOT_CMPDLG")) { // visual checks of the Compare dialog (the value typed on the right)
+        compare_sheet_open(active_pane());
+        te_set(&g_sheet.cp[1], getenv("FE_SHOT_CMPDLG"), (int)strlen(getenv("FE_SHOT_CMPDLG")), (int)strlen(getenv("FE_SHOT_CMPDLG")));
+        cmp_sug_query();
     }
     if (A.single_instance && !A.screenshot && !picker_active() && (!any_selftest || A.ipc_test)) ipc_listen(ipc_handle);
     if (!any_selftest && !A.screenshot && !picker_active()) tray_update();

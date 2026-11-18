@@ -7747,6 +7747,8 @@ static DuCell *st_du_cell(DuView *v, const DuItem *it) {
     return NULL;
 }
 
+static bool st_cmp_sug(void) { return g_sheet.cp_nsug > 0; }
+
 static bool st_menu_has(int act) {
     for (int i = 0; i < A.menu.n; i++)
         if (A.menu.items[i].act == act && !A.menu.items[i].sep) return true;
@@ -8339,9 +8341,11 @@ static int run_selftest_cmp(void) {
     pane_navigate(pa, CMP_BASE "/a", true);
     st_wait();
     menu_open(pa, 100, 100, false);
-    ST_CHECK(st_menu_has(ACT_CMP_START));
+    ST_CHECK(st_menu_has(ACT_CMP_DIALOG));
     A.menu.open = false;
-    do_action(pa, ACT_CMP_START);
+    do_action(pa, ACT_CMP_DIALOG); // two panels: the other one's folder is already on the right
+    ST_CHECK(g_sheet.kind == SHEET_COMPARE && !strcmp(g_sheet.cp[1].buf, CMP_BASE "/b"));
+    st_key(SDLK_RETURN, 0);
     ST_CHECK(st_wait_cond(st_cmp_ready, 5000));
     cmp_bar_layout(pa, &sw, &sy, &cl);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, cl.x + 4, cl.y + 4, SDL_BUTTON_LEFT, 1, 0);
@@ -8361,26 +8365,31 @@ static int run_selftest_cmp(void) {
     Tab *tb = tab_new(CMP_BASE "/b", A.ntabs, false);
     st_wait();
     Tab *ta = A.ap->cur;
-    { // empty space's menu: "Compare with" is a submenu beside it, in titled sections
+    { // the folder's menu: "Compare with..." opens the dialog
         Pane *p = active_pane();
         menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), false);
-        int ci = -1;
-        for (int i = 0; i < A.menu.n; i++)
-            if (A.menu.items[i].act == ACT_CMP_START) ci = i;
-        ST_CHECK(ci >= 0 && A.menu.items[ci].sub);
-        if (ci >= 0 && A.menu.items[ci].sub) {
-            menu_sub_open(ci, true);
-            ST_CHECK(menu_sub_shown() && g_menu_sub.r.x >= A.menu.r.x + A.menu.r.w - 1);
-            ST_CHECK(g_menu_sub.n >= 2 && g_menu_sub.items[0].head && !strcmp(g_menu_sub.items[0].label, "Open tabs"));
-            ST_CHECK(g_menu_sub.items[1].act == ACT_CMP_PICK_BASE && !strcmp(g_cmp.pick[0], CMP_BASE "/b"));
-        }
+        ST_CHECK(st_menu_has(ACT_CMP_DIALOG));
         A.menu.open = false;
-        menu_sub_close();
     }
-    st_key(SDLK_K, SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
-    ST_CHECK(A.menu.open && g_cmp.npick >= 1 && !strcmp(g_cmp.pick[0], CMP_BASE "/b"));
-    A.menu.open = false;
-    do_action(active_pane(), ACT_CMP_PICK_BASE + 0);
+    st_key(SDLK_K, SDL_KMOD_CTRL | SDL_KMOD_SHIFT); // one panel: the dialog, this folder on the left, the right to type
+    ST_CHECK(g_sheet.kind == SHEET_COMPARE && !strcmp(g_sheet.cp[0].buf, CMP_BASE "/a") && !g_sheet.cp[1].buf[0] && g_sheet.cp_focus == 1);
+    st_type(CMP_BASE "/");
+    ST_CHECK(st_wait_cond(st_cmp_sug, 5000)); // the folders in it, a and b
+    ST_CHECK(g_sheet.cp_nsug == 2 && !strcmp(g_sheet.cp_sug[1], CMP_BASE "/b"));
+    st_key(SDLK_DOWN, 0);
+    st_key(SDLK_DOWN, 0);
+    st_key(SDLK_RETURN, 0); // b picked: into the field, a slash after it
+    ST_CHECK(g_sheet.kind == SHEET_COMPARE && !strcmp(g_sheet.cp[1].buf, CMP_BASE "/b/"));
+    ST_CHECK(st_wait_cond(st_cmp_sug, 5000)); // and its folders come up
+    st_key(SDLK_ESCAPE, 0); // closes the suggestions (if any), not the dialog
+    ST_CHECK(g_sheet.kind == SHEET_COMPARE && !g_sheet.cp_nsug);
+    st_type("nope");
+    st_key(SDLK_RETURN, 0);
+    ST_CHECK(g_sheet.kind == SHEET_COMPARE && g_sheet.cp_err[0]); // not a folder: says so, stays open
+    te_set(&g_sheet.cp[1], CMP_BASE "/b", 0, 0);
+    g_sheet.cp_nsug = 0;
+    st_key(SDLK_RETURN, 0);
+    ST_CHECK(g_sheet.kind == SHEET_NONE);
     st_wait();
     ST_CHECK(g_cmp.on && A.npanels == 2 && g_cmp.t[0] == ta && g_cmp.t[1] == tb && tb->panel != ta->panel); // that tab moved over
     ST_CHECK(st_wait_cond(st_cmp_ready, 5000));
