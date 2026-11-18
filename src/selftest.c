@@ -2475,7 +2475,7 @@ static int run_selftest_m8(void) {
         f32 vis = g_sheet.rlist.h / g_sheet.row_h;
         if (g_sheet.napps > vis + 2) {
             sheet_wheel(-3);
-            st_frames(2);
+            st_settle();
             f32 sc = g_sheet.ow_scroll;
             ST_CHECK(sc > 0);
             st_frames(2);
@@ -2863,7 +2863,7 @@ static int run_selftest_m8(void) {
         st_frames(2);
         ST_CHECK(g_sheet.pv_content > g_sheet.rbody.h);
         sheet_wheel(-20);
-        st_frames(2);
+        st_settle();
         ST_CHECK(g_sheet.pv_scroll > 0 && g_sheet.pv_scroll <= g_sheet.pv_content - g_sheet.rbody.h + 0.5f);
         st_shot("properties-scrolled");
         A.H = h0;
@@ -4580,6 +4580,7 @@ static int run_selftest_m9(void) {
         wv.mouse_x = m->r.x + m->r.w * 0.5f;
         wv.mouse_y = m->r.y + m->r.h * 0.5f;
         on_wheel(&wv);
+        st_settle(); // (it eases there)
         ST_CHECK(m->scroll > 0);
         st_key(SDLK_END, SDL_KMOD_NONE);
         for (int k = 0; k < m->n; k++) st_key(SDLK_UP, SDL_KMOD_NONE); // wrap around: every item gets revealed

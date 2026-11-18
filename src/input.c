@@ -1071,8 +1071,11 @@ static void on_wheel(SDL_MouseWheelEvent *w) {
     if (sheet_open()) { sheet_wheel(w->y); return; }
     if (A.ql_on) { A.ql_scroll = MAX(0.f, A.ql_scroll - w->y * 3); A.redraw = true; return; } // (its text)
     if (A.menu.open) { // scroll a tall menu; don't scroll what's underneath
-        if (menu_sub_shown() && in_rect(g_menu_sub.r, w->mouse_x, w->mouse_y)) menu_scroll_by_in(&g_menu_sub, -w->y * S(28) * 2);
-        else if (in_rect(A.menu.r, w->mouse_x, w->mouse_y)) menu_scroll_by(-w->y * S(28) * 2);
+        if (menu_sub_shown() && in_rect(g_menu_sub.r, w->mouse_x, w->mouse_y)) glide_by(&g_menu_sub.scroll, -w->y * S(28) * 2, g_menu_sub.content_h - g_menu_sub.r.h);
+        else if (in_rect(A.menu.r, w->mouse_x, w->mouse_y)) {
+            if (g_menu_sub.open && w->y != 0) menu_sub_close(); // (it would no longer sit next to its item)
+            glide_by(&A.menu.scroll, -w->y * S(28) * 2, A.menu.content_h - A.menu.r.h);
+        }
         return;
     }
     {

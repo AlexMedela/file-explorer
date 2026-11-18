@@ -94,6 +94,7 @@ static void sheet_close(void) {
     free(s->status);
     strv_free(s->paths, s->npaths);
     memset(s, 0, sizeof *s);
+    g_glide.v = NULL;
     A.redraw = true;
 }
 
@@ -2283,9 +2284,9 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
 static void sheet_wheel(f32 dy) {
     Sheet *s = &g_sheet;
     if (s->kind == SHEET_OPTIONS) options_wheel(dy);
-    else if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON || s->kind == SHEET_BORG) && s->cn_pick) s->cn_pick_scroll -= dy * S(48); // clamped when drawn
-    else if (s->kind == SHEET_OPENWITH) s->ow_scroll -= dy * s->row_h * 1.5f; // clamped when drawn
-    else if (s->kind == SHEET_PROPS) s->pv_scroll -= dy * S(48);
+    else if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON || s->kind == SHEET_BORG) && s->cn_pick) glide_by(&s->cn_pick_scroll, -dy * S(48), 1e9f); // clamped when drawn
+    else if (s->kind == SHEET_OPENWITH) glide_by(&s->ow_scroll, -dy * s->row_h * 1.5f, 1e9f);
+    else if (s->kind == SHEET_PROPS) glide_by(&s->pv_scroll, -dy * S(48), s->pv_content - s->rbody.h);
     else if (s->kind == SHEET_RENAME) s->top = MAX(0, s->top - (int)dy * 3);
     A.redraw = true;
 }

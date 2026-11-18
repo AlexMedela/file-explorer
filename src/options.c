@@ -1393,8 +1393,8 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
     case SDLK_TAB:
         if (!g_opt.search.buf[0]) { g_opt.cat = (g_opt.cat + (mod & SDL_KMOD_SHIFT ? OC_COUNT - 1 : 1)) % OC_COUNT; g_opt.scroll = 0; g_opt.lname_focus = g_opt.cat == OC_LAYOUTS; }
         return;
-    case SDLK_PAGEDOWN: g_opt.scroll += S(300); return;
-    case SDLK_PAGEUP: g_opt.scroll -= S(300); return;
+    case SDLK_PAGEDOWN: glide_by(&g_opt.scroll, S(300), g_opt.max_scroll); return;
+    case SDLK_PAGEUP: glide_by(&g_opt.scroll, -S(300), g_opt.max_scroll); return;
     default:
         if (te_key(&g_opt.search, k, mod)) g_opt.scroll = 0;
     }
@@ -1416,7 +1416,7 @@ static void options_text(const char *text) {
 
 static void options_wheel(f32 dy) {
     if (g_opt.drop_opt >= 0) { g_opt.drop_top = MAX(0, g_opt.drop_top - (int)dy * 3); g_opt.drop_sel = CLAMP(g_opt.drop_sel, g_opt.drop_top, g_opt.drop_top + 9); return; }
-    g_opt.scroll = CLAMP(g_opt.scroll - dy * S(60), 0.f, g_opt.max_scroll);
+    glide_by(&g_opt.scroll, -dy * S(60), g_opt.max_scroll);
 }
 
 static void options_open_page(int cat) {
