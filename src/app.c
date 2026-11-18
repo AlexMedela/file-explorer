@@ -7550,6 +7550,7 @@ static int menu_action_icon(const MenuItem *it) {
     case ACT_NET_DISCONNECT: case ACT_CLOUD_DISCONNECT: case ACT_DEV_UNMOUNT: return UI_UNLINK;
     case ACT_DEV_EJECT: return UI_EJECT;
     case ACT_CLOUD_LOG: return UI_FILE_TEXT;
+    case ACT_CLOUD_LOGIN: return UI_LOG_IN;
     case ACT_GIT_OPEN_REMOTE: return UI_EXTERNAL_LINK;
     case ACT_GIT_ROOT: return UI_FOLDER_GIT_2;
     case ACT_GIT_STATUS: return UI_GIT_BRANCH;
