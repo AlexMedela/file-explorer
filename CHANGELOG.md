@@ -3,6 +3,8 @@
 ## Unreleased
 
 **New**
+- Theme > System can use any theme: Options > Appearance > **Light theme** and **Dark theme** pick the ones it switches between as the desktop goes light or dark (Light and Dark by default). Thanks to @pr83-glitch.
+
 - The Snapshots view lists Timeshift snapshots in rsync mode too (on any drive, e.g. ext4), with when each was taken, its comment and its tags (daily, boot…). Timeshift snapshots of either mode now also show up next to Snapper's (a Tool column then says which took each), and can be created or deleted from the view: Timeshift runs as administrator and asks for the password each time. Thanks to @teraflop09-web.
 
 - Browse BorgBackup repositories: folders that are Borg repositories (Borg 1, and Borg 2 beta) get a "Borg backup" pill; opening one shows its backups as dated folders, read-only (through `borg mount`, which needs borg's FUSE support, e.g. `python-pyfuse3`). Encrypted repositories ask for the passphrase, which can be kept in the system keyring. Inside a backup, "Compare with now" and "Restore…" work like in snapshots; copy or drag out anything else. Repositories in SFTP folders are read by borg on the server. "Add to sidebar" keeps a repository under a new Backups section, with its own name and icon, opened with a click; Borg 2 ones can stay mounted while the app runs. Thanks to @teraflop09-web.

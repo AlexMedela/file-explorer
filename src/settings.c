@@ -86,6 +86,8 @@ static void settings_defaults(void) {
     g_accent_custom = 0;
     g_accent_desktop = false;
     g_unified_surfaces = false;
+    snprintf(g_theme_pick[0], sizeof g_theme_pick[0], "Light");
+    snprintf(g_theme_pick[1], sizeof g_theme_pick[1], "Dark");
     g_folders_first = true;
     g_separators = true;
     g_scroll_custom = 0;
@@ -329,6 +331,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
         else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v);
+        else if (!strcmp(k, "theme_light") || !strcmp(k, "theme_dark")) snprintf(g_theme_pick[k[6] == 'd'], sizeof g_theme_pick[0], "%s", v);
         else if (!strcmp(k, "show_separators")) g_separators = atoi(v);
         else if (!strcmp(k, "system_accent")) g_accent_desktop = atoi(v);
         else if (!strcmp(k, "scrollbar_color")) { u32 c; if (scroll_color_parse(v, &c)) g_scroll_custom = c; }
@@ -564,6 +567,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "exec_open=%s\n", g_exec_names[CLAMP(A.exec_open, 0, EXEC_OPEN)]);
     keys_save(f);
     fprintf(f, "unified_surfaces=%d\nshow_separators=%d\nsystem_accent=%d\n", g_unified_surfaces, g_separators, g_accent_desktop);
+    fprintf(f, "theme_light=%s\ntheme_dark=%s\n", g_theme_pick[0], g_theme_pick[1]);
     if (g_scroll_custom) fprintf(f, "scrollbar_color=#%06X\n", g_scroll_custom & 0xFFFFFF);
     else fprintf(f, "scrollbar_color=auto\n");
     fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\n",

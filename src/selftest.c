@@ -3619,7 +3619,26 @@ static int run_selftest_m9(void) {
         settings_save();
         settings_load();
         ST_CHECK(!strcmp(A.theme_name, "System"));
+        // Light theme / Dark theme: which ones System switches between (only shown with System; every theme but System)
+        ST_CHECK(!opt_hidden(OPT_THEME_LIGHT) && !opt_hidden(OPT_THEME_DARK) && opt_choice_count(OPT_THEME_DARK) == g_nthemes - 1);
+        ST_CHECK(!strcmp(opt_choice_label(OPT_THEME_LIGHT, opt_choice_get(OPT_THEME_LIGHT)), "Light") &&
+                 !strcmp(opt_choice_label(OPT_THEME_DARK, opt_choice_get(OPT_THEME_DARK)), "Dark"));
+        for (int i = 0; i < opt_choice_count(OPT_THEME_DARK); i++) {
+            ST_CHECK(strcmp(opt_choice_label(OPT_THEME_DARK, i), "System"));
+            if (!strcmp(opt_choice_label(OPT_THEME_DARK, i), "Nord")) opt_choice_set(OPT_THEME_DARK, i);
+        }
+        ST_CHECK(T.bg == g_themes[theme_find("Nord")].t.bg && !strcmp(g_theme_pick[1], "Nord")); // the desktop is dark
+        d = xcalloc(1, sizeof *d);
+        *d = (DesktopLook){.light = true, .icons = "hicolor"};
+        dlook_apply(d);
+        ST_CHECK(T.bg == g_theme_light.bg); // light: still the built-in Light
+        settings_save();
+        snprintf(g_theme_pick[1], sizeof g_theme_pick[1], "Dark");
+        settings_load();
+        ST_CHECK(!strcmp(g_theme_pick[1], "Nord") && !strcmp(g_theme_pick[0], "Light"));
+        snprintf(g_theme_pick[1], sizeof g_theme_pick[1], "Dark");
         opt_choice_set(OPT_THEME, theme_find("Nord")); // other themes ignore the desktop
+        ST_CHECK(opt_hidden(OPT_THEME_LIGHT) && opt_hidden(OPT_THEME_DARK));
         d = xcalloc(1, sizeof *d);
         *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3584E4, .icons = "hicolor"};
         dlook_apply(d);

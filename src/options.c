@@ -5,7 +5,7 @@ static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "
 enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
 enum {
-    OPT_THEME, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
+    OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
@@ -21,6 +21,8 @@ typedef struct {
 
 static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_THEME, "Theme", "Colour scheme; System: light or dark as the desktop prefers, with its accent (KDE: its colours) (add your own JSON schemes below)"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_THEME_LIGHT, "Light theme", "Used by System while the desktop is light"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_THEME_DARK, "Dark theme", "Used by System while the desktop is dark"},
     {OC_APPEARANCE, OK_ACCENT, OPT_ACCENT, "Accent colour", "Selection, focus and highlight colour"},
     {OC_APPEARANCE, OK_BOOL, OPT_ACCENT_DESKTOP, "Desktop's accent colour", "Use the desktop's accent with every theme, where it has one (else the colour above)"},
     {OC_APPEARANCE, OK_TEXT, OPT_SCROLL_COLOR, "Scrollbar colour", "Empty: Auto, the theme's own (System: the desktop's accent); or #RRGGBB / #RGB, then Apply"},
@@ -297,9 +299,23 @@ static void opt_load_families(void) {
     if (!g_opt.families) g_opt.nfamilies = font_families(&g_opt.families);
 }
 
+// Light theme / Dark theme rows: every theme but System. Choice i -> theme index, and back.
+static int opt_pick_sys(void) {
+    for (int k = 0; k < g_nthemes; k++)
+        if (!g_themes[k].file[0] && !strcmp(g_themes[k].name, "System")) return k;
+    return g_nthemes;
+}
+static int opt_pick_theme(int i) { return i >= opt_pick_sys() ? i + 1 : i; }
+static int opt_pick_choice(int light) {
+    int k = theme_find(g_theme_pick[light]);
+    if (k < 0 || k == opt_pick_sys()) k = MAX(0, theme_find(light == 0 ? "Light" : "Dark"));
+    return k > opt_pick_sys() ? k - 1 : k;
+}
+
 static int opt_choice_count(int id) {
     switch (id) {
     case OPT_THEME: return g_nthemes;
+    case OPT_THEME_LIGHT: case OPT_THEME_DARK: return g_nthemes - (opt_pick_sys() < g_nthemes);
     case OPT_ICON_THEME: return icon_theme_count();
     case OPT_TERM_LOOK: return 2;
     case OPT_TERMINAL: return 1 + g_termlist.n + !term_choice_listed();
@@ -321,6 +337,7 @@ static int opt_choice_count(int id) {
 static const char *opt_choice_label(int id, int i) {
     switch (id) {
     case OPT_THEME: return g_themes[i].name;
+    case OPT_THEME_LIGHT: case OPT_THEME_DARK: return g_themes[opt_pick_theme(i)].name;
     case OPT_ICON_THEME: return icon_theme_name(i);
     case OPT_TERM_LOOK: {
         static char lab[96];
@@ -357,6 +374,8 @@ static const char *opt_choice_label(int id, int i) {
 static int opt_choice_get(int id) {
     switch (id) {
     case OPT_THEME: return g_theme_cur;
+    case OPT_THEME_LIGHT: return opt_pick_choice(0);
+    case OPT_THEME_DARK: return opt_pick_choice(1);
     case OPT_ICON_THEME: return g_icon_theme;
     case OPT_TERM_LOOK: return g_term_look_setting;
     case OPT_TERMINAL:
@@ -411,6 +430,10 @@ static bool apply_ui_font(const char *family) {
 static void opt_choice_set(int id, int i) {
     switch (id) {
     case OPT_THEME: g_theme_cur = i; theme_apply(); desktop_look_sync(); break;
+    case OPT_THEME_LIGHT: case OPT_THEME_DARK:
+        snprintf(g_theme_pick[id == OPT_THEME_DARK], sizeof g_theme_pick[0], "%s", g_themes[opt_pick_theme(i)].name);
+        theme_apply();
+        break;
     case OPT_ICON_THEME: icon_set_theme(i); desktop_look_sync(); break;
     case OPT_TERM_LOOK: g_term_look_setting = i; tc_reload_all(); break;
     case OPT_TERMINAL: {
@@ -661,6 +684,7 @@ static void opt_brand_sync(void) {
 // Rows that don't apply to this copy (updating by itself: AppImage only), or to the current choice.
 static bool opt_hidden(int id) {
     if (id == OPT_BRAND_TEXT) return A.brand_name != BRAND_CUSTOM;
+    if (id == OPT_THEME_LIGHT || id == OPT_THEME_DARK) return !theme_is_system();
     if (id == OPT_UPD_HOW) return upd_can_install(); // (the AppImage's own rows say it)
     return (id == OPT_IG_UPDATES || id == OPT_UPD_AUTO) && !upd_can_install();
 }
