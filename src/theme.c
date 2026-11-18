@@ -99,6 +99,7 @@ static int g_theme_cur;
 static u32 g_accent_custom; // 0 = theme accent, else 0x01000000 | rgb
 static bool g_accent_desktop; // Options: the desktop's accent with every theme, where it has one (it wins over g_accent_custom)
 static bool g_unified_surfaces; // Options: sidebar, header, preview and status bar take the file area's background
+static char g_theme_pick[2][64] = {"Light", "Dark"}; // Theme > System: the theme while the desktop is light / dark (by name)
 // Options > Surfaces brightness: -30..+30 % per part (darker / lighter), 0 = the theme's own colour.
 enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_STATUS, SURF_COUNT };
 static int g_surface_bright[SURF_COUNT];
@@ -205,9 +206,15 @@ static u32 surface_adjust(u32 c, int part) {
     return pct ? rgb_mix(c, pct < 0 ? 0x000000 : 0xFFFFFF, (f32)abs(pct) / 100.f) : c;
 }
 
-// Theme "System": Light or Dark as the desktop prefers; on KDE built from its colour scheme (view = the file area,
-// window = sidebar, header and preview, text, selection = the accent).
+static int theme_find(const char *name);
+
+// Theme "System": the theme picked for light or for dark (Options: Light theme / Dark theme), as the desktop prefers.
+// Left on the built-in Light / Dark, on KDE it's built from its colour scheme (view = the file area, window = sidebar,
+// header and preview, text, selection = the accent).
 static Theme theme_system(void) {
+    int light = g_desktop.light ? 0 : 1, i = theme_find(g_theme_pick[light]);
+    bool builtin = i < 0 || (!g_themes[i].file[0] && (str_ieq(g_themes[i].name, light == 0 ? "Light" : "Dark") || str_ieq(g_themes[i].name, "System")));
+    if (!builtin) return g_themes[i].t;
     Theme t = g_desktop.light ? g_theme_light : g_theme_dark;
     if (!g_desktop.kde[KDE_VIEW]) return t;
     u32 bg = g_desktop.kde[KDE_VIEW] & 0xFFFFFF, win = g_desktop.kde[KDE_WINDOW] ? g_desktop.kde[KDE_WINDOW] & 0xFFFFFF : bg;

@@ -68,6 +68,9 @@ Theme > **System** (`theme=System`) is Light or Dark as the desktop prefers (the
 preference, else GTK's), with the desktop's accent colour where it has one (an accent picked in Options wins), and
 follows changes while the app runs. On KDE it takes KDE's colour scheme itself (view, window, text and selection
 colours from its settings portal, else `~/.config/kdeglobals` when the session is KDE).
+Which themes it switches between is up to you: **Light theme** and **Dark theme** (shown under Theme while System is
+picked; `theme_light=` / `theme_dark=`, any built-in or JSON theme) default to Light and Dark. KDE's colours are used
+only while the one for the current mode is left on its default.
 `system_accent=1` (Options -> Appearance -> Desktop's accent colour, off by default) uses the desktop's accent with
 every theme, where the desktop has one; otherwise the accent picked above.
 
