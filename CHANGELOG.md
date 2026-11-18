@@ -15,6 +15,7 @@
 
 **Fixed**
 - Inside a Timeshift snapshot the bar with "Compare with now" and "Restore…" shows, as it does for Snapper and ZFS.
+- Dragging files to other apps on Wayland: a drag can switch workspaces (Super / Alt hands it to the desktop, so a workspace shortcut no longer drops it where the pointer is), and after a drop into an app that never says it's done, clicks no longer start a selection box that follows the mouse (Esc also ends such a drag). Thanks to @pr83-glitch.
 
 ## 0.11.2
 
