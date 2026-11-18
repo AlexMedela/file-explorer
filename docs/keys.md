@@ -17,11 +17,11 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | F5, Ctrl+R | Refresh (also measures folder sizes again from scratch) |
 | Click column header | Sort (click again to reverse) |
 | Drag on empty space / outside a name | Rubber-band select (Ctrl = add), auto-scrolls at edges |
-| Ctrl+T / Ctrl+W / Ctrl+Shift+T | New tab / close tab / reopen closed tab (in the active panel) |
+| Ctrl+T / Ctrl+W / Ctrl+Shift+T | New tab / close tab / reopen closed tab (in the active panel; when its tab bar is full the new tab goes to the panel with the most room, and when every bar is full + dims and nothing opens) |
 | Ctrl+Tab, Ctrl+PgUp/PgDn, Ctrl+1…9 | Switch tabs within the active panel (Ctrl+9 = last) |
 | Middle-click folder or place, Ctrl+Enter | Open folder in a new tab |
 | Middle-click tab / double-click tab bar | Close tab / new tab |
-| Ctrl+\ / Ctrl+Shift+\, F3, panel split button | **Panels** (like File Pilot): split the active panel right / down; each panel has its own tabs; splits nest; drag dividers to resize |
+| Ctrl+\ / Ctrl+Shift+\, F3, panel split button | **Panels** (like File Pilot): split the active panel right / down (when it is too narrow / short to halve, or halving it would squeeze its tabs, the widest / tallest panel with room is split instead; when none has room the button dims and nothing happens); each panel has its own tabs; splits nest; drag dividers to resize |
 | Drag a tab | Onto a tab bar = reorder/move, onto a panel = move there, onto a panel edge = new split (snap overlay); Ctrl+drag duplicates |
 | Shift+F5 / Shift+F6 | Copy / move the selection to the previously active panel |
 | Ctrl+N | New window |

@@ -335,12 +335,12 @@ static void on_mouse_down_tabbar(Panel *pn, SDL_MouseButtonEvent *b, f32 x, f32 
     bool shift = SDL_GetModState() & SDL_KMOD_SHIFT;
     if (b->button == SDL_BUTTON_LEFT && in_rect(pn->plus, x, y)) {
         panel_activate(pn);
-        tab_new_in(pn, pn->cur->pane[0].path, panel_end_index(pn), true);
+        tab_new_fit(pn, pn->cur->pane[0].path, panel_end_index(pn), true);
         return;
     }
     if (b->button == SDL_BUTTON_LEFT && in_rect(pn->splitbtn, x, y)) {
         panel_activate(pn);
-        panel_split(pn, shift ? ZONE_BOTTOM : ZONE_RIGHT, NULL, pn->cur->pane[0].path);
+        panel_split_fit(pn, shift ? ZONE_BOTTOM : ZONE_RIGHT, pn->cur->pane[0].path);
         return;
     }
     for (int i = 0; i < A.ntabs; i++) {
@@ -352,7 +352,7 @@ static void on_mouse_down_tabbar(Panel *pn, SDL_MouseButtonEvent *b, f32 x, f32 
         f32 cs = roundf(S(18));
         Rect close = {t->r.x + t->r.w - cs - roundf(S(8)), t->r.y + (t->r.h - cs) * 0.5f, cs, cs};
         if (A.ntabs > 1 && t->r.w > S(90) && in_rect(close, x, y)) { tab_close(i); return; }
-        if (b->clicks >= 2 && pn->cur == t) { tab_new_in(pn, t->pane[0].path, i + 1, true); return; } // duplicate
+        if (b->clicks >= 2 && pn->cur == t) { tab_new_fit(pn, t->pane[0].path, i + 1, true); return; } // duplicate
         tab_select(i);
         A.drag = DRAG_TAB_PENDING; // may become a tab drag (reorder / move / split)
         A.drag_tab = t;
@@ -362,7 +362,7 @@ static void on_mouse_down_tabbar(Panel *pn, SDL_MouseButtonEvent *b, f32 x, f32 
     }
     if (b->button == SDL_BUTTON_LEFT && b->clicks >= 2) {
         panel_activate(pn);
-        tab_new_in(pn, pn->cur->pane[0].path, panel_end_index(pn), true);
+        tab_new_fit(pn, pn->cur->pane[0].path, panel_end_index(pn), true);
     }
 }
 

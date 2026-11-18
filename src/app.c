@@ -314,6 +314,7 @@ static void term_send(Term *t, const char *s);
 struct Panel {
     Tab *cur; // visible tab
     Rect area, bar, plus, splitbtn;
+    f32 tabs_w; // room for the tabs (bar minus + and split)
 };
 
 enum { NODE_PANEL, NODE_HSPLIT, NODE_VSPLIT }; // HSPLIT: a | b, VSPLIT: a over b
@@ -1099,6 +1100,7 @@ static void layout_panel(Panel *pn, Rect r) {
     f32 gap = pills ? roundf(S(4)) : 0; // (cards touch: the open one's flares cover the seams)
     f32 x0 = r.x + roundf(S(6));
     f32 avail = pn->splitbtn.x - roundf(S(6)) - (bw + roundf(S(4))) - x0;
+    pn->tabs_w = avail;
     f32 tw = n ? MAX(roundf(S(48)), MIN(roundf(S(200)), roundf((avail - gap * (f32)(n - 1)) / (f32)n))) : 0;
     f32 group = n ? tw * (f32)n + gap * (f32)(n - 1) : 0;
     if (pills) x0 = MAX(x0, MIN(roundf(r.x + (right - r.x - group) * 0.5f), x0 + avail - group)); // centred, clear of + and split
@@ -4033,9 +4035,44 @@ static Tab *tab_new_in(Panel *pn, const char *path, int at, bool activate) {
 }
 
 // New tab in the active panel at a global index (A.cur + 1 = right after the current tab).
+// New tabs don't shrink a panel's tabs below this; they go to a panel with room instead.
+#define TAB_MIN_W S(90)
+
+// How wide pn's tabs would be with one more.
+static f32 panel_next_tab_w(Panel *pn) {
+    int n = panel_ntabs(pn);
+    f32 gap = A.tab_style == TABS_PILLS ? roundf(S(4)) : 0;
+    return (pn->tabs_w - gap * (f32)n) / (f32)(n + 1);
+}
+
+static int panels_ordered(Node *n, Panel **out, int k);
+
+// Which panel a new tab asked for in pn goes into: pn while its tabs stay readable, else the panel whose tabs would
+// stay widest, NULL when every tab bar is full.
+static Panel *tab_target_panel(Panel *pn) {
+    if (!pn || !A.root || A.root->r.w <= 0) return pn; // not laid out yet
+    if (panel_next_tab_w(pn) >= TAB_MIN_W) return pn;
+    Panel *ord[MAX_PANELS], *best = NULL;
+    int n = panels_ordered(A.root, ord, 0);
+    f32 bw = 0;
+    for (int i = 0; i < n; i++) {
+        f32 w = panel_next_tab_w(ord[i]);
+        if (w >= TAB_MIN_W && w > bw) { best = ord[i]; bw = w; }
+    }
+    return best;
+}
+
+// A new tab the user asked for in pn at index `at`: there, in a panel with room (at its end), or not at all.
+static Tab *tab_new_fit(Panel *pn, const char *path, int at, bool activate) {
+    Panel *dst = tab_target_panel(pn);
+    if (!dst && pn) { toast("No room for another tab"); return NULL; }
+    if (dst != pn) at = panel_end_index(dst);
+    return tab_new_in(dst, path, at, activate);
+}
+
 static Tab *tab_new(const char *path, int at, bool activate) {
     if (A.ap && at >= A.ntabs) at = panel_end_index(A.ap);
-    return tab_new_in(A.ap, path, at, activate);
+    return tab_new_fit(A.ap, path, at, activate);
 }
 
 static void closed_push(const char *path) {
@@ -4128,6 +4165,47 @@ static Panel *panel_split(Panel *pn, int zone, Tab *move, const char *path) {
     else tab_new_in(np, path, A.ntabs, true);
     A.settings_dirty = true;
     return np;
+}
+
+static int panels_ordered(Node *n, Panel **out, int k);
+
+// The split button and keys don't halve a panel below this; they split a roomier one instead.
+#define PANEL_MIN_W S(240)
+#define PANEL_MIN_H S(200)
+
+// Can panel p be split that way: both halves big enough, and (side by side) its tabs still readable in its half?
+static bool panel_can_split(Panel *p, bool h, f32 *size) {
+    Node *nd = node_find(A.root, p);
+    if (!nd) return false;
+    *size = h ? nd->r.w : nd->r.h;
+    if (*size < 2 * (h ? PANEL_MIN_W : PANEL_MIN_H) + 1) return false;
+    if (!h) return true;
+    int nt = panel_ntabs(p);
+    f32 gap = A.tab_style == TABS_PILLS ? roundf(S(4)) : 0;
+    f32 tabs_w = p->tabs_w - (nd->r.w - roundf(nd->r.w * 0.5f)); // its bar loses the other half
+    return nt < 1 || (tabs_w - gap * (f32)(nt - 1)) / (f32)nt >= TAB_MIN_W;
+}
+
+// Which panel a split on side `zone` asked for from pn goes into: pn if both halves stay usable, else the widest
+// (tallest) panel that has room (its tabs too), NULL when none has.
+static Panel *panel_split_target(Panel *pn, int zone) {
+    if (!pn || !A.root || A.root->r.w <= 0) return pn; // not laid out yet
+    bool h = zone == ZONE_LEFT || zone == ZONE_RIGHT;
+    f32 s;
+    if (panel_can_split(pn, h, &s)) return pn;
+    Panel *ord[MAX_PANELS], *best = NULL;
+    int n = panels_ordered(A.root, ord, 0);
+    f32 bs = 0;
+    for (int i = 0; i < n; i++) // ties go to the later (more right / lower) panel
+        if (panel_can_split(ord[i], h, &s) && s >= bs) { best = ord[i]; bs = s; }
+    return best;
+}
+
+// Split for the split button, keys and "Open in split": into a panel with room, or not at all.
+static Panel *panel_split_fit(Panel *pn, int zone, const char *path) {
+    Panel *dst = panel_split_target(pn, zone);
+    if (!dst) { toast("No room for another panel"); return NULL; }
+    return panel_split(dst, zone, NULL, path);
 }
 
 // Panels in reading order (left-to-right, top-to-bottom).
@@ -6206,7 +6284,7 @@ static void do_action(Pane *p, int act) {
     case ACT_OPEN_SPLIT_DOWN: {
         char t[PATH_MAX];
         pane_target_folder(p, t, sizeof t);
-        panel_split(A.ap, act == ACT_OPEN_SPLIT_RIGHT ? ZONE_RIGHT : ZONE_BOTTOM, NULL, t);
+        panel_split_fit(A.ap, act == ACT_OPEN_SPLIT_RIGHT ? ZONE_RIGHT : ZONE_BOTTOM, t);
         break;
     }
     case ACT_TAB_REOPEN:
@@ -6249,8 +6327,8 @@ static void do_action(Pane *p, int act) {
         char path[PATH_MAX];
         snprintf(path, sizeof path, "%s", mt->pane[0].path);
         switch (act) {
-        case ACT_TAB_NEW: tab_new_in(pn, path, panel_end_index(pn), true); break;
-        case ACT_TAB_DUP: tab_new_in(pn, path, tab_index(mt) + 1, true); break;
+        case ACT_TAB_NEW: tab_new_fit(pn, path, panel_end_index(pn), true); break;
+        case ACT_TAB_DUP: tab_new_fit(pn, path, tab_index(mt) + 1, true); break;
         case ACT_TAB_CLOSE: tab_close(tab_index(mt)); break;
         case ACT_TAB_CLOSE_OTHERS:
         case ACT_TAB_CLOSE_LEFT:
@@ -10931,8 +11009,8 @@ static void run_command(int id) {
     switch (id) {
     case CMD_NEW_TAB: tab_new(p->path, A.cur + 1, true); break;
     case CMD_CLOSE_TAB: tab_close(A.cur); break;
-    case CMD_SPLIT: panel_split(A.ap, ZONE_RIGHT, NULL, p->path); break;
-    case CMD_SPLIT_DOWN: panel_split(A.ap, ZONE_BOTTOM, NULL, p->path); break;
+    case CMD_SPLIT: panel_split_fit(A.ap, ZONE_RIGHT, p->path); break;
+    case CMD_SPLIT_DOWN: panel_split_fit(A.ap, ZONE_BOTTOM, p->path); break;
     case CMD_SWITCH_PANE: panel_cycle(1); break;
     case CMD_PREV_PANE: panel_cycle(-1); break;
     case CMD_NEXT_TAB: tab_cycle(1); break;
