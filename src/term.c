@@ -384,6 +384,7 @@ struct Term {
     int shint;              // SHINT_*
     bool shint_ready;       // the shell loaded our part (it made cd_file + ".ready")
     char cd_file[PATH_MAX]; // the folder to go to is written here before the shell is poked
+    bool top_trim;          // (terminal panel) its top row is hidden while it's the blank line a prompt starts with
 };
 
 static Font g_term_font, g_term_bold;
@@ -827,6 +828,7 @@ static Term *term_new(const char *dir, char *const argv[], int rows, int cols, b
     vterm_screen_reset(t->scr, 1);
     t->cursor_visible = true;
     t->born = now_ns();
+    t->top_trim = follow;
     t->sb_cap = g_tc.scrollback;
     t->sb = xcalloc((size_t)t->sb_cap, sizeof(TLine *));
     term_apply_colors(t);
@@ -972,6 +974,19 @@ static void term_layout(Term *t, Rect area) {
     t->ox = area.x + px;
     t->oy = area.y + py;
     int cols = (int)((area.w - px * 2) / t->cw), rows = (int)((area.h - py * 2) / t->ch);
+    // The panel is small: a prompt that starts with an empty line (starship's add_newline; fastfetch usually fills
+    // the space above it) would put the first one a row down. That line isn't shown (one more row for the shell
+    // instead, scrolled up under the clip) until it's no longer the untouched top: written on, scrolled away.
+    if (t->top_trim) {
+        VTermScreenCell cell;
+        for (int c = 0; c < t->cols && t->top_trim; c++)
+            if (vterm_screen_get_cell(t->scr, (VTermPos){0, c}, &cell) && cell.chars[0] && cell.chars[0] != ' ') t->top_trim = false;
+        if (t->sb_n || t->altscreen) t->top_trim = false;
+    }
+    if (t->top_trim) {
+        rows++;
+        if (t->cursor.row > 0) t->oy -= t->ch;
+    }
     term_resize(t, rows, cols);
 }
 
@@ -1374,6 +1389,7 @@ static void tc_reload_all(void) {
 
 static void draw_status_term(Term *t) {
     Rect s = A.r_status;
+    A.r_feat = A.r_viewbtn[0] = A.r_viewbtn[1] = A.r_viewbtn[2] = (Rect){0, 0, 0, 0}; // (none of the folder's buttons here)
     draw_rect(s.x, s.y, s.w, s.h, C(COL_STATUS));
     if (g_separators) draw_rect(s.x, s.y, s.w, 1, C(COL_BORDER));
     Font *f = &A.font_small;

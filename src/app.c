@@ -12242,7 +12242,7 @@ static void frame(void) {
         for (int i = 0; i < g_nthumbs; i++)
             if (g_thumbs[i].state == 1) ready = false; // wait for visible thumbnails
         for (int i = 0; i < A.ntabs; i++)
-            if (A.tabs[i]->term && !term_settled(A.tabs[i]->term)) ready = false; // a shell prompt takes a moment
+            if ((A.tabs[i]->term && !term_settled(A.tabs[i]->term)) || (A.tabs[i]->dock && !term_settled(A.tabs[i]->dock))) ready = false; // a shell prompt takes a moment
         if (git_busy() || du_busy() || snapview_busy() || (g_cmp.on && !cmp_ready())) ready = false;
         if ((theme_is_system() || icon_system_selected()) && !g_desktop.known) ready = false; // the desktop's look
         for (int i = 0; i < g_nsysicons; i++)

@@ -31,6 +31,7 @@
 - In the Save dialog (the app as file chooser), Ctrl+L / F6 edits the path while the file name has the keyboard, and Alt+←/→/↑, Ctrl+H and F5 work there without losing the typed name. Thanks to @pr83-glitch.
 - In the Save dialog, selecting a file puts its name in the file name field (its name without the extension selected), to save over it or name the new file after it; a name typed afterwards stays until another file is selected. The name can also be a path (`sub/name`, as a file in the tree view fills in, or a full one) into a folder that exists. Thanks to @pr83-glitch.
 - Extract here with several archives selected unpacks every one of them (each into its own folder), not only the last one clicked; the menu says how many. Thanks to @pr83-glitch.
+- With the terminal panel (F4) open, the status bar keeps the folder's item count, size slider and view buttons (it showed the terminal's details over them, while clicks still went to the hidden buttons), and a prompt that starts with an empty line (starship's `add_newline`) starts on the panel's top row.
 
 ## 0.11.2
 
