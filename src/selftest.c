@@ -1523,6 +1523,7 @@ static int run_selftest_m5(void) {
     A.brand_name = BRAND_CUSTOM;
     snprintf(A.brand_text, sizeof A.brand_text, "My files");
     A.tab_style = TABS_PILLS;
+    A.compress_fmt = ARC_TXZ, A.compress_level = ARC_LVL_CUSTOM, A.compress_num = 4;
     settings_save();
     int ntabs0 = A.ntabs;
     settings_load(); // resets to defaults first, then reads the file
@@ -1530,6 +1531,7 @@ static int run_selftest_m5(void) {
     ST_CHECK(!A.window_buttons && !A.brand_logo && A.brand_name == BRAND_CUSTOM && !strcmp(A.brand_text, "My files"));
     A.window_buttons = A.brand_logo = true;
     ST_CHECK(A.tab_style == TABS_PILLS);
+    ST_CHECK(A.compress_fmt == ARC_TXZ && A.compress_level == ARC_LVL_CUSTOM && A.compress_num == 4);
     A.brand_name = BRAND_APP;
     A.brand_text[0] = 0;
     A.tab_style = TABS_CARDS;
@@ -2885,14 +2887,104 @@ static int run_selftest_m8(void) {
     st_write(M8_BASE "/proj/src/main.c", 4321);
     st_write(M8_BASE "/proj/readme.md", 77);
     pane_refresh(p); st_wait();
-    st_select(p, "proj");
-    do_action(p, ACT_COMPRESS_ZIP);
-    st_wait_ops();
-    ST_CHECK(st_size(M8_BASE "/proj.zip") > 0);
-    st_select(p, "proj");
-    do_action(p, ACT_COMPRESS_TGZ);
-    st_wait_ops();
-    ST_CHECK(st_size(M8_BASE "/proj.tar.gz") > 0);
+    { // the menu: one "Compress to" item, its submenu lists the formats then Custom...
+        st_select(p, "proj");
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        int ci = -1, nold = 0;
+        for (int i = 0; i < A.menu.n; i++) {
+            if (A.menu.items[i].act == ACT_COMPRESS_MENU) ci = i;
+            nold += A.menu.items[i].label && !strncmp(A.menu.items[i].label, "Compress to ", 12); // (the old one-format items)
+        }
+        ST_CHECK(ci >= 0 && !nold && A.menu.items[ci].sub);
+        if (ci >= 0 && A.menu.items[ci].sub) {
+            menu_sub_open(ci, true);
+            Menu *sm = &g_menu_sub;
+            ST_CHECK(menu_sub_shown() && sm->n == ARC_NFMT - 1 + 2 && sm->items[ARC_NFMT - 1].sep);
+            for (int f = ARC_ZIP; f < ARC_NFMT; f++)
+                ST_CHECK(sm->items[f - ARC_ZIP].act == ACT_COMPRESS_BASE + f && !strcmp(sm->items[f - ARC_ZIP].label, g_arc_fmts[f].label));
+            ST_CHECK(sm->items[sm->n - 1].act == ACT_COMPRESS_CUSTOM);
+            st_shot("compress-menu");
+        }
+        A.menu.open = false;
+        menu_sub_close();
+    }
+    for (int f = ARC_ZIP; f < ARC_NFMT; f++) { // Compress to > each format
+        st_select(p, "proj");
+        do_action(p, ACT_COMPRESS_BASE + f);
+        st_wait_ops();
+        char out[PATH_MAX];
+        snprintf(out, sizeof out, M8_BASE "/proj%s", g_arc_fmts[f].ext);
+        ST_CHECK(st_size(out) > 0);
+    }
+    { // Compress to > Custom...: the sheet picks name, format and level (all by keyboard), and remembers them
+        A.compress_fmt = ARC_ZIP, A.compress_level = ARC_LVL_NORMAL;
+        st_select(p, "proj");
+        do_action(p, ACT_COMPRESS_CUSTOM);
+        ST_CHECK(g_sheet.kind == SHEET_COMPRESS && !strcmp(g_sheet.cn[CN_NAME].buf, "proj") && g_sheet.cz_fmt == ARC_ZIP);
+        sheet_key(SDLK_TAB, SDL_KMOD_NONE); // -> format
+        for (int k = 0; k < 9; k++) sheet_key(SDLK_RIGHT, SDL_KMOD_NONE); // (stops at the last)
+        sheet_key(SDLK_LEFT, SDL_KMOD_NONE);
+        ST_CHECK(g_sheet.cz_fmt == ARC_TZST);
+        sheet_key(SDLK_DOWN, SDL_KMOD_NONE); // -> level
+        sheet_key(SDLK_RIGHT, SDL_KMOD_NONE);
+        ST_CHECK(g_sheet.cz_lvl == ARC_LVL_BEST && compress_number() == 19 && g_sheet.cz_kb);
+        sheet_key(SDLK_PLUS, SDL_KMOD_NONE); // a number of one's own...
+        ST_CHECK(g_sheet.cz_lvl == ARC_LVL_CUSTOM && compress_number() == 20);
+        sheet_key(SDLK_MINUS, SDL_KMOD_NONE); // ...back on Best's
+        ST_CHECK(g_sheet.cz_lvl == ARC_LVL_BEST);
+        for (int k = 0; k < 5; k++) sheet_key(SDLK_PLUS, SDL_KMOD_NONE);
+        ST_CHECK(g_sheet.cz_lvl == ARC_LVL_CUSTOM && compress_number() == 22); // (zstd's highest)
+        sheet_key(SDLK_MINUS, SDL_KMOD_NONE);
+        st_frames(1); // (where the buttons are)
+        compress_click(g_sheet.cz_rminus.x + 2, g_sheet.cz_rminus.y + 2); // the stepper's button; a click: no outline
+        ST_CHECK(compress_number() == 20 && !g_sheet.cz_kb && g_sheet.cz_focus == 2);
+        st_shot("compress-sheet");
+        sheet_key(SDLK_TAB, SDL_KMOD_NONE); // -> name (wraps)
+        ST_CHECK(g_sheet.cz_focus == 0);
+        te_set(&g_sheet.cn[CN_NAME], "", 0, 0);
+        sheet_text("packed/");
+        sheet_key(SDLK_RETURN, SDL_KMOD_NONE); // a '/': not a name, the sheet stays
+        ST_CHECK(g_sheet.kind == SHEET_COMPRESS);
+        sheet_key(SDLK_BACKSPACE, SDL_KMOD_NONE);
+        sheet_text(".tar.zst"); // typed with its extension: not doubled
+        sheet_key(SDLK_RETURN, SDL_KMOD_NONE);
+        st_wait_ops();
+        ST_CHECK(g_sheet.kind == SHEET_NONE && st_size(M8_BASE "/packed.tar.zst") > 0 && !st_exists(M8_BASE "/packed.tar.zst.tar.zst"));
+        ST_CHECK(A.compress_fmt == ARC_TZST && A.compress_level == ARC_LVL_CUSTOM && A.compress_num == 20);
+        st_select(p, "proj");
+        do_action(p, ACT_COMPRESS_CUSTOM);
+        ST_CHECK(g_sheet.cz_fmt == ARC_TZST && compress_number() == 20); // offered again
+        st_frames(1); // (where the buttons are)
+        compress_click(g_sheet.cz_rfmt[ARC_ZIP].x + 2, g_sheet.cz_rfmt[ARC_ZIP].y + 2);
+        ST_CHECK(g_sheet.cz_fmt == ARC_ZIP && compress_number() == 9); // (within ZIP's levels)
+        compress_click(g_sheet.cz_rlvl[0].x + 2, g_sheet.cz_rlvl[0].y + 2);
+        ST_CHECK(g_sheet.cz_lvl == ARC_LVL_FAST && compress_number() == 1);
+        sheet_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        ST_CHECK(g_sheet.kind == SHEET_NONE);
+    }
+    { // the levels do something: Best is smaller than Fast on text (zstd 19 vs 3)
+        char text[1 << 16];
+        u32 seed = 7;
+        size_t o = 0;
+        static const char *words[] = {"alpha ", "beta ", "gamma ", "delta ", "epsilon ", "zeta ", "eta ", "theta\n"};
+        while (o + 16 < sizeof text) { seed = seed * 1103515245u + 12345u; o += (size_t)snprintf(text + o, 16, "%s", words[(seed >> 16) & 7]); }
+        int fd = open(M8_BASE "/words.txt", O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0644);
+        for (int k = 0; k < 16 && fd >= 0; k++) if (write(fd, text, o) != (ssize_t)o) break;
+        if (fd >= 0) close(fd);
+        char *wp[] = {M8_BASE "/words.txt"};
+        i64 sz[2];
+        for (int b = 0; b < 2; b++) {
+            const char *arc = b ? M8_BASE "/words-best.tar.zst" : M8_BASE "/words-fast.tar.zst";
+            Op *op = op_new(OP_COMPRESS, wp, 1, M8_BASE);
+            op->arc = strdup(arc);
+            op->arc_fmt = ARC_TZST, op->arc_level = b ? 19 : 3;
+            run_compress(op);
+            ST_CHECK(!op->nerr);
+            op_free(op);
+            sz[b] = st_size(arc);
+        }
+        ST_CHECK(sz[0] > 0 && sz[1] > 0 && sz[1] < sz[0]);
+    }
     { // accented names and spaces keep their bytes; an unreadable file is left out and named, the rest is there;
       // a "<name>.part" that was already there is left alone
         mkdir(M8_BASE "/uni", 0755);
@@ -2903,13 +2995,15 @@ static int run_selftest_m8(void) {
         chmod(M8_BASE "/uni/locked.txt", 0);
         bool locked = geteuid() != 0; // (root reads it anyway)
         char *uni[] = {M8_BASE "/uni"};
-        for (int fmt = 0; fmt < 2; fmt++) {
-            const char *arc = fmt ? M8_BASE "/uni.tar.gz" : M8_BASE "/uni.zip";
+        for (int fmt = ARC_ZIP; fmt < ARC_NFMT; fmt++) { // every format, picked by the op (not the name)
+            char arc[PATH_MAX];
+            snprintf(arc, sizeof arc, M8_BASE "/uni%s", g_arc_fmts[fmt].ext);
             char part[PATH_MAX];
             snprintf(part, sizeof part, "%s.part", arc);
             st_write_text(part, "mine");
             Op *op = op_new(OP_COMPRESS, uni, 1, M8_BASE);
             op->arc = strdup(arc);
+            op->arc_fmt = fmt;
             run_compress(op);
             ST_CHECK(!op->nerr && st_size(arc) > 0);
             if (op->nerr) fprintf(stderr, "SELFTEST compress: %s\n", op->err);
@@ -2926,6 +3020,13 @@ static int run_selftest_m8(void) {
             struct archive *a = arc_open(arc);
             struct archive_entry *ae;
             while (a && arc_next(a, &ae) == ARCHIVE_OK) {
+                if (!seen) { // written as asked: the format, and the tar's filter
+                    static const int want[ARC_NFMT] = {[ARC_ZIP] = ARCHIVE_FILTER_NONE, [ARC_TGZ] = ARCHIVE_FILTER_GZIP,
+                                                       [ARC_TXZ] = ARCHIVE_FILTER_XZ, [ARC_TZST] = ARCHIVE_FILTER_ZSTD, [ARC_7Z] = ARCHIVE_FILTER_NONE};
+                    int af = archive_format(a) & ARCHIVE_FORMAT_BASE_MASK;
+                    ST_CHECK(fmt == ARC_ZIP ? af == ARCHIVE_FORMAT_ZIP : fmt == ARC_7Z ? af == ARCHIVE_FORMAT_7ZIP : af == ARCHIVE_FORMAT_TAR);
+                    ST_CHECK(archive_filter_code(a, 0) == want[fmt]);
+                }
                 const char *nm = archive_entry_pathname_utf8(ae);
                 if (!nm) nm = archive_entry_pathname(ae);
                 if (!nm) continue;

@@ -81,6 +81,7 @@ static void settings_defaults(void) {
     A.verify_copies = false;
     A.transfers_at_once = 1;
     A.conflict_last = CF_KEEP_BOTH;
+    A.compress_fmt = ARC_ZIP, A.compress_level = ARC_LVL_NORMAL, A.compress_num = 0;
     snprintf(A.theme_name, sizeof A.theme_name, "Dark");
     g_accent_custom = 0;
     g_accent_desktop = false;
@@ -217,6 +218,13 @@ static void settings_load(void) {
         else if (!strcmp(k, "sidebar_width")) A.side_w = CLAMP((f32)atof(v), 150.f, 480.f);
         else if (!strcmp(k, "sort_desc")) A.def_sort_desc = atoi(v);
         else if (!strcmp(k, "folders_first")) g_folders_first = atoi(v) != 0;
+        else if (!strcmp(k, "compress_format")) {
+            for (int f = ARC_ZIP; f < ARC_NFMT; f++) if (!strcmp(v, g_arc_fmts[f].key)) A.compress_fmt = f;
+        }
+        else if (!strcmp(k, "compress_level")) { // a name, or a number of one's own
+            for (int l = 0; l < ARC_NLVL; l++) if (!strcasecmp(v, g_arc_lvl_names[l])) A.compress_level = l;
+            if (isdigit((u8)v[0])) A.compress_level = ARC_LVL_CUSTOM, A.compress_num = CLAMP(atoi(v), 1, 22);
+        }
         else if (!strcmp(k, "maximized")) A.maximized = atoi(v);
         else if (!strcmp(k, "renderer")) snprintf(A.renderer, sizeof A.renderer, "%s", v);
         else if (!strcmp(k, "window")) sscanf(v, "%dx%d", &A.win_w, &A.win_h);
@@ -524,6 +532,9 @@ static void settings_write(FILE *f) {
     fprintf(f, "search_contents=%d\nsearch_options=%d,%d,%d\n", A.search_contents, A.cs_case, A.cs_word, A.cs_regex);
     fprintf(f, "sidebar_width=%.0f\nterminal_panel_height=%.0f\n", A.side_w, A.dock_h);
     fprintf(f, "folders_first=%d\n", (int)g_folders_first);
+    fprintf(f, "compress_format=%s\n", g_arc_fmts[A.compress_fmt].key);
+    if (A.compress_level == ARC_LVL_CUSTOM) fprintf(f, "compress_level=%d\n", A.compress_num);
+    else fprintf(f, "compress_level=%s\n", g_arc_lvl_names[A.compress_level]);
     fprintf(f, "sort=%s\nsort_desc=%d\npreview=%d\npreview_width=%.0f\n", g_sort_names[A.def_sort_key], A.def_sort_desc,
             A.preview_on, A.preview_w);
     fprintf(f, "window=%dx%d\nmaximized=%d\nrestore_session=%d\nrenderer=%s\n", A.win_w, A.win_h, A.maximized,
