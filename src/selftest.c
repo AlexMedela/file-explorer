@@ -1892,6 +1892,19 @@ static int run_selftest_m6(void) {
     while (A.npanels > 1) run_command(CMD_CLOSE_PANEL);
     ST_CHECK(A.npanels == 1 && A.root->kind == NODE_PANEL && !A.quit);
     st_frames(2);
+    {   // splitting right again and again: a panel too narrow to halve hands the split to a wider one, then it stops
+        int n = 0;
+        for (int i = 0; i < MAX_PANELS && A.npanels > n; i++) { n = A.npanels; run_command(CMD_SPLIT); st_wait(); }
+        ST_CHECK(A.npanels > 2 && A.npanels < MAX_PANELS && !panel_split_target(A.ap, ZONE_RIGHT));
+        Panel *ord[MAX_PANELS];
+        int k = panels_ordered(A.root, ord, 0);
+        for (int i = 0; i < k; i++) ST_CHECK(node_find(A.root, ord[i])->r.w >= PANEL_MIN_W);
+        ST_CHECK(panel_split_target(A.ap, ZONE_BOTTOM) != NULL); // down still has room
+        st_shot("split-full");
+        while (A.npanels > 1) run_command(CMD_CLOSE_PANEL);
+        ST_CHECK(A.npanels == 1);
+        st_frames(2);
+    }
     {   // pointer shape: hand over buttons (the new-tab +), I-beam over the path bar, arrow over the file list
         Panel *pn = A.ap;
         PaneLayout *ly = &pn->cur->pane[0].ly;

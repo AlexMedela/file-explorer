@@ -21,7 +21,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Ctrl+Tab, Ctrl+PgUp/PgDn, Ctrl+1…9 | Switch tabs within the active panel (Ctrl+9 = last) |
 | Middle-click folder or place, Ctrl+Enter | Open folder in a new tab |
 | Middle-click tab / double-click tab bar | Close tab / new tab |
-| Ctrl+\ / Ctrl+Shift+\, F3, panel split button | **Panels** (like File Pilot): split the active panel right / down; each panel has its own tabs; splits nest; drag dividers to resize |
+| Ctrl+\ / Ctrl+Shift+\, F3, panel split button | **Panels** (like File Pilot): split the active panel right / down (when it is too narrow / short to halve, the widest / tallest panel is split instead; when none has room the button dims and nothing happens); each panel has its own tabs; splits nest; drag dividers to resize |
 | Drag a tab | Onto a tab bar = reorder/move, onto a panel = move there, onto a panel edge = new split (snap overlay); Ctrl+drag duplicates |
 | Shift+F5 / Shift+F6 | Copy / move the selection to the previously active panel |
 | Ctrl+N | New window |

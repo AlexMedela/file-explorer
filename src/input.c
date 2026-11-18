@@ -340,7 +340,7 @@ static void on_mouse_down_tabbar(Panel *pn, SDL_MouseButtonEvent *b, f32 x, f32 
     }
     if (b->button == SDL_BUTTON_LEFT && in_rect(pn->splitbtn, x, y)) {
         panel_activate(pn);
-        panel_split(pn, shift ? ZONE_BOTTOM : ZONE_RIGHT, NULL, pn->cur->pane[0].path);
+        panel_split_fit(pn, shift ? ZONE_BOTTOM : ZONE_RIGHT, pn->cur->pane[0].path);
         return;
     }
     for (int i = 0; i < A.ntabs; i++) {

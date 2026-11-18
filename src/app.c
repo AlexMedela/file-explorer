@@ -4130,6 +4130,38 @@ static Panel *panel_split(Panel *pn, int zone, Tab *move, const char *path) {
     return np;
 }
 
+static int panels_ordered(Node *n, Panel **out, int k);
+
+// The split button and keys don't halve a panel below this; they split a roomier one instead.
+#define PANEL_MIN_W S(240)
+#define PANEL_MIN_H S(200)
+
+// Which panel a split on side `zone` asked for from pn goes into: pn if both halves stay usable, else the widest
+// (tallest) panel that has room, NULL when none has.
+static Panel *panel_split_target(Panel *pn, int zone) {
+    if (!pn || !A.root || A.root->r.w <= 0) return pn; // not laid out yet
+    bool h = zone == ZONE_LEFT || zone == ZONE_RIGHT;
+    f32 need = 2 * (h ? PANEL_MIN_W : PANEL_MIN_H) + 1;
+    Node *nd = node_find(A.root, pn);
+    if (nd && (h ? nd->r.w : nd->r.h) >= need) return pn;
+    Panel *ord[MAX_PANELS], *best = NULL;
+    int n = panels_ordered(A.root, ord, 0);
+    f32 bs = 0;
+    for (int i = 0; i < n; i++) { // ties go to the later (more right / lower) panel
+        Node *o = node_find(A.root, ord[i]);
+        f32 s = o ? (h ? o->r.w : o->r.h) : 0;
+        if (s >= need && s >= bs) { best = ord[i]; bs = s; }
+    }
+    return best;
+}
+
+// Split for the split button, keys and "Open in split": into a panel with room, or not at all.
+static Panel *panel_split_fit(Panel *pn, int zone, const char *path) {
+    Panel *dst = panel_split_target(pn, zone);
+    if (!dst) { toast("No room for another panel"); return NULL; }
+    return panel_split(dst, zone, NULL, path);
+}
+
 // Panels in reading order (left-to-right, top-to-bottom).
 static int panels_ordered(Node *n, Panel **out, int k) {
     if (!n) return k;
@@ -6206,7 +6238,7 @@ static void do_action(Pane *p, int act) {
     case ACT_OPEN_SPLIT_DOWN: {
         char t[PATH_MAX];
         pane_target_folder(p, t, sizeof t);
-        panel_split(A.ap, act == ACT_OPEN_SPLIT_RIGHT ? ZONE_RIGHT : ZONE_BOTTOM, NULL, t);
+        panel_split_fit(A.ap, act == ACT_OPEN_SPLIT_RIGHT ? ZONE_RIGHT : ZONE_BOTTOM, t);
         break;
     }
     case ACT_TAB_REOPEN:
@@ -10931,8 +10963,8 @@ static void run_command(int id) {
     switch (id) {
     case CMD_NEW_TAB: tab_new(p->path, A.cur + 1, true); break;
     case CMD_CLOSE_TAB: tab_close(A.cur); break;
-    case CMD_SPLIT: panel_split(A.ap, ZONE_RIGHT, NULL, p->path); break;
-    case CMD_SPLIT_DOWN: panel_split(A.ap, ZONE_BOTTOM, NULL, p->path); break;
+    case CMD_SPLIT: panel_split_fit(A.ap, ZONE_RIGHT, p->path); break;
+    case CMD_SPLIT_DOWN: panel_split_fit(A.ap, ZONE_BOTTOM, p->path); break;
     case CMD_SWITCH_PANE: panel_cycle(1); break;
     case CMD_PREV_PANE: panel_cycle(-1); break;
     case CMD_NEXT_TAB: tab_cycle(1); break;
