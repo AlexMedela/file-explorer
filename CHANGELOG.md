@@ -3,6 +3,8 @@
 ## Unreleased
 
 **New**
+- Properties has a Media card for images, videos, music and PDFs: dimensions ("1920 × 1080 pixels"), length, the video and audio codecs, frame rate, stereo / 5.1 and sample rate, a song's bit rate and title / artist / album, a PDF's pages, title and author. Image sizes are read directly; the rest through `ffprobe` (ffmpeg) and `pdfinfo` (poppler) when they're installed, in the background. Thanks to @pr83-glitch.
+
 - Theme > System can use any theme: Options > Appearance > **Light theme** and **Dark theme** pick the ones it switches between as the desktop goes light or dark (Light and Dark by default). Thanks to @pr83-glitch.
 
 - The Snapshots view lists Timeshift snapshots in rsync mode too (on any drive, e.g. ext4), with when each was taken, its comment and its tags (daily, boot…). Timeshift snapshots of either mode now also show up next to Snapper's (a Tool column then says which took each), and can be created or deleted from the view: Timeshift runs as administrator and asks for the password each time. Thanks to @teraflop09-web.
