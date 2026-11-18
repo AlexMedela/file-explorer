@@ -9,6 +9,8 @@
 
 - Run AppImages, programs and scripts: opening an executable file asks "Run", "Run in terminal", "Open" (scripts, also `.sh` files without `#!`) or "Cancel", with "Don't ask again" (Options > Behaviour > Programs). A downloaded AppImage without the executable bit offers "Make executable and run". Right-click > Run / Run in terminal too.
 
+- Compress to tar.xz, tar.zst and 7z as well as ZIP and tar.gz: right-click > Compress to lists the formats, and Custom… picks the archive's name, its format and how hard to compress (Fast / Normal / Best), remembered for next time. xz and zstd use every core. Thanks to @teejee2008.
+
 - "Folders first" can be turned off, to mix folders and files (Sort menus, Options > Views); with it on, Group by date puts the folders in their own group on top. The toolbar's sort button offers the same choices as the right-click Sort by. Thanks to @teraflop09-web.
 
 **Fixed**

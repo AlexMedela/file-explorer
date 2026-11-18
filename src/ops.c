@@ -23,6 +23,7 @@ typedef struct Op {
     char **aux_in;   // OP_RESTORE: .trashinfo files to remove after success
     char *dst_dir;   // OP_COPY / OP_MOVE / OP_EXTRACT
     char *arc;       // OP_EXTRACT: archive to read; OP_COMPRESS: archive to write
+    int arc_fmt, arc_level; // OP_COMPRESS: ARC_FMT_* (ARC_FMT_AUTO: from arc's name) and ARC_LVL_*
     bool open_after; // OP_EXTRACT of one file: open it when done
     bool is_undo;    // don't push onto the undo stack
     _Atomic u64 bytes_total, bytes_done;

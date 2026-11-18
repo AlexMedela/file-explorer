@@ -1,6 +1,6 @@
-// ui_tools.c - modal "sheets": Open with, Properties, Batch rename, Options, Connect to server (included from app.c)
+// ui_tools.c - modal "sheets": Open with, Properties, Batch rename, Options, Connect to server, Compress (included from app.c)
 
-enum { SHEET_NONE, SHEET_OPENWITH, SHEET_PROPS, SHEET_RENAME, SHEET_OPTIONS, SHEET_CONNECT, SHEET_SECRET, SHEET_ADDON, SHEET_BORG }; // SHEET_ADDON: an add-on's (addons.c)
+enum { SHEET_NONE, SHEET_OPENWITH, SHEET_PROPS, SHEET_RENAME, SHEET_OPTIONS, SHEET_CONNECT, SHEET_SECRET, SHEET_ADDON, SHEET_BORG, SHEET_COMPRESS }; // SHEET_ADDON: an add-on's (addons.c)
 
 typedef struct {
     int kind;
@@ -51,6 +51,10 @@ typedef struct {
     DevJob *sec_job; // password prompt: the connection waiting for it
     BorgOpen *sec_borg; // ... or a Borg repository's passphrase
     int borg_edit;      // SHEET_BORG: the saved backup edited (A.borgs)
+    // compress: paths (above) go into cz_dir/<cn[CN_NAME]><ext>; focus 0 name, 1 format, 2 level
+    char cz_dir[PATH_MAX];
+    int cz_fmt, cz_lvl, cz_focus;
+    Rect cz_rfmt[8], cz_rlvl[3];
     // connect: the location's icon (network icon key, "" = default) and its picker popover
     char cn_icon[160];
     bool cn_pick;
@@ -1728,6 +1732,144 @@ static void borg_edit_draw(void) {
     if (s->cn_pick) connect_icon_picker_draw();
 }
 
+// --- Compress: the archive's name, its format and level (Compress to > Custom...) -------------------------------
+
+static const int g_cz_lvls[3] = {ARC_LVL_FAST, ARC_LVL_NORMAL, ARC_LVL_BEST}; // the level chips, left to right
+
+static void compress_sheet_open(Pane *p, char **paths, int n) {
+    sheet_close();
+    Sheet *s = &g_sheet;
+    s->kind = SHEET_COMPRESS;
+    s->paths = paths, s->npaths = n;
+    snprintf(s->cz_dir, sizeof s->cz_dir, "%s", p->path);
+    char base[NAME_MAX + 1];
+    compress_default_name(p, paths, n, base, sizeof base);
+    int l = (int)strlen(base);
+    te_set(&s->cn[CN_NAME], base, l, l);
+    s->cz_fmt = A.compress_fmt > ARC_FMT_AUTO && A.compress_fmt < ARC_NFMT ? A.compress_fmt : ARC_ZIP;
+    s->cz_lvl = A.compress_level >= 0 && A.compress_level < ARC_NLVL ? A.compress_level : ARC_LVL_NORMAL;
+    s->cz_focus = 0;
+    A.redraw = true;
+}
+
+// The typed name without the chosen format's extension (typed out of habit): false when it can't be a file name.
+static bool compress_name(char *out, size_t cap) {
+    Sheet *s = &g_sheet;
+    snprintf(out, cap, "%s", s->cn[CN_NAME].buf);
+    size_t n = strlen(out), l = strlen(g_arc_fmts[s->cz_fmt].ext);
+    if (n > l && !strcasecmp(out + n - l, g_arc_fmts[s->cz_fmt].ext)) out[n - l] = 0;
+    return out[0] && !strchr(out, '/') && strcmp(out, ".") && strcmp(out, "..");
+}
+
+static void compress_go(void) {
+    Sheet *s = &g_sheet;
+    char base[NAME_MAX + 1];
+    if (!compress_name(base, sizeof base)) return;
+    A.compress_fmt = s->cz_fmt, A.compress_level = s->cz_lvl;
+    A.settings_dirty = true;
+    compress_start(s->cz_dir, s->paths, s->npaths, base, s->cz_fmt, s->cz_lvl);
+    sheet_close();
+}
+
+static void compress_key(SDL_Keycode k, SDL_Keymod mod) {
+    Sheet *s = &g_sheet;
+    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) { compress_go(); return; }
+    if (k == SDLK_TAB) { s->cz_focus = (s->cz_focus + (mod & SDL_KMOD_SHIFT ? 2 : 1)) % 3; return; }
+    if (s->cz_focus == 0) {
+        if (k == SDLK_DOWN) s->cz_focus = 1;
+        else te_key(&s->cn[CN_NAME], k, mod);
+        return;
+    }
+    if (k == SDLK_UP) { s->cz_focus--; return; }
+    if (k == SDLK_DOWN) { s->cz_focus = MIN(s->cz_focus + 1, 2); return; }
+    int d = k == SDLK_LEFT ? -1 : k == SDLK_RIGHT ? 1 : 0;
+    if (!d) return;
+    if (s->cz_focus == 1) s->cz_fmt = CLAMP(s->cz_fmt + d, ARC_ZIP, ARC_NFMT - 1);
+    else {
+        int i = 0;
+        while (g_cz_lvls[i] != s->cz_lvl) i++;
+        s->cz_lvl = g_cz_lvls[CLAMP(i + d, 0, 2)];
+    }
+}
+
+static void compress_click(f32 x, f32 y) {
+    Sheet *s = &g_sheet;
+    for (int f = ARC_ZIP; f < ARC_NFMT; f++)
+        if (in_rect(s->cz_rfmt[f], x, y)) { s->cz_fmt = f, s->cz_focus = 1; return; }
+    for (int i = 0; i < 3; i++)
+        if (in_rect(s->cz_rlvl[i], x, y)) { s->cz_lvl = g_cz_lvls[i], s->cz_focus = 2; return; }
+    if (in_rect(s->cn_rconnect, x, y)) { compress_go(); return; }
+    if (in_rect(s->rcancel, x, y)) sheet_close();
+}
+
+// A row of chips filling w, one of them chosen; the row gets an outline while it has the keyboard.
+static void compress_chips(f32 x, f32 y, f32 w, f32 h, const char *const *labels, int n, int on, bool focused, Rect *out) {
+    Font *fs = &A.font_small;
+    f32 gap = roundf(S(6)), cw = roundf((w - gap * (n - 1)) / n);
+    if (focused) draw_rrect_outline(x - S(3), y - S(3), w + S(6), h + S(6), S(9), MAX(1.f, S(1.2f)), C(COL_ACCENT));
+    for (int i = 0; i < n; i++) {
+        Rect cr = {x + i * (cw + gap), y, i == n - 1 ? x + w - (x + i * (cw + gap)) : cw, h};
+        out[i] = cr;
+        bool hv = hand_if(A.mouse_in && in_rect(cr, A.mx, A.my));
+        draw_rrect(cr.x, cr.y, cr.w, cr.h, S(7), C(i == on ? COL_ACCENT : hv ? COL_CONTROL_HOVER : COL_CONTROL));
+        f32 tw = text_width(fs, labels[i], (int)strlen(labels[i]));
+        draw_text(fs, cr.x + (cr.w - tw) * 0.5f, text_y(fs, cr.y, cr.h), labels[i], (int)strlen(labels[i]),
+                  C(i == on ? COL_ON_ACCENT : COL_TEXT));
+    }
+}
+
+static void compress_draw(void) {
+    Sheet *s = &g_sheet;
+    Font *fs = &A.font_small;
+    f32 pad = roundf(S(20)), rh = roundf(S(44)), gap = roundf(S(16)), hh = roundf(fs->line_h + S(6)), bh = roundf(S(32));
+    f32 chh = roundf(S(30)), lh = roundf(fs->line_h * 1.3f);
+    f32 w = roundf(MIN(S(520), A.W - S(40)));
+    f32 h = pad + roundf(S(62)) + hh + rh + gap + hh + chh + S(6) + lh + gap + hh + chh + gap + S(4) + bh + pad;
+    Rect r = {roundf((A.W - w) * 0.5f), roundf((A.H - h) * 0.42f), w, h};
+    s->r = r;
+    char sub[PATH_MAX + 64], where[PATH_MAX];
+    tilde_path(s->cz_dir, where, sizeof where);
+    if (s->npaths == 1) snprintf(sub, sizeof sub, "%s", path_basename(s->paths[0]));
+    else snprintf(sub, sizeof sub, "%d items in %s", s->npaths, where);
+    sheet_frame(r, "Compress", sub);
+    f32 x = r.x + pad, cw = w - pad * 2, y = r.y + pad + roundf(S(62)), lw0 = roundf(S(110)), fh0 = roundf(S(30));
+    // name, the format's extension after it
+    y = props_heading(x, y, "Archive");
+    props_card(x, y, cw, 1, rh, 0);
+    draw_text(fs, x + S(14), text_y(fs, y, rh), "Name", 4, C(COL_TEXT_DIM));
+    const char *ext = g_arc_fmts[s->cz_fmt].ext;
+    f32 ew = text_width(&A.font, ext, (int)strlen(ext));
+    Rect nr = {x + lw0, roundf(y + (rh - fh0) * 0.5f), cw - lw0 - S(10) - ew - S(8), fh0};
+    s->cn_rf[CN_NAME] = nr;
+    sheet_field(nr, &s->cn[CN_NAME], s->cz_focus == 0, "Name of the archive");
+    draw_text(&A.font, nr.x + nr.w + S(6), text_y(&A.font, nr.y, nr.h), ext, (int)strlen(ext), C(COL_TEXT_DIM));
+    y += rh + gap;
+    // format, a line about it
+    y = props_heading(x, y, "Format");
+    const char *fl[ARC_NFMT - 1];
+    for (int f = ARC_ZIP; f < ARC_NFMT; f++) fl[f - ARC_ZIP] = g_arc_fmts[f].label;
+    compress_chips(x, y, cw, chh, fl, ARC_NFMT - 1, s->cz_fmt - ARC_ZIP, s->cz_focus == 1, s->cz_rfmt + ARC_ZIP);
+    y += chh + S(6);
+    const char *hint = g_arc_fmts[s->cz_fmt].hint;
+    draw_text_fit(fs, x, y + (lh - fs->line_h) * 0.5f, cw, hint, (int)strlen(hint), C(COL_TEXT_FAINT), 0);
+    y += lh + gap;
+    // level
+    y = props_heading(x, y, "Compression");
+    const char *ll[3];
+    int on = 0;
+    for (int i = 0; i < 3; i++) {
+        ll[i] = g_arc_lvl_names[g_cz_lvls[i]];
+        if (g_cz_lvls[i] == s->cz_lvl) on = i;
+    }
+    compress_chips(x, y, cw, chh, ll, 3, on, s->cz_focus == 2, s->cz_rlvl);
+    char base[NAME_MAX + 1];
+    bool ok = compress_name(base, sizeof base);
+    s->cn_rconnect = (Rect){r.x + w - pad - roundf(S(110)), r.y + h - pad - bh, roundf(S(110)), bh};
+    s->rcancel = (Rect){s->cn_rconnect.x - S(8) - roundf(S(96)), s->cn_rconnect.y, roundf(S(96)), bh};
+    sheet_button(s->rcancel, "Cancel", false, true);
+    sheet_button(s->cn_rconnect, "Compress", true, ok);
+}
+
 #include "options.c"
 
 // --- dispatch ----------------------------------------------------------------
@@ -1743,6 +1885,7 @@ static void sheet_draw(void) {
     case SHEET_SECRET: secret_prompt_draw(); break;
     case SHEET_ADDON: addon_sheet_draw(); break;
     case SHEET_BORG: borg_edit_draw(); break;
+    case SHEET_COMPRESS: compress_draw(); break;
     default: break;
     }
 }
@@ -1759,6 +1902,7 @@ static void sheet_key(SDL_Keycode k, SDL_Keymod mod) {
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) secret_prompt_answer(true);
         else te_key(&s->cn[CN_PASS], k, mod);
         break;
+    case SHEET_COMPRESS: compress_key(k, mod); break;
     case SHEET_BORG:
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) borg_edit_save();
         else te_key(&s->cn[CN_NAME], k, mod);
@@ -1800,6 +1944,7 @@ static void sheet_text(const char *text) {
     else if (s->kind == SHEET_OPENWITH) { te_insert(&s->filter, text); openwith_refresh(); }
     else if (s->kind == SHEET_SECRET) te_insert(&s->cn[CN_PASS], text);
     else if (s->kind == SHEET_BORG) te_insert(&s->cn[CN_NAME], text);
+    else if (s->kind == SHEET_COMPRESS) { if (s->cz_focus == 0) te_insert(&s->cn[CN_NAME], text); }
     else if (s->kind == SHEET_ADDON) addon_sheet_text(text);
     else if (s->kind == SHEET_CONNECT) {
         if (s->cn_focus == CN_PORT) { // digits only
@@ -1834,6 +1979,7 @@ static bool sheet_text_focus(TextEdit *edit, bool focused) {
         return false;
     }
     if (s->kind == SHEET_BORG) return edit == &s->cn[CN_NAME] && !s->cn_pick;
+    if (s->kind == SHEET_COMPRESS) { if (edit == &s->cn[CN_NAME]) s->cz_focus = 0; return edit == &s->cn[CN_NAME]; }
     return focused && !((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON) && s->cn_pick);
 }
 
@@ -1862,6 +2008,7 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
     if (s->kind == SHEET_ADDON) { addon_sheet_click(x, y); return; }
     if (!in_rect(s->r, x, y)) { sheet_close(); return; }
     switch (s->kind) {
+    case SHEET_COMPRESS: compress_click(x, y); return;
     case SHEET_BORG:
         if (in_rect(s->cn_ricon, x, y)) { s->cn_pick = true; s->cn_pick_scroll = 0; return; }
         if (in_rect(s->cn_rconnect, x, y)) { borg_edit_save(); return; }

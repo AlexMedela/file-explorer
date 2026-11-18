@@ -433,9 +433,11 @@ enum {
     ACT_CLOUD_NEW = 540, ACT_CLOUD_REFRESH, ACT_CLOUD_SECTION_TOGGLE, ACT_CLOUD_CONNECT, ACT_CLOUD_CONNECT_TAB, ACT_CLOUD_DISCONNECT,
     ACT_CLOUD_LOGIN, ACT_CLOUD_RECONNECT, ACT_CLOUD_LOG, ACT_CLOUD_COPY_PATH,
     ACT_ARC_BASE = 440, // archive actions (see arc_action)
-    ACT_EXTRACT_HERE = ACT_ARC_BASE, ACT_EXTRACT_SEL, ACT_EXTRACT_ALL, ACT_COMPRESS_ZIP, ACT_COMPRESS_TGZ,
+    ACT_EXTRACT_HERE = ACT_ARC_BASE, ACT_EXTRACT_SEL, ACT_EXTRACT_ALL, ACT_COMPRESS_MENU, ACT_COMPRESS_CUSTOM,
+    ACT_COMPRESS_BASE, // + ARC_FMT_*: Compress to that format at its usual level (below 460)
 };
 _Static_assert(ACT_FIRST_FREE_ <= 100, "ACT_* ids must stay below the CMD_* ids");
+_Static_assert(ACT_COMPRESS_BASE + ARC_NFMT <= ACT_QA_RENAME, "archive actions must stay below the Quick access ones");
 enum {
     CMD_NEW_TAB = 100, CMD_CLOSE_TAB, CMD_SPLIT, CMD_SWITCH_PANE, CMD_BACK, CMD_FORWARD, CMD_UP, CMD_SEARCH,
     CMD_SORT_NAME, CMD_SORT_DATE, CMD_SORT_TYPE, CMD_SORT_SIZE, CMD_FOLDER_SIZES, CMD_EDIT_PATH, CMD_OVERLAY,
@@ -523,6 +525,7 @@ static struct {
     bool verify_copies;   // setting: checksum every copied file against its original
     int transfers_at_once; // setting: big transfers running together (0 = no limit, all at once)
     int conflict_last;    // the conflict answer picked last time (CF_*), offered first next time
+    int compress_fmt, compress_level; // the Compress sheet's last choice (ARC_FMT_* / ARC_LVL_*), offered next time
     UndoRec undo[UNDO_MAX];
     int nundo;
     Dialog dlg;
@@ -5897,12 +5900,13 @@ static void do_action(Pane *p, int act) {
         case ACT_CUT: case ACT_COPY: case ACT_PASTE: case ACT_RENAME: case ACT_TRASH: case ACT_DELETE:
         case ACT_NEW_FOLDER: case ACT_NEW_FILE: case ACT_BATCH_RENAME: case ACT_OPEN_WITH: case ACT_PROPERTIES:
         case ACT_OW_APP_BASE ... ACT_OW_APP_BASE + OW_MENU_APPS - 1:
+        case ACT_COMPRESS_CUSTOM: case ACT_COMPRESS_BASE + ARC_ZIP ... ACT_COMPRESS_BASE + ARC_NFMT - 1:
             toast("Archives are read-only here \xE2\x80\x94 drag items out or use Extract");
             return;
         default: break;
         }
     }
-    if (act >= ACT_ARC_BASE && act < ACT_ARC_BASE + 8) { arc_action(p, act); return; }
+    if (act >= ACT_ARC_BASE && act < ACT_COMPRESS_BASE + ARC_NFMT) { arc_action(p, act); return; }
     switch (act) {
     case ACT_DROP_MOVE: case ACT_DROP_COPY: case ACT_DROP_LINK: case ACT_DROP_CANCEL: drop_menu_do(act); break;
     case ACT_OPEN: open_entry(p, p->cursor, false); break;
@@ -6320,6 +6324,29 @@ static void arc_extract_open(Pane *p, const char *name) {
     ops_start(op);
 }
 
+// The archive's name without its extension: the item's own name for one, else the folder's.
+static void compress_default_name(Pane *p, char **paths, int n, char *base, size_t cap) {
+    if (n == 1) snprintf(base, cap, "%s", path_basename(paths[0]));
+    else snprintf(base, cap, "%s", p->path[1] ? path_basename(p->path) : "archive");
+}
+
+// Compresses paths into "<dir>/<base><format's ext>" (a new name if that's taken).
+static void compress_start(const char *dir, char **paths, int n, const char *base, int fmt, int lvl) {
+    char want[NAME_MAX + 16], nn[NAME_MAX + 1], out[PATH_MAX];
+    snprintf(want, sizeof want, "%s%s", base, g_arc_fmts[fmt].ext);
+    int dfd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    snprintf(nn, sizeof nn, "%s", want);
+    if (dfd >= 0 && exists_at(dfd, nn)) unique_name(dfd, want, false, false, nn, sizeof nn);
+    if (dfd >= 0) close(dfd);
+    path_join(out, sizeof out, dir, nn);
+    Op *op = op_new(OP_COMPRESS, paths, n, dir);
+    op->arc = strdup(out);
+    op->arc_fmt = fmt, op->arc_level = lvl;
+    ops_start(op);
+}
+
+static void compress_sheet_open(Pane *p, char **paths, int n); // ui_tools.c
+
 static void arc_action(Pane *p, int act) {
     int n = 0;
     char **paths = NULL;
@@ -6353,23 +6380,18 @@ static void arc_action(Pane *p, int act) {
         strv_free(paths, n);
         return;
     }
-    if (act == ACT_COMPRESS_ZIP || act == ACT_COMPRESS_TGZ) {
+    if (act == ACT_COMPRESS_CUSTOM) {
+        paths = pane_selection_paths(p, &n);
+        if (n) compress_sheet_open(p, paths, n); // (the sheet keeps paths)
+        else strv_free(paths, n);
+        return;
+    }
+    if (act > ACT_COMPRESS_BASE && act < ACT_COMPRESS_BASE + ARC_NFMT) {
         paths = pane_selection_paths(p, &n);
         if (!n) return;
-        char base[NAME_MAX + 1], out[PATH_MAX];
-        if (n == 1) snprintf(base, sizeof base, "%s", path_basename(paths[0]));
-        else snprintf(base, sizeof base, "%s", p->path[1] ? path_basename(p->path) : "archive");
-        const char *ext = act == ACT_COMPRESS_ZIP ? ".zip" : ".tar.gz";
-        char want[NAME_MAX + 16], nn[NAME_MAX + 1];
-        snprintf(want, sizeof want, "%s%s", base, ext);
-        int dfd = open(p->path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-        snprintf(nn, sizeof nn, "%s", want);
-        if (dfd >= 0 && exists_at(dfd, nn)) unique_name(dfd, want, false, false, nn, sizeof nn);
-        if (dfd >= 0) close(dfd);
-        path_join(out, sizeof out, p->path, nn);
-        Op *op = op_new(OP_COMPRESS, paths, n, p->path);
-        op->arc = strdup(out);
-        ops_start(op);
+        char base[NAME_MAX + 1];
+        compress_default_name(p, paths, n, base, sizeof base);
+        compress_start(p->path, paths, n, base, act - ACT_COMPRESS_BASE, ARC_LVL_NORMAL);
         strv_free(paths, n);
     }
 }
@@ -6444,6 +6466,14 @@ static void ow_menu_add_app(const DesktopApp *a) {
     snprintf(g_ow_menu.id[g_ow_menu.n], sizeof g_ow_menu.id[0], "%s", a->id);
     snprintf(g_ow_menu.icon[g_ow_menu.n], sizeof g_ow_menu.icon[0], "%s", a->icon ? a->icon : "");
     snprintf(g_ow_menu.name[g_ow_menu.n++], sizeof g_ow_menu.name[0], "%s", a->name);
+}
+
+// "Compress to" submenu: each format at its usual level, then the sheet (name, format, level).
+static void menu_sub_compress(Pane *p) {
+    (void)p;
+    for (int f = ARC_ZIP; f < ARC_NFMT; f++) menu_add(g_arc_fmts[f].label, "", ACT_COMPRESS_BASE + f, true);
+    menu_sep();
+    menu_add("Custom\xE2\x80\xA6", "", ACT_COMPRESS_CUSTOM, true);
 }
 
 static void menu_add_open_with(const char *label, const char *mime, bool enabled) {
@@ -6550,8 +6580,8 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
             menu_add(pin_index(t) >= 0 ? "Unpin from sidebar" : "Pin to sidebar", "Ctrl+D", ACT_PIN, true);
         }
         if (!pane_is_archive(p)) {
-            menu_add("Compress to ZIP", "", ACT_COMPRESS_ZIP, true);
-            menu_add("Compress to tar.gz", "", ACT_COMPRESS_TGZ, true);
+            menu_add("Compress to", "", ACT_COMPRESS_MENU, true);
+            A.menu.items[A.menu.n - 1].sub = menu_sub_compress;
         }
         menu_add("Copy path", "Ctrl+Shift+C", ACT_COPY_PATH, true);
         if (snap_in(p->path)) menu_add("Restore to where it is now\xE2\x80\xA6", "", ACT_SNAP_RESTORE, true);
@@ -7383,7 +7413,8 @@ static int menu_action_icon(const MenuItem *it) {
     case ACT_CMP_AGAIN: return UI_REFRESH_CW;
     case ACT_SELECT_ALL: return UI_SQUARE_CHECK_BIG;
     case ACT_PIN: return UI_PIN;
-    case ACT_COMPRESS_ZIP: case ACT_COMPRESS_TGZ: case ACT_EXTRACT_SEL: case ACT_EXTRACT_HERE: case ACT_EXTRACT_ALL:
+    case ACT_COMPRESS_MENU: case ACT_COMPRESS_CUSTOM: case ACT_COMPRESS_BASE + ARC_ZIP ... ACT_COMPRESS_BASE + ARC_NFMT - 1:
+    case ACT_EXTRACT_SEL: case ACT_EXTRACT_HERE: case ACT_EXTRACT_ALL:
         return UI_ARCHIVE;
     case ACT_CMP_START: case ACT_CMP_TAB: case ACT_SNAP_COMPARE: return UI_GIT_COMPARE;
     case ACT_CMP_SYNC_A: case ACT_CMP_SYNC_B: case ACT_CMP_SYNC_BOTH: case ACT_CMP_MIRROR_A: case ACT_CMP_MIRROR_B:
@@ -10760,6 +10791,12 @@ static const CmdDef g_cmds[] = {
     {"Rename", "F2", ACT_RENAME},
     {"Batch rename", "F2 (multiple)", ACT_BATCH_RENAME},
     {"Open with", "", ACT_OPEN_WITH},
+    {"Compress to ZIP", "", ACT_COMPRESS_BASE + ARC_ZIP},
+    {"Compress to tar.gz", "", ACT_COMPRESS_BASE + ARC_TGZ},
+    {"Compress to tar.xz", "", ACT_COMPRESS_BASE + ARC_TXZ},
+    {"Compress to tar.zst", "", ACT_COMPRESS_BASE + ARC_TZST},
+    {"Compress to 7z", "", ACT_COMPRESS_BASE + ARC_7Z},
+    {"Compress\xE2\x80\xA6 (pick the name, format and level)", "", ACT_COMPRESS_CUSTOM},
     {"Run (program or script)", "", ACT_RUN},
     {"Run in terminal", "", ACT_RUN_TERM},
     {"Properties", "Alt+Enter", ACT_PROPERTIES},
@@ -10824,7 +10861,7 @@ static void desktop_look_sync(void); // integration.c
 
 static void run_command(int id) {
     Pane *p = active_pane();
-    if (id < 100) { A.menu_tab = cur_tab(); do_action(p, id); return; }
+    if (id < 100 || (id >= ACT_ARC_BASE && id < ACT_COMPRESS_BASE + ARC_NFMT)) { A.menu_tab = cur_tab(); do_action(p, id); return; }
     switch (id) {
     case CMD_NEW_TAB: tab_new(p->path, A.cur + 1, true); break;
     case CMD_CLOSE_TAB: tab_close(A.cur); break;

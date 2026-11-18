@@ -29,7 +29,7 @@ https://github.com/user-attachments/assets/fbfe88ff-015f-431b-87c6-2704839d9ee3
 - **Git status**: changed, new and ignored files marked in repositories, with the branch in the path bar.
 - **Compare and sync**: compare two folders side by side and sync them one way or both.
 - **Phones and cameras**: iPhones and Android phones on a cable, no GVfs needed.
-- **Archives as folders**: browse zip, tar, 7z, rar and iso like folders; extract or compress from the menu.
+- **Archives as folders**: browse zip, tar, 7z, rar and iso like folders; extract, or compress to zip, tar.gz/xz/zst or 7z from the menu.
 - **Snapshots**: previous versions of files from Snapper, Timeshift or ZFS, browse and restore.
 - **Drives and network**: mount USB drives, SMB/SFTP shares and cloud storage (rclone) from the sidebar.
 - **Looks the same everywhere**: GPU-drawn with its own title bar on GNOME, KDE, Xfce, Hyprland, Sway; themes and icon sets.

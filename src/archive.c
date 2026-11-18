@@ -275,6 +275,57 @@ static void run_extract(Op *op) {
 
 // --- compress ------------------------------------------------------------------
 
+// Formats a compression can write (the Compress to submenu / the Compress sheet), and three levels each.
+enum { ARC_FMT_AUTO, ARC_ZIP, ARC_TGZ, ARC_TXZ, ARC_TZST, ARC_7Z, ARC_NFMT };
+enum { ARC_LVL_NORMAL, ARC_LVL_FAST, ARC_LVL_BEST, ARC_NLVL }; // (NORMAL first: a zeroed op gets the usual level)
+static const struct {
+    const char *ext, *label, *hint, *key; // key: its name in settings.conf
+    int level[ARC_NLVL];                  // libarchive compression-level per ARC_LVL_*
+} g_arc_fmts[ARC_NFMT] = {
+    [ARC_ZIP] = {".zip", "ZIP", "Opens everywhere, Windows and macOS included", "zip", {6, 1, 9}},
+    [ARC_TGZ] = {".tar.gz", "tar.gz", "The usual Linux archive, fast, keeps permissions", "tar.gz", {6, 1, 9}},
+    [ARC_TXZ] = {".tar.xz", "tar.xz", "Smaller than tar.gz, slower to make", "tar.xz", {6, 1, 9}},
+    [ARC_TZST] = {".tar.zst", "tar.zst", "Small and fast to make and to open, on every core", "tar.zst", {9, 3, 19}},
+    [ARC_7Z] = {".7z", "7z", "Usually the smallest (LZMA2), slow to make", "7z", {6, 1, 9}},
+};
+static const char *g_arc_lvl_names[ARC_NLVL] = {"Normal", "Fast", "Best"};
+
+// Which format an archive name asks for (ARC_TGZ when it isn't one of ours, like before formats could be picked).
+static int arc_fmt_of_name(const char *name) {
+    size_t n = strlen(name);
+    for (int f = ARC_ZIP; f < ARC_NFMT; f++) {
+        size_t l = strlen(g_arc_fmts[f].ext);
+        if (n > l && !strcasecmp(name + n - l, g_arc_fmts[f].ext)) return f;
+    }
+    return ARC_TGZ;
+}
+
+// Format, filter and their options on a new writer. An option this libarchive doesn't know (zstd threads before 3.6...)
+// is left at its default: the archive is still right, only slower or a bit bigger.
+static void arc_write_setup(struct archive *w, int fmt, int lvl) {
+    char lv[8];
+    snprintf(lv, sizeof lv, "%d", g_arc_fmts[fmt].level[lvl]);
+    switch (fmt) {
+    case ARC_ZIP:
+        archive_write_set_format_zip(w);
+        archive_write_set_format_option(w, "zip", "compression-level", lv);
+        return;
+    case ARC_7Z:
+        archive_write_set_format_7zip(w);
+        archive_write_set_format_option(w, "7zip", "compression", "lzma2");
+        archive_write_set_format_option(w, "7zip", "compression-level", lv);
+        return;
+    default: break;
+    }
+    archive_write_set_format_pax_restricted(w);
+    const char *mod = fmt == ARC_TXZ ? "xz" : fmt == ARC_TZST ? "zstd" : "gzip";
+    if (fmt == ARC_TXZ) archive_write_add_filter_xz(w);
+    else if (fmt == ARC_TZST) archive_write_add_filter_zstd(w);
+    else archive_write_add_filter_gzip(w);
+    archive_write_set_filter_option(w, mod, "compression-level", lv);
+    if (fmt != ARC_TGZ) archive_write_set_filter_option(w, mod, "threads", "0"); // 0: one per core
+}
+
 // What a compression is writing to, and what it couldn't read (those are left out and named at the end).
 typedef struct {
     struct archive *w;
@@ -359,7 +410,7 @@ static void compress_add(Op *op, Compress *c, const char *path, const char *rel)
     }
 }
 
-// op->src: items; op->arc: output archive path (".zip" or ".tar.gz"). Written to a ".part" file of its own (never one
+// op->src: items; op->arc: output archive path, op->arc_fmt / arc_level what to write. Written to a ".part" file of its own (never one
 // that was already there), renamed when complete. Items that can't be read are left out and named; only a failed
 // write fails the op.
 static void run_compress(Op *op) {
@@ -381,9 +432,8 @@ static void run_compress(Op *op) {
     Compress c = {.w = archive_write_new(), .buf = xmalloc(1 << 18), .utf8 = g_arc_loc != (locale_t)0};
     struct stat ost;
     if (!fstat(fd, &ost)) { c.out_dev = ost.st_dev; c.out_ino = ost.st_ino; }
-    size_t l = strlen(op->arc);
-    if (l > 4 && !strcmp(op->arc + l - 4, ".zip")) archive_write_set_format_zip(c.w);
-    else { archive_write_set_format_pax_restricted(c.w); archive_write_add_filter_gzip(c.w); }
+    int fmt = op->arc_fmt > ARC_FMT_AUTO && op->arc_fmt < ARC_NFMT ? op->arc_fmt : arc_fmt_of_name(op->arc);
+    arc_write_setup(c.w, fmt, op->arc_level >= 0 && op->arc_level < ARC_NLVL ? op->arc_level : ARC_LVL_NORMAL);
     if (archive_write_open_fd(c.w, fd) != ARCHIVE_OK) {
         op_error(op, "Can't create \xE2\x80\x9C%s\xE2\x80\x9D: %s", path_basename(op->arc), archive_error_string(c.w) ? archive_error_string(c.w) : "write failed");
     } else {
