@@ -127,6 +127,7 @@ typedef struct { Rect r; int part, opt, arg; } OptHit;
 static struct {
     int cat;
     TextEdit search;
+    bool search_focus; // the search field has the keyboard (a click on it, or typing a letter)
     f32 scroll, max_scroll;
     OptHit hits[256];
     int nhits;
@@ -1130,7 +1131,7 @@ static void options_draw(void) {
     // search field
     f32 sw = MIN(roundf(S(300)), w * 0.45f), sh = roundf(S(30));
     Rect sr = {cr.x - S(10) - sw, r.y + pad - S(6), sw, sh};
-    bool sfocus = g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus;
+    bool sfocus = g_opt.search_focus && g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus;
     sheet_field(sr, &g_opt.search, sfocus, "Search settings");
     opt_hit(sr, HP_SEARCH, -1, 0);
     // nav (same active style as the sidebar: accent-tinted row with a full-height accent edge)
@@ -1267,10 +1268,10 @@ static void options_draw(void) {
 static bool options_text_focus(TextEdit *edit, bool focused) {
     if (g_opt.rec_def >= 0) return false; // the click ends recording a shortcut first (options_click)
     if (g_opt.drop_opt >= 0) return edit == &g_opt.drop_filter;
-    if (edit == &g_opt.search) { g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
-    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
-    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.lname_focus = g_opt.scroll_focus = false; return true; }
-    if (edit == &g_opt.scroll_color) { g_opt.scroll_focus = true; g_opt.lname_focus = g_opt.brand_focus = false; return true; }
+    if (edit == &g_opt.search) { g_opt.search_focus = true; g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.search_focus = g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.scroll_color) { g_opt.scroll_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = false; return true; }
     return focused;
 }
 
@@ -1299,12 +1300,13 @@ static void options_click(f32 x, f32 y, int clicks) {
     }
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
     if (sheet_scrollbar_press(x, y)) return;
-    g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; // a click elsewhere gives the keyboard back to the search field
+    g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; // a click elsewhere drops the keyboard (typing a letter still searches)
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];
         if (hp->r.w <= 0 || !in_rect(hp->r, x, y)) continue;
         switch (hp->part) {
         case HP_CLOSE: sheet_close(); return;
+        case HP_SEARCH: g_opt.search_focus = true; return;
         case HP_NAV:
             g_opt.cat = hp->arg;
             g_opt.lname_focus = hp->arg == OC_LAYOUTS;
@@ -1398,7 +1400,8 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
     }
     switch (k) {
     case SDLK_ESCAPE:
-        if (g_opt.search.buf[0]) { te_set(&g_opt.search, "", 0, 0); g_opt.scroll = 0; }
+        if (g_opt.search.buf[0]) { te_set(&g_opt.search, "", 0, 0); g_opt.scroll = 0; g_opt.search_focus = false; }
+        else if (g_opt.search_focus) g_opt.search_focus = false;
         else sheet_close();
         return;
     case SDLK_TAB:
@@ -1406,8 +1409,8 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
         return;
     case SDLK_PAGEDOWN: glide_by(&g_opt.scroll, S(300), g_opt.max_scroll); return;
     case SDLK_PAGEUP: glide_by(&g_opt.scroll, -S(300), g_opt.max_scroll); return;
-    default:
-        if (te_key(&g_opt.search, k, mod)) g_opt.scroll = 0;
+    default: // editing keys only reach the search field once it has the keyboard (letters focus it: options_text)
+        if (g_opt.search_focus && te_key(&g_opt.search, k, mod)) g_opt.scroll = 0;
     }
 }
 
@@ -1421,6 +1424,7 @@ static void options_text(const char *text) {
         opt_drop_filter();
         return;
     }
+    g_opt.search_focus = true; // type to search
     te_insert(&g_opt.search, text);
     g_opt.scroll = 0;
 }
