@@ -4173,22 +4173,31 @@ static int panels_ordered(Node *n, Panel **out, int k);
 #define PANEL_MIN_W S(240)
 #define PANEL_MIN_H S(200)
 
+// Can panel p be split that way: both halves big enough, and (side by side) its tabs still readable in its half?
+static bool panel_can_split(Panel *p, bool h, f32 *size) {
+    Node *nd = node_find(A.root, p);
+    if (!nd) return false;
+    *size = h ? nd->r.w : nd->r.h;
+    if (*size < 2 * (h ? PANEL_MIN_W : PANEL_MIN_H) + 1) return false;
+    if (!h) return true;
+    int nt = panel_ntabs(p);
+    f32 gap = A.tab_style == TABS_PILLS ? roundf(S(4)) : 0;
+    f32 tabs_w = p->tabs_w - (nd->r.w - roundf(nd->r.w * 0.5f)); // its bar loses the other half
+    return nt < 1 || (tabs_w - gap * (f32)(nt - 1)) / (f32)nt >= TAB_MIN_W;
+}
+
 // Which panel a split on side `zone` asked for from pn goes into: pn if both halves stay usable, else the widest
-// (tallest) panel that has room, NULL when none has.
+// (tallest) panel that has room (its tabs too), NULL when none has.
 static Panel *panel_split_target(Panel *pn, int zone) {
     if (!pn || !A.root || A.root->r.w <= 0) return pn; // not laid out yet
     bool h = zone == ZONE_LEFT || zone == ZONE_RIGHT;
-    f32 need = 2 * (h ? PANEL_MIN_W : PANEL_MIN_H) + 1;
-    Node *nd = node_find(A.root, pn);
-    if (nd && (h ? nd->r.w : nd->r.h) >= need) return pn;
+    f32 s;
+    if (panel_can_split(pn, h, &s)) return pn;
     Panel *ord[MAX_PANELS], *best = NULL;
     int n = panels_ordered(A.root, ord, 0);
     f32 bs = 0;
-    for (int i = 0; i < n; i++) { // ties go to the later (more right / lower) panel
-        Node *o = node_find(A.root, ord[i]);
-        f32 s = o ? (h ? o->r.w : o->r.h) : 0;
-        if (s >= need && s >= bs) { best = ord[i]; bs = s; }
-    }
+    for (int i = 0; i < n; i++) // ties go to the later (more right / lower) panel
+        if (panel_can_split(ord[i], h, &s) && s >= bs) { best = ord[i]; bs = s; }
     return best;
 }
 

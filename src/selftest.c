@@ -1912,6 +1912,10 @@ static int run_selftest_m6(void) {
         int full = panel_ntabs(pn);
         ST_CHECK(full > 3 && !tab_target_panel(pn) && panel_tab(pn, -1)->r.w >= TAB_MIN_W);
         st_shot("tabs-full");
+        ST_CHECK(!panel_split_target(pn, ZONE_RIGHT) && panel_split_target(pn, ZONE_BOTTOM) == pn); // halving would squeeze its tabs
+        int np0 = A.npanels;
+        run_command(CMD_SPLIT); st_wait();
+        ST_CHECK(A.npanels == np0);
         Panel *np = panel_split(pn, ZONE_RIGHT, NULL, M6_BASE "/a");
         panel_activate(pn); layout();
         ST_CHECK(np && A.ap == pn && tab_target_panel(pn) == np);
