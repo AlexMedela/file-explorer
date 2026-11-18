@@ -2404,6 +2404,7 @@ static void st_setup_m8(void) {
     setenv("XDG_DATA_HOME", M8_BASE "/xdg", 1); // private trash
 }
 
+static bool c_media_done(void) { return g_sheet.media && atomic_load(&g_sheet.media->done); }
 static bool c_stats_done(void) { return g_sheet.stats && atomic_load(&g_sheet.stats->done); }
 static bool c_sum_done(void) { return g_sheet.sum && atomic_load(&g_sheet.sum->done); }
 
@@ -2651,6 +2652,70 @@ static int run_selftest_m8(void) {
     st_frames(2);
     st_shot("properties-folder");
     st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+    { // Properties > Media: an image's size from the file; a video's / a song's details through ffprobe, a PDF's pages
+      // through pdfinfo (stand-ins here); no card for other files
+        const char *lab[10];
+        char val[10][160];
+        st_make_bmp(M8_BASE "/pic.bmp", 640, 480);
+        char *pv[1] = {M8_BASE "/pic.bmp"};
+        props_open(pv, 1);
+        ST_CHECK(g_sheet.media && st_wait_cond(c_media_done, 3000));
+        ST_CHECK(props_media_rows(g_sheet.media, lab, val, 160) == 1 && !strcmp(lab[0], "Dimensions") && !strcmp(val[0], "640 \xC3\x97 480 pixels"));
+        st_frames(2);
+        st_shot("properties-image");
+        sheet_close();
+        char fp[PATH_MAX], pp2[PATH_MAX];
+        snprintf(fp, sizeof fp, "%s/ffprobe", M8_BASE);
+        snprintf(pp2, sizeof pp2, "%s/pdfinfo", M8_BASE);
+        FILE *f = fopen(fp, "w");
+        if (f) {
+            fputs("#!/bin/sh\ncase \"$*\" in *clip.mp4*)\n"
+                  "printf '[STREAM]\\ncodec_name=h264\\ncodec_type=video\\nwidth=1920\\nheight=1080\\navg_frame_rate=30000/1001\\nDISPOSITION:attached_pic=0\\n[/STREAM]\\n"
+                  "[STREAM]\\ncodec_name=aac\\ncodec_type=audio\\nsample_rate=48000\\nchannels=2\\navg_frame_rate=0/0\\nDISPOSITION:attached_pic=0\\n[/STREAM]\\n"
+                  "[FORMAT]\\nduration=3725.4\\nbit_rate=5000000\\n[/FORMAT]\\n';;\n"
+                  "*) printf '[STREAM]\\ncodec_name=mp3\\ncodec_type=audio\\nsample_rate=44100\\nchannels=2\\navg_frame_rate=0/0\\nDISPOSITION:attached_pic=0\\n[/STREAM]\\n"
+                  "[STREAM]\\ncodec_name=mjpeg\\ncodec_type=video\\nwidth=500\\nheight=500\\navg_frame_rate=0/0\\nDISPOSITION:attached_pic=1\\n[/STREAM]\\n"
+                  "[FORMAT]\\nduration=185.2\\nbit_rate=320000\\nTAG:title=Song\\nTAG:artist=Band\\nTAG:album=Record\\n[/FORMAT]\\n';;\nesac\n", f);
+            fclose(f);
+            chmod(fp, 0755);
+        }
+        f = fopen(pp2, "w");
+        if (f) { fputs("#!/bin/sh\nprintf 'Title:           A Report\\nAuthor:          Someone\\nPages:           12\\n'\n", f); fclose(f); chmod(pp2, 0755); }
+        setenv("FE_FFPROBE", fp, 1);
+        setenv("FE_PDFINFO", pp2, 1);
+        static const struct { const char *file; int rows; const char *want[10]; } cases[] = {
+            {"clip.mp4", 4, {"Dimensions", "1920 \xC3\x97 1080 pixels", "Duration", "1:02:05", "Video", "H.264 \xC2\xB7 29.97 fps", "Audio", "AAC \xC2\xB7 stereo \xC2\xB7 48 kHz"}},
+            {"song.mp3", 6, {"Duration", "3:05", "Audio", "MP3 \xC2\xB7 stereo \xC2\xB7 44.1 kHz", "Bit rate", "320 kbps", "Title", "Song", "Artist", "Band"}},
+            {"doc.pdf", 3, {"Pages", "12", "Title", "A Report", "Author", "Someone"}},
+        };
+        for (size_t c = 0; c < ARRAY_COUNT(cases); c++) {
+            char fpath[PATH_MAX];
+            snprintf(fpath, sizeof fpath, "%s/%s", M8_BASE, cases[c].file);
+            st_write(fpath, 100);
+            char *v1[1] = {fpath};
+            props_open(v1, 1);
+            ST_CHECK(g_sheet.media && st_wait_cond(c_media_done, 3000));
+            int nr = props_media_rows(g_sheet.media, lab, val, 160);
+            ST_CHECK(nr == cases[c].rows);
+            for (int i = 0; i < nr && i < 5; i++)
+                if (cases[c].want[i * 2] && (strcmp(lab[i], cases[c].want[i * 2]) || strcmp(val[i], cases[c].want[i * 2 + 1]))) {
+                    fprintf(stderr, "SELFTEST: %s row %d: %s = %s\n", cases[c].file, i, lab[i], val[i]);
+                    st_fail++;
+                }
+            if (c == 0) { st_frames(2); st_shot("properties-video"); }
+            sheet_close();
+            unlink(fpath);
+        }
+        unsetenv("FE_FFPROBE");
+        unsetenv("FE_PDFINFO");
+        char *tv[1] = {M8_BASE "/abc.txt"};
+        props_open(tv, 1);
+        ST_CHECK(!g_sheet.media);
+        sheet_close();
+        unlink(fp);
+        unlink(pp2);
+        unlink(M8_BASE "/pic.bmp");
+    }
     st_select(p, "abc.txt");
     do_action(p, ACT_PROPERTIES);
     st_frames(2);

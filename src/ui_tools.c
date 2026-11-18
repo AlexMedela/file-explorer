@@ -21,6 +21,7 @@ typedef struct {
     f32 row_h;
     // properties
     StatsJob *stats;
+    MediaJob *media; // an image's / video's / song's / PDF's details
     SumJob *sum;
     struct stat st;
     i64 btime;
@@ -84,6 +85,7 @@ static void sheet_close(void) {
     if (s->kind == SHEET_SECRET && s->sec_borg) { borg_prompt_answer(s->sec_borg, NULL, false); s->sec_borg = NULL; }
     explicit_bzero(s->cn[CN_PASS].buf, sizeof s->cn[CN_PASS].buf); // the typed password doesn't linger
     if (s->stats) { atomic_store(&s->stats->cancel, 1); stats_release(s->stats); }
+    if (s->media) media_release(s->media);
     if (s->sum) { atomic_store(&s->sum->cancel, 1); sum_release(s->sum); }
     if (s->snap) snap_release(s->snap);
     strv_free(s->newnames, s->npaths);
@@ -464,6 +466,10 @@ static void props_open(char **paths, int n) {
         bool dir = stat(paths[0], &tst) == 0 && S_ISDIR(tst.st_mode);
         snprintf(s->mime, sizeof s->mime, "%s", mime_for_file(path_basename(paths[0]), dir));
         if (dir) s->stats = stats_start(paths, n);
+        bool local = !strstr(paths[0], "::") && !path_is_remote(paths[0]); // (archive members, network folders: not read)
+        bool pdf = !strcmp(s->mime, "application/pdf");
+        if (!dir && local && (pdf || !strncmp(s->mime, "image/", 6) || !strncmp(s->mime, "video/", 6) || !strncmp(s->mime, "audio/", 6)))
+            s->media = media_start(paths[0], pdf, A.selftest ? getenv("FE_FFPROBE") : "ffprobe", A.selftest ? getenv("FE_PDFINFO") : "pdfinfo");
         if (!strstr(paths[0], "::") && !path_is_remote(paths[0])) s->snap = snap_start(paths[0]); // previous versions
     } else {
         s->stats = stats_start(paths, n);
@@ -490,6 +496,62 @@ static const char *group_name(gid_t gid) {
 }
 
 static void props_date(i64 t0, char *buf, size_t cap);
+
+// Codec names as people know them ("h264" -> "H.264"); others in capitals.
+static void media_codec(const char *c, char *out, size_t cap) {
+    static const char *const names[][2] = {{"h264", "H.264"}, {"hevc", "HEVC (H.265)"}, {"av1", "AV1"}, {"vp9", "VP9"}, {"vp8", "VP8"},
+                                           {"mpeg4", "MPEG-4"}, {"opus", "Opus"}, {"vorbis", "Vorbis"}, {"pcm_s16le", "PCM"}};
+    for (size_t i = 0; i < ARRAY_COUNT(names); i++)
+        if (!strcmp(c, names[i][0])) { snprintf(out, cap, "%s", names[i][1]); return; }
+    size_t i = 0;
+    for (; c[i] && i + 1 < cap; i++) out[i] = (char)toupper((unsigned char)c[i]);
+    out[i] = 0;
+}
+
+// The Media card's rows ("\xE2\x80\xA6" while it's being read); 0: nothing to show.
+static int props_media_rows(MediaJob *m, const char **lab, char (*val)[160], int cap) {
+    int n = 0;
+    if (!atomic_load(&m->done)) { lab[n] = "Details"; snprintf(val[n++], (size_t)cap, "\xE2\x80\xA6"); return n; }
+    char c[32], extra[64];
+    if (m->w > 0) { lab[n] = "Dimensions"; snprintf(val[n++], (size_t)cap, "%d \xC3\x97 %d pixels", m->w, m->h); }
+    if (m->duration > 0) {
+        long t = lround(m->duration);
+        lab[n] = "Duration";
+        if (t >= 3600) snprintf(val[n++], (size_t)cap, "%ld:%02ld:%02ld", t / 3600, t / 60 % 60, t % 60);
+        else snprintf(val[n++], (size_t)cap, "%ld:%02ld", t / 60, t % 60);
+    }
+    if (m->vcodec[0]) {
+        media_codec(m->vcodec, c, sizeof c);
+        extra[0] = 0;
+        if (m->fps > 0) { // "29.97 fps", "25 fps"
+            snprintf(extra, sizeof extra, " \xC2\xB7 %.2f", m->fps);
+            char *e = extra + strlen(extra);
+            while (e[-1] == '0') *--e = 0;
+            if (e[-1] == '.') *--e = 0;
+            strcat(extra, " fps");
+        }
+        lab[n] = "Video";
+        snprintf(val[n++], (size_t)cap, "%s%s", c, extra);
+    }
+    if (m->acodec[0]) {
+        media_codec(m->acodec, c, sizeof c);
+        const char *chs = m->channels == 1 ? "mono" : m->channels == 2 ? "stereo" : m->channels == 6 ? "5.1" : m->channels == 8 ? "7.1" : "";
+        char chn[24] = "";
+        if (chs[0]) snprintf(chn, sizeof chn, " \xC2\xB7 %s", chs);
+        else if (m->channels > 0) snprintf(chn, sizeof chn, " \xC2\xB7 %d channels", m->channels);
+        extra[0] = 0;
+        if (m->sample_rate > 0) snprintf(extra, sizeof extra, " \xC2\xB7 %g kHz", m->sample_rate / 1000.0);
+        lab[n] = "Audio";
+        snprintf(val[n++], (size_t)cap, "%s%s%s", c, chn, extra);
+    }
+    if (m->bit_rate > 0 && !m->vcodec[0] && m->acodec[0]) { lab[n] = "Bit rate"; snprintf(val[n++], (size_t)cap, "%lld kbps", (long long)((m->bit_rate + 500) / 1000)); }
+    if (m->pages > 0) { lab[n] = "Pages"; snprintf(val[n++], (size_t)cap, "%d", m->pages); }
+    if (m->title[0]) { lab[n] = "Title"; snprintf(val[n++], (size_t)cap, "%s", m->title); }
+    if (m->artist[0]) { lab[n] = "Artist"; snprintf(val[n++], (size_t)cap, "%s", m->artist); }
+    if (m->album[0]) { lab[n] = "Album"; snprintf(val[n++], (size_t)cap, "%s", m->album); }
+    if (m->author[0]) { lab[n] = "Author"; snprintf(val[n++], (size_t)cap, "%s", m->author); }
+    return n;
+}
 
 // Previous versions: restore one (the current one goes to the Trash first, or keep both), compare a folder's.
 static struct { char cur[PATH_MAX], ver[PATH_MAX]; i64 when; bool admin; } g_restore;
@@ -707,8 +769,8 @@ static void props_draw(void) {
 
     // General
     {
-        const char *lab[4];
-        char val[4][PATH_MAX + 64];
+        const char *lab[5];
+        char val[5][PATH_MAX + 64];
         int n = 0, reveal_row = -1;
         if (single) {
             lab[n] = "Type";
@@ -742,6 +804,17 @@ static void props_draw(void) {
         for (int i = 0; i < n; i++)
             props_line(x, y + i * rh, cw, rh, lab[i], val[i], fs, i == reveal_row ? "Show" : NULL, i == reveal_row ? &s->rreveal : NULL);
         y += n * rh + gap;
+    }
+    if (s->media) { // Media: what the file holds (nothing found: no card)
+        const char *lab[10];
+        char val[10][160];
+        int n = props_media_rows(s->media, lab, val, (int)sizeof val[0]);
+        if (n) {
+            y = props_heading(x, y, "Media");
+            props_card(x, y, cw, n, rh, 0);
+            for (int i = 0; i < n; i++) props_line(x, y + i * rh, cw, rh, lab[i], val[i], fs, NULL, NULL);
+            y += n * rh + gap;
+        }
     }
     if (single && s->have_st) {
         // Dates
@@ -2186,5 +2259,6 @@ static void sheet_wheel(f32 dy) {
 // Background work in Properties needs periodic redraws.
 static bool sheet_busy(void) {
     Sheet *s = &g_sheet;
-    return (s->stats && !atomic_load(&s->stats->done)) || (s->sum && !atomic_load(&s->sum->done)) || (s->snap && !atomic_load(&s->snap->done));
+    return (s->stats && !atomic_load(&s->stats->done)) || (s->sum && !atomic_load(&s->sum->done)) || (s->snap && !atomic_load(&s->snap->done)) ||
+           (s->media && !atomic_load(&s->media->done));
 }

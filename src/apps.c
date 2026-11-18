@@ -745,6 +745,124 @@ static StatsJob *stats_start(char **paths, int n) {
     return j;
 }
 
+// Properties > Media: an image's, a video's, a song's or a PDF's details. stb_image / nanosvg read an image's size
+// from the file; ffprobe (when installed) the rest of images, videos and audio (one call: size, length, codecs, rate,
+// tags); pdfinfo a PDF's pages. The tools only run when allowed (not in tests: stand-ins).
+typedef struct {
+    char path[PATH_MAX];
+    const char *ffprobe, *pdfinfo; // NULL: don't run it
+    bool pdf;
+    // the results, written by the worker before done (the UI reads them only after)
+    int w, h, channels, sample_rate, pages;
+    double duration, fps;
+    i64 bit_rate;
+    char vcodec[24], acodec[24], title[128], artist[128], album[128], author[128];
+    _Atomic int done;
+    _Atomic int refs;
+} MediaJob;
+
+static void media_release(MediaJob *j) {
+    if (atomic_fetch_sub(&j->refs, 1) == 1) free(j);
+}
+
+static void media_str(char *dst, size_t cap, const char *v) {
+    snprintf(dst, cap, "%s", v);
+    size_t n = strlen(dst);
+    while (n && (dst[n - 1] == '\n' || dst[n - 1] == ' ')) dst[--n] = 0;
+}
+
+// ffprobe's "default" output: [STREAM] ... [/STREAM] blocks, then [FORMAT] with TAG:name=value lines.
+static void media_parse_ffprobe(MediaJob *j, char *out) {
+    char type[16] = "", codec[24] = "";
+    int w = 0, h = 0, ch = 0, sr = 0, pic = 0;
+    double fps = 0;
+    char *sv = NULL;
+    for (char *line = strtok_r(out, "\n", &sv); line; line = strtok_r(NULL, "\n", &sv)) {
+        char *eq = strchr(line, '=');
+        if (!strcmp(line, "[STREAM]")) { type[0] = codec[0] = 0; w = h = ch = sr = pic = 0; fps = 0; continue; }
+        if (!strcmp(line, "[/STREAM]")) {
+            if (!strcmp(type, "video") && !pic && !j->vcodec[0]) { // (a song's cover picture isn't the video)
+                snprintf(j->vcodec, sizeof j->vcodec, "%s", codec);
+                if (w > 0 && h > 0) j->w = w, j->h = h;
+                j->fps = fps;
+            } else if (!strcmp(type, "audio") && !j->acodec[0]) {
+                snprintf(j->acodec, sizeof j->acodec, "%s", codec);
+                j->channels = ch, j->sample_rate = sr;
+            }
+            continue;
+        }
+        if (!eq) continue;
+        *eq = 0;
+        const char *k = line, *v = eq + 1;
+        if (!strcmp(k, "codec_type")) snprintf(type, sizeof type, "%s", v);
+        else if (!strcmp(k, "codec_name")) snprintf(codec, sizeof codec, "%s", v);
+        else if (!strcmp(k, "width")) w = atoi(v);
+        else if (!strcmp(k, "height")) h = atoi(v);
+        else if (!strcmp(k, "channels")) ch = atoi(v);
+        else if (!strcmp(k, "sample_rate")) sr = atoi(v);
+        else if (!strcmp(k, "DISPOSITION:attached_pic")) pic = atoi(v);
+        else if (!strcmp(k, "avg_frame_rate")) { int a = 0, b = 0; if (sscanf(v, "%d/%d", &a, &b) == 2 && a > 0 && b > 0) fps = (double)a / b; }
+        else if (!strcmp(k, "duration")) j->duration = atof(v);
+        else if (!strcmp(k, "bit_rate")) j->bit_rate = atoll(v);
+        else if (!strcasecmp(k, "TAG:title")) media_str(j->title, sizeof j->title, v);
+        else if (!strcasecmp(k, "TAG:artist")) media_str(j->artist, sizeof j->artist, v);
+        else if (!strcasecmp(k, "TAG:album")) media_str(j->album, sizeof j->album, v);
+    }
+}
+
+static void *media_thread(void *arg) {
+    MediaJob *j = arg;
+    thread_background_priority();
+    size_t cap = 16384;
+    char *out = xmalloc(cap), *sv = NULL;
+    if (j->pdf) {
+        char *argv[] = {(char *)j->pdfinfo, j->path, NULL};
+        if (j->pdfinfo && run_capture(argv, out, cap) == 0)
+            for (char *line = strtok_r(out, "\n", &sv); line; line = strtok_r(NULL, "\n", &sv)) {
+                char *c = strchr(line, ':');
+                if (!c) continue;
+                *c++ = 0;
+                while (*c == ' ') c++;
+                if (!strcmp(line, "Pages")) j->pages = atoi(c);
+                else if (!strcmp(line, "Title")) media_str(j->title, sizeof j->title, c);
+                else if (!strcmp(line, "Author")) media_str(j->author, sizeof j->author, c);
+            }
+    } else {
+        int n = 0;
+        char ext[24];
+        path_ext_lower(j->path, ext, sizeof ext);
+        if (ext_in(ext, STB_EXTS)) stbi_info(j->path, &j->w, &j->h, &n);
+        else if (!strcmp(ext, "svg")) free(svg_preview_pixels(j->path, 16, &n, &n, &j->w, &j->h));
+        if (j->w <= 0 && j->ffprobe) {
+            char *argv[] = {(char *)j->ffprobe, "-v", "error", "-show_entries",
+                            "format=duration,bit_rate:format_tags=title,artist,album:stream=codec_type,codec_name,width,height,"
+                            "avg_frame_rate,channels,sample_rate:stream_disposition=attached_pic",
+                            "-of", "default", j->path, NULL};
+            if (run_capture(argv, out, cap) == 0) media_parse_ffprobe(j, out);
+        }
+    }
+    free(out);
+    if (j->w <= 0 || j->h <= 0) j->w = j->h = 0;
+    atomic_store(&j->done, 1);
+    main_wake();
+    media_release(j);
+    return NULL;
+}
+
+static MediaJob *media_start(const char *path, bool pdf, const char *ffprobe, const char *pdfinfo) {
+    MediaJob *j = xcalloc(1, sizeof *j);
+    snprintf(j->path, sizeof j->path, "%s", path);
+    j->pdf = pdf;
+    j->ffprobe = ffprobe;
+    j->pdfinfo = pdfinfo;
+    atomic_init(&j->refs, 2); // UI + thread
+    pthread_t t;
+    pthread_create(&t, NULL, media_thread, j);
+    pthread_setname_np(t, "fe-media");
+    pthread_detach(t);
+    return j;
+}
+
 typedef struct {
     char path[PATH_MAX];
     char md5[33], sha256[65];
