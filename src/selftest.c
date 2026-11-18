@@ -8386,6 +8386,22 @@ static int run_selftest_cmp(void) {
     st_type("nope");
     st_key(SDLK_RETURN, 0);
     ST_CHECK(g_sheet.kind == SHEET_COMPARE && g_sheet.cp_err[0]); // not a folder: says so, stays open
+    { // the left field's suggestions cover the right field: a click there picks one (not the field)
+        TextEdit *l = &g_sheet.cp[0];
+        st_text_click(l, (int)strlen(l->buf), 1, 0);
+        ST_CHECK(g_sheet.cp_focus == 0);
+        te_set(l, "", 0, 0);
+        st_type(CMP_BASE "/");
+        ST_CHECK(st_wait_cond(st_cmp_sug, 5000));
+        st_frames(1);
+        Rect r = g_sheet.cp_rsug[1];
+        ST_CHECK(g_sheet.cp_nsug == 2 && r.y < g_sheet.cp_rf[1].y + g_sheet.cp_rf[1].h && r.y + r.h > g_sheet.cp_rf[1].y);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, r.x + r.w * 0.5f, r.y + r.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
+        ST_CHECK(g_sheet.cp_focus == 0 && !strcmp(l->buf, CMP_BASE "/b/"));
+        te_set(l, CMP_BASE "/a", 0, 0);
+        g_sheet.cp_focus = 1;
+    }
     te_set(&g_sheet.cp[1], CMP_BASE "/b", 0, 0);
     g_sheet.cp_nsug = 0;
     st_key(SDLK_RETURN, 0);

@@ -72,7 +72,8 @@ typedef struct {
     char *cp_sug[8];
     u32 cp_gen; // the suggestions asked for last (older answers are dropped)
     char cp_err[160];
-    Rect cp_rf[2], cp_rsug[8];
+    Rect cp_rf[2], cp_rsug[8], cp_rlist;
+    f32 cp_mx, cp_my; // the pointer when last drawn: the highlight follows it only when it moves (not over the keys)
 } Sheet;
 enum { CN_HOST, CN_PORT, CN_PATH, CN_USER, CN_PASS, CN_DOMAIN, CN_COUNT, CN_NAME = CN_COUNT, CN_ALL }; // CN_COUNT: the server card
 
@@ -2249,6 +2250,9 @@ static void compare_key(SDL_Keycode k, SDL_Keymod mod) {
     if (strcmp(before, s->cp[s->cp_focus].buf)) cmp_sug_query();
 }
 
+// A press on the suggestions: theirs, not the field they cover.
+static bool sheet_popup_at(f32 x, f32 y) { return g_sheet.kind == SHEET_COMPARE && g_sheet.cp_nsug && in_rect(g_sheet.cp_rlist, x, y); }
+
 static void compare_text(const char *text) {
     Sheet *s = &g_sheet;
     te_insert(&s->cp[s->cp_focus], text);
@@ -2292,24 +2296,30 @@ static void compare_draw(void) {
     sheet_button(s->cn_rconnect, "Compare", true, s->cp[0].buf[0] && s->cp[1].buf[0]);
     // the suggestions: a list under the focused field, over what's below it
     for (int i = 0; i < CP_NSUG; i++) s->cp_rsug[i] = (Rect){0, 0, 0, 0};
+    s->cp_rlist = (Rect){0, 0, 0, 0};
+    bool moved = A.mx != s->cp_mx || A.my != s->cp_my;
+    s->cp_mx = A.mx, s->cp_my = A.my;
     if (!s->cp_nsug) return;
     Rect f = s->cp_rf[s->cp_focus];
     f32 ih = roundf(S(28)), lp = roundf(S(4));
     Rect lr = {f.x, f.y + f.h + S(4), f.w, ih * s->cp_nsug + lp * 2};
+    s->cp_rlist = lr;
+    if (A.mouse_in && in_rect(lr, A.mx, A.my)) A.ptr_text = false; // (over the other field, which it hides)
     draw_rrect(lr.x, lr.y, lr.w, lr.h, S(8), C(COL_POPUP));
     draw_rrect_outline(lr.x, lr.y, lr.w, lr.h, S(8), 1, C(COL_POPUP_BORDER));
     for (int i = 0; i < s->cp_nsug; i++) {
         Rect ir = {lr.x + lp, lr.y + lp + ih * i, lr.w - lp * 2, ih};
         s->cp_rsug[i] = ir;
-        if (hand_if(A.mouse_in && in_rect(ir, A.mx, A.my))) s->cp_hover = i;
-        if (i == s->cp_hover) draw_rrect(ir.x, ir.y, ir.w, ir.h, S(6), C(COL_HOVER));
+        if (hand_if(A.mouse_in && in_rect(ir, A.mx, A.my)) && moved) s->cp_hover = i;
+        bool on = i == s->cp_hover;
+        if (on) draw_rrect(ir.x, ir.y, ir.w, ir.h, S(6), C(COL_SEL_FOCUS));
         char t[PATH_MAX];
         tilde_path(s->cp_sug[i], t, sizeof t);
         const char *b = path_basename(t);
         f32 bw = text_width(&A.font, b, (int)strlen(b)), tx = ir.x + S(8);
         draw_text_fit(&A.font, tx, text_y(&A.font, ir.y, ir.h), ir.w - S(16), b, (int)strlen(b), C(COL_TEXT), 0);
         if (b > t + 1 && bw + S(40) < ir.w - S(16)) // where it is, dim after the name
-            draw_text_fit(fs, tx + bw + S(10), text_y(fs, ir.y, ir.h), ir.w - S(26) - bw, t, (int)(b - t - 1), C(COL_TEXT_FAINT), 0);
+            draw_text_fit(fs, tx + bw + S(10), text_y(fs, ir.y, ir.h), ir.w - S(26) - bw, t, (int)(b - t - 1), C(on ? COL_SEL_DIM : COL_TEXT_FAINT), 0);
     }
 }
 

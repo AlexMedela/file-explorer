@@ -892,6 +892,7 @@ static void cmp_after_op(Op *op);
 static void cmp_action(Pane *p, int act);
 static void cmp_run(void);
 static void compare_sheet_open(Pane *p);
+static bool sheet_popup_at(f32 x, f32 y);
 static f64 content_h(const Pane *p) { return (f64)item_rows(p) * p->ly.cell_h + p->ly.pad * 2; }
 
 static f64 max_scroll(const Pane *p) { return MAX(0.0, content_h(p) - p->ly.list.h); }
