@@ -635,7 +635,7 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
         if (b->button == SDL_BUTTON_LEFT) dialog_mouse(x, y);
         return;
     }
-    if (!A.menu.open && (sheet_open() || A.pal_open) && te_pointer_down(b)) return; // their text fields
+    if (!A.menu.open && (sheet_open() || A.pal_open) && !sheet_popup_at(x, y) && te_pointer_down(b)) return; // their text fields
     if (sheet_open()) { sheet_mouse(b); return; }
     if (A.ql_on) { // a click beside Quick Look closes it; its text's scrollbar: drag the thumb, click beside it to page
         if (!in_rect(A.r_ql, x, y)) ql_toggle();

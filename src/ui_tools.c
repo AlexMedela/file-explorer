@@ -1,6 +1,6 @@
 // ui_tools.c - modal "sheets": Open with, Properties, Batch rename, Options, Connect to server, Compress (included from app.c)
 
-enum { SHEET_NONE, SHEET_OPENWITH, SHEET_PROPS, SHEET_RENAME, SHEET_OPTIONS, SHEET_CONNECT, SHEET_SECRET, SHEET_ADDON, SHEET_BORG, SHEET_COMPRESS }; // SHEET_ADDON: an add-on's (addons.c)
+enum { SHEET_NONE, SHEET_OPENWITH, SHEET_PROPS, SHEET_RENAME, SHEET_OPTIONS, SHEET_CONNECT, SHEET_SECRET, SHEET_ADDON, SHEET_BORG, SHEET_COMPRESS, SHEET_COMPARE }; // SHEET_ADDON: an add-on's (addons.c)
 
 typedef struct {
     int kind;
@@ -66,6 +66,14 @@ typedef struct {
     f32 cn_pick_scroll, cn_pick_content;
     Rect cn_rcell[256];
     int cn_cell_idx[256], cn_ncell;
+    // compare: the two folders (left, right), folder suggestions under the focused one
+    TextEdit cp[2];
+    int cp_focus, cp_nsug, cp_hover; // cp_hover: the suggestion the keyboard / pointer is on (-1 none)
+    char *cp_sug[8];
+    u32 cp_gen; // the suggestions asked for last (older answers are dropped)
+    char cp_err[160];
+    Rect cp_rf[2], cp_rsug[8], cp_rlist;
+    f32 cp_mx, cp_my; // the pointer when last drawn: the highlight follows it only when it moves (not over the keys)
 } Sheet;
 enum { CN_HOST, CN_PORT, CN_PATH, CN_USER, CN_PASS, CN_DOMAIN, CN_COUNT, CN_NAME = CN_COUNT, CN_ALL }; // CN_COUNT: the server card
 
@@ -94,6 +102,7 @@ static void sheet_close(void) {
     strv_free(s->newnames, s->npaths);
     free(s->status);
     strv_free(s->paths, s->npaths);
+    for (int i = 0; i < s->cp_nsug; i++) free(s->cp_sug[i]);
     memset(s, 0, sizeof *s);
     g_glide.v = NULL;
     A.redraw = true;
@@ -2024,6 +2033,296 @@ static void compress_draw(void) {
     sheet_button(s->cn_rconnect, "Compress", true, ok);
 }
 
+// --- Compare folders: the two folders, typed or picked from suggestions (subfolders of a typed path, else the index) ---
+
+#define CP_NSUG 8
+typedef struct {
+    u32 gen;
+    char q[PATH_MAX];
+    int n;
+    char *out[CP_NSUG];
+} CmpSugJob;
+
+static u32 g_cp_gen;
+
+// A typed folder as a full path: ~ is home, anything else not starting with / is under base.
+static void compare_resolve(const char *in, const char *base, char *out, size_t cap) {
+    while (*in == ' ') in++;
+    const char *home = getenv("HOME");
+    if (in[0] == '~' && (in[1] == '/' || !in[1])) snprintf(out, cap, "%s%s", home ? home : "", in + 1);
+    else if (in[0] == '/') snprintf(out, cap, "%s", in);
+    else path_join(out, cap, base, in);
+    size_t n = strlen(out);
+    while (n > 1 && out[n - 1] == ' ') out[--n] = 0;
+    path_normalize(out);
+}
+
+static int cp_natcmp(const void *a, const void *b) { return natcmp(*(char *const *)a, *(char *const *)b); }
+
+// (worker) A path being typed (/ or ~): the folders in its last folder whose names start with what follows the
+// last slash. Anything else: the folders of the index that match it best (as in Ctrl+P).
+static void cmp_sug_done(void *arg);
+static void cmp_sug_work(void *arg) {
+    CmpSugJob *j = arg;
+    if (j->q[0] == '/' || j->q[0] == '~') {
+        char full[PATH_MAX];
+        compare_resolve(j->q, "/", full, sizeof full);
+        const char *ls = strrchr(j->q, '/');
+        const char *part = ls ? ls + 1 : (j->q[1] ? j->q + 1 : ""); // "~": the home folder's
+        char dir[PATH_MAX];
+        snprintf(dir, sizeof dir, "%s", full);
+        if (part[0] && strcmp(part, ".") && strcmp(part, "..")) { char *e = strrchr(dir, '/'); if (e) e[e == dir] = 0; }
+        else if (!strcmp(part, ".") || !strcmp(part, "..")) part = "";
+        size_t pl = strlen(part);
+        DIR *d = opendir(dir);
+        char *names[512];
+        int nn = 0;
+        struct dirent *de;
+        while (d && (de = readdir(d)) && nn < 512) {
+            const char *nm = de->d_name;
+            if (!strcmp(nm, ".") || !strcmp(nm, "..") || (nm[0] == '.' && part[0] != '.') || strncasecmp(nm, part, pl)) continue;
+            bool isdir = de->d_type == DT_DIR;
+            if (de->d_type == DT_LNK || de->d_type == DT_UNKNOWN) {
+                char p[PATH_MAX];
+                struct stat st;
+                path_join(p, sizeof p, dir, nm);
+                isdir = stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+            }
+            if (isdir) names[nn++] = strdup(nm);
+        }
+        if (d) closedir(d);
+        qsort(names, (size_t)nn, sizeof *names, cp_natcmp);
+        for (int i = 0; i < nn; i++) {
+            if (j->n < CP_NSUG) {
+                char p[PATH_MAX];
+                path_join(p, sizeof p, dir, names[i]);
+                j->out[j->n++] = strdup(p);
+            }
+            free(names[i]);
+        }
+    } else if (j->q[0]) {
+        int qn = (int)strlen(j->q), score[CP_NSUG];
+        DirIndex *d = index_acquire();
+        for (u32 i = 0; d && i < d->n; i++) {
+            if (index_is_file(d, i)) continue;
+            const char *path = d->buf + d->offs[i];
+            int sc = fuzzy_path(path, j->q, qn, NULL, NULL);
+            if (sc < 0) continue;
+            sc -= (int)strlen(path) / 8; // the shorter (nearer the top) of two alike
+            int k = j->n;
+            if (k == CP_NSUG && sc <= score[k - 1]) continue;
+            if (k == CP_NSUG) free(j->out[--k]);
+            for (; k > 0 && score[k - 1] < sc; k--) score[k] = score[k - 1], j->out[k] = j->out[k - 1];
+            score[k] = sc, j->out[k] = strdup(path);
+            j->n = MIN(j->n + 1, CP_NSUG);
+        }
+        index_release(d);
+    }
+    main_post(cmp_sug_done, j);
+}
+
+static void cmp_sug_clear(void) {
+    Sheet *s = &g_sheet;
+    for (int i = 0; i < s->cp_nsug; i++) free(s->cp_sug[i]);
+    s->cp_nsug = 0, s->cp_hover = -1;
+    s->cp_gen = ++g_cp_gen; // (one still on its way is dropped)
+}
+
+static void cmp_sug_done(void *arg) {
+    CmpSugJob *j = arg;
+    Sheet *s = &g_sheet;
+    if (s->kind == SHEET_COMPARE && j->gen == s->cp_gen) {
+        for (int i = 0; i < s->cp_nsug; i++) free(s->cp_sug[i]);
+        memcpy(s->cp_sug, j->out, sizeof j->out);
+        s->cp_nsug = j->n, s->cp_hover = -1;
+        A.redraw = true;
+    } else for (int i = 0; i < j->n; i++) free(j->out[i]);
+    free(j);
+}
+
+// The focused field changed: ask for suggestions for it.
+static void cmp_sug_query(void) {
+    Sheet *s = &g_sheet;
+    cmp_sug_clear();
+    s->cp_err[0] = 0;
+    const char *q = s->cp[s->cp_focus].buf;
+    while (*q == ' ') q++;
+    if (!q[0]) return;
+    CmpSugJob *j = xcalloc(1, sizeof *j);
+    j->gen = s->cp_gen;
+    snprintf(j->q, sizeof j->q, "%s", q);
+    pool_submit(cmp_sug_work, j);
+    DirIndex *d = index_acquire(); // (built on first use, like Ctrl+P's)
+    if (!d && !(q[0] == '/' || q[0] == '~')) index_rebuild_default();
+    index_release(d);
+}
+
+// Left: the folder shown; right: the other panel's, if there is one, else empty to type.
+static void compare_sheet_open(Pane *p) {
+    if (!p) return;
+    sheet_close();
+    Sheet *s = &g_sheet;
+    s->kind = SHEET_COMPARE;
+    s->pane = p;
+    char t[PATH_MAX];
+    tilde_path(p->path, t, sizeof t);
+    te_set(&s->cp[0], t, (int)strlen(t), (int)strlen(t));
+    Tab *t0 = tab_of(p);
+    Panel *ord[MAX_PANELS];
+    int n = panels_ordered(A.root, ord, 0);
+    for (int i = 0; i < n && !s->cp[1].buf[0]; i++)
+        if (t0 && ord[i] != t0->panel && ord[i]->cur && !ord[i]->cur->term) {
+            tilde_path(ord[i]->cur->pane[0].path, t, sizeof t);
+            te_set(&s->cp[1], t, 0, (int)strlen(t)); // selected: typing replaces it
+        }
+    s->cp_focus = 1;
+    s->cp_hover = -1;
+    s->cp_gen = ++g_cp_gen;
+    A.redraw = true;
+}
+
+// A suggestion into the field, with a slash: its subfolders come up next.
+static void compare_accept(int i) {
+    Sheet *s = &g_sheet;
+    if (i < 0 || i >= s->cp_nsug) return;
+    char t[PATH_MAX];
+    tilde_path(s->cp_sug[i], t, sizeof t);
+    size_t l = strlen(t);
+    if (l + 1 < sizeof t && t[l - 1] != '/') t[l++] = '/', t[l] = 0;
+    te_set(&s->cp[s->cp_focus], t, (int)l, (int)l);
+    cmp_sug_query();
+}
+
+static void compare_go(void) {
+    Sheet *s = &g_sheet;
+    Pane *p = s->pane && pane_exists(s->pane) ? s->pane : active_pane();
+    Tab *cur = p ? tab_of(p) : NULL, *other = NULL;
+    if (!cur || !cur->panel) return;
+    Panel *pn = cur->panel;
+    char path[2][PATH_MAX];
+    cmp_sug_clear();
+    for (int k = 0; k < 2; k++) {
+        if (!s->cp[k].buf[0]) { snprintf(s->cp_err, sizeof s->cp_err, "Type or pick the %s folder", k ? "right" : "left"); s->cp_focus = k; return; }
+        compare_resolve(s->cp[k].buf, p->path, path[k], sizeof path[k]);
+        struct stat st;
+        if (stat(path[k], &st) != 0 || !S_ISDIR(st.st_mode)) { snprintf(s->cp_err, sizeof s->cp_err, "The %s one isn't a folder", k ? "right" : "left"); s->cp_focus = k; return; }
+    }
+    if (!strcmp(path[0], path[1])) { snprintf(s->cp_err, sizeof s->cp_err, "Both are the same folder"); return; }
+    sheet_close();
+    if (strcmp(cur->pane[0].path, path[0])) pane_navigate(&cur->pane[0], path[0], true);
+    Panel *ord[MAX_PANELS], *np = NULL;
+    int n = panels_ordered(A.root, ord, 0), i = 0;
+    while (i < n && ord[i] != pn) i++;
+    if (n >= 2 && i < n) np = ord[i + 1 < n ? i + 1 : i - 1]; // two panels: the right side goes into the other one
+    if (np && np->cur && !np->cur->term) {
+        if (strcmp(np->cur->pane[0].path, path[1])) pane_navigate(&np->cur->pane[0], path[1], true);
+    } else {
+        for (int k = 0; k < A.ntabs; k++) // a tab of this panel already there moves into the split
+            if (A.tabs[k] != cur && A.tabs[k]->panel == pn && !A.tabs[k]->term && !strcmp(A.tabs[k]->pane[0].path, path[1])) other = A.tabs[k];
+        np = panel_split(pn, ZONE_RIGHT, other, path[1]);
+        if (!np) return;
+    }
+    cmp_start(cur, np->cur);
+}
+
+static void compare_key(SDL_Keycode k, SDL_Keymod mod) {
+    Sheet *s = &g_sheet;
+    int ns = s->cp_nsug;
+    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
+        if (ns && s->cp_hover >= 0) compare_accept(s->cp_hover);
+        else compare_go();
+        return;
+    }
+    if (k == SDLK_TAB) {
+        if (ns) compare_accept(s->cp_hover >= 0 ? s->cp_hover : 0); // like a shell's completion
+        else s->cp_focus = !s->cp_focus, cmp_sug_clear();
+        (void)mod;
+        return;
+    }
+    if (ns && (k == SDLK_DOWN || k == SDLK_UP)) {
+        s->cp_hover = k == SDLK_DOWN ? (s->cp_hover + 1) % ns : s->cp_hover <= 0 ? ns - 1 : s->cp_hover - 1;
+        return;
+    }
+    if (k == SDLK_DOWN || k == SDLK_UP) { s->cp_focus = k == SDLK_DOWN, cmp_sug_clear(); return; }
+    char before[PATH_MAX];
+    snprintf(before, sizeof before, "%s", s->cp[s->cp_focus].buf);
+    te_key(&s->cp[s->cp_focus], k, mod);
+    if (strcmp(before, s->cp[s->cp_focus].buf)) cmp_sug_query();
+}
+
+// A press on the suggestions: theirs, not the field they cover.
+static bool sheet_popup_at(f32 x, f32 y) { return g_sheet.kind == SHEET_COMPARE && g_sheet.cp_nsug && in_rect(g_sheet.cp_rlist, x, y); }
+
+static void compare_text(const char *text) {
+    Sheet *s = &g_sheet;
+    te_insert(&s->cp[s->cp_focus], text);
+    cmp_sug_query();
+}
+
+static void compare_click(f32 x, f32 y) {
+    Sheet *s = &g_sheet;
+    for (int i = 0; i < s->cp_nsug; i++)
+        if (in_rect(s->cp_rsug[i], x, y)) { compare_accept(i); return; }
+    cmp_sug_clear();
+    if (in_rect(s->cn_rconnect, x, y)) { compare_go(); return; }
+    if (in_rect(s->rcancel, x, y)) sheet_close();
+}
+
+static void compare_draw(void) {
+    Sheet *s = &g_sheet;
+    Font *fs = &A.font_small;
+    f32 pad = roundf(S(20)), rh = roundf(S(44)), gap = roundf(S(12)), bh = roundf(S(32)), lh = roundf(fs->line_h * 1.3f);
+    f32 w = roundf(MIN(S(560), A.W - S(40)));
+    f32 h = pad + roundf(S(62)) + rh * 2 + gap + lh + gap + bh + pad;
+    Rect r = {roundf((A.W - w) * 0.5f), roundf((A.H - h) * 0.36f), w, h};
+    s->r = r;
+    sheet_frame(r, "Compare folders", "What's new, newer or different gets marked on each side; sync from the bar under them");
+    f32 x = r.x + pad, cw = w - pad * 2, y = r.y + pad + roundf(S(62)), lw0 = roundf(S(70)), fh0 = roundf(S(30));
+    props_card(x, y, cw, 2, rh, 0);
+    static const char *const lab[2] = {"Left", "Right"};
+    static const char *const ph[2] = {"Folder", "Type a path (/ or ~) or a folder's name"};
+    for (int k = 0; k < 2; k++) {
+        f32 ry = y + rh * k;
+        draw_text(fs, x + S(14), text_y(fs, ry, rh), lab[k], (int)strlen(lab[k]), C(COL_TEXT_DIM));
+        s->cp_rf[k] = (Rect){x + lw0, roundf(ry + (rh - fh0) * 0.5f), cw - lw0 - S(10), fh0};
+        sheet_field(s->cp_rf[k], &s->cp[k], s->cp_focus == k, ph[k]);
+    }
+    y += rh * 2 + gap;
+    const char *note = s->cp_err[0] ? s->cp_err : "Tab completes a path; a folder that isn't shown opens in a panel beside this one";
+    draw_text_fit(fs, x, y + (lh - fs->line_h) * 0.5f, cw, note, (int)strlen(note), C(s->cp_err[0] ? COL_DANGER_TEXT : COL_TEXT_FAINT), 0);
+    s->cn_rconnect = (Rect){r.x + w - pad - roundf(S(110)), r.y + h - pad - bh, roundf(S(110)), bh};
+    s->rcancel = (Rect){s->cn_rconnect.x - S(8) - roundf(S(96)), s->cn_rconnect.y, roundf(S(96)), bh};
+    sheet_button(s->rcancel, "Cancel", false, true);
+    sheet_button(s->cn_rconnect, "Compare", true, s->cp[0].buf[0] && s->cp[1].buf[0]);
+    // the suggestions: a list under the focused field, over what's below it
+    for (int i = 0; i < CP_NSUG; i++) s->cp_rsug[i] = (Rect){0, 0, 0, 0};
+    s->cp_rlist = (Rect){0, 0, 0, 0};
+    bool moved = A.mx != s->cp_mx || A.my != s->cp_my;
+    s->cp_mx = A.mx, s->cp_my = A.my;
+    if (!s->cp_nsug) return;
+    Rect f = s->cp_rf[s->cp_focus];
+    f32 ih = roundf(S(28)), lp = roundf(S(4));
+    Rect lr = {f.x, f.y + f.h + S(4), f.w, ih * s->cp_nsug + lp * 2};
+    s->cp_rlist = lr;
+    if (A.mouse_in && in_rect(lr, A.mx, A.my)) A.ptr_text = false; // (over the other field, which it hides)
+    draw_rrect(lr.x, lr.y, lr.w, lr.h, S(8), C(COL_POPUP));
+    draw_rrect_outline(lr.x, lr.y, lr.w, lr.h, S(8), 1, C(COL_POPUP_BORDER));
+    for (int i = 0; i < s->cp_nsug; i++) {
+        Rect ir = {lr.x + lp, lr.y + lp + ih * i, lr.w - lp * 2, ih};
+        s->cp_rsug[i] = ir;
+        if (hand_if(A.mouse_in && in_rect(ir, A.mx, A.my)) && moved) s->cp_hover = i;
+        bool on = i == s->cp_hover;
+        if (on) draw_rrect(ir.x, ir.y, ir.w, ir.h, S(6), C(COL_SEL_FOCUS));
+        char t[PATH_MAX];
+        tilde_path(s->cp_sug[i], t, sizeof t);
+        const char *b = path_basename(t);
+        f32 bw = text_width(&A.font, b, (int)strlen(b)), tx = ir.x + S(8);
+        draw_text_fit(&A.font, tx, text_y(&A.font, ir.y, ir.h), ir.w - S(16), b, (int)strlen(b), C(COL_TEXT), 0);
+        if (b > t + 1 && bw + S(40) < ir.w - S(16)) // where it is, dim after the name
+            draw_text_fit(fs, tx + bw + S(10), text_y(fs, ir.y, ir.h), ir.w - S(26) - bw, t, (int)(b - t - 1), C(on ? COL_SEL_DIM : COL_TEXT_FAINT), 0);
+    }
+}
+
 #include "options.c"
 
 // --- dispatch ----------------------------------------------------------------
@@ -2040,6 +2339,7 @@ static void sheet_draw(void) {
     case SHEET_ADDON: addon_sheet_draw(); break;
     case SHEET_BORG: borg_edit_draw(); break;
     case SHEET_COMPRESS: compress_draw(); break;
+    case SHEET_COMPARE: compare_draw(); break;
     default: break;
     }
 }
@@ -2050,6 +2350,7 @@ static void sheet_key(SDL_Keycode k, SDL_Keymod mod) {
     if (s->kind == SHEET_OPTIONS) { options_key(k, mod); return; }
     if (k == SDLK_ESCAPE && (s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON || s->kind == SHEET_BORG) && s->cn_pick) { s->cn_pick = false; return; }
     if (s->kind == SHEET_ADDON && addon_sheet_key(k, mod)) return;
+    if (k == SDLK_ESCAPE && s->kind == SHEET_COMPARE && s->cp_nsug) { cmp_sug_clear(); return; } // the suggestions first
     if (k == SDLK_ESCAPE) { sheet_close(); return; }
     switch (s->kind) {
     case SHEET_SECRET:
@@ -2057,6 +2358,7 @@ static void sheet_key(SDL_Keycode k, SDL_Keymod mod) {
         else te_key(&s->cn[CN_PASS], k, mod);
         break;
     case SHEET_COMPRESS: compress_key(k, mod); break;
+    case SHEET_COMPARE: compare_key(k, mod); break;
     case SHEET_BORG:
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) borg_edit_save();
         else te_key(&s->cn[CN_NAME], k, mod);
@@ -2099,6 +2401,7 @@ static void sheet_text(const char *text) {
     else if (s->kind == SHEET_SECRET) te_insert(&s->cn[CN_PASS], text);
     else if (s->kind == SHEET_BORG) te_insert(&s->cn[CN_NAME], text);
     else if (s->kind == SHEET_COMPRESS) { if (s->cz_focus == 0) te_insert(&s->cn[CN_NAME], text); }
+    else if (s->kind == SHEET_COMPARE) compare_text(text);
     else if (s->kind == SHEET_ADDON) addon_sheet_text(text);
     else if (s->kind == SHEET_CONNECT) {
         if (s->cn_focus == CN_PORT) { // digits only
@@ -2134,6 +2437,14 @@ static bool sheet_text_focus(TextEdit *edit, bool focused) {
     }
     if (s->kind == SHEET_BORG) return edit == &s->cn[CN_NAME] && !s->cn_pick;
     if (s->kind == SHEET_COMPRESS) { if (edit == &s->cn[CN_NAME]) s->cz_focus = 0; return edit == &s->cn[CN_NAME]; }
+    if (s->kind == SHEET_COMPARE) {
+        for (int k = 0; k < 2; k++)
+            if (edit == &s->cp[k]) {
+                if (s->cp_focus != k) s->cp_focus = k, cmp_sug_clear();
+                return true;
+            }
+        return false;
+    }
     return focused && !((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON) && s->cn_pick);
 }
 
@@ -2160,9 +2471,11 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
     }
     if (sheet_scrollbar_press(x, y)) return;
     if (s->kind == SHEET_ADDON) { addon_sheet_click(x, y); return; }
+    if (s->kind == SHEET_COMPARE && s->cp_nsug) { compare_click(x, y); return; } // (the suggestions can reach below it)
     if (!in_rect(s->r, x, y)) { sheet_close(); return; }
     switch (s->kind) {
     case SHEET_COMPRESS: compress_click(x, y); return;
+    case SHEET_COMPARE: compare_click(x, y); return;
     case SHEET_BORG:
         if (in_rect(s->cn_ricon, x, y)) { s->cn_pick = true; s->cn_pick_scroll = 0; return; }
         if (in_rect(s->cn_rconnect, x, y)) { borg_edit_save(); return; }
