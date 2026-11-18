@@ -35,7 +35,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_ALT_ROWS, "Alternating row colours", "Zebra stripes in the details view"},
     {OC_APPEARANCE, OK_BOOL, OPT_SIZE_BARS, "Folder size bars", "Bars behind folder sizes, relative to the largest"},
     {OC_APPEARANCE, OK_BOOL, OPT_LOAD_TIMES, "Load times", "How long the folder took to list, in the status bar"},
-    {OC_APPEARANCE, OK_BOOL, OPT_SMOOTH, "Smooth scrolling", "Animate scrolling instead of jumping"},
+    {OC_APPEARANCE, OK_BOOL, OPT_SMOOTH, "Smooth scrolling", "Ease scrolling, go further on quick wheel turns, let touchpad swipes glide on"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Cards: the open tab joins the folder below it; Pills: rounded tabs centred in a box"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: Explorer's own on every desktop (Automatic), or the desktop's title bar (System)"},
     {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_BUTTONS, "Window buttons", "Minimise, maximise and close at the top right of Explorer's own title bar; without them, the desktop's keys close it"},
@@ -132,7 +132,9 @@ static struct {
     int nhits;
     int drop_opt;   // option whose dropdown is open (-1 none)
     Rect drop_r;
-    int drop_sel, drop_top;
+    int drop_sel;
+    f32 drop_scroll;  // its list (pixels)
+    bool drop_reveal; // keep the highlight in view on the next draw (arrow keys)
     TextEdit drop_filter;
     int drop_map[1024]; // filtered index -> choice index
     int drop_n;
@@ -734,7 +736,7 @@ static void opt_drop_filter(void) {
     int cur = opt_choice_get(id);
     for (int k = 0; k < g_opt.drop_n; k++)
         if (g_opt.drop_map[k] == cur) g_opt.drop_sel = k;
-    g_opt.drop_top = MAX(0, g_opt.drop_sel - 3);
+    g_opt.drop_scroll = (f32)MAX(0, g_opt.drop_sel - 3) * roundf(S(28)); // (rows as drawn)
 }
 
 static void opt_drop_open(int id, Rect r) {
@@ -908,13 +910,22 @@ static void opt_draw_dropdown(void) {
             draw_text(f, fr.x + S(10), text_y(f, fr.y, fr.h), "Type to filter", 14, C(COL_TEXT_FAINT));
         yy += fh;
     }
-    g_opt.drop_top = CLAMP(g_opt.drop_top, 0, MAX(0, g_opt.drop_n - vis));
-    if (g_opt.drop_sel < g_opt.drop_top) g_opt.drop_top = g_opt.drop_sel;
-    if (g_opt.drop_sel >= g_opt.drop_top + vis) g_opt.drop_top = g_opt.drop_sel - vis + 1;
+    Rect lr = {r.x, yy, r.w, rh * (f32)vis}; // the rows
+    if (g_opt.drop_reveal) {
+        f32 st = rh * (f32)g_opt.drop_sel;
+        if (st < g_opt.drop_scroll) g_opt.drop_scroll = st;
+        if (st + rh > g_opt.drop_scroll + lr.h) g_opt.drop_scroll = st + rh - lr.h;
+        g_opt.drop_reveal = false;
+    }
+    g_opt.drop_scroll = CLAMP(g_opt.drop_scroll, 0.f, rh * (f32)MAX(0, g_opt.drop_n - vis));
     int cur = opt_choice_get(id);
-    for (int k = g_opt.drop_top; k < g_opt.drop_top + vis && k < g_opt.drop_n; k++) {
-        Rect ir = {r.x + S(4), yy, r.w - S(8), rh};
-        if (moved && opt_hover(ir)) g_opt.drop_sel = k;
+    ClipSave cl = draw_clip_push((SDL_Rect){(int)lr.x, (int)lr.y, (int)lr.w, (int)ceilf(lr.h)});
+    for (int k = (int)(g_opt.drop_scroll / rh); k < g_opt.drop_n; k++) {
+        Rect ir = {r.x + S(4), yy + rh * (f32)k - g_opt.drop_scroll, r.w - S(8), rh};
+        if (ir.y >= lr.y + lr.h) break;
+        Rect hr = ir; // (what shows of a row cut by the edge)
+        hr.y = MAX(ir.y, lr.y), hr.h = MIN(ir.y + rh, lr.y + lr.h) - hr.y;
+        if (moved && opt_hover(hr)) g_opt.drop_sel = k;
         bool sel = k == g_opt.drop_sel;
         if (sel) draw_rrect(ir.x, ir.y, ir.w, ir.h, S(6), C(COL_SEL_FOCUS));
         int ci = g_opt.drop_map[k];
@@ -926,9 +937,9 @@ static void opt_draw_dropdown(void) {
             draw_line(cx, cyy, cx + S(3.5f), cyy + S(3.5f), t, cc);
             draw_line(cx + S(3.5f), cyy + S(3.5f), cx + S(10), cyy - S(4), t, cc);
         }
-        opt_hit(ir, HP_DROPITEM, id, k);
-        yy += rh;
+        opt_hit(hr, HP_DROPITEM, id, k);
     }
+    draw_clip_pop(cl);
     if (!g_opt.drop_n) draw_text(f, r.x + S(14), text_y(f, yy, rh), "No matches", 10, C(COL_TEXT_FAINT));
 }
 
@@ -1376,10 +1387,10 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
         switch (k) {
         case SDLK_ESCAPE: g_opt.drop_opt = -1; return;
         case SDLK_RETURN: case SDLK_KP_ENTER: opt_drop_pick(g_opt.drop_sel); return;
-        case SDLK_DOWN: g_opt.drop_sel = MIN(g_opt.drop_sel + 1, g_opt.drop_n - 1); return;
-        case SDLK_UP: g_opt.drop_sel = MAX(g_opt.drop_sel - 1, 0); return;
-        case SDLK_PAGEDOWN: g_opt.drop_sel = MIN(g_opt.drop_sel + vis, g_opt.drop_n - 1); return;
-        case SDLK_PAGEUP: g_opt.drop_sel = MAX(g_opt.drop_sel - vis, 0); return;
+        case SDLK_DOWN: g_opt.drop_sel = MIN(g_opt.drop_sel + 1, g_opt.drop_n - 1), g_opt.drop_reveal = true; return;
+        case SDLK_UP: g_opt.drop_sel = MAX(g_opt.drop_sel - 1, 0), g_opt.drop_reveal = true; return;
+        case SDLK_PAGEDOWN: g_opt.drop_sel = MIN(g_opt.drop_sel + vis, g_opt.drop_n - 1), g_opt.drop_reveal = true; return;
+        case SDLK_PAGEUP: g_opt.drop_sel = MAX(g_opt.drop_sel - vis, 0), g_opt.drop_reveal = true; return;
         default:
             if (te_key(&g_opt.drop_filter, k, mod)) opt_drop_filter();
             return;
@@ -1393,8 +1404,8 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
     case SDLK_TAB:
         if (!g_opt.search.buf[0]) { g_opt.cat = (g_opt.cat + (mod & SDL_KMOD_SHIFT ? OC_COUNT - 1 : 1)) % OC_COUNT; g_opt.scroll = 0; g_opt.lname_focus = g_opt.cat == OC_LAYOUTS; }
         return;
-    case SDLK_PAGEDOWN: g_opt.scroll += S(300); return;
-    case SDLK_PAGEUP: g_opt.scroll -= S(300); return;
+    case SDLK_PAGEDOWN: glide_by(&g_opt.scroll, S(300), g_opt.max_scroll); return;
+    case SDLK_PAGEUP: glide_by(&g_opt.scroll, -S(300), g_opt.max_scroll); return;
     default:
         if (te_key(&g_opt.search, k, mod)) g_opt.scroll = 0;
     }
@@ -1415,8 +1426,8 @@ static void options_text(const char *text) {
 }
 
 static void options_wheel(f32 dy) {
-    if (g_opt.drop_opt >= 0) { g_opt.drop_top = MAX(0, g_opt.drop_top - (int)dy * 3); g_opt.drop_sel = CLAMP(g_opt.drop_sel, g_opt.drop_top, g_opt.drop_top + 9); return; }
-    g_opt.scroll = CLAMP(g_opt.scroll - dy * S(60), 0.f, g_opt.max_scroll);
+    if (g_opt.drop_opt >= 0) { glide_by(&g_opt.drop_scroll, -dy * 3 * roundf(S(28)), 1e9f); return; } // (clamped when drawn)
+    glide_by(&g_opt.scroll, -dy * S(60), g_opt.max_scroll);
 }
 
 static void options_open_page(int cat) {

@@ -12,7 +12,7 @@ typedef struct {
     // open with
     char mime[160];
     DesktopApp *apps[512];
-    int napps, sel, top;
+    int napps, sel;
     f32 ow_scroll;   // app list scroll offset (pixels)
     bool ow_reveal;  // keep the selection in view on the next draw (keyboard / filter changes)
     bool show_all, set_default;
@@ -42,6 +42,7 @@ typedef struct {
     char **newnames;
     u8 *status; // 0 unchanged, 1 change, 2 conflict
     int nconflicts, nchanges;
+    f32 rn_scroll; // the preview list (pixels)
     Rect rfield[3], rcase[4], rmatch, rapply, rnum_minus, rnum_plus;
     // connect to server
     TextEdit cn[7]; // CN_* fields (+ CN_NAME)
@@ -94,6 +95,7 @@ static void sheet_close(void) {
     free(s->status);
     strv_free(s->paths, s->npaths);
     memset(s, 0, sizeof *s);
+    g_glide.v = NULL;
     A.redraw = true;
 }
 
@@ -308,7 +310,6 @@ static void openwith_refresh(void) {
         s->apps[s->napps++] = tmp[i];
     }
     s->sel = CLAMP(s->sel, 0, MAX(s->napps - 1, 0));
-    s->top = 0;
     s->ow_scroll = 0;
     s->ow_reveal = true;
 }
@@ -1233,10 +1234,10 @@ static void rename_draw(void) {
     draw_rrect(lr.x, lr.y, lr.w, lr.h, S(8), C(COL_SUNKEN));
     ClipSave cs = draw_clip_push((SDL_Rect){(int)lr.x + 2, (int)lr.y + 2, (int)lr.w - 4, (int)lr.h - 4});
     f32 rh = roundf(S(24)), half = (lr.w - S(40)) * 0.5f;
-    int vis = (int)(lr.h / rh);
-    s->top = CLAMP(s->top, 0, MAX(0, s->npaths - vis));
-    for (int i = s->top; i < s->npaths && i < s->top + vis + 1; i++) {
-        f32 yy = lr.y + S(4) + (i - s->top) * rh;
+    s->rn_scroll = CLAMP(s->rn_scroll, 0.f, MAX(0.f, (f32)s->npaths * rh + S(8) - lr.h));
+    for (int i = (int)(s->rn_scroll / rh); i < s->npaths; i++) {
+        f32 yy = lr.y + S(4) + (f32)i * rh - s->rn_scroll;
+        if (yy >= lr.y + lr.h) break;
         const char *old = path_basename(s->paths[i]);
         draw_text_fit(f, lr.x + S(12), text_y(f, yy, rh), half - S(12), old, (int)strlen(old), C(COL_TEXT_DIM), 0);
         draw_chevron(lr.x + S(12) + half + S(8), yy + rh * 0.5f, S(6), 1, MAX(1.f, S(1.3f)), C(COL_TEXT_FAINT));
@@ -2080,8 +2081,8 @@ static void sheet_key(SDL_Keycode k, SDL_Keymod mod) {
         TextEdit *tes[3] = {&s->tmpl, &s->find, &s->repl};
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) rename_apply();
         else if (k == SDLK_TAB) s->focus = (s->focus + (mod & SDL_KMOD_SHIFT ? 2 : 1)) % 3;
-        else if (k == SDLK_DOWN) s->top++;
-        else if (k == SDLK_UP) s->top = MAX(0, s->top - 1);
+        else if (k == SDLK_DOWN) glide_by(&s->rn_scroll, roundf(S(24)), 1e9f); // (clamped when drawn)
+        else if (k == SDLK_UP) glide_by(&s->rn_scroll, -roundf(S(24)), 1e9f);
         else if (te_key(tes[s->focus], k, mod)) rename_recompute();
         break;
     }
@@ -2283,10 +2284,10 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
 static void sheet_wheel(f32 dy) {
     Sheet *s = &g_sheet;
     if (s->kind == SHEET_OPTIONS) options_wheel(dy);
-    else if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON || s->kind == SHEET_BORG) && s->cn_pick) s->cn_pick_scroll -= dy * S(48); // clamped when drawn
-    else if (s->kind == SHEET_OPENWITH) s->ow_scroll -= dy * s->row_h * 1.5f; // clamped when drawn
-    else if (s->kind == SHEET_PROPS) s->pv_scroll -= dy * S(48);
-    else if (s->kind == SHEET_RENAME) s->top = MAX(0, s->top - (int)dy * 3);
+    else if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON || s->kind == SHEET_BORG) && s->cn_pick) glide_by(&s->cn_pick_scroll, -dy * S(48), 1e9f); // clamped when drawn
+    else if (s->kind == SHEET_OPENWITH) glide_by(&s->ow_scroll, -dy * s->row_h * 1.5f, 1e9f);
+    else if (s->kind == SHEET_PROPS) glide_by(&s->pv_scroll, -dy * S(48), s->pv_content - s->rbody.h);
+    else if (s->kind == SHEET_RENAME) glide_by(&s->rn_scroll, -dy * 3 * roundf(S(24)), 1e9f);
     A.redraw = true;
 }
 

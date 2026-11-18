@@ -79,6 +79,11 @@ every theme, where the desktop has one; otherwise the accent picked above.
 colours the scrollbars; `auto` (the field left empty) keeps the theme's own, which under Theme > System take the
 desktop's accent colour.
 
+`smooth_scroll=1` (Options -> Appearance -> Smooth scrolling, on by default): the wheel eases every list, sheet and
+menu to its new place, and a quick run of notches one way scrolls further each time (up to three times as far). A
+touchpad moves the view as the fingers do, and a swipe that lets go at speed carries on, slowing down; a click, a
+key or the wheel stops it. Off: the wheel jumps a fixed step.
+
 Colour schemes: `~/.config/file-explorer/themes/*.json` (Options → "Create theme from current colours" writes a
 starting point). Any key you leave out comes from the `base` theme:
 ```json
