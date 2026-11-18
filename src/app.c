@@ -1157,7 +1157,7 @@ static f32 picker_bar_h(void);
 static f32 picker_tab_h(void);
 static void draw_picker_bar(Rect s);
 static bool picker_mouse(f32 x, f32 y);
-static bool picker_key(SDL_Keycode k, SDL_Keymod mod);
+static bool picker_key(SDL_KeyboardEvent *ev);
 static bool picker_text(const char *text);
 static bool picker_open_file(struct Pane *p, const char *full);
 static void picker_cancel(void);

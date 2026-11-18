@@ -15,6 +15,7 @@
 
 **Fixed**
 - Inside a Timeshift snapshot the bar with "Compare with now" and "Restore…" shows, as it does for Snapper and ZFS.
+- In the Save dialog (the app as file chooser), Ctrl+L / F6 edits the path while the file name has the keyboard, and Alt+←/→/↑, Ctrl+H and F5 work there without losing the typed name. Thanks to @pr83-glitch.
 
 ## 0.11.2
 

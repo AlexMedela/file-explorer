@@ -6390,6 +6390,20 @@ static int run_selftest_m10(void) {
         picker_commit();
         st_wait();
         ST_CHECK(!strcmp(pp->path, M10_BASE "/pick/sub") && !g_pick_name.buf[0]);
+        // while the name has the keyboard: Alt+Up goes up and keeps the name, Ctrl+L gives the path bar the keys
+        g_pick_name_focus = true;
+        A.pick_done = 0;
+        st_type("draft");
+        st_key(SDLK_UP, SDL_KMOD_ALT);
+        st_wait();
+        ST_CHECK(!strcmp(pp->path, M10_BASE "/pick") && !strcmp(g_pick_name.buf, "draft") && g_pick_name_focus);
+        st_key(SDLK_L, SDL_KMOD_CTRL);
+        ST_CHECK(A.edit_pane == pp && !g_pick_name_focus);
+        st_type("x");
+        ST_CHECK(!strcmp(g_pick_name.buf, "draft") && !strcmp(A.edit.buf, "x")); // typed into the path bar, not the name
+        st_key(SDLK_ESCAPE, 0);
+        ST_CHECK(!A.edit_pane && A.pick_done == 0);
+        te_set(&g_pick_name, "", 0, 0);
         unlink(outf);
         A.pick_done = 0;
         g_pick_name_focus = true;

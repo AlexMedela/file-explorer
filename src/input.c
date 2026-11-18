@@ -84,7 +84,7 @@ static void on_key(SDL_KeyboardEvent *k) {
     if (A.menu.open) { menu_key(k->key); return; }
     if (A.q_open && !A.ren_pane && !A.search_pane && !A.edit_pane && A.qa_edit_g < 0 && !active_term() && queue_key(k->key, k->mod)) return;
     if (A.drag != DRAG_NONE && k->key == SDLK_ESCAPE) { dragout_cancel(); drag_cancel(); return; }
-    if (!A.ren_pane && A.qa_edit_g < 0 && picker_key(k->key, k->mod)) return;
+    if (!A.ren_pane && A.qa_edit_g < 0 && picker_key(k)) return;
     if (active_term()) { // the terminal has the keyboard; the app keeps tab switching, closing and its menus
         Term *tt = active_term();
         if (tt == A.ap->cur->dock && (key_is(k, ACT_TERM_PANEL) || key_is(k, ACT_TERM_FOCUS))) {

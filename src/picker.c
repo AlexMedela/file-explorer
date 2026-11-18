@@ -277,10 +277,19 @@ static bool picker_mouse(f32 x, f32 y) {
 }
 
 // Keys before the list gets them. Escape cancels unless something else would use it.
-static bool picker_key(SDL_Keycode k, SDL_Keymod mod) {
+static bool picker_key(SDL_KeyboardEvent *ev) {
     if (!picker_active()) return false;
+    SDL_Keycode k = ev->key;
+    SDL_Keymod mod = ev->mod;
     Pane *p = active_pane();
     if (g_pick_name_focus) {
+        // The folder shortcuts work while the name has the keyboard (like GTK's chooser): going elsewhere keeps the
+        // name and its focus, the path bar and the searches take the keyboard. Other shortcuts (undo, delete...) don't.
+        static const int keep[] = {CMD_BACK, CMD_FORWARD, CMD_UP, ACT_HIDDEN, ACT_REFRESH}, take[] = {CMD_EDIT_PATH, CMD_SEARCH, CMD_GOTO};
+        for (size_t i = 0; i < ARRAY_COUNT(keep); i++)
+            if (key_is(ev, keep[i])) { run_command(keep[i]); return true; }
+        for (size_t i = 0; i < ARRAY_COUNT(take); i++)
+            if (key_is(ev, take[i])) { g_pick_name_focus = false; return false; }
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) picker_commit();
         else if (k == SDLK_ESCAPE) picker_cancel();
         else if (k == SDLK_TAB) g_pick_name_focus = false;
