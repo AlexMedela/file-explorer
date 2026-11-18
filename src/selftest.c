@@ -8403,7 +8403,7 @@ static int run_selftest_cmp(void) {
         g_sheet.cp_focus = 1;
     }
     te_set(&g_sheet.cp[1], CMP_BASE "/b", 0, 0);
-    g_sheet.cp_nsug = 0;
+    cmp_sug_clear();
     st_key(SDLK_RETURN, 0);
     ST_CHECK(g_sheet.kind == SHEET_NONE);
     st_wait();
