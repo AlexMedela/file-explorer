@@ -9272,6 +9272,13 @@ static int run_selftest_borg(void) {
     char mp1[PATH_MAX];
     borg_mount_point(BORG_BASE "/home/repo1", mp1, sizeof mp1);
     ST_CHECK(!strcmp(p->path, mp1) && g_borg_n == 2 && p->ly.has_snapbar);
+    { // tabs (and other path icons) show the backup's icon at the mount and its archives, a folder deeper in
+        char sub[PATH_MAX + 16];
+        snprintf(sub, sizeof sub, "%s/archive", mp);
+        ST_CHECK(!strcmp(borg_path_icon(mp), "nas") && !strcmp(borg_path_icon(mp1), BORG_ICON_DEFAULT) && !strcmp(borg_path_icon(sub), "nas"));
+        snprintf(sub, sizeof sub, "%s/archive/home", mp);
+        ST_CHECK(!borg_path_icon(sub) && !borg_path_icon(BORG_BASE "/home"));
+    }
     // closed by hand: the kept one stays closed this run; removed from the sidebar
     borg_close_mount(mp);
     st_borg_settle();
