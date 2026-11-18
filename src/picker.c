@@ -26,7 +26,68 @@ static const char *picker_title(void) {
     return "";
 }
 
+static bool path_is_dir(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+// Save: the folder last saved into, per file type (the name's extension), in picker.conf next to settings.conf
+// ("ext<TAB>folder" lines, newest first): the next Save of that type starts there. (Apps only pass a suggested name.)
+static void picker_conf(char *out, size_t cap) {
+    char dir[PATH_MAX];
+    settings_file(dir, sizeof dir, true);
+    snprintf(out, cap, "%s/picker.conf", dir);
+}
+
+static void picker_ext(const char *name, char *ext, size_t cap) {
+    const char *b = path_basename(name), *dot = strrchr(b, '.');
+    size_t k = 0;
+    if (dot && dot != b)
+        for (dot++; *dot && k + 1 < cap; dot++) ext[k++] = (char)tolower((unsigned char)*dot);
+    ext[k] = 0;
+}
+
+static bool picker_type_folder(const char *ext, char *out, size_t cap) {
+    char path[PATH_MAX], line[PATH_MAX + 32];
+    picker_conf(path, sizeof path);
+    FILE *f = ext[0] ? fopen(path, "re") : NULL;
+    bool found = false;
+    while (f && !found && fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\n")] = 0;
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = 0;
+        if (!strcmp(line, ext) && path_is_dir(tab + 1)) { snprintf(out, cap, "%s", tab + 1); found = true; }
+    }
+    if (f) fclose(f);
+    return found;
+}
+
+static void picker_type_remember(const char *saved) {
+    char ext[24], dir[PATH_MAX], path[PATH_MAX], tmp[PATH_MAX + 8], line[PATH_MAX + 32];
+    picker_ext(saved, ext, sizeof ext);
+    parent_of(saved, dir, sizeof dir);
+    if (!ext[0] || strpbrk(dir, "\n\r")) return;
+    picker_conf(path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    char cdir[PATH_MAX];
+    settings_file(cdir, sizeof cdir, true);
+    mkdir_p(cdir, 0700);
+    FILE *in = fopen(path, "re"), *out = fopen(tmp, "w");
+    if (!out) { if (in) fclose(in); return; }
+    fprintf(out, "%s\t%s\n", ext, dir);
+    for (int n = 1; in && n < 64 && fgets(line, sizeof line, in);) { // (the 64 types used last)
+        char *tab = strchr(line, '\t');
+        if (!tab || ((size_t)(tab - line) == strlen(ext) && !strncmp(line, ext, strlen(ext)))) continue;
+        fputs(line, out);
+        n++;
+    }
+    if (in) fclose(in);
+    if (fclose(out) == 0) rename(tmp, path);
+}
+
 static void picker_finish(char **paths, int n) {
+    if (g_pick == PICK_SAVE && n == 1) picker_type_remember(paths[0]);
     FILE *f = g_pick_out[0] ? fopen(g_pick_out, "w") : NULL;
     for (int i = 0; f && i < n; i++) fprintf(f, "%s\n", paths[i]);
     if (f) fclose(f);
@@ -39,11 +100,6 @@ static void picker_cancel(void) { picker_finish(NULL, 0); }
 static bool picker_folder_ok(Pane *p) {
     if (pane_is_archive(p) || pane_is_trash(p)) { toast("Choose a regular folder"); return false; }
     return true;
-}
-
-static bool path_is_dir(const char *path) {
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
 // The folder Choose would return: the one selected (a single folder), else the folder being shown.
@@ -356,7 +412,9 @@ static void picker_setup(const char *mode, const char **start, char *buf, size_t
     if (g_pick == PICK_SAVE && !path_is_dir(path)) { // ".../Downloads/report.pdf": folder + name
         picker_set_name(path_basename(path));
         parent_of(path, buf, cap);
-        if (!path_is_dir(buf)) snprintf(buf, cap, "%s", getenv("HOME") ? getenv("HOME") : "/");
+        char ext[24];
+        picker_ext(path, ext, sizeof ext);
+        if (!picker_type_folder(ext, buf, cap) && !path_is_dir(buf)) snprintf(buf, cap, "%s", getenv("HOME") ? getenv("HOME") : "/");
         g_pick_name_focus = true;
     } else if (!path_is_dir(path) && g_pick != PICK_SAVE) {
         // a suggested file: open its folder (the file is selected by the normal FILE argument handling)

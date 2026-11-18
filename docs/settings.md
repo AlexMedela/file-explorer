@@ -62,7 +62,8 @@ file, then "Restart now" switches to it (tabs come back; or it simply starts nex
 downloads by itself, so the card only asks to restart. The AppImage's folder must be writable. Packages (apt, dnf,
 zypper) update with the system and makepkg / source builds are told the command to run; "Check now" works for all.
 
-Per-folder views live in `~/.config/file-explorer/folders.conf`, saved layouts in `layouts.conf`.
+Per-folder views live in `~/.config/file-explorer/folders.conf`, saved layouts in `layouts.conf`, the file chooser's last
+Save folder per file type in `picker.conf`.
 
 Theme > **System** (`theme=System`) is Light or Dark as the desktop prefers (the settings portal's dark / light
 preference, else GTK's), with the desktop's accent colour where it has one (an accent picked in Options wins), and
