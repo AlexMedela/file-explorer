@@ -9,7 +9,7 @@ enum {
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
-    OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_DEF_GROUP,
+    OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_FOLDERS_FIRST, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
 };
@@ -72,6 +72,7 @@ static const OptDef g_opts[] = {
     {OC_VIEWS, OK_BOOL, OPT_VIEW_PER_FOLDER, "Each folder keeps its own view", "Opening a folder switches to the view last used there (else the default)"},
     {OC_VIEWS, OK_CHOICE, OPT_DEF_SORT, "Default sort", "Sort column for new tabs"},
     {OC_VIEWS, OK_BOOL, OPT_SORT_DESC, "Sort descending", "Reverse the default sort order"},
+    {OC_VIEWS, OK_BOOL, OPT_FOLDERS_FIRST, "Folders first", "Folders above files, whatever the sort; off: mixed together"},
     {OC_VIEWS, OK_CHOICE, OPT_DEF_GROUP, "Default grouping", "Group items in the details view"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_DEFAULT_FM, "Default file manager", "Folders from other apps open here"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_FM1, "\"Show in folder\" opens here", "From browsers and other apps"},
@@ -466,6 +467,7 @@ static bool opt_bool_get(int id) {
     case OPT_RESTORE: return A.restore_session;
     case OPT_PREVIEW: return A.preview_on;
     case OPT_SORT_DESC: return A.def_sort_desc;
+    case OPT_FOLDERS_FIRST: return atomic_load(&g_folders_first);
     case OPT_VIEW_PER_FOLDER: return A.view_per_folder;
     case OPT_SINGLE_CLICK: return A.single_click;
     case OPT_DBLCLICK_UP: return A.dblclick_up;
@@ -517,6 +519,7 @@ static void opt_bool_toggle(int id) {
     case OPT_RESTORE: A.restore_session = !A.restore_session; break;
     case OPT_PREVIEW: preview_toggle(); break;
     case OPT_SORT_DESC: A.def_sort_desc = !A.def_sort_desc; break;
+    case OPT_FOLDERS_FIRST: do_action(active_pane(), ACT_FOLDERS_FIRST); break;
     case OPT_VIEW_PER_FOLDER: A.view_per_folder = !A.view_per_folder; break;
     case OPT_SINGLE_CLICK: A.single_click = !A.single_click; break;
     case OPT_DBLCLICK_UP: A.dblclick_up = !A.dblclick_up; break;

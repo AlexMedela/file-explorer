@@ -1309,7 +1309,7 @@ static void dirsize_start(Listing *L, bool visible, bool hidden, bool remote, co
         c->dirs[c->n++] = i;
     }
     if (!c->n) { free(c->dirs); free(c); return; }
-    SortCtx ctx = {L->entries, SORT_NAME, false, false, GROUP_NONE, 0};
+    SortCtx ctx = {L->entries, SORT_NAME, false, false, GROUP_NONE, 0, true};
     qsort_r(c->dirs, c->n, sizeof(u32), cmp_entries, &ctx);
     c->L = L;
     listing_retain(L);
