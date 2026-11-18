@@ -146,9 +146,25 @@ static void draw_dir_icon(f32 x, f32 y, f32 s, const char *name, bool hidden) {
     draw_folder_icon(x, y + (s > 48 ? s * 0.04f : 0), s, hidden ? rgb_mix(COL_FOLDER, COL_BG, 0.35f) : COL_FOLDER, hidden ? rgb_mix(COL_FOLDER_TAB, COL_BG, 0.35f) : COL_FOLDER_TAB);
 }
 
-// A folder given by its full path: the trash gets the bin, home its folder, anything else goes by its name.
+// A backup mount of ours or one of its archives: the backup's icon (the sidebar's), else NULL.
+static const char *borg_path_icon(const char *path) {
+    for (int k = 0; k < g_borg_n; k++) {
+        size_t ml = strlen(g_borg[k].mp);
+        if (strncmp(path, g_borg[k].mp, ml) || (path[ml] && path[ml] != '/')) continue;
+        const char *rest = path + ml + (path[ml] == '/');
+        if (strchr(rest, '/')) return NULL; // deeper inside an archive: an ordinary folder
+        int i = borg_saved_of_mount(k);
+        return i >= 0 && A.borgs[i].icon[0] ? A.borgs[i].icon : BORG_ICON_DEFAULT;
+    }
+    return NULL;
+}
+
+// A folder given by its full path: the trash gets the bin, home its folder, a backup its icon, anything else goes
+// by its name.
 static void draw_path_icon(f32 x, f32 y, f32 s, const char *path) {
     if (is_trash_dir(path) && draw_icon_id(x, y, s, trash_icon(A.trash_known && !A.trash_empty), false)) return;
+    const char *bic = borg_path_icon(path);
+    if (bic && draw_net_icon(x, y, s, bic, 1.f)) return;
     const char *home = getenv("HOME");
     draw_dir_icon(x, y, s, home && home[0] && !strcmp(path, home) ? "home" : path_basename(path), false);
 }
