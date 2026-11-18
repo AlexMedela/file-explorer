@@ -441,7 +441,7 @@ _Static_assert(ACT_COMPRESS_BASE + ARC_NFMT <= ACT_QA_RENAME, "archive actions m
 enum {
     CMD_NEW_TAB = 100, CMD_CLOSE_TAB, CMD_SPLIT, CMD_SWITCH_PANE, CMD_BACK, CMD_FORWARD, CMD_UP, CMD_SEARCH,
     CMD_SORT_NAME, CMD_SORT_DATE, CMD_SORT_TYPE, CMD_SORT_SIZE, CMD_FOLDER_SIZES, CMD_EDIT_PATH, CMD_OVERLAY,
-    CMD_REINDEX, CMD_QUIT, CMD_HOME, CMD_SEARCH_SUBFOLDERS, CMD_ZOOM_IN, CMD_ZOOM_OUT, CMD_ZOOM_RESET,
+    CMD_REINDEX, CMD_QUICK_LOOK, CMD_QUIT, CMD_HOME, CMD_SEARCH_SUBFOLDERS, CMD_ZOOM_IN, CMD_ZOOM_OUT, CMD_ZOOM_RESET,
     CMD_RESTORE_SESSION, CMD_OPEN_SETTINGS, CMD_SPLIT_DOWN, CMD_COPY_OTHER, CMD_MOVE_OTHER, CMD_NEW_WINDOW,
     CMD_CLOSE_PANEL, CMD_OPTIONS, CMD_NEXT_TAB, CMD_PREV_TAB, CMD_GOTO, CMD_PALETTE, CMD_PREV_PANE,
     CMD_SAVE_LAYOUT, CMD_NEW_QA_GROUP, CMD_TREE_VIEW, CMD_TABS_POPUP, CMD_CONNECT, CMD_GIT_STATUS, CMD_SEARCH_CONTENTS, CMD_CS_TOGGLE,
@@ -593,6 +593,14 @@ static struct {
     char sess_layout[1024];
     // preview panel
     bool preview_on;
+    bool ql_on;      // Quick Look (Space): the cursor's file large over the window
+    f32 ql_scroll;   // its text, lines scrolled
+    const void *ql_placed; // the preview it was scrolled to the matching line for (contents search)
+    Rect r_ql;       // its card (a click outside closes it)
+    Rect r_ql_track, r_ql_thumb; // its text's scrollbar
+    int ql_total, ql_vis;        //   lines in the text / on screen
+    bool ql_drag;                //   the thumb held
+    f32 ql_drag_off;
     f32 preview_w; // logical px
     f32 side_w;    // sidebar width, logical px (drag its edge)
     Rect r_sdiv;   // the sidebar's draggable edge
@@ -10861,7 +10869,8 @@ static const CmdDef g_cmds[] = {
     {"Sort by type", "", CMD_SORT_TYPE},
     {"Sort by size", "", CMD_SORT_SIZE},
     {"Re-index folders for Go to", "", CMD_REINDEX},
-    {"Toggle preview panel", "Space / Ctrl+I", ACT_PREVIEW},
+    {"Quick Look", "Space", CMD_QUICK_LOOK},
+    {"Toggle preview panel", "Ctrl+I", ACT_PREVIEW},
     {"Pin / unpin folder in sidebar", "Ctrl+D", ACT_PIN},
     {"Zoom in", "Ctrl+=", CMD_ZOOM_IN},
     {"Zoom out", "Ctrl+-", CMD_ZOOM_OUT},
@@ -10888,6 +10897,8 @@ static void set_zoom(f32 z);
 static void settings_save(void);
 static void settings_file(char *out, size_t cap, bool dir_only);
 static void desktop_look_sync(void); // integration.c
+
+static void ql_toggle(void); // (preview panel section)
 
 static void run_command(int id) {
     Pane *p = active_pane();
@@ -10969,6 +10980,7 @@ static void run_command(int id) {
     case CMD_TREE_VIEW: tree_toggle_mode(p); break;
     case CMD_TABS_POPUP: pal_open_tabs(); break;
     case CMD_CONNECT: connect_open(-1); break;
+    case CMD_QUICK_LOOK: ql_toggle(); break;
     case CMD_REINDEX: index_rebuild_default(); toast("Re-indexing folders\xE2\x80\xA6"); break;
     case CMD_QUIT: A.quit = true; break;
     default:
@@ -11736,6 +11748,18 @@ static void preview_toggle(void) {
     A.redraw = true;
 }
 
+// Quick Look: Space opens it over the window, Space / Esc closes it. The preview is asked for again at the window's
+// size (the panel's is too small to fill it) and once more at the panel's when it closes.
+static void ql_toggle(void) {
+    A.ql_on = !A.ql_on;
+    A.ql_scroll = 0;
+    A.ql_placed = NULL;
+    A.ql_drag = false;
+    A.pv_want[0] = 0;
+    A.pv_path[0] = 0;
+    A.redraw = true;
+}
+
 static void preview_done_cb(void *arg) {
     PreviewResult *r = arg;
     if (r->gen != A.pv_gen) { preview_result_free(r); return; }
@@ -11757,7 +11781,7 @@ static void preview_done_cb(void *arg) {
 
 // Track the active pane's cursor; request a preview once it rests for a moment.
 static void preview_update(void) {
-    if (!A.preview_on || !A.ntabs) return;
+    if ((!A.preview_on && !A.ql_on) || !A.ntabs) return;
     Pane *p = active_pane();
     if (pane_is_archive(p)) return; // members aren't real files
     char path[PATH_MAX];
@@ -11784,11 +11808,12 @@ static void preview_update(void) {
         A.pv_line = line;
         A.pv_due = now + (first ? 0 : 90000000ull); // don't decode every row while holding an arrow key
         A.pv_path[0] = 0;
+        A.ql_scroll = 0;
     }
     if (A.pv_due && now >= A.pv_due) {
         A.pv_due = 0;
         snprintf(A.pv_path, sizeof A.pv_path, "%s", A.pv_want);
-        int max_px = (int)CLAMP(A.r_preview.w * 1.25f, 256.f, 2048.f);
+        int max_px = A.ql_on ? (int)CLAMP((f32)MAX(A.W, A.H), 256.f, 4096.f) : (int)CLAMP(A.r_preview.w * 1.25f, 256.f, 2048.f);
         preview_request(++A.pv_gen, A.pv_path, max_px, A.pv_line);
     }
 }
@@ -12010,6 +12035,7 @@ static void frame_draw(void) {
     draw_toast();
     draw_drag_badge();
     draw_tab_drop();
+    draw_quicklook();
     if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open) g_text_field_count = 0; // under an overlay: no clicks
     A.mouse_in = mouse_in; // overlays get the mouse
     fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);

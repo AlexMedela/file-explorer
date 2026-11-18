@@ -480,10 +480,10 @@ static void st_queue(void) {
     ST_CHECK(A.ops[A.q_sel] == o2 && !o2->go && !o1->go);
     bool pv = A.preview_on;
     queue_key(SDLK_SPACE, SDL_KMOD_NONE);
-    on_text(" "); // (the text event that comes with Space doesn't open the preview)
+    on_text(" "); // (the text event that comes with Space doesn't open Quick Look)
     queue_key(SDLK_DOWN, SDL_KMOD_NONE);
     queue_key(SDLK_SPACE, SDL_KMOD_NONE);
-    ST_CHECK(!atomic_load(&o1->paused) && !atomic_load(&o2->paused) && A.preview_on == pv && A.ops[A.q_sel] == o1);
+    ST_CHECK(!atomic_load(&o1->paused) && !atomic_load(&o2->paused) && A.preview_on == pv && !A.ql_on && A.ops[A.q_sel] == o1);
     main_drain();
     ops_schedule();
     ST_CHECK(o2->go && !o1->go);
@@ -1476,8 +1476,34 @@ static int run_selftest_m5(void) {
     st_mouse(SDL_EVENT_MOUSE_MOTION, dx + S(60), A.r_pdiv.y + S(100), 0, 0, 0);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
     ST_CHECK(fabsf(A.r_preview.w - MAX(before_w - S(60), roundf(S(220)))) < S(4)); // min width 220
-    // Space toggles it off
+    // Quick Look: Space shows the file large over the window (asked for at the window's size), the arrows go to the
+    // previous / next file, other keys do nothing, Space or Esc closes it; the panel stays. Ctrl+I hides the panel.
+    st_select(p, "photo.bmp");
+    st_key(SDLK_SPACE, SDL_KMOD_NONE);
     on_text(" ");
+    ST_CHECK(A.ql_on && A.preview_on);
+    ST_CHECK(st_wait_cond(c_pv_ready, 3000) && A.pv->kind == PV_IMAGE && A.pv->w == 640 && A.pv->h == 480 && A.pv_tex);
+    st_frames(2);
+    st_shot("quicklook-image");
+    i64 c0 = p->cursor;
+    st_key(SDLK_LEFT, SDL_KMOD_NONE);
+    ST_CHECK(A.ql_on && p->cursor == c0 - 1);
+    st_key(SDLK_RIGHT, SDL_KMOD_NONE);
+    ST_CHECK(A.ql_on && p->cursor == c0);
+    st_key(SDLK_DELETE, SDL_KMOD_NONE); // (nothing happens to the file while it's up)
+    st_wait_ops();
+    ST_CHECK(A.ql_on && st_exists(M5_BASE "/photo.bmp"));
+    st_key(SDLK_SPACE, SDL_KMOD_NONE);
+    on_text(" ");
+    ST_CHECK(!A.ql_on && A.preview_on);
+    st_select(p, "notes.txt");
+    on_text(" ");
+    ST_CHECK(A.ql_on && st_wait_cond(c_pv_ready, 3000) && A.pv->kind == PV_TEXT);
+    st_frames(2);
+    st_shot("quicklook-text");
+    st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+    ST_CHECK(!A.ql_on);
+    st_key(SDLK_I, SDL_KMOD_CTRL);
     ST_CHECK(!A.preview_on);
 
     // zoom
@@ -7382,6 +7408,14 @@ static int run_selftest_grep(void) {
     for (int k = 0; k < 200 && !(A.pv && A.pv->want_line == 3 && A.pv->first_line == 1); k++) { st_frames(1); SDL_Delay(3); }
     ST_CHECK(A.pv && A.pv->want_line == 3 && A.pv->first_line == 1);
     preview_toggle();
+    // Quick Look on a match line far down: the text opens at the match (in the upper third), not at the window's top
+    p->cursor = st_cs_row(p, "sub/deep/big.md", 3000);
+    on_text(" ");
+    for (int k = 0; k < 200 && !(A.ql_on && A.pv && A.pv->want_line == 3000 && A.ql_placed == A.pv); k++) { st_frames(1); SDL_Delay(3); }
+    ST_CHECK(A.ql_on && A.ql_placed == A.pv && A.ql_scroll > 10 && A.ql_scroll < 30); // (line 2970 + scroll: 3000 a third down)
+    st_shot("grep-quicklook");
+    on_text(" ");
+    ST_CHECK(!A.ql_on);
 
     // --- options: smart case, match case, whole word, regex, file filter, bad regex, hidden files
     st_cs_search("Needle");

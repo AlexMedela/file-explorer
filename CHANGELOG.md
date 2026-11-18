@@ -3,6 +3,8 @@
 ## Unreleased
 
 **New**
+- Quick Look: Space shows the file under the cursor large over the window, like macOS, Windows' Peek and GNOME's Sushi: pictures fitted to the window, text with line numbers, else its icon. ← / → go to the previous / next file, Space or Esc closes it. The preview panel moved to Ctrl+I alone. Thanks to @pr83-glitch.
+
 - The Save dialog remembers where you saved each type of file: the next PDF starts in the folder the last PDF went to, the next photo where the last photo went. Thanks to @pr83-glitch.
 
 - Properties of a photo (JPEG) shows its EXIF in the Media card: when it was taken, the camera and lens, the exposure (f/1.8 · 1/120 s · ISO 100 · 6.9 mm) and where (GPS coordinates), read by the app itself.

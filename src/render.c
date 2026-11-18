@@ -3778,3 +3778,147 @@ static void draw_preview(void) {
     }
     draw_clip_pop(cs);
 }
+
+// A keycap with text or an interface icon (ui >= 0) on the right of xr, centred on cy; returns its left edge.
+static f32 ql_keycap(f32 xr, f32 cy, const char *text, int ui) {
+    Font *fs = &A.font_small;
+    f32 h = roundf(S(22)), w = ui >= 0 ? h : roundf(text_width(fs, text, (int)strlen(text)) + S(16));
+    Rect r = {xr - w, roundf(cy - h * 0.5f), w, h};
+    draw_rrect(r.x, r.y, r.w, r.h, S(5), C(COL_CONTROL));
+    draw_rect(r.x + S(3), r.y + r.h - 1, r.w - S(6), 1, C(COL_POPUP_BORDER)); // (the keycap's edge)
+    if (ui >= 0) draw_ui_icon(ui, roundf(r.x + (w - S(14)) * 0.5f), roundf(r.y + (h - S(14)) * 0.5f), roundf(S(14)), C(COL_TEXT));
+    else draw_text(fs, r.x + S(8), text_y(fs, r.y, r.h), text, (int)strlen(text), C(COL_TEXT));
+    return r.x;
+}
+
+static f32 ql_label(f32 xr, f32 cy, const char *text) { // a keycap's word, right-aligned at xr
+    Font *fs = &A.font_small;
+    f32 w = text_width(fs, text, (int)strlen(text));
+    draw_text(fs, xr - w, text_y(fs, roundf(cy - S(11)), roundf(S(22))), text, (int)strlen(text), C(COL_TEXT_DIM));
+    return xr - w;
+}
+
+// Quick Look (Space): the cursor's file over the dimmed window, with its name, what it is and the keys on top. A
+// picture's card fits it (never larger than its pixels, never smaller than a minimum); a text gets the whole window
+// with line numbers and a scrollbar; anything else its icon in a smaller card.
+static void draw_quicklook(void) {
+    if (!A.ql_on || !A.ntabs) return;
+    Pane *p = active_pane();
+    Font *f = &A.font_brand, *fs = &A.font_small;
+    Listing *L = p->L;
+    Entry *e = (L && p->order && p->cursor >= 0 && p->cursor < (i64)p->count) ? &L->entries[p->order[p->cursor]] : NULL;
+    if (e && (e->flags & ENT_MATCH)) e = &L->entries[content_file_of(L, p->order[p->cursor])];
+    const char *name = e ? (strrchr(e->name, '/') ? strrchr(e->name, '/') + 1 : e->name) : (p->path[1] ? path_basename(p->path) : "/");
+    bool is_dir = e ? (e->flags & ENT_DIR) : true;
+    PreviewResult *pv = A.pv && !strcmp(A.pv->path, A.pv_want) ? A.pv : NULL;
+    bool pic = pv && pv->kind == PV_IMAGE && A.pv_tex, text = pv && pv->kind == PV_TEXT && pv->text && A.mono_path;
+    A.r_ql_track = A.r_ql_thumb = (Rect){0};
+    draw_rect(0, 0, (f32)A.W, (f32)A.H, CA(0x000000, 0.55f));
+
+    // the card: the window less a margin for a text, else sized to what it shows
+    f32 m = roundf(S(36)), pad = roundf(S(18)), hh = roundf(S(56));
+    f32 maxw = (f32)A.W - m * 2, maxh = (f32)A.H - m * 2, minw = MIN(maxw, roundf(S(520))), minh = MIN(maxh, roundf(S(360)));
+    f32 cw = maxw, ch = maxh, sc = 1;
+    if (pic) {
+        f32 tw = (f32)pv->w, th = (f32)pv->h;
+        sc = MIN(MIN((maxw - pad * 2) / tw, (maxh - hh - pad * 2) / th), 1.f);
+        cw = CLAMP(roundf(tw * sc) + pad * 2, minw, maxw);
+        ch = CLAMP(roundf(th * sc) + hh + pad * 2, minh, maxh);
+    } else if (!text) cw = minw, ch = minh;
+    Rect r = {roundf(((f32)A.W - cw) * 0.5f), roundf(((f32)A.H - ch) * 0.5f), cw, ch};
+    A.r_ql = r;
+    draw_rrect(r.x, r.y, r.w, r.h, S(12), C(COL_POPUP));
+    draw_rrect_outline(r.x, r.y, r.w, r.h, S(12), 1, C(COL_POPUP_BORDER));
+
+    // top: name and details on the left, the keys on the right (when there's room), all centred on the bar
+    char info[256] = "", b2[64];
+    if (e) {
+        type_label(e, info, sizeof info);
+        if (!is_dir && atomic_load_explicit(&e->meta, memory_order_acquire) == META_READY) {
+            fmt_size(b2, sizeof b2, e->size);
+            snprintf(info + strlen(info), sizeof info - strlen(info), "  \xC2\xB7  %s", b2);
+        }
+        if (pv && pv->kind == PV_IMAGE && pv->src_w)
+            snprintf(info + strlen(info), sizeof info - strlen(info), "  \xC2\xB7  %d \xC3\x97 %d", pv->src_w, pv->src_h);
+    }
+    f32 cy = r.y + hh * 0.5f, kx = r.x + r.w - pad, cap = roundf(S(22));
+    f32 w_close = text_width(fs, "Close", 5) + S(6) + text_width(fs, "Space", 5) + S(16);   // [Space] Close
+    f32 w_next = S(18) + text_width(fs, "Next", 4) + S(6) + cap * 2 + S(4);                // [<][>] Next
+    f32 room = r.w - pad * 2 - roundf(S(180)); // (the name keeps at least this much)
+    if (room >= w_close) {
+        kx = ql_label(kx, cy, "Close");
+        kx = ql_keycap(kx - S(6), cy, "Space", -1);
+        if (room >= w_close + w_next) {
+            kx = ql_label(kx - S(18), cy, "Next");
+            kx = ql_keycap(kx - S(6), cy, NULL, UI_ARROW_RIGHT);
+            kx = ql_keycap(kx - S(4), cy, NULL, UI_ARROW_LEFT);
+        }
+    }
+    f32 tw = kx - S(24) - (r.x + pad), ty = roundf(cy - (f->line_h + fs->line_h) * 0.5f);
+    draw_text_fit(f, r.x + pad, ty, tw, name, (int)strlen(name), C(COL_TEXT_STRONG), 0);
+    draw_text_fit(fs, r.x + pad, ty + roundf(f->line_h), tw, info, (int)strlen(info), C(COL_TEXT_DIM), 0);
+    draw_rect(r.x, r.y + hh, r.w, 1, C(COL_BORDER));
+    Rect b = {r.x + pad, r.y + hh + pad, r.w - pad * 2, r.h - hh - pad * 2};
+    ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x, (int)(r.y + hh + 1), (int)r.w, (int)(r.h - hh - 2)});
+
+    if (pic) {
+        f32 iw = roundf((f32)pv->w * sc), ih = roundf((f32)pv->h * sc);
+        SDL_FRect dst = {roundf(b.x + (b.w - iw) * 0.5f), roundf(b.y + (b.h - ih) * 0.5f), iw, ih};
+        draw_flush();
+        SDL_RenderTexture(A.ren, A.pv_tex, NULL, &dst);
+    } else if (text) {
+        Font *fm = &A.font_mono;
+        f32 lh = roundf(fm->line_h * 1.2f), gw = text_width(fm, "00000", 5), sbw = roundf(S(10));
+        int total = 1, vis = MAX(1, (int)((b.h - S(8)) / lh));
+        for (const char *c = pv->text; *c; c++) total += *c == '\n';
+        if (A.ql_placed != pv) { // contents search: opens at the match, in the upper third
+            A.ql_placed = pv;
+            if (pv->want_line) A.ql_scroll = (f32)MAX(0, pv->want_line - (pv->first_line > 0 ? pv->first_line : 1) - vis / 3);
+        }
+        A.ql_scroll = CLAMP(A.ql_scroll, 0.f, (f32)MAX(0, total - vis));
+        A.ql_total = total, A.ql_vis = vis;
+        if (total > vis) { // the scrollbar: drag the thumb, click beside it to page
+            Rect tr = {r.x + r.w - pad * 0.5f - sbw, b.y, sbw, b.h};
+            f32 th = MAX(roundf(S(32)), tr.h * (f32)vis / (f32)total), ty0 = tr.y + (tr.h - th) * (A.ql_scroll / (f32)(total - vis));
+            A.r_ql_track = tr;
+            A.r_ql_thumb = (Rect){tr.x, roundf(ty0), sbw, th};
+            bool hot = A.ql_drag || (A.mouse_in && in_rect(tr, A.mx, A.my));
+            draw_rrect(tr.x + sbw * 0.25f, tr.y, sbw * 0.5f, tr.h, sbw * 0.25f, CA(COL_TEXT, 0.05f));
+            draw_rrect(tr.x + (hot ? 0 : sbw * 0.2f), A.r_ql_thumb.y, hot ? sbw : sbw * 0.6f, th, S(4), C(hot ? COL_SCROLL_HOVER : COL_SCROLL));
+            b.w -= sbw + S(8);
+        }
+        const char *s0 = pv->text;
+        for (int k = 0; k < (int)A.ql_scroll && s0; k++) { s0 = strchr(s0, '\n'); if (s0) s0++; }
+        int lineno = (pv->first_line > 0 ? pv->first_line : 1) + (int)A.ql_scroll;
+        for (f32 y = b.y; s0 && *s0 && y < b.y + b.h - lh * 0.5f; y += lh) {
+            const char *eol = strchr(s0, '\n');
+            int len = eol ? (int)(eol - s0) : (int)strlen(s0);
+            char num[16], exp[2048];
+            if (pv->want_line && lineno == pv->want_line) draw_rect(b.x - S(6), y - roundf((lh - fm->line_h) * 0.5f), b.w + S(12), lh, CA(COL_ACCENT, 0.16f));
+            snprintf(num, sizeof num, "%d", lineno++);
+            draw_text(fm, b.x + gw - text_width(fm, num, (int)strlen(num)), y, num, (int)strlen(num), C(COL_TEXT_FAINT));
+            int o = 0;
+            for (int i = 0; i < len && o < (int)sizeof exp - 5; i++) {
+                if (s0[i] == '\t') { for (int k = 0; k < 4; k++) exp[o++] = ' '; }
+                else if (s0[i] != '\r') exp[o++] = s0[i];
+            }
+            draw_text_fit(fm, b.x + gw + S(16), y, b.w - gw - S(16), exp, o, C(COL_TEXT2), 0);
+            s0 = eol ? eol + 1 : NULL;
+        }
+    } else { // no picture or text (yet): its icon, and for a folder what it holds
+        f32 is = roundf(MIN(S(128), b.h * 0.45f)), ix = roundf(b.x + (b.w - is) * 0.5f), iy = roundf(b.y + (b.h - is) * 0.35f);
+        if (is_dir) draw_dir_icon(ix, iy, is, name, false);
+        else if (!e || !draw_icon_for_name(ix, iy, is, name, e->mflags & MF_EXEC)) draw_file_icon(ix, iy, is, e ? file_color(e) : 0x8C8F99);
+        char line[128] = "";
+        if (pv && pv->kind == PV_DIR) {
+            char a[32], c2[32];
+            fmt_count(a, pv->n_dirs);
+            fmt_count(c2, pv->n_files);
+            snprintf(line, sizeof line, "%s folder%s, %s file%s%s", a, pv->n_dirs == 1 ? "" : "s", c2, pv->n_files == 1 ? "" : "s", pv->truncated ? "+" : "");
+        } else if (!pv && A.pv_want[0] && !pane_is_archive(p)) snprintf(line, sizeof line, "Loading\xE2\x80\xA6");
+        else if (pv && pv->note[0]) snprintf(line, sizeof line, "%s", pv->note);
+        Font *fn = &A.font;
+        if (line[0]) draw_text(fn, b.x + (b.w - text_width(fn, line, (int)strlen(line))) * 0.5f, iy + is + S(24), line, (int)strlen(line), C(COL_TEXT_DIM));
+    }
+    draw_clip_pop(cs);
+}
