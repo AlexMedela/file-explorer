@@ -3,6 +3,8 @@
 ## Unreleased
 
 **New**
+- Properties of a photo (JPEG) shows its EXIF in the Media card: when it was taken, the camera and lens, the exposure (f/1.8 · 1/120 s · ISO 100 · 6.9 mm) and where (GPS coordinates), read by the app itself.
+
 - Properties of an archive shows what it holds: files, folders and the unpacked size (and how much it saves), counted in the background and updated as it goes, so big compressed archives don't make you wait.
 
 - Properties has a Media card for images, videos, music and PDFs: dimensions ("1920 × 1080 pixels"), length, the video and audio codecs, frame rate, stereo / 5.1 and sample rate, a song's bit rate and title / artist / album, a PDF's pages, title and author. Image sizes are read directly; the rest through `ffprobe` (ffmpeg) and `pdfinfo` (poppler) when they're installed, in the background. Thanks to @pr83-glitch.
