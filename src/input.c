@@ -919,6 +919,15 @@ static void on_mouse_up(void) {
     if (open_row >= 0 && p && pane_exists(p) && p->order && open_row < (i64)p->count) open_entry(p, open_row, false);
 }
 
+// The items dragged inside pane p go on as a drag to other apps (archive members can't: they aren't files yet).
+static void drag_items_out(Pane *p) {
+    if (pane_is_archive(p)) return;
+    int n;
+    char **paths = pane_selection_paths(p, &n);
+    dragout_start(p, paths, n);
+    strv_free(paths, n);
+}
+
 static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     A.mx = m->x;
     A.my = m->y;
@@ -960,12 +969,7 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     } else if (A.drag == DRAG_ITEMS && p) {
         drop_target(p, m->x, m->y);
         if (g_do.active) dragout_motion();
-        else if ((m->x <= 0 || m->y <= 0 || m->x >= A.W - 1 || m->y >= A.H - 1) && !pane_is_archive(p)) { // out of the window: to other apps
-            int n;
-            char **paths = pane_selection_paths(p, &n);
-            dragout_start(p, paths, n);
-            strv_free(paths, n);
-        }
+        else if (m->x <= 0 || m->y <= 0 || m->x >= A.W - 1 || m->y >= A.H - 1) drag_items_out(p); // out of the window: to other apps
     } else if (A.drag == DRAG_PLACE_PENDING || A.drag == DRAG_PLACE) {
         if (A.drag == DRAG_PLACE_PENDING && fabsf(m->y - A.band_my0) > S(6)) A.drag = DRAG_PLACE;
         if (A.drag == DRAG_PLACE) qa_drop_point(m->y, &A.qa_ins_g, &A.qa_ins_i);
