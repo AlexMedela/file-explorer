@@ -3166,7 +3166,7 @@ static void draw_menu_in(Menu *m, bool frame) {
     }
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x, (int)r.y + 1, (int)r.w, (int)r.h - 2});
     bool anycheck = false; // one check mark column for the whole menu keeps labels aligned
-    for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable;
+    for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable && !menu_item_icon_check(&m->items[i]);
     bool icons = menu_icons_in(m); // an icon column before the labels
     f32 yy = r.y + roundf(S(5)) - m->scroll;
     for (int i = 0; i < m->n; i++) {
@@ -3180,7 +3180,8 @@ static void draw_menu_in(Menu *m, bool frame) {
             hand_if(it->enabled && A.mouse_in && menu_item_at_in(m, A.mx, A.my) == i && !(m == &A.menu && menu_sub_shown() && in_rect(g_menu_sub.r, A.mx, A.my)));
             Color tc = it->enabled ? C(COL_TEXT) : C(COL_TEXT_FAINT);
             f32 lx = (anycheck ? r.x + S(30) : r.x + S(16)) + (icons ? S(26) : 0);
-            if (it->checkable) {
+            bool icon_check = menu_item_icon_check(it);
+            if (it->checkable && !icon_check) {
                 if (it->checked) {
                     f32 cx = r.x + S(14), cy = yy + h * 0.5f, t = MAX(1.4f, S(1.6f));
                     draw_line(cx - S(4), cy, cx - S(1), cy + S(3), t, it->enabled ? C(COL_ACCENT) : C(COL_TEXT_FAINT));
@@ -3211,8 +3212,14 @@ static void draw_menu_in(Menu *m, bool frame) {
                     draw_text(fs, ix + (is - text_width(fs, ch, 1)) * 0.5f, text_y(fs, iy, is), ch, 1, tc);
                 }
             } else if (icons) {
-                f32 is = roundf(S(16));
-                draw_ui_icon(menu_action_icon(it), lx - S(25) + (S(18) - is) * 0.5f, yy + (h - is) * 0.5f, is, tc);
+                f32 is = roundf(S(16)), ix = lx - S(25) + (S(18) - is) * 0.5f, iy = yy + (h - is) * 0.5f;
+                Color ic = tc;
+                if (icon_check && it->checked) { // on: the icon in an accent circle
+                    f32 d = roundf(S(22));
+                    draw_rrect(roundf(ix + (is - d) * 0.5f), roundf(iy + (is - d) * 0.5f), d, d, d * 0.5f, it->enabled ? C(COL_ACCENT) : C(COL_CHIP));
+                    if (it->enabled) ic = C(COL_ON_ACCENT);
+                }
+                draw_ui_icon(menu_action_icon(it), ix, iy, is, ic);
             }
             draw_text(f, lx, text_y(f, yy, h), it->label, (int)strlen(it->label), tc);
             if (it->sub) { // opens a submenu: a chevron where the shortcut would be

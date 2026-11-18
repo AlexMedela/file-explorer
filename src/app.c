@@ -7525,7 +7525,8 @@ static int menu_action_icon(const MenuItem *it) {
     case ACT_FV_SUBFOLDERS: return UI_FOLDER_TREE;
     case ACT_FV_ALL: return UI_GLOBE;
     case ACT_HIDDEN: return !it->checkable && A.show_hidden ? UI_EYE_OFF : UI_EYE;
-    case ACT_PREVIEW: case ACT_DU_SHOW: return UI_EYE;
+    case ACT_PREVIEW: return UI_PANEL_RIGHT; // the panel on the right
+    case ACT_DU_SHOW: return UI_EYE;
     case ACT_REFRESH: case ACT_CLOUD_REFRESH: case ACT_GIT_REFRESH: case ACT_SNAP_REFRESH: case ACT_DU_RESCAN:
     case ACT_CMP_AGAIN: return UI_REFRESH_CW;
     case ACT_SELECT_ALL: return UI_SQUARE_CHECK_BIG;
@@ -7554,11 +7555,15 @@ static int menu_action_icon(const MenuItem *it) {
     case ACT_GIT_STATUS: return UI_GIT_BRANCH;
     case ACT_FOLDER_SIZES: case ACT_SIZE_BARS: return UI_CHART_COLUMN;
     case ACT_LOAD_TIMES: return UI_CLOCK;
+    case ACT_ALT_ROWS: return UI_ROWS_3;
     }
     return -1;
 }
 
 static bool menu_item_is_app(const MenuItem *it) { return it->act >= ACT_OW_APP_BASE && it->act < ACT_OW_APP_BASE + g_ow_menu.n; }
+
+// A switch with an icon shows its state on the icon (in an accent circle when on) rather than with a check mark.
+static bool menu_item_icon_check(const MenuItem *it) { return it->checkable && !menu_item_is_app(it) && menu_action_icon(it) >= 0; }
 
 // Menus show those icons (render.c draws them; built in, the same everywhere); the Open with apps show their own.
 // When no item has an icon there's no icon column at all.
@@ -7588,7 +7593,7 @@ static void menu_layout(Menu *m, f32 x, f32 y, f32 x_left) {
         sw = MAX(sw, it->sub ? S(10) : text_width(&A.font_small, it->shortcut, (int)strlen(it->shortcut)));
     }
     bool anycheck = false;
-    for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable;
+    for (int i = 0; i < m->n; i++) anycheck |= m->items[i].checkable && !menu_item_icon_check(&m->items[i]);
     f32 w = roundf(lw + sw + S(64) + (anycheck ? S(14) : 0) + (menu_icons_in(m) ? S(26) : 0));
     if (x_left >= 0 && x + w > A.W - S(4) && x_left - w >= S(4)) x = x_left - w;
     x = MAX(S(4), MIN(x, A.W - w - S(4)));
