@@ -3136,6 +3136,19 @@ static int run_selftest_m8(void) {
     st_key(SDLK_Z, SDL_KMOD_CTRL); // undo extraction -> trashed
     st_wait_ops();
     ST_CHECK(!st_exists(M8_BASE "/proj (2)"));
+    // several archives selected: each one into its own folder, even when their names give the same one
+    st_select(p, "proj.zip");
+    for (u32 i = 0; i < p->count; i++)
+        if (!strcmp(p->L->entries[p->order[i]].name, "proj.tar.gz")) sel_set(p, i, true);
+    ST_CHECK(p->sel_count == 2 && extract_here_count(p, false) == 2);
+    do_action(p, ACT_EXTRACT_HERE);
+    st_wait_ops();
+    ST_CHECK(st_size(M8_BASE "/proj (2)/proj/src/main.c") == 4321 && st_exists(M8_BASE "/proj (3)"));
+    st_key(SDLK_Z, SDL_KMOD_CTRL);
+    st_wait_ops();
+    st_key(SDLK_Z, SDL_KMOD_CTRL);
+    st_wait_ops();
+    ST_CHECK(!st_exists(M8_BASE "/proj (2)") && !st_exists(M8_BASE "/proj (3)"));
     // zip-slip: a member "../escaped.txt" must not be written outside the target
     {
         struct archive *w = archive_write_new();
