@@ -78,9 +78,17 @@ static void picker_commit(void) {
         const char *nm = g_pick_name.buf;
         while (*nm == ' ') nm++;
         if (!nm[0]) { toast("Type a file name"); g_pick_name_focus = true; return; }
-        if (strchr(nm, '/')) { toast("A file name can't contain /"); return; }
-        if (!picker_folder_ok(p)) return;
-        path_join(g_pick_save_path, sizeof g_pick_save_path, p->path, nm);
+        // a path works too: "sub/name" (what a file in the tree view fills in) or a full one, into a folder that exists
+        if (nm[0] == '/') snprintf(g_pick_save_path, sizeof g_pick_save_path, "%s", nm);
+        else {
+            if (!picker_folder_ok(p)) return;
+            path_join(g_pick_save_path, sizeof g_pick_save_path, p->path, nm);
+        }
+        if (strchr(nm, '/')) {
+            char dir[PATH_MAX];
+            parent_of(g_pick_save_path, dir, sizeof dir);
+            if (!path_is_dir(dir)) { toast("That folder doesn't exist"); return; }
+        }
         if (path_is_dir(g_pick_save_path)) { pane_navigate(p, g_pick_save_path, true); te_set(&g_pick_name, "", 0, 0); return; }
         if (access(g_pick_save_path, F_OK) == 0) {
             static const char *btn[] = {"Replace", "Cancel"};
@@ -128,6 +136,33 @@ static bool picker_open_file(Pane *p, const char *full) {
     (void)p;
     picker_commit();
     return true;
+}
+
+// Save: the name in the field with its stem selected, like F2 (typing replaces the name, the extension stays).
+static void picker_set_name(const char *b) {
+    const char *dot = strrchr(b, '.');
+    te_set(&g_pick_name, b, 0, dot && dot != b ? (int)(dot - b) : (int)strlen(b));
+}
+
+// Save, every loop: selecting one file puts its name in the field (to save over it or name after it), like GTK's
+// and KDE's choosers. Only when the selected file changes: a name typed afterwards stays until another one is picked.
+static void picker_tick(void) {
+    static char seen[NAME_MAX + 1];
+    if (g_pick != PICK_SAVE) return;
+    Pane *p = active_pane();
+    const char *nm = "";
+    if (p && p->order && p->sel_count == 1)
+        for (u32 i = 0; i < p->count; i++)
+            if (p->sel[p->order[i]]) {
+                Entry *e = &p->L->entries[p->order[i]];
+                if (!(e->flags & ENT_DIR)) nm = e->name;
+                break;
+            }
+    if (!strcmp(nm, seen)) return;
+    snprintf(seen, sizeof seen, "%s", nm);
+    if (!nm[0]) return;
+    picker_set_name(nm);
+    A.redraw = true;
 }
 
 static f32 picker_bar_h(void) { return roundf(S(54)); }
@@ -319,12 +354,7 @@ static void picker_setup(const char *mode, const char **start, char *buf, size_t
     const char *path = *start;
     if (!path || !path[0]) path = getenv("HOME") ? getenv("HOME") : "/";
     if (g_pick == PICK_SAVE && !path_is_dir(path)) { // ".../Downloads/report.pdf": folder + name
-        const char *b = path_basename(path);
-        te_set(&g_pick_name, b, (int)strlen(b), (int)strlen(b));
-        // the stem is selected, like F2 (typing replaces the name, the extension stays)
-        const char *dot = strrchr(b, '.');
-        if (dot && dot != b) { g_pick_name.anchor = 0; g_pick_name.caret = (int)(dot - b); }
-        else { g_pick_name.anchor = 0; g_pick_name.caret = (int)strlen(b); }
+        picker_set_name(path_basename(path));
         parent_of(path, buf, cap);
         if (!path_is_dir(buf)) snprintf(buf, cap, "%s", getenv("HOME") ? getenv("HOME") : "/");
         g_pick_name_focus = true;
