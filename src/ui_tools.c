@@ -263,6 +263,8 @@ static void sheet_field(Rect r, TextEdit *te, bool focused, const char *placehol
     if (A.mouse_in && in_rect(r, A.mx, A.my)) A.ptr_text = true;
     draw_rrect(r.x, r.y, r.w, r.h, S(6), C(focused ? COL_FIELD_HOVER : COL_FIELD));
     if (focused) draw_rrect_outline(r.x, r.y, r.w, r.h, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
+    else // an outline so an idle field still reads as a field (stronger under the pointer)
+        draw_rrect_outline(r.x, r.y, r.w, r.h, S(6), MAX(1.f, S(1)), C(A.mouse_in && in_rect(r, A.mx, A.my) ? COL_TEXT_FAINT : COL_BORDER));
     if (focused) te_draw(te, &A.font, r, roundf(S(8)), C(COL_TEXT));
     else {
         te_register_ex(te, &A.font, r, roundf(S(8)), false, false); // a click moves the keyboard here (sheet_text_focus)
