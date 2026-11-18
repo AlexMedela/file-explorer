@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0
 
 **New**
 - Quick Look: Space shows the file under the cursor large over the window, like macOS, Windows' Peek and GNOME's Sushi: pictures fitted to the window, text with line numbers, else its icon. ← / → go to the previous / next file, Space or Esc closes it. The preview panel moved to Ctrl+I alone. Thanks to @pr83-glitch.
