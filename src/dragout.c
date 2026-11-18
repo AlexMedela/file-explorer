@@ -32,6 +32,7 @@ static struct {
 } g_do = {.mtx = PTHREAD_MUTEX_INITIALIZER};
 
 static void dragout_ended(void); // app side: the drag is over (dropped elsewhere or cancelled)
+static void drag_items_out(Pane *p); // input.c: the items dragged inside, out to other apps
 static void on_mouse_up(void);    // input.c (a drop back onto this window ends like a drag inside)
 static void drop_target(Pane *src, f32 x, f32 y); // (below, in app.c's "drag & drop")
 static u32 *drag_badge_pixels(bool square, int *w, int *h); // render.c: the card shown next to the pointer
@@ -474,7 +475,7 @@ static bool x_release(void) {
 // The protocol is spoken through libwayland-client's generic calls (opcodes from wayland.xml).
 
 static struct {
-    void *dpy, *surface, *queue, *wrap, *registry, *seat, *ddm, *dd, *pointer, *src;
+    void *dpy, *surface, *queue, *wrap, *registry, *seat, *ddm, *dd, *pointer, *keyboard, *src;
     void *compositor, *shm, *icon, *icon_pool, *icon_buf; // the card the compositor shows next to the pointer
     void *offer;           // (our thread) the offer of our own drag while it's over this window
     pthread_mutex_t self_mtx; // our own drag over this window, for the main thread:
@@ -482,6 +483,11 @@ static struct {
     double sx, sy;         //   where (surface coordinates)
     _Atomic uint32_t press_serial;
     _Atomic int result; // (thread -> main) 1 dropped, 2 cancelled
+    _Atomic bool dragging; // (main -> thread) our source's drag may be on
+    _Atomic int over;      // (thread -> main) W_OVER_*: the compositor let go of the pointer, its verdict may not come
+    _Atomic bool wm_key;   // (thread -> main) Super or Alt went down: a desktop shortcut may follow
+    uint32_t mods;         // (thread) modifiers held
+    u64 t_over;            // when the main thread saw that
     pthread_t thr;
     int stop[2];
     void *(*create_queue)(void *);
@@ -498,12 +504,13 @@ static struct {
     void (*cancel_read)(void *);
     int (*flush)(void *);
     int (*get_fd)(void *);
-    const void *i_registry, *i_seat, *i_pointer, *i_ddm, *i_dd, *i_src, *i_offer;
+    const void *i_registry, *i_seat, *i_pointer, *i_keyboard, *i_ddm, *i_dd, *i_src, *i_offer;
     const void *i_compositor, *i_shm, *i_pool, *i_buffer, *i_surface;
 } g_wl;
 
 #define W_DESTROY 1 // WL_MARSHAL_FLAG_DESTROY
 enum { W_SELF_OVER = 1, W_SELF_LEAVE = 2, W_SELF_DROP = 4 };
+enum { W_OVER_DROP = 1, W_OVER_POINTER = 2 }; // dnd_drop_performed / our pointer back (no pointer events during a drag)
 
 static const char *w_iface_name(const void *iface) { return *(const char *const *)iface; } // (struct wl_interface's first field)
 
@@ -511,24 +518,56 @@ static void *w_bind(uint32_t name, const void *iface, uint32_t ver) {
     return g_wl.marshal(g_wl.registry, 0, iface, ver, 0, name, w_iface_name(iface), ver, NULL);
 }
 
+// The drag is over for the compositor, whatever the source hears later (some targets never finish a drop, some
+// compositors never say cancelled): the main thread stops waiting with the pointer (dragout_tick).
+static void w_over(int how, const char *why) {
+    if (!atomic_load(&g_wl.dragging) || (atomic_load(&g_wl.over) & how)) return;
+    DO_LOG("wayland: %s", why);
+    atomic_fetch_or(&g_wl.over, how);
+    main_wake();
+}
+
 // listeners (event order from wayland.xml; versions above what we bind never arrive)
 static void w_noop_ptr(void *d, void *o) { (void)d; (void)o; }
-static void w_pointer_enter(void *d, void *p, uint32_t serial, void *surf, int32_t x, int32_t y) { (void)d; (void)p; (void)serial; (void)surf; (void)x; (void)y; }
+static void w_pointer_enter(void *d, void *p, uint32_t serial, void *surf, int32_t x, int32_t y) {
+    (void)d; (void)p; (void)serial; (void)surf; (void)x; (void)y;
+    w_over(W_OVER_POINTER, "pointer back on the window");
+}
 static void w_pointer_leave(void *d, void *p, uint32_t serial, void *surf) { (void)d; (void)p; (void)serial; (void)surf; }
 static void w_pointer_motion(void *d, void *p, uint32_t t, int32_t x, int32_t y) { (void)d; (void)p; (void)t; (void)x; (void)y; }
 static void w_pointer_button(void *d, void *p, uint32_t serial, uint32_t t, uint32_t button, uint32_t state) {
     (void)d; (void)p; (void)t; (void)button;
     if (state == 1) atomic_store(&g_wl.press_serial, serial);
+    w_over(W_OVER_POINTER, "a button on the window");
 }
 static void w_pointer_axis(void *d, void *p, uint32_t t, uint32_t axis, int32_t v) { (void)d; (void)p; (void)t; (void)axis; (void)v; }
 static void (*g_wl_pointer_l[])(void) = {(void (*)(void))w_pointer_enter, (void (*)(void))w_pointer_leave, (void (*)(void))w_pointer_motion,
                                         (void (*)(void))w_pointer_button, (void (*)(void))w_pointer_axis};
+
+// Our own wl_keyboard, for its modifiers only: Super or Alt pressed during a drag inside (window managers' shortcuts,
+// a workspace switch) - the compositor takes the drag before the shortcut ends the drag inside (dragout_tick).
+static void w_kb_keymap(void *d, void *k, uint32_t fmt, int32_t fd, uint32_t size) { (void)d; (void)k; (void)fmt; (void)size; close(fd); }
+static void w_kb_enter(void *d, void *k, uint32_t serial, void *surf, void *keys) { (void)d; (void)k; (void)serial; (void)surf; (void)keys; }
+static void w_kb_leave(void *d, void *k, uint32_t serial, void *surf) { (void)d; (void)k; (void)serial; (void)surf; }
+static void w_kb_key(void *d, void *k, uint32_t serial, uint32_t t, uint32_t key, uint32_t state) { (void)d; (void)k; (void)serial; (void)t; (void)key; (void)state; }
+static void w_kb_mods(void *d, void *k, uint32_t serial, uint32_t dep, uint32_t latched, uint32_t locked, uint32_t group) {
+    (void)d; (void)k; (void)serial; (void)latched; (void)locked; (void)group;
+    uint32_t wm = 8 | 64; // Mod1 (Alt), Mod4 (Super) in the usual xkb keymaps
+    if ((dep & wm) & ~(g_wl.mods & wm)) { atomic_store(&g_wl.wm_key, true); main_wake(); }
+    g_wl.mods = dep;
+}
+static void (*g_wl_kb_l[])(void) = {(void (*)(void))w_kb_keymap, (void (*)(void))w_kb_enter, (void (*)(void))w_kb_leave,
+                                   (void (*)(void))w_kb_key, (void (*)(void))w_kb_mods};
 
 static void w_seat_caps(void *d, void *seat, uint32_t caps) {
     (void)d;
     if ((caps & 1) && !g_wl.pointer) {
         g_wl.pointer = g_wl.marshal(seat, 0, g_wl.i_pointer, g_wl.version(seat), 0, NULL);
         if (g_wl.pointer) g_wl.add_listener(g_wl.pointer, g_wl_pointer_l, NULL);
+    }
+    if ((caps & 2) && !g_wl.keyboard && g_wl.i_keyboard) {
+        g_wl.keyboard = g_wl.marshal(seat, 1, g_wl.i_keyboard, g_wl.version(seat), 0, NULL); // get_keyboard
+        if (g_wl.keyboard) g_wl.add_listener(g_wl.keyboard, g_wl_kb_l, NULL);
     }
 }
 static void w_seat_name(void *d, void *seat, const char *name) { (void)d; (void)seat; (void)name; }
@@ -628,10 +667,11 @@ static void w_src_end(int how) {
     main_wake();
 }
 static void w_src_cancelled(void *d, void *s) { (void)d; (void)s; w_src_end(2); }
-static void w_src_finished(void *d, void *s) { (void)d; (void)s; w_src_end(1); }
+static void w_src_finished(void *d, void *s) { (void)d; (void)s; w_src_end(1); } // (Hyprland: also without drop_performed)
 static void w_src_action(void *d, void *s, uint32_t a) { (void)d; (void)s; DO_LOG("wayland: action %u", a); }
+static void w_src_dropped(void *d, void *s) { (void)d; (void)s; w_over(W_OVER_DROP, "drop performed"); }
 static void (*g_wl_src_l[])(void) = {(void (*)(void))w_src_target, (void (*)(void))w_src_send, (void (*)(void))w_src_cancelled,
-                                    (void (*)(void))w_noop_ptr, (void (*)(void))w_src_finished, (void (*)(void))w_src_action};
+                                    (void (*)(void))w_src_dropped, (void (*)(void))w_src_finished, (void (*)(void))w_src_action};
 
 // Reads and handles our queue's events next to SDL (libwayland lets several threads read one connection).
 static void *w_thread(void *arg) {
@@ -675,6 +715,7 @@ static bool w_init(void) {
     g_wl.i_registry = dlsym(l, "wl_registry_interface");
     g_wl.i_seat = dlsym(l, "wl_seat_interface");
     g_wl.i_pointer = dlsym(l, "wl_pointer_interface");
+    g_wl.i_keyboard = dlsym(l, "wl_keyboard_interface"); // (optional)
     g_wl.i_ddm = dlsym(l, "wl_data_device_manager_interface");
     g_wl.i_dd = dlsym(l, "wl_data_device_interface");
     g_wl.i_src = dlsym(l, "wl_data_source_interface");
@@ -752,8 +793,10 @@ static bool w_start(void) {
     uint32_t serial = atomic_load(&g_wl.press_serial);
     void *surf = SDL_GetPointerProperty(SDL_GetWindowProperties(A.win), SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, NULL);
     if (!serial || !surf) return false;
+    if (g_wl.src) w_src_free(); // (the last drag's source, still waiting for a verdict that never came)
     g_wl.surface = surf;
     atomic_store(&g_wl.result, 0);
+    atomic_store(&g_wl.over, 0);
     uint32_t v = g_wl.version(g_wl.ddm);
     g_wl.src = g_wl.marshal(g_wl.ddm, 0, g_wl.i_src, v, 0, NULL); // create_data_source
     if (!g_wl.src) return false;
@@ -768,6 +811,7 @@ static bool w_start(void) {
     g_wl.dd = g_wl.marshal(g_wl.ddm, 1, g_wl.i_dd, v, 0, NULL, g_wl.seat); // get_data_device (until the drag ends)
     if (!g_wl.dd) { w_src_free(); return false; }
     g_wl.add_listener(g_wl.dd, g_wl_dd_l, NULL);
+    atomic_store(&g_wl.dragging, true);
     g_wl.marshal(g_wl.dd, 0, NULL, g_wl.version(g_wl.dd), 0, g_wl.src, g_wl.surface, g_wl.icon, serial); // start_drag
     if (g_wl.icon) g_wl.marshal(g_wl.icon, 6, NULL, g_wl.version(g_wl.icon), 0); // commit (now that it's the drag's icon)
     g_wl.flush(g_wl.dpy);
@@ -775,6 +819,7 @@ static bool w_start(void) {
 }
 
 static void w_src_free(void) {
+    atomic_store(&g_wl.dragging, false);
     w_icon_free();
     if (g_wl.dd) g_wl.marshal(g_wl.dd, 2, NULL, g_wl.version(g_wl.dd), W_DESTROY); // wl_data_device.release: SDL's again
     g_wl.dd = NULL;
@@ -867,16 +912,32 @@ static void dragout_tick(void) {
         }
     }
     if (g_do.sys != DOS_WAYLAND) return;
+    // Super / Alt during a drag inside: a workspace switch would end it (Hyprland lets go of the button), so the
+    // compositor takes it now (over this window it stays a drag inside, through our data device).
+    if (atomic_exchange(&g_wl.wm_key, false) && !g_do.active && A.drag == DRAG_ITEMS && A.drag_pane) {
+        DO_LOG("wayland: Super/Alt during a drag: handed to the compositor");
+        drag_items_out(A.drag_pane);
+    }
     pthread_mutex_lock(&g_wl.self_mtx); // (Wayland) our own drag back over this window: what our data device saw
     int ev = g_wl.self_ev;
     f32 dens = SDL_GetWindowPixelDensity(A.win), m = (f32)A.shadow_px, x = (f32)g_wl.sx * dens - m, y = (f32)g_wl.sy * dens - m; // (surface: shadow margin included)
     g_wl.self_ev = 0;
     pthread_mutex_unlock(&g_wl.self_mtx);
     if (ev) dragout_self_at(ev & W_SELF_DROP ? W_SELF_DROP : ev & W_SELF_OVER ? W_SELF_OVER : W_SELF_LEAVE, x, y);
+    // The compositor is done with the pointer but the source hasn't heard how it ended: the drag inside ends now (or
+    // every mouse-up would be ignored), the source waits a while longer for a target still reading the files.
+    if (g_wl.src && atomic_load(&g_wl.over)) {
+        if (!g_wl.t_over) g_wl.t_over = now_ns();
+        dragout_finish();
+        if (now_ns() - g_wl.t_over > 10000000000ull) { DO_LOG("wayland: no verdict, source freed"); w_src_free(); }
+    } else g_wl.t_over = 0;
 }
 
-// (X11) Esc: the target hears it's over.
-static void dragout_cancel(void) { if (g_do.active && g_do.sys == DOS_X11 && !g_xd.dropped) x_end(); }
+// Esc: the target hears it's over (X11); on Wayland the source goes, which cancels the drag if it's still on.
+static void dragout_cancel(void) {
+    if (g_do.active && g_do.sys == DOS_X11 && !g_xd.dropped) x_end();
+    if (g_do.active && g_do.sys == DOS_WAYLAND) { w_src_free(); dragout_finish(); }
+}
 
 
 // (X11) pointer motion while dragging out.
@@ -886,7 +947,7 @@ static void dragout_motion(void) { if (g_do.active && g_do.sys == DOS_X11 && !g_
 static bool dragout_release(void) { return g_do.active && g_do.sys == DOS_X11 && x_release(); }
 
 // (Wayland) the compositor has the pointer now: mouse-ups SDL makes up aren't drops.
-static bool dragout_owns_pointer(void) { return g_do.active && g_do.sys == DOS_WAYLAND; }
+static bool dragout_owns_pointer(void) { return g_do.active && g_do.sys == DOS_WAYLAND && !atomic_load(&g_wl.over); }
 
 // A drop SDL reports: our own drag, dropped back onto this window? (Its paths, while it lasts or just after.)
 static bool dragout_is_self(char **paths, int n) {
