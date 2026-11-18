@@ -7,7 +7,7 @@
 
 - The Save dialog remembers where you saved each type of file: the next PDF starts in the folder the last PDF went to, the next photo where the last photo went. Thanks to @pr83-glitch.
 
-- Properties of a photo (JPEG) shows its EXIF in the Media card: when it was taken, the camera and lens, the exposure (f/1.8 · 1/120 s · ISO 100 · 6.9 mm) and where (GPS coordinates), read by the app itself.
+- Properties of a photo (JPEG) shows its EXIF in the Media card: when it was taken, the camera and lens, the exposure (f/1.8 · 1/120 s · ISO 100 · 6.9 mm) and where (GPS coordinates), read directly, no extra tools needed.
 
 - Properties of an archive shows what it holds: files, folders and the unpacked size (and how much it saves), counted in the background and updated as it goes, so big compressed archives don't make you wait.
 
@@ -17,7 +17,7 @@
 
 - The Snapshots view lists Timeshift snapshots in rsync mode too (on any drive, e.g. ext4), with when each was taken, its comment and its tags (daily, boot…). Timeshift snapshots of either mode now also show up next to Snapper's (a Tool column then says which took each), and can be created or deleted from the view: Timeshift runs as administrator and asks for the password each time. Thanks to @teraflop09-web.
 
-- Browse BorgBackup repositories: folders that are Borg repositories (Borg 1, and Borg 2 beta) get a "Borg backup" pill; opening one shows its backups as dated folders, read-only (through `borg mount`, which needs borg's FUSE support, e.g. `python-pyfuse3`). Encrypted repositories ask for the passphrase, which can be kept in the system keyring. Inside a backup, "Compare with now" and "Restore…" work like in snapshots; copy or drag out anything else. Repositories in SFTP folders are read by borg on the server. "Add to sidebar" keeps a repository under a new Backups section, with its own name and icon, opened with a click; Borg 2 ones can stay mounted while the app runs. Thanks to @teraflop09-web.
+- Browse BorgBackup repositories: folders that are Borg repositories (Borg 1, and Borg 2 beta) get a "Borg backup" pill; opening one shows its backups as dated folders, read-only (through `borg mount`, which needs borg's FUSE support, e.g. `python-pyfuse3`). Encrypted repositories ask for the passphrase, which can be kept in the system keyring. Inside a backup, "Compare with now" and "Restore…" work like in snapshots; copy or drag out anything else. Repositories in SFTP folders are read by borg on the server. "Add to sidebar" keeps a repository under a new Backups section, with its own name and icon, opened with a click; Borg 2 ones can stay mounted until you quit. Thanks to @teraflop09-web.
 
 - Run AppImages, programs and scripts: opening an executable file asks "Run", "Run in terminal", "Open" (scripts, also `.sh` files without `#!`) or "Cancel", with "Don't ask again" (Options > Behaviour > Programs). A downloaded AppImage without the executable bit offers "Make executable and run". Right-click > Run / Run in terminal too.
 
@@ -38,7 +38,7 @@
 **Fixed**
 - Inside a Timeshift snapshot the bar with "Compare with now" and "Restore…" shows, as it does for Snapper and ZFS.
 - Dragging files to other apps on Wayland: a drag can switch workspaces (Super / Alt hands it to the desktop, so a workspace shortcut no longer drops it where the pointer is), and after a drop into an app that never says it's done, clicks no longer start a selection box that follows the mouse (Esc also ends such a drag). Thanks to @pr83-glitch.
-- In the Save dialog (the app as file chooser), Ctrl+L / F6 edits the path while the file name has the keyboard, and Alt+←/→/↑, Ctrl+H and F5 work there without losing the typed name. Thanks to @pr83-glitch.
+- In the Save dialog (when used as the system file chooser), Ctrl+L / F6 edits the path while the file name has the keyboard, and Alt+←/→/↑, Ctrl+H and F5 work there without losing the typed name. Thanks to @pr83-glitch.
 - In the Save dialog, selecting a file puts its name in the file name field (its name without the extension selected), to save over it or name the new file after it; a name typed afterwards stays until another file is selected. The name can also be a path (`sub/name`, as a file in the tree view fills in, or a full one) into a folder that exists. Thanks to @pr83-glitch.
 - Extract here with several archives selected unpacks every one of them (each into its own folder), not only the last one clicked; the menu says how many. Thanks to @pr83-glitch.
 - With the terminal panel (F4) open, the status bar keeps the folder's item count, size slider and view buttons (it showed the terminal's details over them, while clicks still went to the hidden buttons), and a prompt that starts with an empty line (starship's `add_newline`) starts on the panel's top row.
@@ -46,7 +46,8 @@
 - Empty Trash works whichever panel is active and its icon shows whether the trash is full; a cancelled copy or move stays at the progress it reached, marked cancelled; failed compressions say why and leave no half-written archive, and non-ASCII names inside archives are kept; the free space of `/` is right; network mounts whose path has spaces no longer show up twice; text on Vulkan no longer flickers or garbles. Thanks to @juangiler.
 - Split right / down no longer squeezes a panel below a usable size: the split goes to a panel that has room, or the button dims and says so when none has.
 - The search field in Options no longer looks active as soon as it opens: it takes the keyboard when clicked or typed into.
-- The app no longer quits silently when a helper program it writes to has already exited.
+- No more silent quits when a helper program (an archiver, `ffprobe`…) exits before it has read everything sent to it.
+- The AppImage shows its icon in file managers and AppImage catalogs.
 
 ## 0.11.2
 
