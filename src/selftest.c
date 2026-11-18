@@ -8361,6 +8361,22 @@ static int run_selftest_cmp(void) {
     Tab *tb = tab_new(CMP_BASE "/b", A.ntabs, false);
     st_wait();
     Tab *ta = A.ap->cur;
+    { // empty space's menu: "Compare with" is a submenu beside it, in titled sections
+        Pane *p = active_pane();
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), false);
+        int ci = -1;
+        for (int i = 0; i < A.menu.n; i++)
+            if (A.menu.items[i].act == ACT_CMP_START) ci = i;
+        ST_CHECK(ci >= 0 && A.menu.items[ci].sub);
+        if (ci >= 0 && A.menu.items[ci].sub) {
+            menu_sub_open(ci, true);
+            ST_CHECK(menu_sub_shown() && g_menu_sub.r.x >= A.menu.r.x + A.menu.r.w - 1);
+            ST_CHECK(g_menu_sub.n >= 2 && g_menu_sub.items[0].head && !strcmp(g_menu_sub.items[0].label, "Open tabs"));
+            ST_CHECK(g_menu_sub.items[1].act == ACT_CMP_PICK_BASE && !strcmp(g_cmp.pick[0], CMP_BASE "/b"));
+        }
+        A.menu.open = false;
+        menu_sub_close();
+    }
     st_key(SDLK_K, SDL_KMOD_CTRL | SDL_KMOD_SHIFT);
     ST_CHECK(A.menu.open && g_cmp.npick >= 1 && !strcmp(g_cmp.pick[0], CMP_BASE "/b"));
     A.menu.open = false;
