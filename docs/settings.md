@@ -9,7 +9,8 @@ still running the old version after an update restarts as the new one the next t
 the previous file is kept as `settings.conf.bak` when that happens.
 
 `~/.config/file-explorer/settings.conf` (plain `key=value`, saved automatically; "Open settings file" in the
-palette). Remembers zoom, hidden files, folder sizes, search scope, sort order, preview panel, window size,
+palette). Remembers zoom, hidden files, folder sizes, search scope, sort order
+(`folders_first=0` mixes folders and files), preview panel, window size,
 pinned folders, columns, and your tabs/split panes (`restore_session=0` to start fresh). `transfers_at_once=1`
 (0 = all at once) and `verify_copies=0` are the transfer queue's settings. `renderer=auto` uses
 OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is resized; Vulkan can take less memory

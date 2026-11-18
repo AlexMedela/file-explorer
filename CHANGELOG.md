@@ -9,6 +9,8 @@
 
 - Run AppImages, programs and scripts: opening an executable file asks "Run", "Run in terminal", "Open" (scripts, also `.sh` files without `#!`) or "Cancel", with "Don't ask again" (Options > Behaviour > Programs). A downloaded AppImage without the executable bit offers "Make executable and run". Right-click > Run / Run in terminal too.
 
+- "Folders first" can be turned off, to mix folders and files (Sort menus, Options > Views); with it on, Group by date puts the folders in their own group on top. The toolbar's sort button offers the same choices as the right-click Sort by. Thanks to @teraflop09-web.
+
 **Fixed**
 - Inside a Timeshift snapshot the bar with "Compare with now" and "Restore…" shows, as it does for Snapper and ZFS.
 

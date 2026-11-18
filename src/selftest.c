@@ -3213,15 +3213,19 @@ static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
 
-    // --- the toolbar's sort button: every sort key and the direction ---
+    // --- the toolbar's sort button: the same keys as the folder menu's Sort by, the direction, Folders first ---
     st_frames(1);
     Rect sb = p->ly.sortbtn;
     ST_CHECK(sb.w > 0 && sb.x + sb.w <= p->ly.filterbtn.x && p->ly.pathbar.x + p->ly.pathbar.w <= sb.x);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
-    ST_CHECK(A.menu.open && A.menu.pane == p && A.menu.n == SORT_COUNT + 3);
-    if (A.menu.open && A.menu.n == SORT_COUNT + 3) {
-        ST_CHECK(A.menu.items[SORT_PERMS].act == ACT_SORT_BASE + SORT_PERMS && A.menu.items[A.menu.n - 1].act == ACT_SORT_DESC);
+    int nkeys = SORT_CREATED + 1 + col_visible(COL_PERMS) + col_visible(COL_OWNER);
+    ST_CHECK(A.menu.open && A.menu.pane == p && A.menu.n == nkeys + 5);
+    if (A.menu.open && A.menu.n == nkeys + 5) {
+        bool has_ext = false;
+        for (int i = 0; i < A.menu.n; i++) has_ext |= A.menu.items[i].act == ACT_SORT_BASE + SORT_EXT;
+        ST_CHECK(!has_ext && A.menu.items[A.menu.n - 3].act == ACT_SORT_DESC && A.menu.items[A.menu.n - 1].act == ACT_FOLDERS_FIRST);
+        ST_CHECK(A.menu.items[A.menu.n - 1].checked == atomic_load(&g_folders_first));
         st_frames(1);
         st_shot("toolbar-sort");
         st_key(SDLK_DOWN, 0); // keyboard: down to Size, Enter picks it
@@ -3234,7 +3238,7 @@ static int run_selftest_m9(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
         ST_CHECK(A.menu.open && A.menu.items[SORT_SIZE].checked);
         bool was_desc = p->sort_desc;
-        int dir = A.menu.n - (was_desc ? 2 : 1); // the other direction
+        int dir = A.menu.n - (was_desc ? 4 : 3); // the other direction
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, A.menu.r.x + S(20), menu_item_y(&A.menu, dir) + S(12), SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, SDL_BUTTON_LEFT, 1, 0);
         ST_CHECK(!A.menu.open && p->sort_key == SORT_SIZE && p->sort_desc == !was_desc);
@@ -3243,6 +3247,28 @@ static int run_selftest_m9(void) {
         st_key(SDLK_ESCAPE, 0);
         ST_CHECK(!A.menu.open);
     }
+
+    // --- Folders first (on by default): folders above files whatever the key and direction; off: mixed ---
+    pane_set_sort(p, SORT_NAME);
+    for (int pass = 0; pass < 4; pass++) {
+        bool first = pass < 2, desc = pass & 1;
+        if (atomic_load(&g_folders_first) != first) do_action(p, ACT_FOLDERS_FIRST);
+        do_action(p, desc ? ACT_SORT_DESC : ACT_SORT_ASC);
+        st_frames(2);
+        u32 last_dir = 0, first_file = p->count, ndirs = 0;
+        for (u32 i = 0; i < p->count; i++) {
+            if (p->L->entries[p->order[i]].flags & ENT_DIR) { last_dir = i; ndirs++; }
+            else if (first_file == p->count) first_file = i;
+        }
+        ST_CHECK(ndirs == 2 && first_file < p->count);
+        // by name file* < sub < tree: ascending puts files above the folders, descending below
+        if (first) ST_CHECK(last_dir < first_file);
+        else ST_CHECK(desc ? last_dir < first_file : last_dir > first_file);
+    }
+    ST_CHECK(!atomic_load(&g_folders_first));
+    do_action(p, ACT_FOLDERS_FIRST);
+    do_action(p, ACT_SORT_ASC);
+    ST_CHECK(atomic_load(&g_folders_first));
     Rect area = p->ly.area; // a narrow split: no sort button, nothing overlaps
     layout_pane(p, (Rect){area.x, area.y, S(110), area.h});
     ST_CHECK(p->ly.sortbtn.w == 0 && p->ly.pathbar.w >= 0 && p->ly.pathbar.x + p->ly.pathbar.w <= p->ly.filterbtn.x);
@@ -3289,7 +3315,7 @@ static int run_selftest_m9(void) {
         }
         // Extension sorts like Type; Permissions only with its column shown
         ST_CHECK(!has_ext && has_perms == col_visible(COL_PERMS) && g_menu_sub.items[0].act == ACT_SORT_BASE + SORT_NAME);
-        int descending = g_menu_sub.n - 1;
+        int descending = g_menu_sub.n - 3;
         ST_CHECK(g_menu_sub.items[descending].act == ACT_SORT_DESC);
         st_shot("menu-sort");
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_menu_sub.r.x + S(20), menu_item_y(&g_menu_sub, descending) + S(12), SDL_BUTTON_LEFT, 1, 0);

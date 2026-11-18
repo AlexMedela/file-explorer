@@ -173,7 +173,12 @@ typedef struct {
     bool desc, meta;
     int group;
     i64 day0; // local midnight today (date groups)
+    bool dirs_first;
 } SortCtx;
+
+// Options > Views "Folders first" (sort menus too): folders above files whatever the key and direction. Read by the
+// sort workers, set by the UI thread.
+static _Atomic bool g_folders_first = true;
 
 static i64 local_midnight(time_t now) {
     struct tm tm;
@@ -185,6 +190,10 @@ static i64 local_midnight(time_t now) {
 // Group of an entry: rank orders the groups; label (optional) names it.
 static int group_rank(const Entry *e, int group, bool meta, i64 day0, char *label, size_t cap) {
     bool dir = e->flags & ENT_DIR;
+    if (group == GROUP_DATE && dir && atomic_load(&g_folders_first)) { // folders together on top, as with type / size
+        if (label) snprintf(label, cap, "Folders");
+        return -2; // ("In the future" is -1)
+    }
     if (group == GROUP_TYPE) {
         if (dir) { if (label) snprintf(label, cap, "Folders"); return 0; }
         if (label) {
@@ -253,7 +262,7 @@ static int cmp_entries(const void *pa, const void *pb, void *pctx) {
         if (g) return g; // groups keep their own order regardless of the sort direction
     }
     int dx = x->flags & ENT_DIR, dy = y->flags & ENT_DIR;
-    if (dx != dy) return dx ? -1 : 1; // folders first, always
+    if (dx != dy && c->dirs_first) return dx ? -1 : 1; // folders first: before the direction is applied
     int r = 0;
     switch (c->key) {
     case SORT_DATE:
@@ -389,7 +398,7 @@ static void listing_build_order_ex(const Listing *L, const OrderOpts *op, u32 **
     }
     int key = op->key, group = op->group;
     bool desc = op->desc, meta = op->meta;
-    SortCtx ctx = {L->entries, key, desc, meta, group, group ? local_midnight(time(NULL)) : 0};
+    SortCtx ctx = {L->entries, key, desc, meta, group, group ? local_midnight(time(NULL)) : 0, atomic_load(&g_folders_first)};
     qsort_r(o, m, sizeof(u32), cmp_entries, &ctx);
     if (op->tree && m) m = tree_order(L, o, m);
     *out = o;

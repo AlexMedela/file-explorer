@@ -415,6 +415,7 @@ enum {
     ACT_SORT_BASE = 320, // + SORT_* key
     ACT_SORT_ASC = 330, ACT_SORT_DESC,
     ACT_MENU_VIEWS, ACT_MENU_SORT, ACT_MENU_GROUP, // items that open the Views / Sort by / Group by submenus
+    ACT_FOLDERS_FIRST, // sort menus: folders above files (every folder, every tab)
     ACT_GROUP_BASE = 340, // + GROUP_*
     ACT_FV_SUBFOLDERS = 360, ACT_FV_ALL, ACT_FV_RESET,
     ACT_TF_BASE = 370, ACT_TF_RESET = 373, ACT_TF_EXT_BASE = 380, // type filter
@@ -6020,6 +6021,12 @@ static void do_action(Pane *p, int act) {
         for (int i = 0; i < A.ntabs; i++)
             for (int j = 0; j < A.tabs[i]->npanes; j++) pane_resort(&A.tabs[i]->pane[j]);
         break;
+    case ACT_FOLDERS_FIRST:
+        atomic_store(&g_folders_first, !atomic_load(&g_folders_first));
+        A.settings_dirty = true;
+        for (int i = 0; i < A.ntabs; i++)
+            for (int j = 0; j < A.tabs[i]->npanes; j++) pane_resort(&A.tabs[i]->pane[j]);
+        break;
     case ACT_SELECT_ALL:
         if (p->order && !pane_du_on(p))
             for (u32 i = 0; i < p->count; i++) sel_set(p, i, true);
@@ -6638,23 +6645,25 @@ static void menu_sub_views(Pane *p) {
 }
 
 // Name, dates, type and size always; Permissions and Owner only while their column is shown (sorting by what you can't
-// see makes little sense). Extension sorts like Type: listed only while it's the current key. all: every key (the
-// toolbar's sort button).
-static void menu_add_sort(Pane *p, bool all) {
+// see makes little sense). Extension sorts like Type: listed only while it's the current key. The same in the folder
+// menu's Sort by and the toolbar's sort button.
+static void menu_add_sort(Pane *p) {
     static const char *labels[SORT_COUNT] = {"Name", "Date modified", "Type", "Size", "Date created", "Extension", "Permissions", "Owner"};
     for (int i = 0; i < SORT_COUNT; i++) {
-        bool shown = all || i <= SORT_CREATED || p->sort_key == i;
+        bool shown = i <= SORT_CREATED || p->sort_key == i;
         for (int c = 0; c < COL_COUNT && !shown; c++) shown = g_coldef[c].sort == i && i != SORT_EXT && col_visible(c);
         if (shown) menu_add_check(labels[i], ACT_SORT_BASE + i, p->sort_key == i, true);
     }
     menu_sep();
     menu_add_check("Ascending", ACT_SORT_ASC, !p->sort_desc, true);
     menu_add_check("Descending", ACT_SORT_DESC, p->sort_desc, true);
+    menu_sep();
+    menu_add_check("Folders first", ACT_FOLDERS_FIRST, atomic_load(&g_folders_first), true);
 }
 
-static void menu_sub_sort(Pane *p) { menu_add_sort(p, false); }
+static void menu_sub_sort(Pane *p) { menu_add_sort(p); }
 
-// The toolbar's sort button: every sort key and the direction.
+// The toolbar's sort button: the folder menu's Sort by, on its own.
 static void menu_open_sort(Pane *p, f32 x, f32 y) {
     Menu *m = &A.menu;
     m->n = m->ninfo = 0;
@@ -6662,7 +6671,7 @@ static void menu_open_sort(Pane *p, f32 x, f32 y) {
     m->pane = p;
     m->keep_open = false;
     m->reopen = NULL;
-    menu_add_sort(p, true);
+    menu_add_sort(p);
     menu_finish(x, y);
 }
 

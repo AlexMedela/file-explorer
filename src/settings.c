@@ -85,6 +85,7 @@ static void settings_defaults(void) {
     g_accent_custom = 0;
     g_accent_desktop = false;
     g_unified_surfaces = false;
+    g_folders_first = true;
     g_separators = true;
     g_scroll_custom = 0;
     memset(g_surface_bright, 0, sizeof g_surface_bright);
@@ -215,6 +216,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "preview_width")) A.preview_w = CLAMP((f32)atof(v), 200.f, 1200.f);
         else if (!strcmp(k, "sidebar_width")) A.side_w = CLAMP((f32)atof(v), 150.f, 480.f);
         else if (!strcmp(k, "sort_desc")) A.def_sort_desc = atoi(v);
+        else if (!strcmp(k, "folders_first")) g_folders_first = atoi(v) != 0;
         else if (!strcmp(k, "maximized")) A.maximized = atoi(v);
         else if (!strcmp(k, "renderer")) snprintf(A.renderer, sizeof A.renderer, "%s", v);
         else if (!strcmp(k, "window")) sscanf(v, "%dx%d", &A.win_w, &A.win_h);
@@ -521,6 +523,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "disk_usage_style=%s\ndisk_usage_list=%d\n", A.du_style ? "sunburst" : "treemap", A.du_list);
     fprintf(f, "search_contents=%d\nsearch_options=%d,%d,%d\n", A.search_contents, A.cs_case, A.cs_word, A.cs_regex);
     fprintf(f, "sidebar_width=%.0f\nterminal_panel_height=%.0f\n", A.side_w, A.dock_h);
+    fprintf(f, "folders_first=%d\n", (int)g_folders_first);
     fprintf(f, "sort=%s\nsort_desc=%d\npreview=%d\npreview_width=%.0f\n", g_sort_names[A.def_sort_key], A.def_sort_desc,
             A.preview_on, A.preview_w);
     fprintf(f, "window=%dx%d\nmaximized=%d\nrestore_session=%d\nrenderer=%s\n", A.win_w, A.win_h, A.maximized,
