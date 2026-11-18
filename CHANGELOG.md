@@ -3,6 +3,8 @@
 ## Unreleased
 
 **New**
+- Properties of an archive shows what it holds: files, folders and the unpacked size (and how much it saves), counted in the background and updated as it goes, so big compressed archives don't make you wait.
+
 - Properties has a Media card for images, videos, music and PDFs: dimensions ("1920 × 1080 pixels"), length, the video and audio codecs, frame rate, stereo / 5.1 and sample rate, a song's bit rate and title / artist / album, a PDF's pages, title and author. Image sizes are read directly; the rest through `ffprobe` (ffmpeg) and `pdfinfo` (poppler) when they're installed, in the background. Thanks to @pr83-glitch.
 
 - Theme > System can use any theme: Options > Appearance > **Light theme** and **Dark theme** pick the ones it switches between as the desktop goes light or dark (Light and Dark by default). Thanks to @pr83-glitch.
