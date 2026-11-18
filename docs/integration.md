@@ -29,6 +29,7 @@ with an Open / Save / Choose bar and writes the chosen path(s) to FILE, one per 
 apps (`GTK_USE_PORTAL=1`) get it as their Open / Save dialog. The picker never changes your settings.
 In Save the name field has the keyboard (Tab switches to the list); Ctrl+L / F6 still edits the path, Ctrl+F searches,
 and Alt+←/→/↑, Ctrl+H and F5 work without losing the typed name. Selecting a file puts its name in the field.
+Save starts in the folder you last saved that type of file into (by extension: the next PDF where the last PDF went).
 Its sidebar has the Cloud section too: open a file straight from a cloud remote or save one into it. The remote stays
 mounted after the picker closes so the app can read or write the path it got; files pass through rclone's cache
 (`~/.cache/rclone/vfs`) and are dropped from it an hour after their last use (saved ones once uploaded), nothing is

@@ -6637,6 +6637,20 @@ static int run_selftest_m10(void) {
         A.settings_dirty = true;
         settings_save();
         ST_CHECK(stat(sp, &s2) == 0 && s1.st_mtim.tv_sec == s2.st_mtim.tv_sec && s1.st_mtim.tv_nsec == s2.st_mtim.tv_nsec);
+        // the folder last saved into, per type: the next .txt starts where the last one went (sub/abs.txt above);
+        // other types keep the app's folder; a remembered folder that's gone doesn't count
+        const char *st1 = M10_BASE "/pick/notes.TXT";
+        picker_setup("save", &st1, sb, sizeof sb);
+        ST_CHECK(!strcmp(st1, M10_BASE "/pick/sub") && !strcmp(g_pick_name.buf, "notes.TXT"));
+        const char *st2 = M10_BASE "/pick/report.final.pdf";
+        picker_setup("save", &st2, sb, sizeof sb);
+        ST_CHECK(!strcmp(st2, M10_BASE "/pick"));
+        mkdir(M10_BASE "/pick/gone", 0755);
+        picker_type_remember(M10_BASE "/pick/gone/x.md");
+        rmdir(M10_BASE "/pick/gone");
+        const char *st3 = M10_BASE "/pick/y.md";
+        picker_setup("save", &st3, sb, sizeof sb);
+        ST_CHECK(!strcmp(st3, M10_BASE "/pick"));
         g_pick = PICK_NONE;
         g_pick_out[0] = 0;
         A.settings_dirty = false;

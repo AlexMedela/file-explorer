@@ -3,6 +3,8 @@
 ## Unreleased
 
 **New**
+- The Save dialog remembers where you saved each type of file: the next PDF starts in the folder the last PDF went to, the next photo where the last photo went. Thanks to @pr83-glitch.
+
 - Properties of a photo (JPEG) shows its EXIF in the Media card: when it was taken, the camera and lens, the exposure (f/1.8 · 1/120 s · ISO 100 · 6.9 mm) and where (GPS coordinates), read by the app itself.
 
 - Properties of an archive shows what it holds: files, folders and the unpacked size (and how much it saves), counted in the background and updated as it goes, so big compressed archives don't make you wait.
