@@ -6348,29 +6348,55 @@ static void compress_start(const char *dir, char **paths, int n, const char *bas
 
 static void compress_sheet_open(Pane *p, char **paths, int n); // ui_tools.c
 
+// Extract here, one archive of pane p (its name as listed: "sub/x.zip" in the tree view) -> a new folder named after
+// it, next to it. taken: the folders already given to archives of the same batch (their jobs haven't made them yet:
+// "a.zip" and "a.tar.gz" get "a" and "a (2)").
+static void extract_here_one(Pane *p, const char *name, char **taken, int *ntaken) {
+    char arc[PATH_MAX], dir[PATH_MAX], stem[NAME_MAX + 1], nn[NAME_MAX + 1], dst[PATH_MAX];
+    path_join(arc, sizeof arc, p->path, name);
+    parent_of(arc, dir, sizeof dir);
+    snprintf(stem, sizeof stem, "%s", path_basename(arc));
+    char *dot = strstr(stem, ".tar.");
+    if (!dot) dot = strrchr(stem, '.');
+    if (dot && dot != stem) *dot = 0;
+    int dfd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    for (int k = 1; k < 100000; k++) { // "a", "a (2)", "a (3)"...
+        if (k == 1) snprintf(nn, sizeof nn, "%s", stem);
+        else snprintf(nn, sizeof nn, "%.*s (%d)", NAME_MAX - 16, stem, k);
+        path_join(dst, sizeof dst, dir, nn);
+        bool used = dfd >= 0 && exists_at(dfd, nn);
+        for (int i = 0; !used && i < *ntaken; i++) used = !strcmp(taken[i], dst);
+        if (!used) break;
+    }
+    if (dfd >= 0) close(dfd);
+    taken[(*ntaken)++] = strdup(dst);
+    Op *op = op_new(OP_EXTRACT, NULL, 0, dst);
+    op->arc = strdup(arc);
+    ops_start(op);
+}
+
+// The archives Extract here takes: every selected one when the item under the cursor is selected, else that item.
+static int extract_here_count(Pane *p, bool run) {
+    if (p->cursor < 0 || !p->order) return 0;
+    u32 ce = p->order[p->cursor];
+    bool many = p->sel_count > 1 && p->sel[ce];
+    char **taken = run ? xmalloc(sizeof(char *) * (many ? p->sel_count : 1)) : NULL;
+    int n = 0;
+    for (u32 i = 0; i < p->count; i++) {
+        u32 e = p->order[i];
+        Entry *en = &p->L->entries[e];
+        if ((many ? !p->sel[e] : e != ce) || (en->flags & ENT_DIR) || !is_archive_name(en->name)) continue;
+        if (run) extract_here_one(p, en->name, taken, &n);
+        else n++;
+    }
+    if (run) strv_free(taken, n);
+    return n;
+}
+
 static void arc_action(Pane *p, int act) {
     int n = 0;
     char **paths = NULL;
-    if (act == ACT_EXTRACT_HERE) { // archive file in a normal folder -> "<folder>/<name without ext>/"
-        if (p->cursor < 0 || !p->order) return;
-        Entry *e = &p->L->entries[p->order[p->cursor]];
-        char arc[PATH_MAX], stem[NAME_MAX + 1], dst[PATH_MAX];
-        path_join(arc, sizeof arc, p->path, e->name);
-        snprintf(stem, sizeof stem, "%s", e->name);
-        char *dot = strstr(stem, ".tar.");
-        if (!dot) dot = strrchr(stem, '.');
-        if (dot && dot != stem) *dot = 0;
-        int dfd = open(p->path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-        char nn[NAME_MAX + 1];
-        snprintf(nn, sizeof nn, "%s", stem);
-        if (dfd >= 0 && exists_at(dfd, nn)) unique_name(dfd, stem, true, false, nn, sizeof nn);
-        if (dfd >= 0) close(dfd);
-        path_join(dst, sizeof dst, p->path, nn);
-        Op *op = op_new(OP_EXTRACT, NULL, 0, dst);
-        op->arc = strdup(arc);
-        ops_start(op);
-        return;
-    }
+    if (act == ACT_EXTRACT_HERE) { extract_here_count(p, true); return; } // archive files in a normal folder
     if (act == ACT_EXTRACT_SEL || act == ACT_EXTRACT_ALL) { // inside an archive: next to the archive file
         char file[PATH_MAX], inner[PATH_MAX], par[PATH_MAX];
         if (!arc_split(p->path, file, sizeof file, inner, sizeof inner)) return;
@@ -6526,7 +6552,10 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
             menu_add("Extract next to the archive", "Drag out", ACT_EXTRACT_SEL, true);
             menu_sep();
         } else if (!dir && is_archive_name(e->name)) {
-            menu_add("Extract here", "", ACT_EXTRACT_HERE, true);
+            int na = extract_here_count(p, false);
+            static char lbl[48]; // (the menu keeps the pointer)
+            if (na > 1) snprintf(lbl, sizeof lbl, "Extract %d archives here", na);
+            menu_add(na > 1 ? lbl : "Extract here", "", ACT_EXTRACT_HERE, true);
         }
         if (pane_is_trash(p)) {
             menu_add("Restore", "", ACT_TRASH_RESTORE, true);
