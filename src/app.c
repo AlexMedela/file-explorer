@@ -12404,6 +12404,7 @@ int main(int argc, char **argv) {
         split_path = NULL;
     }
     signal(SIGCHLD, SIG_IGN); // reap xdg-open children automatically
+    signal(SIGPIPE, SIG_IGN); // a write to a helper that already exited is an EPIPE error, not the end of the app (children get it back)
     A.rec_dir = getenv("FE_RECORD");
     if (A.rec_dir && !A.rec_dir[0]) A.rec_dir = NULL;
     bool any_selftest = selftest || selftest_ops || selftest_m4 || selftest_m5 || selftest_m6 || selftest_m7 || selftest_m8 || selftest_m9 || selftest_m10 || selftest_m11 || selftest_git || selftest_grep || selftest_du || selftest_cmp || selftest_admin || selftest_borg;
