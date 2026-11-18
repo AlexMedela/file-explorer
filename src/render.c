@@ -3214,11 +3214,7 @@ static void draw_menu_in(Menu *m, bool frame) {
             } else if (icons) {
                 f32 is = roundf(S(16)), ix = lx - S(25) + (S(18) - is) * 0.5f, iy = yy + (h - is) * 0.5f;
                 Color ic = tc;
-                if (icon_check && it->checked) { // on: the icon in an accent circle
-                    f32 d = roundf(S(22));
-                    draw_rrect(roundf(ix + (is - d) * 0.5f), roundf(iy + (is - d) * 0.5f), d, d, d * 0.5f, it->enabled ? C(COL_ACCENT) : C(COL_CHIP));
-                    if (it->enabled) ic = C(COL_ON_ACCENT);
-                }
+                if (icon_check && it->checked && it->enabled) ic = C(COL_ACCENT); // on: the icon in the accent colour
                 draw_ui_icon(menu_action_icon(it), ix, iy, is, ic);
             }
             draw_text(f, lx, text_y(f, yy, h), it->label, (int)strlen(it->label), tc);

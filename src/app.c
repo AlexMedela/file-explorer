@@ -7562,7 +7562,7 @@ static int menu_action_icon(const MenuItem *it) {
 
 static bool menu_item_is_app(const MenuItem *it) { return it->act >= ACT_OW_APP_BASE && it->act < ACT_OW_APP_BASE + g_ow_menu.n; }
 
-// A switch with an icon shows its state on the icon (in an accent circle when on) rather than with a check mark.
+// A switch with an icon shows its state on the icon (accent coloured when on) rather than with a check mark.
 static bool menu_item_icon_check(const MenuItem *it) { return it->checkable && !menu_item_is_app(it) && menu_action_icon(it) >= 0; }
 
 // Menus show those icons (render.c draws them; built in, the same everywhere); the Open with apps show their own.
