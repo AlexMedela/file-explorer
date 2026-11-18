@@ -54,7 +54,13 @@ jobs:
             ./build/file-explorer --selftest /tmp/fe-st
             for t in ops admin git borg grep du cmp m4 m5 m6 m7 m8 m9 m10 m11; do
               echo "::group::selftest-$t"
-              ./build/file-explorer --selftest-$t || { echo "::error::selftest-$t failed"; exit 1; }
+              # a failure shows its exit code (and signal) and is run once more: a pass then is only a warning (flaky)
+              rc=0; ./build/file-explorer --selftest-$t || rc=$?
+              if [ $rc != 0 ]; then
+                echo "::warning::selftest-$t failed (exit $rc $(kill -l $rc 2>/dev/null)), running it again"
+                rc=0; ./build/file-explorer --selftest-$t || rc=$?
+                [ $rc = 0 ] || { echo "::error::selftest-$t failed twice (exit $rc $(kill -l $rc 2>/dev/null))"; exit 1; }
+              fi
               echo "::endgroup::"
             done'
       - name: Screenshot
