@@ -6403,6 +6403,32 @@ static int run_selftest_m10(void) {
         ST_CHECK(!strcmp(g_pick_name.buf, "draft") && !strcmp(A.edit.buf, "x")); // typed into the path bar, not the name
         st_key(SDLK_ESCAPE, 0);
         ST_CHECK(!A.edit_pane && A.pick_done == 0);
+        // selecting a file puts its name in the field, stem selected; typed over, it stays; a folder leaves it
+        g_pick_name_focus = false;
+        st_select(pp, "a.txt");
+        picker_tick();
+        ST_CHECK(!strcmp(g_pick_name.buf, "a.txt") && g_pick_name.anchor == 0 && g_pick_name.caret == 1);
+        g_pick_name_focus = true;
+        st_type("c");
+        picker_tick();
+        ST_CHECK(!strcmp(g_pick_name.buf, "c.txt"));
+        g_pick_name_focus = false;
+        st_select(pp, "sub");
+        picker_tick();
+        ST_CHECK(!strcmp(g_pick_name.buf, "c.txt") && !strcmp(pp->path, M10_BASE "/pick"));
+        // a path as the name (a file selected in the tree view): into that folder, if it exists
+        A.pick_done = 0;
+        te_set(&g_pick_name, "nope/x.txt", 0, 0);
+        picker_commit();
+        ST_CHECK(A.pick_done == 0 && !A.dlg.open);
+        te_set(&g_pick_name, "sub/new.txt", 0, 0);
+        picker_commit();
+        ST_CHECK(A.pick_done == 1 && !strcmp(ST_PICK_OUT(), M10_BASE "/pick/sub/new.txt\n"));
+        A.pick_done = 0;
+        te_set(&g_pick_name, M10_BASE "/pick/sub/abs.txt", 0, 0);
+        picker_commit();
+        ST_CHECK(A.pick_done == 1 && !strcmp(ST_PICK_OUT(), M10_BASE "/pick/sub/abs.txt\n"));
+        A.pick_done = 0;
         te_set(&g_pick_name, "", 0, 0);
         unlink(outf);
         A.pick_done = 0;

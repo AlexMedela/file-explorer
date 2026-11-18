@@ -12713,6 +12713,7 @@ int main(int argc, char **argv) {
         if (A.settings_dirty && !A.screenshot && now_ns() - A.settings_saved > 3000000000ull) settings_save();
         term_tick();
         dragout_tick();
+        picker_tick();
         addon_tick();
         cloud_tick();
         git_tick();

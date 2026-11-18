@@ -17,6 +17,7 @@
 - Inside a Timeshift snapshot the bar with "Compare with now" and "Restore…" shows, as it does for Snapper and ZFS.
 - Dragging files to other apps on Wayland: a drag can switch workspaces (Super / Alt hands it to the desktop, so a workspace shortcut no longer drops it where the pointer is), and after a drop into an app that never says it's done, clicks no longer start a selection box that follows the mouse (Esc also ends such a drag). Thanks to @pr83-glitch.
 - In the Save dialog (the app as file chooser), Ctrl+L / F6 edits the path while the file name has the keyboard, and Alt+←/→/↑, Ctrl+H and F5 work there without losing the typed name. Thanks to @pr83-glitch.
+- In the Save dialog, selecting a file puts its name in the file name field (its name without the extension selected), to save over it or name the new file after it; a name typed afterwards stays until another file is selected. The name can also be a path (`sub/name`, as a file in the tree view fills in, or a full one) into a folder that exists. Thanks to @pr83-glitch.
 
 ## 0.11.2
 
