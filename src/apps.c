@@ -757,6 +757,11 @@ typedef struct {
     double duration, fps;
     i64 bit_rate;
     char vcodec[24], acodec[24], title[128], artist[128], album[128], author[128];
+    // a photo's EXIF: when it was taken (local time), camera, lens, exposure, where
+    i64 taken;
+    char camera[96], lens[96], exposure[80];
+    bool has_gps;
+    double lat, lon;
     _Atomic int done;
     _Atomic int refs;
 } MediaJob;
@@ -810,6 +815,135 @@ static void media_parse_ffprobe(MediaJob *j, char *out) {
     }
 }
 
+// --- a JPEG's EXIF (APP1 "Exif" -> a TIFF: IFD0, its Exif and GPS sub-IFDs). Only the tags Properties shows; every
+// offset is checked against what was read. ---
+typedef struct { const u8 *p; size_t n; bool le; } Tiff;
+
+static u32 tiff_u16(const Tiff *t, size_t o) { return o + 2 > t->n ? 0 : t->le ? t->p[o] | t->p[o + 1] << 8 : t->p[o] << 8 | t->p[o + 1]; }
+static u32 tiff_u32(const Tiff *t, size_t o) {
+    return o + 4 > t->n ? 0 : t->le ? (u32)t->p[o] | (u32)t->p[o + 1] << 8 | (u32)t->p[o + 2] << 16 | (u32)t->p[o + 3] << 24
+                                    : (u32)t->p[o] << 24 | (u32)t->p[o + 1] << 16 | (u32)t->p[o + 2] << 8 | (u32)t->p[o + 3];
+}
+
+// The entry of tag in the IFD at ifd: where its value is (inline or at its offset) and how many values; false: none.
+static bool tiff_find(const Tiff *t, u32 ifd, u32 tag, u32 *type, u32 *count, size_t *at) {
+    u32 n = tiff_u16(t, ifd);
+    for (u32 i = 0; i < n && i < 512; i++) {
+        size_t e = ifd + 2 + (size_t)i * 12;
+        if (e + 12 > t->n) return false;
+        if (tiff_u16(t, e) != tag) continue;
+        *type = tiff_u16(t, e + 2);
+        *count = tiff_u32(t, e + 4);
+        static const u8 sz[13] = {0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8};
+        u64 bytes = (u64)(*type < 13 ? sz[*type] : 0) * *count;
+        if (!bytes || bytes > t->n) return false;
+        *at = bytes <= 4 ? e + 8 : tiff_u32(t, e + 8);
+        return *at + bytes <= t->n;
+    }
+    return false;
+}
+
+static void tiff_str(const Tiff *t, u32 ifd, u32 tag, char *out, size_t cap) {
+    u32 type, count;
+    size_t at;
+    out[0] = 0;
+    if (!tiff_find(t, ifd, tag, &type, &count, &at) || type != 2) return;
+    size_t k = 0;
+    for (u32 i = 0; i < count && k + 1 < cap && t->p[at + i]; i++) out[k++] = (char)t->p[at + i];
+    while (k && out[k - 1] == ' ') k--;
+    out[k] = 0;
+}
+
+static double tiff_num(const Tiff *t, u32 ifd, u32 tag, int idx) { // SHORT / LONG / RATIONAL as a number (-1: none)
+    u32 type, count;
+    size_t at;
+    if (!tiff_find(t, ifd, tag, &type, &count, &at) || (u32)idx >= count) return -1;
+    if (type == 3) return tiff_u16(t, at + (size_t)idx * 2);
+    if (type == 4) return tiff_u32(t, at + (size_t)idx * 4);
+    if (type == 5 || type == 10) {
+        u32 a = tiff_u32(t, at + (size_t)idx * 8), b = tiff_u32(t, at + (size_t)idx * 8 + 4);
+        return b ? (type == 10 ? (double)(i32)a / (i32)b : (double)a / b) : -1;
+    }
+    if (type == 11) { u32 u = tiff_u32(t, at + (size_t)idx * 4); float f; memcpy(&f, &u, 4); return f; } // (some writers: FLOAT / DOUBLE)
+    if (type == 12) {
+        u64 hi = tiff_u32(t, at + (size_t)idx * 8 + (t->le ? 4 : 0)), lo = tiff_u32(t, at + (size_t)idx * 8 + (t->le ? 0 : 4)), u = hi << 32 | lo;
+        double d;
+        memcpy(&d, &u, 8);
+        return d;
+    }
+    return -1;
+}
+
+static void media_exif_tiff(MediaJob *j, const Tiff *t) {
+    u32 ifd0 = tiff_u32(t, 4);
+    if (tiff_u16(t, 2) != 42 || !ifd0) return;
+    char make[48], model[64];
+    tiff_str(t, ifd0, 0x010F, make, sizeof make);
+    tiff_str(t, ifd0, 0x0110, model, sizeof model);
+    if (make[0] && strncasecmp(model, make, strlen(make)) && !(strchr(make, ' ') && !strncasecmp(model, make, (size_t)(strchr(make, ' ') - make))))
+        snprintf(j->camera, sizeof j->camera, "%s %s", make, model); // ("Google" + "Pixel 8"; "Canon" + "Canon EOS R6" once)
+    else snprintf(j->camera, sizeof j->camera, "%s", model);
+    double v = tiff_num(t, ifd0, 0x8769, 0);
+    if (v > 0) {
+        u32 ex = (u32)v;
+        char when[24];
+        tiff_str(t, ex, 0x9003, when, sizeof when);
+        if (!when[0]) tiff_str(t, ifd0, 0x0132, when, sizeof when);
+        struct tm tm = {0};
+        if (sscanf(when, "%d:%d:%d %d:%d:%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday, &tm.tm_hour, &tm.tm_min, &tm.tm_sec) == 6 && tm.tm_year > 1900) {
+            tm.tm_year -= 1900, tm.tm_mon -= 1, tm.tm_isdst = -1;
+            j->taken = (i64)mktime(&tm); // (EXIF times are the camera's local time)
+        }
+        tiff_str(t, ex, 0xA434, j->lens, sizeof j->lens);
+        double f = tiff_num(t, ex, 0x829D, 0), et = tiff_num(t, ex, 0x829A, 0), iso = tiff_num(t, ex, 0x8827, 0), fl = tiff_num(t, ex, 0x920A, 0);
+        size_t o = 0;
+        const char *sep = " \xC2\xB7 ";
+        if (f > 0) o += (size_t)snprintf(j->exposure + o, sizeof j->exposure - o, "f/%.3g", f);
+        if (et > 0 && o < sizeof j->exposure) {
+            if (et < 1) o += (size_t)snprintf(j->exposure + o, sizeof j->exposure - o, "%s1/%.0f s", o ? sep : "", 1 / et);
+            else o += (size_t)snprintf(j->exposure + o, sizeof j->exposure - o, "%s%.3g s", o ? sep : "", et);
+        }
+        if (iso > 0 && o < sizeof j->exposure) o += (size_t)snprintf(j->exposure + o, sizeof j->exposure - o, "%sISO %.0f", o ? sep : "", iso);
+        if (fl > 0 && o < sizeof j->exposure) snprintf(j->exposure + o, sizeof j->exposure - o, "%s%.3g mm", o ? sep : "", fl);
+    }
+    v = tiff_num(t, ifd0, 0x8825, 0);
+    if (v > 0) {
+        u32 g = (u32)v;
+        char ns[4], ew[4];
+        tiff_str(t, g, 1, ns, sizeof ns);
+        tiff_str(t, g, 3, ew, sizeof ew);
+        double la[3], lo[3];
+        bool ok = ns[0] && ew[0];
+        for (int i = 0; i < 3 && ok; i++) ok = (la[i] = tiff_num(t, g, 2, i)) >= 0 && (lo[i] = tiff_num(t, g, 4, i)) >= 0;
+        if (ok) {
+            j->lat = (la[0] + la[1] / 60 + la[2] / 3600) * (ns[0] == 'S' ? -1 : 1);
+            j->lon = (lo[0] + lo[1] / 60 + lo[2] / 3600) * (ew[0] == 'W' ? -1 : 1);
+            j->has_gps = fabs(j->lat) <= 90 && fabs(j->lon) <= 180;
+        }
+    }
+}
+
+static void media_exif(MediaJob *j) {
+    int fd = open(j->path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return;
+    size_t cap = 128 << 10; // (EXIF sits in the first 64 KB: APP1's size is 16 bits)
+    u8 *b = xmalloc(cap);
+    ssize_t n = pread(fd, b, cap, 0);
+    close(fd);
+    for (size_t o = 2; n > 4 && b[0] == 0xFF && b[1] == 0xD8 && o + 4 <= (size_t)n && b[o] == 0xFF;) {
+        u8 mk = b[o + 1];
+        size_t len = (size_t)b[o + 2] << 8 | b[o + 3];
+        if (mk == 0xDA || mk == 0xD9 || len < 2) break; // (the picture data: no headers after it)
+        if (mk == 0xE1 && len >= 8 && o + 2 + len <= (size_t)n && !memcmp(b + o + 4, "Exif\0\0", 6)) {
+            Tiff t = {b + o + 10, len - 8, b[o + 10] == 'I'};
+            media_exif_tiff(j, &t);
+            break;
+        }
+        o += 2 + len;
+    }
+    free(b);
+}
+
 static void *media_thread(void *arg) {
     MediaJob *j = arg;
     thread_background_priority();
@@ -832,6 +966,7 @@ static void *media_thread(void *arg) {
         char ext[24];
         path_ext_lower(j->path, ext, sizeof ext);
         if (ext_in(ext, STB_EXTS)) stbi_info(j->path, &j->w, &j->h, &n);
+        if (!strcmp(ext, "jpg") || !strcmp(ext, "jpeg") || !strcmp(ext, "jpe")) media_exif(j);
         else if (!strcmp(ext, "svg")) free(svg_preview_pixels(j->path, 16, &n, &n, &j->w, &j->h));
         if (j->w <= 0 && j->ffprobe) {
             char *argv[] = {(char *)j->ffprobe, "-v", "error", "-show_entries",

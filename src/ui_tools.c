@@ -548,6 +548,13 @@ static int props_media_rows(MediaJob *m, const char **lab, char (*val)[160], int
         snprintf(val[n++], (size_t)cap, "%s%s%s", c, chn, extra);
     }
     if (m->bit_rate > 0 && !m->vcodec[0] && m->acodec[0]) { lab[n] = "Bit rate"; snprintf(val[n++], (size_t)cap, "%lld kbps", (long long)((m->bit_rate + 500) / 1000)); }
+    if (m->taken > 0) { lab[n] = "Taken"; props_date(m->taken, val[n++], (size_t)cap); }
+    if (m->camera[0]) { lab[n] = "Camera"; snprintf(val[n++], (size_t)cap, "%s", m->camera); }
+    if (m->lens[0]) { lab[n] = "Lens"; snprintf(val[n++], (size_t)cap, "%s", m->lens); }
+    if (m->exposure[0]) { lab[n] = "Exposure"; snprintf(val[n++], (size_t)cap, "%s", m->exposure); }
+    if (m->has_gps)
+        lab[n] = "Location", snprintf(val[n++], (size_t)cap, "%.5f\xC2\xB0 %c, %.5f\xC2\xB0 %c", fabs(m->lat), m->lat < 0 ? 'S' : 'N', fabs(m->lon),
+                                      m->lon < 0 ? 'W' : 'E');
     if (m->pages > 0) { lab[n] = "Pages"; snprintf(val[n++], (size_t)cap, "%d", m->pages); }
     if (m->title[0]) { lab[n] = "Title"; snprintf(val[n++], (size_t)cap, "%s", m->title); }
     if (m->artist[0]) { lab[n] = "Artist"; snprintf(val[n++], (size_t)cap, "%s", m->artist); }
@@ -833,8 +840,8 @@ static void props_draw(void) {
         y += n * rh + gap;
     }
     if (s->media) { // Media: what the file holds (nothing found: no card)
-        const char *lab[10];
-        char val[10][160];
+        const char *lab[16];
+        char val[16][160];
         int n = props_media_rows(s->media, lab, val, (int)sizeof val[0]);
         if (n) {
             y = props_heading(x, y, "Media");
