@@ -795,6 +795,9 @@ static int run_selftest_ops(void) {
         ST_CHECK(!dragout_is_self(dp, 2));
         g_do.sys = DOS_NONE;
         // no window system: an item dragged past the window's edge stays a drag inside
+        // (let the watcher's refreshes from the undo and rmdir above land first: a listing mid-drag cancels the drag)
+        st_wait_ops();
+        for (int k = 0; k < 3; k++) { st_frames(10); SDL_Delay(50); st_wait(); }
         pane_refresh(p);
         st_wait();
         f32 ay2 = st_row_y(p, "a.txt");
