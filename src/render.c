@@ -392,8 +392,11 @@ static void draw_panel_bar(Panel *pn) {
         g_alpha = 1.f;
     }
     // + and split buttons (+'s highlight after the tab backgrounds: the active tab's flare can reach under it)
-    if (A.drag == DRAG_NONE && hot(pr)) draw_rrect(pr.x, pr.y, pr.w, pr.h, pr.w * 0.5f, C(COL_TAB_HOVER));
+    bool troom = tab_target_panel(pn) != NULL; // every tab bar full: dimmed, no hand
+    if (A.drag == DRAG_NONE && troom && hot(pr)) draw_rrect(pr.x, pr.y, pr.w, pr.h, pr.w * 0.5f, C(COL_TAB_HOVER));
+    if (!troom) g_alpha = 0.4f;
     draw_plus(pr.x + pr.w * 0.5f, pr.y + pr.h * 0.5f, S(12), MAX(2.f, S(1.8f)), C(COL_TEXT_DIM));
+    g_alpha = 1.f;
     Rect sr = pn->splitbtn;
     bool sh = A.mouse_in && in_rect(sr, A.mx, A.my), down = sh && (SDL_GetModState() & SDL_KMOD_SHIFT);
     bool room = panel_split_target(pn, down ? ZONE_BOTTOM : ZONE_RIGHT) != NULL; // no panel left to split: dimmed, no hand

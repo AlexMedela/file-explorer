@@ -17,7 +17,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | F5, Ctrl+R | Refresh (also measures folder sizes again from scratch) |
 | Click column header | Sort (click again to reverse) |
 | Drag on empty space / outside a name | Rubber-band select (Ctrl = add), auto-scrolls at edges |
-| Ctrl+T / Ctrl+W / Ctrl+Shift+T | New tab / close tab / reopen closed tab (in the active panel) |
+| Ctrl+T / Ctrl+W / Ctrl+Shift+T | New tab / close tab / reopen closed tab (in the active panel; when its tab bar is full the new tab goes to the panel with the most room, and when every bar is full + dims and nothing opens) |
 | Ctrl+Tab, Ctrl+PgUp/PgDn, Ctrl+1…9 | Switch tabs within the active panel (Ctrl+9 = last) |
 | Middle-click folder or place, Ctrl+Enter | Open folder in a new tab |
 | Middle-click tab / double-click tab bar | Close tab / new tab |

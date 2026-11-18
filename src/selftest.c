@@ -1905,6 +1905,23 @@ static int run_selftest_m6(void) {
         ST_CHECK(A.npanels == 1);
         st_frames(2);
     }
+    {   // new tabs again and again: they stop once the tabs would get too narrow, then go to a panel with room
+        Panel *pn = A.ap;
+        int nt0 = A.ntabs, n = 0;
+        for (int i = 0; i < 64 && A.ntabs > n; i++) { n = A.ntabs; st_key(SDLK_T, SDL_KMOD_CTRL); st_wait(); }
+        int full = panel_ntabs(pn);
+        ST_CHECK(full > 3 && !tab_target_panel(pn) && panel_tab(pn, -1)->r.w >= TAB_MIN_W);
+        st_shot("tabs-full");
+        Panel *np = panel_split(pn, ZONE_RIGHT, NULL, M6_BASE "/a");
+        panel_activate(pn); layout();
+        ST_CHECK(np && A.ap == pn && tab_target_panel(pn) == np);
+        st_key(SDLK_T, SDL_KMOD_CTRL); st_wait();
+        ST_CHECK(panel_ntabs(pn) == full && panel_ntabs(np) == 2 && A.ap == np);
+        while (A.npanels > 1) run_command(CMD_CLOSE_PANEL);
+        while (A.ntabs > nt0) { st_key(SDLK_W, SDL_KMOD_CTRL); st_wait(); }
+        ST_CHECK(A.npanels == 1 && A.ntabs == nt0);
+        st_frames(2);
+    }
     {   // pointer shape: hand over buttons (the new-tab +), I-beam over the path bar, arrow over the file list
         Panel *pn = A.ap;
         PaneLayout *ly = &pn->cur->pane[0].ly;
