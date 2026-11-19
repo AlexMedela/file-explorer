@@ -1,0 +1,5 @@
+# Generated release notes (gh release create --generate-notes): contributors' pull requests only.
+changelog:
+  exclude:
+    authors:
+      - AlexMedela
