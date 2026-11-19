@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1
+
+**Fixed**
+- With Theme "System" on a light desktop, the window opens light, not dark for a moment first. Thanks to @pr83-glitch.
+
 ## 0.12.0
 
 **New**
