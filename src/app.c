@@ -12800,6 +12800,9 @@ int main(int argc, char **argv) {
 
     // lsblk takes a few ms: wait for it (bounded) so the drives are in the first frame instead of popping in after.
     for (u64 t0 = now_ns(); A.devs_enabled && !A.devs_known && now_ns() - t0 < 150000000ull;) { SDL_Delay(2); main_drain(); }
+    // Theme / File icons "System" or the desktop's accent: the same for the desktop's look, so a light desktop doesn't
+    // get a dark first frame that turns light a moment later (the watcher started with the fonts).
+    for (u64 t0 = now_ns(); atomic_load(&g_dlook.running) && !g_desktop.known && now_ns() - t0 < 400000000ull;) { SDL_Delay(2); main_drain(); }
     A.redraw = true;
     int hold_ms = 0;
     while (!A.quit) {
