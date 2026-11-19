@@ -724,7 +724,7 @@ static void *dlook_thread(void *arg) {
     u64 next = 0;
     while (!atomic_load(&g_dlook.stop)) {
         bool changed = false; // the portal says something changed; config files are looked at every 5 s
-        if (conn && g_fm1.read_write(conn, 1000)) {
+        if (conn && g_fm1.read_write(conn, first ? 0 : 1000)) { // (the first look right away: startup waits for it)
             void *m;
             while ((m = g_fm1.pop_message(conn))) {
                 changed |= g_dlook.is_signal(m, "org.freedesktop.portal.Settings", "SettingChanged") != 0;
