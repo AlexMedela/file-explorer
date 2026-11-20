@@ -5962,6 +5962,9 @@ static void paste_dir(Pane *p, char *out, size_t cap) {
 
 static void drop_menu_do(int act);
 static void open_with_menu_app(Pane *p, int k);
+#define ACT_UA_BASE 700 // user actions (*.action files): + index in g_ua
+#define UA_MAX 16
+static void ua_run(Pane *p, int idx);
 
 static void borg_close(Pane *p);
 static void borg_close_mount(const char *mp);
@@ -6315,6 +6318,7 @@ static void do_action(Pane *p, int act) {
         else if (act >= ACT_TF_EXT_BASE && act < ACT_TF_EXT_BASE + g_ntf) tf_toggle(p, g_tf_keys[act - ACT_TF_EXT_BASE]);
         else if (act == ACT_CMP_DIALOG) cmp_action(p, act);
         else if (act >= ACT_OW_APP_BASE && act < ACT_OW_APP_BASE + OW_MENU_APPS) open_with_menu_app(p, act - ACT_OW_APP_BASE);
+        else if (act >= ACT_UA_BASE && act < ACT_UA_BASE + UA_MAX) ua_run(p, act - ACT_UA_BASE);
         else if (act == ACT_TRASH_RESTORE) trash_restore(p, false);
         else if (act == ACT_TRASH_RESTORE_ALL) trash_restore(p, true);
         else if (act == ACT_TRASH_EMPTY) trash_delete(p, true);
@@ -6624,6 +6628,223 @@ static void open_with_menu_app(Pane *p, int k) {
     strv_free(paths, n);
 }
 
+// user actions: ~/.local/share/file-explorer/actions/*.action
+typedef struct {
+    char name[96],
+    exec[1024],
+    exts[256];
+    int sel;
+    bool quote;
+
+} UserAction; // sel: 0 any, 1 single, 2 multiple, 3 none
+
+static UserAction g_ua[UA_MAX];
+static int g_nua;
+
+static char *ua_trim(char *s) {
+    while (*s == ' ' || *s == '\t') {
+        s++;
+    }
+
+    size_t l = strlen(s);
+    while (l && strchr(" \t\r\n", s[l - 1])) {
+        s[--l] = 0;
+    }
+    return s;
+}
+
+static void ua_parse(const char *file) {
+    FILE *f = fopen(file, "r");
+    if (!f || g_nua >= UA_MAX)
+    {
+        if (f) fclose(f);
+        return;
+    }
+
+    UserAction a = {.quote = true};
+    bool active = true, in_sect = false;
+    char line[2048];
+    while (fgets(line, sizeof line, f)) {
+        char *s = ua_trim(line), *eq;
+        if (!s[0] || s[0] == '#') continue;
+        if (s[0] == '[') {
+            if (in_sect) break;
+            in_sect = true;
+            continue;
+        }
+        if (!(eq = strchr(s, '='))) continue;
+
+        *eq = 0;
+        char *k = ua_trim(s), *v = ua_trim(eq + 1);
+        if (!strcmp(k, "Active")) active = strcmp(v, "false") != 0;
+        else if (!strcmp(k, "Name")) snprintf(a.name, sizeof a.name, "%s", v);
+        else if (!strcmp(k, "Exec")) snprintf(a.exec, sizeof a.exec, "%s", v);
+        else if (!strcmp(k, "Extensions")) snprintf(a.exts, sizeof a.exts, "%s", v);
+        else if (!strcmp(k, "Selection")) a.sel = !strcmp(v, "single") ? 1 : !strcmp(v, "multiple") ? 2 : !strcmp(v, "none") ? 3 : 0;
+        else if (!strcmp(k, "Quote")) a.quote = strcmp(v, "none") != 0;
+    }
+    fclose(f);
+    if (active && a.name[0] && a.exec[0]) g_ua[g_nua++] = a;
+}
+
+static void ua_load(void) {
+    char dh[PATH_MAX], dir[PATH_MAX];
+    g_nua = 0;
+    data_home(dh, sizeof dh);
+    snprintf(dir, sizeof dir, "%s/file-explorer/actions", dh);
+    DIR *d = opendir(dir);
+    if (!d) return;
+    char *names[64];
+    int n = 0;
+    for (struct dirent *e; (e = readdir(d)) && n < 64;) {
+        size_t l = strlen(e->d_name);
+        if (l > 7 && !strcmp(e->d_name + l - 7, ".action")) names[n++] = strdup(e->d_name);
+    }
+    closedir(d);
+    qsort(names, (size_t)n, sizeof(char *), cmp_strp);
+    for (int i = 0; i < n; i++) {
+        char full[PATH_MAX];
+        path_join(full, sizeof full, dir, names[i]);
+        ua_parse(full);
+        free(names[i]);
+    }
+}
+
+static bool ua_item_ok(const UserAction *a, const char *path) {
+    struct stat st;
+    bool dir = stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+    const char *name = path_basename(path);
+    size_t nl = strlen(name);
+    char ex[256];
+    snprintf(ex, sizeof ex, "%s", a->exts);
+    char *save = NULL;
+    bool any = true; // an empty list means any
+    for (char *t = strtok_r(ex, ";", &save); t; t = strtok_r(NULL, ";", &save)) {
+        t = ua_trim(t);
+        if (!t[0]) continue;
+        any = false;
+        size_t tl = strlen(t);
+        if (!strcasecmp(t, "any")) return true;
+        if (!strcasecmp(t, "dir")) {
+            if (dir) return true;
+            continue;
+        }
+        if (!dir && nl > tl + 1 && name[nl - tl - 1] == '.' && !strcasecmp(name + nl - tl, t)) {
+            return true;
+        }
+    }
+    return any;
+}
+
+static bool ua_match(const UserAction *a, char **paths, int n) {
+    if (n < 1 || a->sel == 3 || (a->sel == 1 && n != 1) || (a->sel == 2 && n < 2)) return false;
+    for (int i = 0; i < n; i++) {
+        if (!ua_item_ok(a, paths[i])) return false;
+    }
+    return true;
+}
+
+static void ua_add(char *out, size_t cap, const char *s, bool quote) {
+    char q[PATH_MAX * 2 + 8];
+    if (!s[0]) return;
+    if (quote) sh_quote(q, sizeof q, s);
+    else snprintf(q, sizeof q, "%s", s);
+    size_t o = strlen(out);
+    snprintf(out + o, cap - o, "%s", q);
+}
+
+// %F all selected, %f name of the first, %p its path, %P its folder, %% a percent sign
+static void ua_expand(const UserAction *a, const char *dir, char **paths, int n, char *out, size_t cap) {
+    char par[PATH_MAX], one[3];
+    if (n) parent_of(paths[0], par, sizeof par);
+    else snprintf(par, sizeof par, "%s", dir);
+    out[0] = 0;
+    for (const char *c = a->exec; *c; c++) {
+        if (c[0] != '%' || !c[1]) {
+            one[0] = *c;
+            one[1] = 0;
+            ua_add(out, cap, one, false);
+            continue;
+        }
+        c++;
+        if (*c == 'F') {
+            for (int i = 0; i < n; i++) {
+                if (i) {
+                    ua_add(out, cap, " ", false);
+                }
+                ua_add(out, cap, paths[i], a->quote);
+            }
+        }
+        else if (*c == 'f') ua_add(out, cap, n ? path_basename(paths[0]) : "", a->quote);
+        else if (*c == 'p') ua_add(out, cap, n ? paths[0] : par, a->quote);
+        else if (*c == 'P') ua_add(out, cap, par, a->quote);
+        else if (*c == '%') ua_add(out, cap, "%", false);
+        else {
+            one[0] = '%';
+            one[1] = *c;
+            one[2] = 0;
+            ua_add(out, cap, one, false);
+        }
+    }
+}
+
+static void ua_run(Pane *p, int idx) {
+
+    if (idx < 0 || idx >= g_nua) return;
+    bool none = g_ua[idx].sel == 3;
+    int n = 0;
+    char **paths = none ? NULL : pane_selection_paths(p, &n);
+    if (!none && (!n || !ua_match(&g_ua[idx], paths, n))) {
+        strv_free(paths, n);
+        return;
+    }
+
+    char cmd[8192];
+    ua_expand(&g_ua[idx], p->path, paths, n, cmd, sizeof cmd);
+    strv_free(paths, n);
+
+    if (A.selftest) {
+        snprintf(A.last_opened, sizeof A.last_opened, "action:%s", cmd);
+        return;
+    }
+    char *argv[] = {"/bin/sh", "-c", cmd, NULL};
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addchdir_np(&fa, p->path);
+    pid_t pid;
+    int err = posix_spawn(&pid, "/bin/sh", &fa, spawn_attr(), argv, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    if (err) toast("Couldn't run %s: %s", g_ua[idx].name, strerror(err));
+}
+
+// Selection=none actions
+static void ua_folder_items(Pane *p) {
+    int shown = 0;
+    fprintf(stderr, "ua_folder_items called\n");
+    if (pane_is_archive(p)) return;
+    ua_load();
+    for (int i = 0; i < g_nua; i++) {
+        if (g_ua[i].sel != 3) continue;
+        if (!shown++) menu_sep();
+        menu_add(g_ua[i].name, "", ACT_UA_BASE + i, true);
+    }
+}
+
+static void ua_menu_items(Pane *p) {
+    int n = 0, shown = 0;
+    if (pane_is_archive(p)) return;
+    char **paths = pane_selection_paths(p, &n);
+
+    ua_load();
+
+    for (int i = 0; i < g_nua; i++) {
+        if (!ua_match(&g_ua[i], paths, n)) continue;
+        if (!shown++) menu_sep();
+        menu_add(g_ua[i].name, "", ACT_UA_BASE + i, true);
+    }
+    strv_free(paths, n);
+}
+
 static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
     Menu *m = &A.menu;
     m->keep_open = false;
@@ -6703,6 +6924,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         menu_add("Copy path", "Ctrl+Shift+C", ACT_COPY_PATH, true);
         if (snap_in(p->path)) menu_add("Restore to where it is now\xE2\x80\xA6", "", ACT_SNAP_RESTORE, true);
         menu_terminal_items(p);
+        ua_menu_items(p);
         menu_add("Properties", "Alt+Enter", ACT_PROPERTIES, true);
     } else {
         if (pane_is_archive(p)) {
@@ -6752,6 +6974,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         menu_add("Copy path", "Ctrl+Shift+C", ACT_COPY_PATH, true);
         menu_add_open_with("Open this folder with", "inode/directory", !pane_is_archive(p) && !pane_is_trash(p));
         menu_terminal_items(p);
+        ua_folder_items(p);
         menu_add("Properties", "Alt+Enter", ACT_PROPERTIES, true);
     }
     menu_finish(x, y);
