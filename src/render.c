@@ -294,7 +294,14 @@ static void te_draw(TextEdit *t, Font *f, Rect r, f32 pad, Color tc) {
         draw_rect(roundf(x + a), r.y + roundf(S(4)), roundf(b - a), r.h - roundf(S(8)), C(COL_SEL_FOCUS));
     }
     draw_text(f, x, ty, t->buf, n, tc);
-    draw_rect(roundf(x + cx), r.y + roundf(S(5)), MAX(1.f, roundf(S(1.2f))), r.h - roundf(S(10)), C(COL_ACCENT));
+    f32 alpha;
+    f32 cursor = text_caret_animate(&t->animation, cx - t->scroll, t->caret, t->anchor,
+                                    now_ns(), g_text_selecting || A.selftest || A.screenshot, &alpha);
+    Color caret_color = C(COL_ACCENT);
+    caret_color.a *= alpha;
+    f32 caret_width = MAX(1.f, roundf(S(1.2f)));
+    f32 caret_x = CLAMP(roundf(x + cursor), r.x + 1, MAX(r.x + 1, r.x + r.w - caret_width - 1));
+    draw_rect(caret_x, r.y + roundf(S(5)), caret_width, r.h - roundf(S(10)), caret_color);
     draw_clip_pop(cs);
 }
 
