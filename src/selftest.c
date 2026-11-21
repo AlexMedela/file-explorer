@@ -2215,6 +2215,19 @@ static int run_selftest_m7(void) {
         g_theme_cur = th;
         theme_apply();
         icons_sync_theme();
+        // draw-time tint: only light navigation surfaces darken pale artwork; the pixel caches never change
+        u32 saved_bg = g_icon_surface_bg;
+        g_icon_surface_bg = 0;
+        ST_CHECK(icon_glyph_tint(fo, 16) == 1.f);
+        g_icon_surface_bg = 0x202124; // dark surface
+        ST_CHECK(icon_glyph_tint(fo, 16) == 1.f);
+        g_icon_surface_bg = 0xFFFFFF; // light navigation surface
+        f32 tint = icon_glyph_tint(fo, 16);
+        ST_CHECK(tint > 0.f && tint < 1.f);
+        SDL_Texture *bt = big_icon_tex(fo, 96);
+        ST_CHECK(bt != NULL && icon_texture_tint(bt) > 0.f && icon_texture_tint(bt) < 1.f);
+        g_icon_surface_bg = saved_bg;
+        ST_CHECK(icon_glyph_tint(fo, 16) == 1.f && (!bt || icon_texture_tint(bt) == 1.f));
     }
     { // the trash bin's main colour follows the UI theme (re-rasterized on a theme change)
         int tr = icon_find("trash"), saved = g_theme_cur;
