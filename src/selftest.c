@@ -5190,6 +5190,21 @@ static int run_selftest_m11(void) {
         if (A.ap->cur->term) tab_close(A.cur);
         A.dock_h = 240;
     }
+    { // the sidebar edge is one full-height line drawn once, not a brand piece plus a list piece
+        g_sidebar_edge_draws = 0;
+        st_frames(1);
+        ST_CHECK(g_sidebar_edge_draws == 1);
+        ST_CHECK(g_sidebar_edge_probe.x == A.r_content.x - 1 && g_sidebar_edge_probe.y == 0 &&
+                 fabsf(g_sidebar_edge_probe.h - (A.r_sidebar.y + A.r_sidebar.h)) < 0.5f);
+        ST_CHECK(g_sidebar_edge_probe.color == COL_BORDER);
+        int saved_drag = A.drag;
+        A.drag = DRAG_SIDEBAR;
+        g_sidebar_edge_draws = 0;
+        st_frames(1);
+        ST_CHECK(sidebar_edge_hot() && g_sidebar_edge_draws == 1 && g_sidebar_edge_probe.color == COL_ACCENT);
+        A.drag = saved_drag;
+        st_shot("sidebar-edge");
+    }
     { // the sidebar is resizable: drag its edge (kept within limits), double-click resets, remembered
         f32 w0 = A.r_sidebar.w;
         Rect e = A.r_sdiv;
