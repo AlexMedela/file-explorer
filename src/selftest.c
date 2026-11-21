@@ -2189,6 +2189,13 @@ static int run_selftest_m7(void) {
         icons_sync_theme();
         g_logo_changed = false;
     }
+    { // icon contrast: pale artwork is darkened only on light navigation surfaces, keeping its hue
+        ST_CHECK(icon_contrast_scale(0.8f, 0.64f) == 1.f);       // dark surface: no change
+        ST_CHECK(icon_contrast_scale(0.f, 0.8f) == 1.f);          // transparent ink: no change
+        ST_CHECK(fabsf(icon_contrast_scale(0.8f, 0.8f) - 0.4375f) < 0.001f); // (0.8 - 0.45) / 0.8
+        ST_CHECK(fabsf(icon_contrast_scale(0.5f, 0.7f) - 0.5f) < 0.001f);
+        ST_CHECK(icon_contrast_scale(4.f, 0.8f) >= 0.15f - 0.0001f); // lower bound on the scale
+    }
     { // the trash bin's main colour follows the UI theme (re-rasterized on a theme change)
         int tr = icon_find("trash"), saved = g_theme_cur;
         ST_CHECK(tr >= 0 && strstr(g_icon_svg[0][tr], ICON_THEME_MARK) && icon_glyph(tr, 16));
