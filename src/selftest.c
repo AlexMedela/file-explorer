@@ -3574,6 +3574,26 @@ static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
 
+    { // sidebar quantitative labels use DIM in both themes (more readable than FAINT)
+        ST_CHECK(sidebar_meta_color() == COL_TEXT_DIM && sidebar_meta_color() != COL_TEXT_FAINT);
+        int tr = -1, dr = -1;
+        for (int i = 0; i < A.nplaces; i++) {
+            if (A.places[i].kind == PK_TRASH) tr = i;
+            if (A.places[i].kind == PK_DRIVE && dr < 0 && A.places[i].path[0]) dr = i;
+        }
+        ST_CHECK(tr >= 0 && dr >= 0);
+        bool tk = A.trash_known;
+        u64 ts = A.trash_size;
+        A.trash_known = true;
+        A.trash_size = 4096;
+        g_sidebar_meta_drawn[0] = g_sidebar_meta_drawn[1] = 0;
+        st_frames(1);
+        ST_CHECK(g_sidebar_meta_drawn[0] == COL_TEXT_DIM && g_sidebar_meta_drawn[1] == COL_TEXT_DIM);
+        st_shot("sidebar-meta-contrast");
+        A.trash_known = tk;
+        A.trash_size = ts;
+    }
+
     // --- the toolbar's sort button: the same keys as the folder menu's Sort by, the direction, Folders first ---
     st_frames(1);
     Rect sb = p->ly.sortbtn;
