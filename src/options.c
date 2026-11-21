@@ -637,7 +637,7 @@ static void opt_terminal_path_apply(void) {
     const char *name = NULL;
     if (*s && !find_terminal(exe, sizeof exe, &name)) {
         snprintf(g_external_terminal, sizeof g_external_terminal, "%s", old);
-        toast("Terminal executable not found or not executable");
+        toast("Terminal executable not found (name or path only, no arguments)");
         return;
     }
     g_opt.terminal_path_focus = false;
@@ -925,7 +925,7 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             f32 bw = MAX(roundf(S(80)), MAX(text_width(f, "Apply", 5), text_width(f, "Default", 7)) + S(28));
             Rect reset = {x + w - bw, y, bw, ch}, apply = {reset.x - gap - bw, y, bw, ch};
             Rect r = {x, y, MAX(0.f, apply.x - gap - x), ch};
-            sheet_field(r, &g_opt.terminal_path, g_opt.terminal_path_focus, "Executable name or path");
+            sheet_field(r, &g_opt.terminal_path, g_opt.terminal_path_focus, "Name or path (no arguments)");
             opt_hit(r, HP_TEXT, o->id, 0);
             bool valid = opt_terminal_path_valid(g_opt.terminal_path.buf);
             opt_action_button(apply, "Apply", valid);
