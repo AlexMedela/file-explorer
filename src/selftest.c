@@ -4758,6 +4758,15 @@ static int run_selftest_m9(void) {
         ST_CHECK(!strcmp(A.brand_text, "Work station \xC3\xA9") && !strcmp(brand_label(), A.brand_text));
         te_set(&g_opt.search, "sidebar", 7, 7);
         st_frames(1);
+        { // drawing drives the animation; pointer hit-testing still selects the same [lo, hi) range
+            u64 seen = g_opt.search.animation.seen;
+            st_frames(1);
+            ST_CHECK(g_opt.search.animation.seen > seen && g_opt.search.animation.valid);
+            st_text_click(&g_opt.search, 0, 1, 0);
+            ST_CHECK(g_opt.search.anchor == 0 && g_opt.search.caret == 0 && g_opt.search.animation.input > 0);
+            st_text_click(&g_opt.search, 7, 1, SDL_KMOD_SHIFT);
+            ST_CHECK(g_opt.search.anchor == 0 && g_opt.search.caret == 7);
+        }
         st_shot("m9-brand-custom");
         options_key(SDLK_RETURN, 0);
         ST_CHECK(!g_opt.brand_focus && options_is_open());
