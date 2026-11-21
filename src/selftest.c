@@ -4761,6 +4761,7 @@ static int run_selftest_m9(void) {
         st_shot("m9-brand-custom");
         { // a drawn, focused field drives the caret animation; pointer hit-testing still selects [lo, hi)
             ST_CHECK(g_opt.brand_focus && g_opt.brand.animation.seen > 0 && g_opt.brand.animation.valid);
+            A.menu.open = false; // a menu left by an earlier click would swallow the first click here
             st_text_click(&g_opt.search, 0, 1, 0);
             ST_CHECK(g_opt.search.anchor == 0 && g_opt.search.caret == 0 && g_opt.search.animation.input > 0);
             st_text_click(&g_opt.search, 7, 1, SDL_KMOD_SHIFT);
