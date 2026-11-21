@@ -5,7 +5,7 @@ static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "
 enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
 enum {
-    OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_APP_ICON, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
+    OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_APP_ICON, OPT_TITLE_ICON, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
@@ -28,6 +28,8 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_TEXT, OPT_SCROLL_COLOR, "Scrollbar colour", "Empty: Auto, the theme's own (System: the desktop's accent); or #RRGGBB / #RGB, then Apply"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders; System: the desktop's icon theme"},
     {OC_APPEARANCE, OK_TEXT, OPT_APP_ICON, "Application icon", "Absolute SVG/PNG path; the preview shows the current icon (the built-in default when empty). Apply to use it"},
+    {OC_APPEARANCE, OK_TEXT, OPT_TITLE_ICON, "Title bar icon", "Icon at the left of the title bar: absolute SVG/PNG path, or empty for the built-in logo. Apply to use it; Logo off hides it"},
+    {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "Show the icon before the name above the sidebar; off hides a custom title bar icon too"},
     {OC_APPEARANCE, OK_CHOICE, OPT_FONT, "Font", "Interface font family"},
     {OC_APPEARANCE, OK_INT, OPT_FONT_SIZE, "Font size", "Text size at 100% zoom"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ROW_SPACING, "Row spacing", "Height of rows in the details and list views"},
@@ -43,7 +45,6 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
     {OC_APPEARANCE, OK_CHOICE, OPT_BRAND_NAME, "Name above the sidebar", "Explorer, this computer's name, your own text, or none (the sidebar then starts at the top)"},
     {OC_APPEARANCE, OK_TEXT, OPT_BRAND_TEXT, "Your own name", "Shown above the sidebar instead of Explorer"},
-    {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "The logo before the name above the sidebar"},
     {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED, "Unified surfaces", "Sidebar, header, preview and status bar take the file area's background; the lines between them stay"},
     {OC_APPEARANCE, OK_BOOL, OPT_SEPARATORS, "Separator lines", "Lines between the sidebar, header, columns, preview and status bar (an edge you can drag shows on hover)"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_SIDEBAR, "Sidebar brightness", "With the name above it; darker or lighter than the theme's own colour, -30% to +30%"},
@@ -155,9 +156,11 @@ static struct {
     // the scrollbar colour (OK_TEXT, applied with Enter or Apply)
     TextEdit scroll_color;
     bool scroll_focus;
-    // the application icon path (OK_TEXT, applied with Enter or Apply)
+    // the application and title bar icon paths (OK_TEXT, applied with Enter or Apply)
     TextEdit app_icon;
     bool app_icon_focus;
+    TextEdit title_icon;
+    bool title_icon_focus;
 } g_opt;
 
 // Options > Integration > Terminal app: the terminals installed (programs on $PATH), found on a worker each time
@@ -636,6 +639,18 @@ static void opt_app_icon_chosen(const char *path) {
 
 static void opt_app_icon_apply(void) { opt_app_icon_chosen(g_opt.app_icon.buf); }
 
+// Title bar icon: an absolute .svg/.png replaces the header logo; empty restores it.
+static void opt_title_icon_chosen(const char *path) {
+    if (!app_icon_path_ok(path)) { toast("Title bar icon: an absolute .svg or .png path"); return; }
+    snprintf(g_title_icon_path, sizeof g_title_icon_path, "%s", path ? path : "");
+    A.settings_dirty = true;
+    A.redraw = true;
+    te_set(&g_opt.title_icon, g_title_icon_path, (int)strlen(g_title_icon_path), (int)strlen(g_title_icon_path));
+    g_opt.title_icon_focus = false;
+}
+
+static void opt_title_icon_apply(void) { opt_title_icon_chosen(g_opt.title_icon.buf); }
+
 static void opt_button(int id) {
     char dir[PATH_MAX];
     switch (id) {
@@ -678,6 +693,7 @@ static void opt_button(int id) {
     case OPT_REINDEX: run_command(CMD_REINDEX); break;
     case OPT_SCROLL_COLOR: opt_scroll_color_apply(); break;
     case OPT_APP_ICON: opt_app_icon_apply(); break;
+    case OPT_TITLE_ICON: opt_title_icon_apply(); break;
     case OPT_UPD_NOW: upd_button_press(); break;
     case OPT_UPD_NOTES: upd_notes(); break;
     case OPT_UPD_HOW:
@@ -741,6 +757,7 @@ static void options_open(void) {
     if (g_scroll_custom) snprintf(sc, sizeof sc, "#%06X", g_scroll_custom & 0xFFFFFF);
     te_set(&g_opt.scroll_color, sc, (int)strlen(sc), (int)strlen(sc));
     te_set(&g_opt.app_icon, g_app_icon_path, (int)strlen(g_app_icon_path), (int)strlen(g_app_icon_path));
+    te_set(&g_opt.title_icon, g_title_icon_path, (int)strlen(g_title_icon_path), (int)strlen(g_title_icon_path));
     term_scan_start();
     themes_scan(); // pick up new/edited theme files
     theme_apply();
@@ -904,7 +921,7 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     case OK_BUTTON: {
         bool primary = false, enabled = true;
         const char *l = o->id == OPT_THEME_NEW ? "Create" : o->id == OPT_REINDEX ? "Re-index" : o->id == OPT_KEYS_RESET ? "Reset"
-                      : o->id == OPT_APP_ICON ? "Apply"
+                      : o->id == OPT_APP_ICON || o->id == OPT_TITLE_ICON ? "Apply"
                       : o->id == OPT_UPD_NOW ? upd_button(&primary, &enabled) : o->id == OPT_UPD_HOW ? (upd_how_cmd() ? "Copy" : NULL) : "Open";
         if (!l) break; // (nothing to press)
         f32 bw = MAX(roundf(S(96)), text_width(f, l, (int)strlen(l)) + S(28));
@@ -913,16 +930,20 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
         if (enabled) opt_hit(r, HP_BUTTON, o->id, 0);
         break;
     }
-    case OK_TEXT: { // the name above the sidebar, the scrollbar colour, the application icon (with their Apply buttons)
-        if (o->id == OPT_APP_ICON) {
+    case OK_TEXT: { // the name above the sidebar, the scrollbar colour, the icon paths (with their Apply buttons)
+        if (o->id == OPT_APP_ICON || o->id == OPT_TITLE_ICON) {
+            bool header = o->id == OPT_TITLE_ICON;
+            TextEdit *field = header ? &g_opt.title_icon : &g_opt.app_icon;
+            bool focused = header ? g_opt.title_icon_focus : g_opt.app_icon_focus;
             Rect p, r, a;
             opt_app_icon_layout(w, ch, &p, &r, &a);
             p.x += x; r.x += x; a.x += x;
             p.y = r.y = a.y = y;
             draw_rrect(p.x, p.y, p.w, ch, S(4), C(COL_CHIP));
-            draw_app_icon_preview(p.x, p.y, p.w);
-            sheet_field(r, &g_opt.app_icon, g_opt.app_icon_focus, "System");
-            opt_hit(r, HP_TEXT, o->id, 2);
+            if (header) draw_title_icon_preview(p.x, p.y, p.w);
+            else draw_app_icon_preview(p.x, p.y, p.w);
+            sheet_field(r, field, focused, "Default");
+            opt_hit(r, HP_TEXT, o->id, header ? 3 : 2);
             sheet_button(a, "Apply", false, true);
             opt_hit(a, HP_BUTTON, o->id, 0);
             break;
@@ -1193,7 +1214,7 @@ static void options_draw(void) {
     // search field
     f32 sw = MIN(roundf(S(300)), w * 0.45f), sh = roundf(S(30));
     Rect sr = {cr.x - S(10) - sw, r.y + pad - S(6), sw, sh};
-    bool sfocus = g_opt.search_focus && g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus && !g_opt.app_icon_focus;
+    bool sfocus = g_opt.search_focus && g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus && !g_opt.app_icon_focus && !g_opt.title_icon_focus;
     sheet_field(sr, &g_opt.search, sfocus, "Search settings");
     opt_hit(sr, HP_SEARCH, -1, 0);
     // nav (same active style as the sidebar: accent-tinted row with a full-height accent edge)
@@ -1251,7 +1272,7 @@ static void options_draw(void) {
                 bool hv = opt_hover(rr) && opt_hover(list) && g_opt.drop_opt < 0;
                 if (hv) g_opt.hover_row = k; // (no highlight: rows are static, their controls react)
                 f32 tx = rr.x + S(16), ctlw = MIN(roundf(S(380)), rr.w * 0.55f), lw = rr.w - ctlw - S(44);
-                if (ok->id == OPT_APP_ICON) ctlw = opt_app_icon_ctlw(rr.w); // preview + field + Apply
+                if (ok->id == OPT_APP_ICON || ok->id == OPT_TITLE_ICON) ctlw = opt_app_icon_ctlw(rr.w); // preview + field + Apply
                 if (ok->kind == OK_BOOL || ok->kind == OK_BUTTON) lw = rr.w - roundf(S(200)); // (narrow controls: more room for text)
                 else lw = rr.w - ctlw - S(44);
                 draw_text_fit(f, tx, roundf(y + rh * 0.5f - f->line_h + S(2)), lw, ok->label, (int)strlen(ok->label), C(COL_TEXT), 0);
@@ -1332,11 +1353,12 @@ static void options_draw(void) {
 static bool options_text_focus(TextEdit *edit, bool focused) {
     if (g_opt.rec_def >= 0) return false; // the click ends recording a shortcut first (options_click)
     if (g_opt.drop_opt >= 0) return edit == &g_opt.drop_filter;
-    if (edit == &g_opt.search) { g_opt.search_focus = true; g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = false; return true; }
-    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.search_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = false; return true; }
-    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.scroll_focus = g_opt.app_icon_focus = false; return true; }
-    if (edit == &g_opt.scroll_color) { g_opt.scroll_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.app_icon_focus = false; return true; }
-    if (edit == &g_opt.app_icon) { g_opt.app_icon_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
+    if (edit == &g_opt.search) { g_opt.search_focus = true; g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; return true; }
+    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.search_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; return true; }
+    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.scroll_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; return true; }
+    if (edit == &g_opt.scroll_color) { g_opt.scroll_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; return true; }
+    if (edit == &g_opt.app_icon) { g_opt.app_icon_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.title_icon_focus = false; return true; }
+    if (edit == &g_opt.title_icon) { g_opt.title_icon_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = false; return true; }
     return focused;
 }
 
@@ -1365,7 +1387,7 @@ static void options_click(f32 x, f32 y, int clicks) {
     }
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
     if (sheet_scrollbar_press(x, y)) return;
-    g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = false; // a click elsewhere drops the keyboard
+    g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; // a click elsewhere drops the keyboard
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];
         if (hp->r.w <= 0 || !in_rect(hp->r, x, y)) continue;
@@ -1391,7 +1413,8 @@ static void options_click(f32 x, f32 y, int clicks) {
         case HP_BUTTON: opt_button(hp->opt); return;
         case HP_LNAME: g_opt.lname_focus = true; return;
         case HP_TEXT:
-            if (hp->arg == 2) g_opt.app_icon_focus = true;
+            if (hp->arg == 3) g_opt.title_icon_focus = true;
+            else if (hp->arg == 2) g_opt.app_icon_focus = true;
             else if (hp->arg) g_opt.scroll_focus = true;
             else g_opt.brand_focus = true;
             return;
@@ -1453,6 +1476,12 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
         else te_key(&g_opt.app_icon, k, mod);
         return;
     }
+    if (g_opt.title_icon_focus && g_opt.drop_opt < 0) {
+        if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_title_icon_apply();
+        else if (k == SDLK_ESCAPE) g_opt.title_icon_focus = false;
+        else te_key(&g_opt.title_icon, k, mod);
+        return;
+    }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) {
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_layout_save();
         else if (k == SDLK_ESCAPE) g_opt.lname_focus = false;
@@ -1495,6 +1524,7 @@ static void options_text(const char *text) {
     if (g_opt.lname_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.lname, text); return; }
     if (g_opt.scroll_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.scroll_color, text); return; }
     if (g_opt.app_icon_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.app_icon, text); return; }
+    if (g_opt.title_icon_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.title_icon, text); return; }
     if (g_opt.drop_opt >= 0) {
         te_insert(&g_opt.drop_filter, text);
         opt_drop_filter();

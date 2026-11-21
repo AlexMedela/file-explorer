@@ -3782,10 +3782,10 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.show_hidden == !hid);
     st_opt_click(st_opt_hit(HP_TOGGLE, OPT_HIDDEN, 0));
     ST_CHECK(A.show_hidden == hid);
-    // appearance: font size, row spacing (the app-icon rows pushed these below the fold)
+    // appearance: font size, row spacing (the icon rows pushed these below the fold)
     st_opt_click(st_opt_hit(HP_NAV, -1, OC_APPEARANCE));
     st_frames(1);
-    g_opt.scroll = S(100);
+    g_opt.scroll = S(140);
     st_frames(1);
     int px0 = A.font.px;
     st_opt_click(st_opt_hit(HP_PLUS, OPT_FONT_SIZE, 0));
@@ -4058,6 +4058,43 @@ static int run_selftest_m9(void) {
         free(custom_prev);
         free(def_prev);
         free(px);
+        { // Apply from the path field: invalid paths are rejected, an empty field restores the default
+            te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
+            opt_app_icon_apply();
+            ST_CHECK(!strcmp(g_app_icon_path, svg));
+            te_set(&g_opt.app_icon, "relative.svg", 12, 12);
+            opt_app_icon_apply();
+            ST_CHECK(!strcmp(g_app_icon_path, svg));
+            te_set(&g_opt.app_icon, "", 0, 0);
+            opt_app_icon_apply();
+            ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
+        }
+        { // title bar icon: its own path setting, preview and Apply, independent of the app icon
+            char ti[PATH_MAX];
+            snprintf(ti, sizeof ti, M9_BASE "/title-icon.svg");
+            st_write_text(ti, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#00ff00\"/></svg>");
+            u8 *def_title = title_icon_preview_raster(16);
+            ST_CHECK(def_title && !g_title_icon_path[0]);
+            te_set(&g_opt.title_icon, ti, (int)strlen(ti), (int)strlen(ti));
+            opt_title_icon_apply();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            u8 *custom_title = title_icon_preview_raster(16);
+            ST_CHECK(custom_title && memcmp(def_title, custom_title, 16 * 16 * 4) != 0);
+            free(custom_title);
+            free(def_title);
+            te_set(&g_opt.title_icon, "relative.svg", 12, 12);
+            opt_title_icon_apply();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            settings_save();
+            settings_load();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            options_open();
+            g_opt.cat = OC_APPEARANCE;
+            g_opt.scroll = 0;
+            st_frames(2);
+            ST_CHECK(st_opt_hit(HP_TEXT, OPT_TITLE_ICON, 3) != NULL);
+            ST_CHECK(title_icon_glyph(24) != NULL);
+        }
         data_home(dh, sizeof dh);
         snprintf(dest, sizeof dest, "%s/icons/hicolor/scalable/apps/dev.fileexplorer.svg", dh);
         ST_CHECK(app_icon_write_ex(dh, 0x123456, svg));

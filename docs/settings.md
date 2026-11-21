@@ -159,9 +159,14 @@ desktop's is there, and wherever its theme has none.
 
 `app_icon` (Options -> Appearance -> Application icon, directly under File icons, empty by default) is an absolute
 path to an `.svg` or `.png` used for the window and launcher icon instead of the built-in logo. The one row previews
-the icon currently in effect - the accent-coloured built-in logo when no path is set - and has a path field, Browse
-(the app's own file chooser) and Apply. SVG keeps its own colours; press Apply to use a path you typed, or use the
-"Use system icon" row below to restore the accent-coloured logo.
+the icon currently in effect - the accent-coloured built-in logo when no path is set - and has a path field and Apply.
+SVG keeps its own colours; press Apply to use a path you typed, or clear the field and press Apply to restore the
+built-in logo.
+
+`title_icon` (Options -> Appearance -> Title bar icon, directly below Application icon, empty by default) is an
+absolute `.svg` or `.png` path that overrides the icon at the left of the title bar. Its row previews the icon in effect
+and has a path field and Apply; clearing the field restores the built-in accent-coloured logo. This override follows
+the **Logo** toggle below it: with Logo off, no icon is drawn in that slot.
 
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`

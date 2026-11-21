@@ -508,6 +508,56 @@ static void draw_app_icon_preview(f32 x, f32 y, f32 s) {
     if (g) draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
 }
 
+// Options > Appearance > Title bar icon: overrides the logo at the left of the brand header. Empty keeps the built-in
+// logo. Uses the same SVG/PNG rasterizer as the application icon.
+static char g_title_icon_path[PATH_MAX];
+
+static u8 *title_icon_raster(int px) {
+    return g_title_icon_path[0] ? sysi_raster(g_title_icon_path, px, COL_ACCENT) : NULL;
+}
+
+// RGBA of the title-bar icon currently in effect: chosen artwork, or the built-in logo.
+static u8 *title_icon_preview_raster(int px) {
+    u8 *custom = title_icon_raster(px);
+    return custom ? custom : icon_raster(ICON_LOGO, px, px);
+}
+
+// One atlas slot for the header, rebuilt when the path, accent or size changes. Synthetic id -2 cannot collide with
+// file icons or the app-icon preview.
+static Glyph *title_icon_glyph(int px) {
+    static char key_path[PATH_MAX];
+    static u32 key_accent;
+    static int key_px, slot = -1;
+    u32 accent = COL_ACCENT & 0xFFFFFF;
+    if (slot >= 0 && slot < g_icon_cache_n && key_px == px && key_accent == accent && g_icon_cache[slot].id == -2
+        && !strcmp(key_path, g_title_icon_path)) return &g_icon_cache[slot].g;
+    u8 *buf = title_icon_preview_raster(px);
+    if (!buf) return NULL;
+    int ax, ay;
+    if (!atlas_pack(px, px, &ax, &ay)) { free(buf); return NULL; }
+    for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
+    free(buf);
+    if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0;
+    slot = g_icon_cache_n;
+    IconSlot *s = &g_icon_cache[g_icon_cache_n++];
+    s->id = -2;
+    s->px = px;
+    memset(&s->g, 0, sizeof s->g);
+    s->g.x = (u16)ax;
+    s->g.y = (u16)ay;
+    s->g.w = (u16)px;
+    s->g.h = (u16)px;
+    snprintf(key_path, sizeof key_path, "%s", g_title_icon_path);
+    key_accent = accent;
+    key_px = px;
+    return &s->g;
+}
+
+static void draw_title_icon_preview(f32 x, f32 y, f32 s) {
+    Glyph *g = title_icon_glyph((int)roundf(s));
+    if (g) draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
+}
+
 // Draw the icon for a file name at (x, y), s pixels. Returns false if it couldn't (caller falls back).
 static bool draw_icon_for_name(f32 x, f32 y, f32 s, const char *name, bool exec) {
     Glyph *g = icon_glyph(icon_for_name(name, exec), (int)roundf(s));
