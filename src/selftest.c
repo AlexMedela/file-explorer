@@ -4012,6 +4012,53 @@ static int run_selftest_m9(void) {
         g_theme_cur = saved;
         theme_apply();
     }
+    { // application icon: an absolute SVG/PNG overrides the built-in logo; "Use system" restores it
+        char svg[PATH_MAX], dh[PATH_MAX], dest[PATH_MAX + 64];
+        snprintf(svg, sizeof svg, M9_BASE "/app-icon.svg");
+        st_write_text(svg, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#ff0000\"/></svg>");
+        ST_CHECK(app_icon_path_ok(NULL) && app_icon_path_ok(""));
+        ST_CHECK(app_icon_path_ok(svg) && !app_icon_path_ok("relative.svg"));
+        ST_CHECK(!app_icon_path_ok(M9_BASE "/app-icon.txt"));
+        ST_CHECK(!app_icon_path_ok(M9_BASE "/app\n-icon.svg"));
+        ST_CHECK(!app_icon_raster(16)); // System: no custom artwork
+        opt_app_icon_chosen(svg);
+        ST_CHECK(!strcmp(g_app_icon_path, svg));
+        u8 *px = app_icon_raster(16);
+        ST_CHECK(px != NULL);
+        free(px);
+        data_home(dh, sizeof dh);
+        snprintf(dest, sizeof dest, "%s/icons/hicolor/scalable/apps/dev.fileexplorer.svg", dh);
+        ST_CHECK(app_icon_write_ex(dh, 0x123456, svg));
+        FILE *df = fopen(dest, "rb");
+        ST_CHECK(df != NULL);
+        if (df) {
+            char body[8192] = {0};
+            size_t n = fread(body, 1, sizeof body - 1, df);
+            fclose(df);
+            ST_CHECK(n && strstr(body, "#ff0000"));
+        }
+        ST_CHECK(!app_icon_write_ex(dh, 0x123456, svg)); // already installed: nothing changed
+        opt_app_icon_reset();
+        ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
+        ST_CHECK(app_icon_write(dh, LOGO_BASE_ACCENT)); // System restores the recoloured built-in artwork
+        df = fopen(dest, "rb");
+        ST_CHECK(df != NULL);
+        if (df) {
+            char body[8192] = {0};
+            size_t n = fread(body, 1, sizeof body - 1, df);
+            fclose(df);
+            ST_CHECK(n && strstr(body, "<svg"));
+        }
+        settings_save();
+        opt_app_icon_chosen(svg);
+        settings_save();
+        opt_app_icon_reset();
+        settings_load();
+        init_places();
+        ST_CHECK(!strcmp(g_app_icon_path, svg));
+        opt_app_icon_reset();
+        settings_save();
+    }
     { // scrollbar colour: Auto (the theme's own; System: the desktop's accent), or #RRGGBB / #RGB typed and applied
         int saved = g_theme_cur;
         g_theme_cur = theme_find("Dark");
