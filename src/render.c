@@ -601,6 +601,10 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
 
 static bool sidebar_edge_hot(void) { return A.drag == DRAG_SIDEBAR || (A.drag == DRAG_NONE && A.mouse_in && in_rect(A.r_sdiv, A.mx, A.my)); }
 
+// Selftest probe: the edge must be one draw spanning brand + list, not two adjacent pieces.
+static int g_sidebar_edge_draws;
+static struct { f32 x, y, h; u32 color; } g_sidebar_edge_probe;
+
 // The name above the sidebar: the app's, the computer's, or the user's own.
 static const char *brand_label(void) {
     static char host[256];
@@ -618,7 +622,6 @@ static void draw_brand(void) {
     Rect r = A.r_brand;
     if (r.h <= 0) return;
     draw_rect(r.x, r.y, r.w, r.h, C(COL_SIDEBAR));
-    if (g_separators || sidebar_edge_hot()) draw_rect(r.x + r.w - 1, r.y, 1, r.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
     f32 lh = roundf(S(17)), lw = roundf(lh * 624.f / 456.f), lx = roundf(r.x + S(18)), ly = roundf(r.y + (r.h - lh) * 0.5f);
     f32 tx = lx;
     if (A.brand_logo) {
@@ -704,7 +707,6 @@ static void draw_sidebar(void) {
     Pane *p = active_pane();
     Rect sb = A.r_sidebar;
     draw_rect(sb.x, sb.y, sb.w, sb.h, C(COL_SIDEBAR));
-    if (g_separators || sidebar_edge_hot()) draw_rect(sb.x + sb.w - 1, sb.y, 1, sb.h, C(sidebar_edge_hot() ? COL_ACCENT : COL_BORDER));
     Font *fs = &A.font_small, *f = &A.font;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)sb.x, (int)sb.y, (int)sb.w - 1, (int)sb.h});
     bool dragging_place = A.drag == DRAG_PLACE;
@@ -903,6 +905,21 @@ static void draw_sidebar(void) {
         }
     }
     draw_clip_pop(cs);
+}
+
+static void draw_sidebar_edge(void) {
+    bool hot = sidebar_edge_hot();
+    if (!g_separators && !hot) return;
+    f32 x = A.r_content.x - 1, y = 0, h = A.r_sidebar.y + A.r_sidebar.h;
+    u32 color = hot ? COL_ACCENT : COL_BORDER;
+    draw_rect(x, y, 1, h, C(color));
+    if (A.selftest) {
+        g_sidebar_edge_draws++;
+        g_sidebar_edge_probe.x = x;
+        g_sidebar_edge_probe.y = y;
+        g_sidebar_edge_probe.h = h;
+        g_sidebar_edge_probe.color = color;
+    }
 }
 
 static const char *owner_name(u32 uid) {
