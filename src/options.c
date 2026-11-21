@@ -659,7 +659,6 @@ static void opt_button(int id) {
         break;
     case OPT_SETTINGS_FILE: run_command(CMD_OPEN_SETTINGS); break;
     case OPT_REINDEX: run_command(CMD_REINDEX); break;
-    case OPT_SCROLL_COLOR: opt_scroll_color_apply(); break;
     case OPT_UPD_NOW: upd_button_press(); break;
     case OPT_UPD_NOTES: upd_notes(); break;
     case OPT_UPD_HOW:
