@@ -12044,6 +12044,9 @@ static bool animating(void) {
     return false;
 }
 
+// Selftest-only draw order probe: a later sequence number means the call painted over the earlier one.
+static int g_draw_seq, g_sheet_seq, g_toast_seq;
+
 static void frame_draw(void) {
     g_text_field_count = 0; // (each te_draw records its field again)
     draw_clip(NULL);
@@ -12096,7 +12099,6 @@ static void frame_draw(void) {
     draw_ops();
     draw_queue();
     upd_card_draw();
-    draw_toast();
     draw_drag_badge();
     draw_tab_drop();
     draw_quicklook();
@@ -12107,7 +12109,10 @@ static void frame_draw(void) {
     draw_palette();
     A.mouse_in = mouse_in && !A.dlg.open;
     fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
+    if (A.selftest) g_sheet_seq = ++g_draw_seq;
     sheet_draw();
+    if (A.selftest) g_toast_seq = ++g_draw_seq;
+    draw_toast(); // keep feedback visible above an open sheet
     A.mouse_in = mouse_in;
     fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     draw_dialog();
