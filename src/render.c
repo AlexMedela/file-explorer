@@ -700,6 +700,11 @@ static void draw_status_dot(f32 ix, f32 iy, f32 is, u32 dot, bool hover) {
     draw_rrect(dx, dy, dr * 2, dr * 2, dr, C(dot));
 }
 
+// The quantitative labels on Trash and drives need more contrast than faint placeholders.
+u32 g_sidebar_meta_drawn[2]; // selftest probe: 0 = Trash amount, 1 = drive free space
+
+static u32 sidebar_meta_color(void) { return COL_TEXT_DIM; }
+
 static void draw_sidebar(void) {
     Pane *p = active_pane();
     Rect sb = A.r_sidebar;
@@ -810,7 +815,9 @@ static void draw_sidebar(void) {
             char sz[32];
             fmt_size(sz, sizeof sz, A.trash_size);
             f32 tw = text_width(fs, sz, (int)strlen(sz));
-            draw_text(fs, r.x + r.w - S(8) - tw, text_y(fs, r.y, r.h), sz, (int)strlen(sz), C(COL_TEXT_FAINT));
+            u32 mc = sidebar_meta_color();
+            draw_text(fs, r.x + r.w - S(8) - tw, text_y(fs, r.y, r.h), sz, (int)strlen(sz), C(mc));
+            if (A.selftest) g_sidebar_meta_drawn[0] = mc;
             lmax -= tw + S(10);
         }
         if (cloud_off && (hover || cloud_busy(cl))) { // "Connect" on hover, "Connecting..." while it does
@@ -864,7 +871,11 @@ static void draw_sidebar(void) {
                 char fr[32];
                 fmt_size(fr, sizeof fr, du[k].avail);
                 f32 fw = text_width(fs, fr, (int)strlen(fr));
-                if (!show_eject) draw_text(fs, r.x + r.w - S(8) - fw, text_y(fs, r.y - S(3), r.h), fr, (int)strlen(fr), C(COL_TEXT_FAINT));
+                if (!show_eject) {
+                    u32 mc = sidebar_meta_color();
+                    draw_text(fs, r.x + r.w - S(8) - fw, text_y(fs, r.y - S(3), r.h), fr, (int)strlen(fr), C(mc));
+                    if (A.selftest) g_sidebar_meta_drawn[1] = mc;
+                }
                 lmax -= fw + S(8); // same room either way: the name doesn't jump when the button appears
                 f32 bw = MAX(S(10), bar_end - lx), by2 = r.y + r.h - roundf(S(7));
                 f32 bt = roundf(S(3));
