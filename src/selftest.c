@@ -3782,8 +3782,11 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.show_hidden == !hid);
     st_opt_click(st_opt_hit(HP_TOGGLE, OPT_HIDDEN, 0));
     ST_CHECK(A.show_hidden == hid);
-    // appearance: font size, row spacing
+    // appearance: font size, row spacing (the app-icon rows pushed these below the fold)
     st_opt_click(st_opt_hit(HP_NAV, -1, OC_APPEARANCE));
+    st_frames(1);
+    g_opt.scroll = S(100);
+    st_frames(1);
     int px0 = A.font.px;
     st_opt_click(st_opt_hit(HP_PLUS, OPT_FONT_SIZE, 0));
     ST_CHECK(A.font_size == 14 && A.font.px == (int)roundf(14.f * A.scale) && A.font.px > px0);
@@ -3791,6 +3794,8 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.font_size == 13);
     st_opt_click(st_opt_hit(HP_SEG, OPT_ROW_SPACING, 0));
     ST_CHECK(A.row_spacing == 0);
+    g_opt.scroll = 0;
+    st_frames(1);
     { // the scrollbar's thumb can be dragged (not only the wheel); a press on its track pages
         st_frames(1);
         SheetBar *sb = NULL;
@@ -4012,7 +4017,28 @@ static int run_selftest_m9(void) {
         g_theme_cur = saved;
         theme_apply();
     }
-    { // application icon: an absolute SVG/PNG overrides the built-in logo; "Use system" restores it
+    { // application icon: an absolute SVG/PNG overrides the built-in logo; clearing it restores the default
+        int ii = -1, ia = -1, it = -1, il = -1;
+        for (int k = 0; k < OPT_COUNT; k++) {
+            if (g_opts[k].id == OPT_ICON_THEME) ii = k;
+            if (g_opts[k].id == OPT_APP_ICON) ia = k;
+            if (g_opts[k].id == OPT_TITLE_ICON) it = k;
+            if (g_opts[k].id == OPT_BRAND_LOGO) il = k;
+        }
+        ST_CHECK(ii >= 0 && ia == ii + 1 && it == ia + 1 && il == it + 1);
+        options_open();
+        g_opt.cat = OC_APPEARANCE;
+        g_opt.scroll = 0;
+        st_frames(2);
+        st_shot("options-app-icon");
+        { // one row: Apply sits at the same height as the path field, even in a narrow window; no Browse hit
+            OptHit *ap = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0), *field = st_opt_hit(HP_TEXT, OPT_APP_ICON, 2);
+            ST_CHECK(!st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1));
+            ST_CHECK(ap && field && field->r.w > 0 && fabsf(ap->r.y - field->r.y) < 0.5f);
+            Rect pv, fld, apw;
+            opt_app_icon_layout(S(186), S(30), &pv, &fld, &apw);
+            ST_CHECK(fld.w > 0 && apw.x >= fld.x + fld.w && apw.x + apw.w <= S(186) + 0.5f);
+        }
         char svg[PATH_MAX], dh[PATH_MAX], dest[PATH_MAX + 64];
         snprintf(svg, sizeof svg, M9_BASE "/app-icon.svg");
         st_write_text(svg, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#ff0000\"/></svg>");
@@ -4021,10 +4047,16 @@ static int run_selftest_m9(void) {
         ST_CHECK(!app_icon_path_ok(M9_BASE "/app-icon.txt"));
         ST_CHECK(!app_icon_path_ok(M9_BASE "/app\n-icon.svg"));
         ST_CHECK(!app_icon_raster(16)); // System: no custom artwork
+        u8 *def_prev = app_icon_preview_raster(16); // the row previews the icon in effect: default with System
+        ST_CHECK(def_prev != NULL);
         opt_app_icon_chosen(svg);
         ST_CHECK(!strcmp(g_app_icon_path, svg));
         u8 *px = app_icon_raster(16);
         ST_CHECK(px != NULL);
+        u8 *custom_prev = app_icon_preview_raster(16);
+        ST_CHECK(custom_prev != NULL && memcmp(def_prev, custom_prev, 16 * 16 * 4) != 0);
+        free(custom_prev);
+        free(def_prev);
         free(px);
         data_home(dh, sizeof dh);
         snprintf(dest, sizeof dest, "%s/icons/hicolor/scalable/apps/dev.fileexplorer.svg", dh);
@@ -4038,7 +4070,7 @@ static int run_selftest_m9(void) {
             ST_CHECK(n && strstr(body, "#ff0000"));
         }
         ST_CHECK(!app_icon_write_ex(dh, 0x123456, svg)); // already installed: nothing changed
-        opt_app_icon_reset();
+        opt_app_icon_chosen("");
         ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
         ST_CHECK(app_icon_write(dh, 0x123456)); // System restores the recoloured built-in artwork
         df = fopen(dest, "rb");
@@ -4052,11 +4084,11 @@ static int run_selftest_m9(void) {
         settings_save();
         opt_app_icon_chosen(svg);
         settings_save();
-        opt_app_icon_reset();
+        opt_app_icon_chosen("");
         settings_load();
         init_places();
         ST_CHECK(!strcmp(g_app_icon_path, svg));
-        opt_app_icon_reset();
+        opt_app_icon_chosen("");
         settings_save();
     }
     { // scrollbar colour: Auto (the theme's own; System: the desktop's accent), or #RRGGBB / #RGB typed and applied

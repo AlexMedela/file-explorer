@@ -439,6 +439,13 @@ static u8 *icon_raster(int id, int w, int h) {
     return buf;
 }
 
+// RGBA of the icon currently in effect: the chosen artwork, or the built-in accent-coloured logo on System.
+// Caller frees. Defined after icon_raster(), which supplies the default.
+static u8 *app_icon_preview_raster(int px) {
+    u8 *custom = app_icon_raster(px);
+    return custom ? custom : icon_raster(ICON_LOGO, px, px);
+}
+
 typedef struct { int id, px; Glyph g; } IconSlot;
 static IconSlot g_icon_cache[512];
 // g_icon_cache_n lives in font.c (reset together with the atlas)
@@ -463,6 +470,42 @@ static Glyph *icon_glyph(int id, int px) {
     s->g.w = (u16)px;
     s->g.h = (u16)px;
     return &s->g;
+}
+
+// Options-row preview of the icon in effect. One atlas slot, rebuilt when the applied path, accent or size changes;
+// a reset of g_icon_cache_n (atlas rebuild) also drops it. The synthetic id -1 cannot collide with a file icon.
+static Glyph *app_icon_preview_glyph(int px) {
+    static char key_path[PATH_MAX];
+    static u32 key_accent;
+    static int key_px, slot = -1;
+    u32 accent = COL_ACCENT & 0xFFFFFF;
+    if (slot >= 0 && slot < g_icon_cache_n && key_px == px && key_accent == accent && g_icon_cache[slot].id == -1
+        && !strcmp(key_path, g_app_icon_path)) return &g_icon_cache[slot].g;
+    u8 *buf = app_icon_preview_raster(px);
+    if (!buf) return NULL;
+    int ax, ay;
+    if (!atlas_pack(px, px, &ax, &ay)) { free(buf); return NULL; }
+    for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
+    free(buf);
+    if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0;
+    slot = g_icon_cache_n;
+    IconSlot *s = &g_icon_cache[g_icon_cache_n++];
+    s->id = -1;
+    s->px = px;
+    memset(&s->g, 0, sizeof s->g);
+    s->g.x = (u16)ax;
+    s->g.y = (u16)ay;
+    s->g.w = (u16)px;
+    s->g.h = (u16)px;
+    snprintf(key_path, sizeof key_path, "%s", g_app_icon_path);
+    key_accent = accent;
+    key_px = px;
+    return &s->g;
+}
+
+static void draw_app_icon_preview(f32 x, f32 y, f32 s) {
+    Glyph *g = app_icon_preview_glyph((int)roundf(s));
+    if (g) draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
 }
 
 // Draw the icon for a file name at (x, y), s pixels. Returns false if it couldn't (caller falls back).

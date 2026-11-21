@@ -5,7 +5,7 @@ static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "
 enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
 enum {
-    OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_APP_ICON, OPT_APP_ICON_RESET, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
+    OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_APP_ICON, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
@@ -27,6 +27,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_ACCENT_DESKTOP, "Desktop's accent colour", "Use the desktop's accent with every theme, where it has one (else the colour above)"},
     {OC_APPEARANCE, OK_TEXT, OPT_SCROLL_COLOR, "Scrollbar colour", "Empty: Auto, the theme's own (System: the desktop's accent); or #RRGGBB / #RGB, then Apply"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders; System: the desktop's icon theme"},
+    {OC_APPEARANCE, OK_TEXT, OPT_APP_ICON, "Application icon", "Absolute SVG/PNG path; the preview shows the current icon (the built-in default when empty). Apply to use it"},
     {OC_APPEARANCE, OK_CHOICE, OPT_FONT, "Font", "Interface font family"},
     {OC_APPEARANCE, OK_INT, OPT_FONT_SIZE, "Font size", "Text size at 100% zoom"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ROW_SPACING, "Row spacing", "Height of rows in the details and list views"},
@@ -51,8 +52,6 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_PREVIEW, "Preview panel brightness", "-30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_STATUS, "Status bar brightness", "-30% to +30%"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Font, colours, padding and cursor of terminal tabs (F4)"},
-    {OC_APPEARANCE, OK_TEXT, OPT_APP_ICON, "Application icon", "Absolute .svg or .png path for the window and launcher icon; Apply to use it"},
-    {OC_APPEARANCE, OK_BUTTON, OPT_APP_ICON_RESET, "Use system icon", "Restore the app's own accent-coloured logo"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_NEW, "Create theme from current colours", "Writes a JSON scheme you can edit"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_FOLDER, "Themes folder", "Open the folder and reload theme files"},
     {OC_APPEARANCE, OK_BUTTON, OPT_ICON_FOLDER, "Icon themes folder", "Add your own file icons (SVG); opens the folder and reloads them"},
@@ -635,8 +634,6 @@ static void opt_app_icon_chosen(const char *path) {
     g_opt.app_icon_focus = false;
 }
 
-static void opt_app_icon_reset(void) { opt_app_icon_chosen(""); }
-
 static void opt_app_icon_apply(void) { opt_app_icon_chosen(g_opt.app_icon.buf); }
 
 static void opt_button(int id) {
@@ -681,7 +678,6 @@ static void opt_button(int id) {
     case OPT_REINDEX: run_command(CMD_REINDEX); break;
     case OPT_SCROLL_COLOR: opt_scroll_color_apply(); break;
     case OPT_APP_ICON: opt_app_icon_apply(); break;
-    case OPT_APP_ICON_RESET: opt_app_icon_reset(); break;
     case OPT_UPD_NOW: upd_button_press(); break;
     case OPT_UPD_NOTES: upd_notes(); break;
     case OPT_UPD_HOW:
@@ -787,6 +783,34 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
 
 static bool opt_hover(Rect r) { return hot(r); }
 
+// An icon-path row's controls, left to right, inside a strip of w pixels. Shrink the button and the preview before
+// letting the path field vanish: even the minimum window must keep all three usable on one row.
+static void opt_app_icon_layout(f32 w, f32 ch, Rect *p, Rect *r, Rect *a) {
+    f32 maxlab = text_width(&A.font, "Apply", 5);
+    f32 gap = S(6), ps = ch, bw = MAX(roundf(S(64)), maxlab + S(14));
+    f32 fw = w - ps - bw - 2 * gap;
+    if (fw < roundf(S(110))) {
+        gap = S(4);
+        bw = MAX(roundf(S(52)), maxlab + S(10));
+        fw = w - ps - bw - 2 * gap;
+    }
+    if (fw < roundf(S(40))) {
+        ps = MIN(ps, MAX(roundf(S(20)), w - bw - 2 * gap - roundf(S(40))));
+        fw = w - ps - bw - 2 * gap;
+    }
+    if (fw < S(1)) fw = S(1);
+    *p = (Rect){0, 0, ps, ch};
+    *r = (Rect){ps + gap, 0, fw, ch};
+    *a = (Rect){r->x + fw + gap, 0, bw, ch};
+}
+
+// Leave the controls enough room, taking it from the label first; at narrow widths the label simply truncates.
+static f32 opt_app_icon_ctlw(f32 row_w) {
+    f32 maxlab = text_width(&A.font, "Apply", 5);
+    f32 need = roundf(S(30)) + MAX(roundf(S(52)), maxlab + S(10)) + 2 * S(4) + roundf(S(40));
+    return MAX(MIN(roundf(S(600)), row_w * 0.75f), MIN(row_w - S(16), need));
+}
+
 // Control area of one row (right-aligned inside [x, x + w]).
 static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     Font *f = &A.font, *fs = &A.font_small;
@@ -880,7 +904,7 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     case OK_BUTTON: {
         bool primary = false, enabled = true;
         const char *l = o->id == OPT_THEME_NEW ? "Create" : o->id == OPT_REINDEX ? "Re-index" : o->id == OPT_KEYS_RESET ? "Reset"
-                      : o->id == OPT_APP_ICON_RESET ? "Restore" : o->id == OPT_APP_ICON ? "Apply"
+                      : o->id == OPT_APP_ICON ? "Apply"
                       : o->id == OPT_UPD_NOW ? upd_button(&primary, &enabled) : o->id == OPT_UPD_HOW ? (upd_how_cmd() ? "Copy" : NULL) : "Open";
         if (!l) break; // (nothing to press)
         f32 bw = MAX(roundf(S(96)), text_width(f, l, (int)strlen(l)) + S(28));
@@ -891,12 +915,16 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     }
     case OK_TEXT: { // the name above the sidebar, the scrollbar colour, the application icon (with their Apply buttons)
         if (o->id == OPT_APP_ICON) {
-            f32 bw = MAX(roundf(S(80)), text_width(f, "Apply", 5) + S(28)), fw = roundf(S(260));
-            Rect b = {x + w - bw, y, bw, ch}, r = {b.x - S(8) - fw, y, fw, ch};
+            Rect p, r, a;
+            opt_app_icon_layout(w, ch, &p, &r, &a);
+            p.x += x; r.x += x; a.x += x;
+            p.y = r.y = a.y = y;
+            draw_rrect(p.x, p.y, p.w, ch, S(4), C(COL_CHIP));
+            draw_app_icon_preview(p.x, p.y, p.w);
             sheet_field(r, &g_opt.app_icon, g_opt.app_icon_focus, "System");
             opt_hit(r, HP_TEXT, o->id, 2);
-            sheet_button(b, "Apply", false, true);
-            opt_hit(b, HP_BUTTON, o->id, 0);
+            sheet_button(a, "Apply", false, true);
+            opt_hit(a, HP_BUTTON, o->id, 0);
             break;
         }
         if (o->id == OPT_SCROLL_COLOR) {
@@ -1223,7 +1251,9 @@ static void options_draw(void) {
                 bool hv = opt_hover(rr) && opt_hover(list) && g_opt.drop_opt < 0;
                 if (hv) g_opt.hover_row = k; // (no highlight: rows are static, their controls react)
                 f32 tx = rr.x + S(16), ctlw = MIN(roundf(S(380)), rr.w * 0.55f), lw = rr.w - ctlw - S(44);
+                if (ok->id == OPT_APP_ICON) ctlw = opt_app_icon_ctlw(rr.w); // preview + field + Apply
                 if (ok->kind == OK_BOOL || ok->kind == OK_BUTTON) lw = rr.w - roundf(S(200)); // (narrow controls: more room for text)
+                else lw = rr.w - ctlw - S(44);
                 draw_text_fit(f, tx, roundf(y + rh * 0.5f - f->line_h + S(2)), lw, ok->label, (int)strlen(ok->label), C(COL_TEXT), 0);
                 const char *desc = opt_desc(ok);
                 draw_text_fit(fs, tx, roundf(y + rh * 0.5f + S(3)), lw, desc, (int)strlen(desc), C(COL_TEXT_DIM), 0);

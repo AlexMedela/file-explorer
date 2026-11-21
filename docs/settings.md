@@ -157,9 +157,11 @@ File icons > **System** (`icon_theme=System`) uses the desktop's icon theme for 
 the settings portal names (else KDE's or GTK's settings), followed when it changes. The bundled icon shows until the
 desktop's is there, and wherever its theme has none.
 
-`app_icon` (Options -> Appearance -> Application icon, empty by default) is an absolute path to an `.svg` or `.png`
-used for the window and launcher icon instead of the built-in logo. SVG keeps its own colours; press Apply to use a
-path you typed, or "Use system icon" to restore the accent-coloured logo.
+`app_icon` (Options -> Appearance -> Application icon, directly under File icons, empty by default) is an absolute
+path to an `.svg` or `.png` used for the window and launcher icon instead of the built-in logo. The one row previews
+the icon currently in effect - the accent-coloured built-in logo when no path is set - and has a path field, Browse
+(the app's own file chooser) and Apply. SVG keeps its own colours; press Apply to use a path you typed, or use the
+"Use system icon" row below to restore the accent-coloured logo.
 
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`
