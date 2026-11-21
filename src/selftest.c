@@ -2953,6 +2953,20 @@ static int run_selftest_m8(void) {
         sel_clear(p);
     }
 
+    { // caret animation: a short ease-in to the new position, then a slow breathing pulse at rest
+        TextCaret s;
+        memset(&s, 0, sizeof s);
+        f32 a = 0;
+        u64 t = 1000000000ull;
+        ST_CHECK(text_caret_animate(&s, 20.f, 1, 1, t, true, &a) == 20.f && a == 1.f && s.valid);
+        f32 mid = text_caret_animate(&s, 20.f, 1, 1, t + 45000000ull, false, &a);
+        ST_CHECK(mid > 0.f && mid < 20.f);
+        ST_CHECK(text_caret_animate(&s, 20.f, 1, 1, t + 1000000000ull, false, &a) == 20.f && a < 1.f && a > 0.f);
+        f32 from = text_caret_position(&s, t + 1000000000ull);
+        text_caret_animate(&s, 40.f, 2, 2, t + 1000000000ull, false, &a);
+        ST_CHECK(fabsf(s.from - from) < 0.0001f && s.target == 40.f); // a new caret eases from where it was
+        ST_CHECK(text_caret_animate(&s, 40.f, 2, 2, t + 1000000000ull, true, &a) == 40.f && a == 1.f); // snap
+    }
     // Mouse in a text field (inline rename): click places the caret, drag selects, Shift-click extends,
     // double-click picks a word, triple-click everything; none of it ends the rename
     sel_clear(p);
