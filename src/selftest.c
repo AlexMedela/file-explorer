@@ -2953,20 +2953,6 @@ static int run_selftest_m8(void) {
         sel_clear(p);
     }
 
-    { // caret animation: a short ease-in to the new position, then a slow breathing pulse at rest
-        TextCaret s;
-        memset(&s, 0, sizeof s);
-        f32 a = 0;
-        u64 t = 1000000000ull;
-        ST_CHECK(text_caret_animate(&s, 20.f, 1, 1, t, true, &a) == 20.f && a == 1.f && s.valid);
-        f32 mid = text_caret_animate(&s, 20.f, 1, 1, t + 45000000ull, false, &a);
-        ST_CHECK(mid > 0.f && mid < 20.f);
-        ST_CHECK(text_caret_animate(&s, 20.f, 1, 1, t + 1000000000ull, false, &a) == 20.f && a < 1.f && a > 0.f);
-        f32 from = text_caret_position(&s, t + 1000000000ull);
-        text_caret_animate(&s, 40.f, 2, 2, t + 1000000000ull, false, &a);
-        ST_CHECK(fabsf(s.from - from) < 0.0001f && s.target == 40.f); // a new caret eases from where it was
-        ST_CHECK(text_caret_animate(&s, 40.f, 2, 2, t + 1000000000ull, true, &a) == 40.f && a == 1.f); // snap
-    }
     // Mouse in a text field (inline rename): click places the caret, drag selects, Shift-click extends,
     // double-click picks a word, triple-click everything; none of it ends the rename
     sel_clear(p);
@@ -3587,6 +3573,33 @@ static void st_opt_click(OptHit *h) {
 static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
+
+    { // caret animation: a short ease-in to the new position, then a slow breathing pulse at rest
+        TextCaret s;
+        memset(&s, 0, sizeof s);
+        f32 a = 0;
+        u64 t = 1000000000ull;
+        ST_CHECK(text_caret_animate(&s, 20.f, 1, 1, t, false, &a) == 20.f && a == 1.f && s.valid); // first target is immediate
+        ST_CHECK(text_caret_animate(&s, 40.f, 1, 1, t + 45000000ull, false, &a) == 20.f); // next one starts where it was
+        f32 mid = text_caret_animate(&s, 40.f, 1, 1, t + 90000000ull, false, &a);
+        ST_CHECK(mid > 20.f && mid < 40.f);
+        f32 pos = mid;
+        for (u64 dt = 200000000ull; dt <= 1000000000ull; dt += 200000000ull) // frames, not one long gap (that resets)
+            pos = text_caret_animate(&s, 40.f, 1, 1, t + dt, false, &a);
+        ST_CHECK(pos == 40.f && a < 1.f && a > 0.f); // breathing once settled
+        f32 from = text_caret_position(&s, t + 1000000000ull);
+        text_caret_animate(&s, 60.f, 2, 2, t + 1000000000ull, false, &a);
+        ST_CHECK(fabsf(s.from - from) < 0.0001f && s.target == 60.f); // a new caret eases from where it was
+        ST_CHECK(text_caret_animate(&s, 60.f, 2, 2, t + 1000000000ull, true, &a) == 60.f && a == 1.f); // snap
+        TextEdit e;
+        te_set(&e, "hello", 3, 3);
+        ST_CHECK(!e.animation.valid && !e.animation.moved && !e.animation.seen && !e.animation.input);
+        e.animation.input = 1;
+        te_insert(&e, "XY");
+        ST_CHECK(e.animation.input > 1 && e.caret == 5 && !strcmp(e.buf, "helXYlo"));
+        e.animation.input = 1;
+        ST_CHECK(te_key(&e, SDLK_LEFT, SDL_KMOD_NONE) && e.animation.input > 1);
+    }
 
     // --- the toolbar's sort button: the same keys as the folder menu's Sort by, the direction, Folders first ---
     st_frames(1);
