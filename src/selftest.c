@@ -4040,7 +4040,7 @@ static int run_selftest_m9(void) {
         ST_CHECK(!app_icon_write_ex(dh, 0x123456, svg)); // already installed: nothing changed
         opt_app_icon_reset();
         ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
-        ST_CHECK(app_icon_write(dh, LOGO_BASE_ACCENT)); // System restores the recoloured built-in artwork
+        ST_CHECK(app_icon_write(dh, 0x123456)); // System restores the recoloured built-in artwork
         df = fopen(dest, "rb");
         ST_CHECK(df != NULL);
         if (df) {

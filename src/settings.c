@@ -329,6 +329,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "view_per_folder")) A.view_per_folder = atoi(v);
         else if (!strcmp(k, "group")) A.def_group = CLAMP(atoi(v), 0, GROUP_COUNT - 1);
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
+        else if (!strcmp(k, "app_icon")) { if (app_icon_path_ok(v)) snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", v); }
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
         else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v);
         else if (!strcmp(k, "theme_light") || !strcmp(k, "theme_dark")) snprintf(g_theme_pick[k[6] == 'd'], sizeof g_theme_pick[0], "%s", v);
@@ -560,6 +561,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "external_terminal=%s\n", g_external_terminal);
     for (int i = 0; i < A.nservers; i++) fprintf(f, "server=%s\t%s%s%s\n", A.servers[i].name, A.servers[i].uri, A.servers[i].icon[0] ? "\t" : "", A.servers[i].icon);
     fprintf(f, "icon_theme=%s\n", icon_theme_name(g_icon_theme));
+    fprintf(f, "app_icon=%s\n", g_app_icon_path);
     fprintf(f, "theme=%s\nfont=%s\nfont_size=%d\nrow_spacing=%d\nsmooth_scroll=%d\n",
             g_nthemes ? g_themes[g_theme_cur].name : A.theme_name, A.ui_font, A.font_size, A.row_spacing, A.smooth_scroll);
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,

@@ -406,6 +406,22 @@ static NSVGimage *icon_image(int id) {
 
 #include "system_icons.c"
 
+// Options > Appearance > Application icon: an absolute SVG/PNG beside the app's own name, or empty for System.
+// Kept here because rasterising it reuses sysi_raster(), which lives in system_icons.c above.
+static char g_app_icon_path[PATH_MAX];
+
+static bool app_icon_path_ok(const char *p) {
+    if (!p || !*p) return true;
+    if (*p != '/' || strchr(p, '\n') || strchr(p, '\r')) return false;
+    const char *ext = strrchr(p, '.');
+    return ext && (!strcasecmp(ext, ".svg") || !strcasecmp(ext, ".png"));
+}
+
+// NULL means System (the recoloured built-in logo). Caller frees.
+static u8 *app_icon_raster(int px) {
+    return g_app_icon_path[0] ? sysi_raster(g_app_icon_path, px, COL_ACCENT) : NULL;
+}
+
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
     const u8 *sys = icon_system_selected() && w == h ? sysi_pixels(id, w) : NULL;
