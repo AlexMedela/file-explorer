@@ -363,6 +363,12 @@ static void openwith_go(void) {
     sheet_close();
 }
 
+// The accent is too dim on the dark inset well; selected rows already have their own dimmed colour.
+static u32 ow_default_label_color(u32 well, bool sel) {
+    if (sel) return COL_SEL_DIM;
+    return rgb_luma(well) < 0.5f ? rgb_mix(COL_ACCENT, 0xFFFFFF, 0.15f) : COL_ACCENT;
+}
+
 static void openwith_draw(void) {
     Sheet *s = &g_sheet;
     Font *f = &A.font, *fs = &A.font_small;
@@ -420,7 +426,7 @@ static void openwith_draw(void) {
         }
         f32 tx = ix + is + S(12);
         f32 ex = draw_text(f, tx, text_y(f, rr.y, rr.h), a->name, (int)strlen(a->name), C(sel ? COL_SEL_TEXT : COL_TEXT));
-        if (a == def) draw_text(fs, ex + S(10), text_y(fs, rr.y, rr.h), "default", 7, C(sel ? COL_SEL_DIM : COL_ACCENT));
+        if (a == def) draw_text(fs, ex + S(10), text_y(fs, rr.y, rr.h), "default", 7, C(ow_default_label_color(well, sel)));
     }
     if (!s->napps) {
         const char *m = "No apps found";
