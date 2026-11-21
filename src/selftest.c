@@ -2195,6 +2195,26 @@ static int run_selftest_m7(void) {
         ST_CHECK(fabsf(icon_contrast_scale(0.8f, 0.8f) - 0.4375f) < 0.001f); // (0.8 - 0.45) / 0.8
         ST_CHECK(fabsf(icon_contrast_scale(0.5f, 0.7f) - 0.5f) < 0.001f);
         ST_CHECK(icon_contrast_scale(4.f, 0.8f) >= 0.15f - 0.0001f); // lower bound on the scale
+        u8 white[16], clear[16] = {0};
+        for (int i = 0; i < 4; i++) { white[i * 4] = white[i * 4 + 1] = white[i * 4 + 2] = 255; white[i * 4 + 3] = 255; }
+        ST_CHECK(fabsf(icon_pixel_lightness(white, 4) - 1.f) < 0.001f);
+        ST_CHECK(icon_pixel_lightness(clear, 4) == 0.f);
+        int fo = icon_find("folder"), th = g_theme_cur;
+        ST_CHECK(icon_glyph(fo, 16) != NULL && big_icon_tex(fo, 96) != NULL);
+        f32 gl = -1.f, bl = -1.f;
+        for (int i = 0; i < g_icon_cache_n; i++) if (g_icon_cache[i].id == fo && g_icon_cache[i].px == 16) gl = g_icon_cache[i].lightness;
+        for (int i = 0; i < g_nbig; i++) if (g_big_icons[i].id == fo && g_big_icons[i].px == 96) bl = g_big_icons[i].lightness;
+        ST_CHECK(gl > 0.f && gl <= 1.f && fabsf(bl - gl) < 0.001f);
+        g_theme_cur = theme_find("Light");
+        theme_apply();
+        icons_sync_theme();
+        ST_CHECK(icon_glyph(fo, 16) != NULL);
+        f32 gl2 = -1.f;
+        for (int i = 0; i < g_icon_cache_n; i++) if (g_icon_cache[i].id == fo && g_icon_cache[i].px == 16) gl2 = g_icon_cache[i].lightness;
+        ST_CHECK(fabsf(gl2 - gl) < 0.0001f); // cached lightness is theme-independent
+        g_theme_cur = th;
+        theme_apply();
+        icons_sync_theme();
     }
     { // the trash bin's main colour follows the UI theme (re-rasterized on a theme change)
         int tr = icon_find("trash"), saved = g_theme_cur;
