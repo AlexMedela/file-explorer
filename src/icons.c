@@ -423,6 +423,9 @@ static f32 icon_contrast_scale(f32 ink, f32 background) {
     return MIN(1.f, MAX(0.15f, background - 0.45f) / ink);
 }
 
+// Set only while drawing navigation/sidebar/toolbar/tab icons; 0 = an ordinary surface, no contrast change.
+static u32 g_icon_surface_bg;
+
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
     const u8 *sys = icon_system_selected() && w == h ? sysi_pixels(id, w) : NULL;
@@ -468,26 +471,40 @@ static Glyph *icon_glyph(int id, int px) {
     return &s->g;
 }
 
+static f32 icon_glyph_tint(int id, int px) {
+    if (!g_icon_surface_bg) return 1.f;
+    for (int i = 0; i < g_icon_cache_n; i++)
+        if (g_icon_cache[i].id == id && g_icon_cache[i].px == px)
+            return icon_contrast_scale(g_icon_cache[i].lightness, rgb_luma(g_icon_surface_bg));
+    return 1.f;
+}
+
 // Draw the icon for a file name at (x, y), s pixels. Returns false if it couldn't (caller falls back).
 static bool draw_icon_for_name(f32 x, f32 y, f32 s, const char *name, bool exec) {
-    Glyph *g = icon_glyph(icon_for_name(name, exec), (int)roundf(s));
+    int id = icon_for_name(name, exec);
+    Glyph *g = icon_glyph(id, (int)roundf(s));
     if (!g) return false;
-    draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
+    f32 t = icon_glyph_tint(id, (int)roundf(s));
+    draw_glyph(g, roundf(x), roundf(y), (Color){t, t, t, 1});
     return true;
 }
 
 // A network location's icon (key as stored with the server); alpha < 1 for saved servers that aren't connected.
 static bool draw_net_icon(f32 x, f32 y, f32 s, const char *key, f32 alpha) {
-    Glyph *g = icon_glyph(ICON_NET_BASE + net_icon_find(key), (int)roundf(s));
+    int id = ICON_NET_BASE + net_icon_find(key);
+    Glyph *g = icon_glyph(id, (int)roundf(s));
     if (!g) return false;
-    draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, alpha});
+    f32 t = icon_glyph_tint(id, (int)roundf(s));
+    draw_glyph(g, roundf(x), roundf(y), (Color){t, t, t, alpha});
     return true;
 }
 
 // An interface icon (UI_*) s pixels big at (x, y), tinted c.
 static void draw_ui_icon(int ui, f32 x, f32 y, f32 s, Color c) {
     Glyph *g = ui >= 0 ? icon_glyph(ICON_UI_BASE + ui, (int)roundf(s)) : NULL;
-    if (g) draw_glyph(g, roundf(x), roundf(y), c);
+    if (!g) return;
+    f32 t = icon_glyph_tint(ICON_UI_BASE + ui, (int)roundf(s));
+    draw_glyph(g, roundf(x), roundf(y), (Color){c.r * t, c.g * t, c.b * t, c.a});
 }
 
 // Large icons (grid view) get their own textures so they don't flood the glyph atlas.
@@ -526,6 +543,14 @@ static SDL_Texture *big_icon_tex(int id, int px) {
     }
     g_big_icons[k] = (BigIcon){id, px, tex, g_big_clock, lightness};
     return tex;
+}
+
+static f32 icon_texture_tint(SDL_Texture *tex) {
+    if (!g_icon_surface_bg) return 1.f;
+    for (int i = 0; i < g_nbig; i++)
+        if (g_big_icons[i].tex == tex)
+            return icon_contrast_scale(g_big_icons[i].lightness, rgb_luma(g_icon_surface_bg));
+    return 1.f;
 }
 
 // The desktop's icon (system_icons.c) arrived: over the bundled one drawn meanwhile, in place in the atlas; big copies

@@ -2194,7 +2194,7 @@ static int run_selftest_m7(void) {
         ST_CHECK(icon_contrast_scale(0.f, 0.8f) == 1.f);          // transparent ink: no change
         ST_CHECK(fabsf(icon_contrast_scale(0.8f, 0.8f) - 0.4375f) < 0.001f); // (0.8 - 0.45) / 0.8
         ST_CHECK(fabsf(icon_contrast_scale(0.5f, 0.7f) - 0.5f) < 0.001f);
-        ST_CHECK(icon_contrast_scale(4.f, 0.8f) >= 0.15f - 0.0001f); // lower bound on the scale
+        ST_CHECK(fabsf(icon_contrast_scale(4.f, 0.8f) - 0.0875f) < 0.001f); // 0.35 / 4: the 0.15 floor is on the numerator
         u8 white[16], clear[16] = {0};
         for (int i = 0; i < 4; i++) { white[i * 4] = white[i * 4 + 1] = white[i * 4 + 2] = 255; white[i * 4 + 3] = 255; }
         ST_CHECK(fabsf(icon_pixel_lightness(white, 4) - 1.f) < 0.001f);
