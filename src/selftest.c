@@ -4012,6 +4012,51 @@ static int run_selftest_m9(void) {
         g_theme_cur = saved;
         theme_apply();
     }
+    { // path field / pill enclosure and folder search brightness are independent of the header
+        ST_CHECK(!g_surface_bright[SURF_PATHBAR] && !g_surface_bright[SURF_SEARCHBAR] && !g_transparent_pathbar);
+        opt_int_step(OPT_BRIGHT_PATHBAR, +1);
+        opt_int_step(OPT_BRIGHT_PATHBAR, +1);
+        opt_int_step(OPT_BRIGHT_SEARCHBAR, -1);
+        opt_int_step(OPT_BRIGHT_SEARCHBAR, -1);
+        ST_CHECK(g_surface_bright[SURF_PATHBAR] == 10 && g_surface_bright[SURF_SEARCHBAR] == -10);
+        char fbuf[16];
+        opt_int_fmt(OPT_BRIGHT_PATHBAR, fbuf, sizeof fbuf);
+        ST_CHECK(!strcmp(fbuf, "+10%"));
+        g_theme_cur = theme_find("Dark");
+        theme_apply();
+        ST_CHECK(pathbar_field_color() == rgb_mix(g_theme_dark.field, 0xFFFFFF, 0.10f));
+        ST_CHECK(searchbar_field_color() == rgb_mix(g_theme_dark.field, 0x000000, 0.10f));
+        opt_bool_toggle(OPT_TRANSPARENT_PATHBAR);
+        ST_CHECK(g_transparent_pathbar);
+        st_frames(2);
+        st_shot("m9-transparent-pathbar");
+        settings_save();
+        settings_load();
+        theme_apply();
+        ST_CHECK(g_surface_bright[SURF_PATHBAR] == 10 && g_surface_bright[SURF_SEARCHBAR] == -10 && g_transparent_pathbar);
+        char cfgp[PATH_MAX];
+        settings_file(cfgp, sizeof cfgp, false);
+        FILE *cf = fopen(cfgp, "w");
+        ST_CHECK(cf != NULL);
+        if (cf) {
+            fputs("pathbar_brightness=99\nsearchbar_brightness=-99\ntransparent_pathbar=1\n", cf);
+            fclose(cf);
+        }
+        settings_load();
+        ST_CHECK(g_surface_bright[SURF_PATHBAR] == 30 && g_surface_bright[SURF_SEARCHBAR] == -30 && g_transparent_pathbar);
+        // No settings_version bump: an older config must leave the new keys at their defaults.
+        cf = fopen(cfgp, "w");
+        ST_CHECK(cf != NULL);
+        if (cf) {
+            fputs("header_brightness=-30\n", cf);
+            fclose(cf);
+        }
+        settings_load();
+        ST_CHECK(!g_surface_bright[SURF_PATHBAR] && !g_surface_bright[SURF_SEARCHBAR] && !g_transparent_pathbar);
+        memset(g_surface_bright, 0, sizeof g_surface_bright);
+        g_transparent_pathbar = false;
+        theme_apply();
+    }
     { // scrollbar colour: Auto (the theme's own; System: the desktop's accent), or #RRGGBB / #RGB typed and applied
         int saved = g_theme_cur;
         g_theme_cur = theme_find("Dark");
