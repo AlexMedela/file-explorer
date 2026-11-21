@@ -440,7 +440,7 @@ static u8 *icon_raster(int id, int w, int h) {
     return buf;
 }
 
-typedef struct { int id, px; Glyph g; } IconSlot;
+typedef struct { int id, px; Glyph g; f32 lightness; } IconSlot;
 static IconSlot g_icon_cache[512];
 // g_icon_cache_n lives in font.c (reset together with the atlas)
 
@@ -451,6 +451,7 @@ static Glyph *icon_glyph(int id, int px) {
     if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0; // crude eviction (atlas keeps the pixels)
     u8 *buf = icon_raster(id, px, px);
     if (!buf) return NULL;
+    f32 lightness = icon_pixel_lightness(buf, (size_t)px * px);
     int ax, ay;
     if (!atlas_pack(px, px, &ax, &ay)) { free(buf); return NULL; }
     for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
@@ -458,6 +459,7 @@ static Glyph *icon_glyph(int id, int px) {
     IconSlot *s = &g_icon_cache[g_icon_cache_n++];
     s->id = id;
     s->px = px;
+    s->lightness = lightness;
     memset(&s->g, 0, sizeof s->g);
     s->g.x = (u16)ax;
     s->g.y = (u16)ay;
@@ -489,7 +491,7 @@ static void draw_ui_icon(int ui, f32 x, f32 y, f32 s, Color c) {
 }
 
 // Large icons (grid view) get their own textures so they don't flood the glyph atlas.
-typedef struct { int id, px; SDL_Texture *tex; u64 used; } BigIcon;
+typedef struct { int id, px; SDL_Texture *tex; u64 used; f32 lightness; } BigIcon;
 static BigIcon g_big_icons[96];
 static int g_nbig;
 static u64 g_big_clock;
@@ -510,6 +512,7 @@ static SDL_Texture *big_icon_tex(int id, int px) {
         SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
     }
+    f32 lightness = icon_pixel_lightness(buf, (size_t)px * px);
     free(buf);
     if (!tex) return NULL;
     int k = g_nbig;
@@ -521,7 +524,7 @@ static SDL_Texture *big_icon_tex(int id, int px) {
     } else {
         g_nbig++;
     }
-    g_big_icons[k] = (BigIcon){id, px, tex, g_big_clock};
+    g_big_icons[k] = (BigIcon){id, px, tex, g_big_clock, lightness};
     return tex;
 }
 
@@ -532,6 +535,7 @@ static void icons_replace(int id, int px, const u8 *rgba) {
         Glyph *g = &g_icon_cache[i].g;
         if (g_icon_cache[i].id != id || g_icon_cache[i].px != px) continue;
         for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(g->y + y) * ATLAS_SIZE + g->x) * 4], rgba + (size_t)y * px * 4, (size_t)px * 4);
+        g_icon_cache[i].lightness = icon_pixel_lightness(rgba, (size_t)px * px);
         g_dirty_x0 = MIN(g_dirty_x0, g->x);
         g_dirty_y0 = MIN(g_dirty_y0, g->y);
         g_dirty_x1 = MAX(g_dirty_x1, g->x + px);
