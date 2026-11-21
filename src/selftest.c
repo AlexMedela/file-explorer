@@ -3574,6 +3574,26 @@ static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
 
+    { // Options text actions: accent hover while enabled, subtle control otherwise
+        Rect b = {10, 10, 80, 30};
+        bool mouse = A.mouse_in;
+        f32 mx = A.mx, my = A.my;
+        A.mouse_in = false;
+        A.mx = A.my = -1;
+        opt_action_button(b, "Apply", true);
+        ST_CHECK(g_opt_action_bg == COL_CONTROL && g_opt_action_fg == COL_TEXT);
+        A.mouse_in = true;
+        A.mx = b.x + 2;
+        A.my = b.y + 2;
+        opt_action_button(b, "Apply", true);
+        ST_CHECK(g_opt_action_bg == COL_ACCENT_HOVER && g_opt_action_fg == COL_ON_ACCENT);
+        opt_action_button(b, "Apply", false);
+        ST_CHECK(g_opt_action_bg == COL_CONTROL_OFF && g_opt_action_fg == COL_TEXT_FAINT);
+        A.mouse_in = mouse;
+        A.mx = mx;
+        A.my = my;
+    }
+
     // --- the toolbar's sort button: the same keys as the folder menu's Sort by, the direction, Folders first ---
     st_frames(1);
     Rect sb = p->ly.sortbtn;
@@ -4029,8 +4049,15 @@ static int run_selftest_m9(void) {
         st_type("#f80");
         st_frames(1);
         st_shot("m9-scrollbar-field");
-        st_opt_click(st_opt_hit(HP_BUTTON, OPT_SCROLL_COLOR, 0)); // Apply
+        ST_CHECK(st_opt_hit(HP_EDIT_APPLY, OPT_SCROLL_COLOR, 0) && st_opt_hit(HP_EDIT_RESET, OPT_SCROLL_COLOR, 0));
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_SCROLL_COLOR, 0)); // Apply
         ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800) && T.scroll == 0xFF8800 && !strcmp(g_opt.scroll_color.buf, "#FF8800"));
+        st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_SCROLL_COLOR, 0)); // Default: back to the theme's own colour
+        ST_CHECK(!g_scroll_custom && !g_opt.scroll_color.buf[0] && T.scroll == g_theme_dark.scroll);
+        te_set(&g_opt.scroll_color, "#f80", 3, 3);
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_SCROLL_COLOR, 0));
+        ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800));
         settings_save();
         settings_load();
         theme_apply();
