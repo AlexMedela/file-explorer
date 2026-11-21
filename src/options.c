@@ -121,7 +121,8 @@ static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "
 
 // hit parts recorded while drawing, tested on click
 enum { HP_NONE, HP_NAV, HP_TOGGLE, HP_SEG, HP_DROP, HP_MINUS, HP_PLUS, HP_SWATCH, HP_BUTTON, HP_DROPITEM, HP_SEARCH, HP_CLOSE,
-       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT };
+       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT,
+       HP_EDIT_APPLY, HP_EDIT_RESET };
 typedef struct { Rect r; int part, opt, arg; } OptHit;
 
 static struct {
@@ -761,6 +762,23 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
     draw_rrect(kx - kr, t.y + t.h * 0.5f - kr, kr * 2, kr * 2, kr, C(on ? COL_ON_ACCENT : COL_KNOB_OFF));
 }
 
+// Apply/reset actions use a visible accent hover, independent of the subtle control shades.
+static u32 g_opt_action_bg, g_opt_action_fg; // selftest probe: last colours drawn
+
+static void opt_action_button(Rect r, const char *label, bool enabled) {
+    bool hv = hand_if(enabled && A.mouse_in && in_rect(r, A.mx, A.my));
+    u32 bg = !enabled ? COL_CONTROL_OFF : hv ? COL_ACCENT_HOVER : COL_CONTROL;
+    u32 fg = !enabled ? COL_TEXT_FAINT : hv ? COL_ON_ACCENT : COL_TEXT;
+    draw_rrect(r.x, r.y, r.w, r.h, S(7), C(bg));
+    Font *f = &A.font;
+    f32 tw = text_width(f, label, (int)strlen(label));
+    draw_text(f, r.x + (r.w - tw) * 0.5f, text_y(f, r.y, r.h), label, (int)strlen(label), C(fg));
+    if (A.selftest) {
+        g_opt_action_bg = bg;
+        g_opt_action_fg = fg;
+    }
+}
+
 static bool opt_hover(Rect r) { return hot(r); }
 
 // Control area of one row (right-aligned inside [x, x + w]).
@@ -866,12 +884,15 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     }
     case OK_TEXT: { // the name above the sidebar, the scrollbar colour (with its Apply button)
         if (o->id == OPT_SCROLL_COLOR) {
-            f32 bw = MAX(roundf(S(80)), text_width(f, "Apply", 5) + S(28)), fw = roundf(S(140));
-            Rect b = {x + w - bw, y, bw, ch}, r = {b.x - S(8) - fw, y, fw, ch};
+            f32 gap = roundf(S(6)), bw = MAX(roundf(S(80)), text_width(f, "Apply", 5) + S(28)), fw = roundf(S(140));
+            Rect reset = {x + w - bw, y, bw, ch}, apply = {reset.x - gap - bw, y, bw, ch};
+            Rect r = {apply.x - gap - fw, y, fw, ch};
             sheet_field(r, &g_opt.scroll_color, g_opt.scroll_focus, "Auto");
             opt_hit(r, HP_TEXT, o->id, 1);
-            sheet_button(b, "Apply", false, true);
-            opt_hit(b, HP_BUTTON, o->id, 0);
+            opt_action_button(apply, "Apply", true);
+            opt_action_button(reset, "Auto", true);
+            opt_hit(apply, HP_EDIT_APPLY, o->id, 0);
+            opt_hit(reset, HP_EDIT_RESET, o->id, 0);
             break;
         }
         Rect r = {x + w - MIN(roundf(S(260)), w), y, MIN(roundf(S(260)), w), ch};
@@ -1326,6 +1347,11 @@ static void options_click(f32 x, f32 y, int clicks) {
         case HP_BUTTON: opt_button(hp->opt); return;
         case HP_LNAME: g_opt.lname_focus = true; return;
         case HP_TEXT: *(hp->arg ? &g_opt.scroll_focus : &g_opt.brand_focus) = true; return;
+        case HP_EDIT_APPLY: opt_scroll_color_apply(); return;
+        case HP_EDIT_RESET:
+            te_set(&g_opt.scroll_color, "", 0, 0); // empty is Auto: the theme's own colour
+            opt_scroll_color_apply();
+            return;
         case HP_LSAVE: opt_layout_save(); return;
         case HP_LOPEN: {
             int li = hp->arg;
