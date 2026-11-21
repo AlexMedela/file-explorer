@@ -4278,6 +4278,49 @@ static int run_selftest_m9(void) {
     sheet_close();
     g_opt.cat = OC_APPEARANCE;
 
+    // --- terminal executable: free text with Apply/Default, checked against PATH ---
+    {
+        char too_long[sizeof g_external_terminal + 1];
+        memset(too_long, 'a', sizeof too_long - 1);
+        too_long[sizeof too_long - 1] = 0;
+        ST_CHECK(opt_terminal_path_valid("foot") && !opt_terminal_path_valid("foot\n") &&
+                 !opt_terminal_path_valid("foot\r") && !opt_terminal_path_valid(too_long));
+        char *tpath1 = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
+        setenv("PATH", M9_BASE "-bin", 1);
+        options_open_page(OC_INTEGRATION);
+        st_frames(1);
+        g_opt.scroll = g_opt.max_scroll; // the field is at the bottom of the page
+        st_frames(1);
+        ST_CHECK(st_opt_hit(HP_TEXT, OPT_TERMINAL_PATH, 0));
+        ST_CHECK(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0) && st_opt_hit(HP_EDIT_RESET, OPT_TERMINAL_PATH, 0));
+        te_set(&g_opt.terminal_path, "foot", 4, 4);
+        st_frames(1);
+        A.toast[0] = 0;
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0));
+        ST_CHECK(!strcmp(g_external_terminal, "foot") && strstr(A.toast, "Open in foot"));
+        A.menu.n = 0;
+        menu_terminal_items(p);
+        ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in foot"));
+        settings_save();
+        settings_load();
+        ST_CHECK(!strcmp(g_external_terminal, "foot"));
+        te_set(&g_opt.terminal_path, "no-such-terminal-xyz", 20, 20);
+        st_frames(1);
+        A.toast[0] = 0;
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0));
+        ST_CHECK(!strcmp(g_external_terminal, "foot") && strstr(A.toast, "not found"));
+        A.toast[0] = 0;
+        st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_TERMINAL_PATH, 0));
+        ST_CHECK(!g_external_terminal[0] && strstr(A.toast, "cleared"));
+        A.menu.n = 0;
+        menu_terminal_items(p);
+        ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in external terminal"));
+        sheet_close();
+        if (tpath1) setenv("PATH", tpath1, 1);
+        else unsetenv("PATH");
+        free(tpath1);
+    }
+
     // --- named layouts ---
     st_wait();
     st_key(SDLK_BACKSLASH, SDL_KMOD_CTRL);
