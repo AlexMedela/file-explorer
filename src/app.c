@@ -54,6 +54,7 @@ static void te_set(TextEdit *t, const char *s, int anchor, int caret) {
     t->anchor = CLAMP(anchor, 0, n);
     t->caret = CLAMP(caret, 0, n);
     t->scroll = 0;
+    memset(&t->animation, 0, sizeof t->animation);
 }
 
 static int te_prev(const TextEdit *t, int i) {
@@ -94,6 +95,7 @@ static void te_delete_sel(TextEdit *t) {
 }
 
 static void te_insert(TextEdit *t, const char *s) {
+    t->animation.input = now_ns();
     te_delete_sel(t);
     size_t n = strlen(t->buf), k = strlen(s);
     if (n + k + 1 > sizeof t->buf) return;
@@ -104,6 +106,7 @@ static void te_insert(TextEdit *t, const char *s) {
 }
 
 static bool te_key(TextEdit *t, SDL_Keycode key, SDL_Keymod mod) {
+    t->animation.input = now_ns();
     bool ctrl = mod & SDL_KMOD_CTRL, shift = mod & SDL_KMOD_SHIFT;
     int n = (int)strlen(t->buf), lo = MIN(t->anchor, t->caret), hi = MAX(t->anchor, t->caret);
     switch (key) {
