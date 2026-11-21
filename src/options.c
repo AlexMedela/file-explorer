@@ -10,7 +10,7 @@ enum {
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_FOLDERS_FIRST, OPT_DEF_GROUP,
-    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
+    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL, OPT_TERMINAL_PATH,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
 };
 
@@ -80,6 +80,7 @@ static const OptDef g_opts[] = {
     {OC_INTEGRATION, OK_BOOL, OPT_IG_FM1, "\"Show in folder\" opens here", "From browsers and other apps"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_PICKER, "File chooser for other apps", "Their Open and Save dialogs open here"},
     {OC_INTEGRATION, OK_CHOICE, OPT_TERMINAL, "Terminal app", "For right-click > Open in; Automatic: $TERMINAL, else the desktop's own"},
+    {OC_INTEGRATION, OK_TEXT, OPT_TERMINAL_PATH, "Terminal executable", "Executable name or absolute path (no arguments), with Apply / Default; its name appears in the Open in menu"},
     {OC_UPDATES, OK_BUTTON, OPT_UPD_NOW, APP_LABEL " " APP_VERSION, "How this copy updates"},
     {OC_UPDATES, OK_BUTTON, OPT_UPD_HOW, "How it updates", "Where new versions come from"},
     {OC_UPDATES, OK_BUTTON, OPT_UPD_NOTES, "What's new", "Release notes of every version, on GitHub"},
@@ -121,7 +122,8 @@ static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "
 
 // hit parts recorded while drawing, tested on click
 enum { HP_NONE, HP_NAV, HP_TOGGLE, HP_SEG, HP_DROP, HP_MINUS, HP_PLUS, HP_SWATCH, HP_BUTTON, HP_DROPITEM, HP_SEARCH, HP_CLOSE,
-       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT };
+       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT,
+       HP_EDIT_APPLY, HP_EDIT_RESET };
 typedef struct { Rect r; int part, opt, arg; } OptHit;
 
 static struct {
@@ -154,6 +156,9 @@ static struct {
     // the scrollbar colour (OK_TEXT, applied with Enter or Apply)
     TextEdit scroll_color;
     bool scroll_focus;
+    // the external terminal executable (OK_TEXT, applied with Apply or cleared with Default)
+    TextEdit terminal_path;
+    bool terminal_path_focus;
 } g_opt;
 
 // Options > Integration > Terminal app: the terminals installed (programs on $PATH), found on a worker each time
@@ -618,6 +623,29 @@ static void opt_scroll_color_apply(void) {
     g_opt.scroll_focus = false;
 }
 
+static bool opt_terminal_path_valid(const char *s) {
+    return strlen(s) < sizeof g_external_terminal && !strpbrk(s, "\n\r");
+}
+
+static void opt_terminal_path_apply(void) {
+    const char *s = g_opt.terminal_path.buf;
+    if (!opt_terminal_path_valid(s)) { toast("Enter a single executable name or absolute path"); return; }
+    char old[PATH_MAX];
+    snprintf(old, sizeof old, "%s", g_external_terminal);
+    snprintf(g_external_terminal, sizeof g_external_terminal, "%s", s);
+    char exe[PATH_MAX];
+    const char *name = NULL;
+    if (*s && !find_terminal(exe, sizeof exe, &name)) {
+        snprintf(g_external_terminal, sizeof g_external_terminal, "%s", old);
+        toast("Terminal executable not found or not executable");
+        return;
+    }
+    g_opt.terminal_path_focus = false;
+    A.settings_dirty = true;
+    if (*s) toast("Terminal applied: Open in %s", path_basename(g_external_terminal));
+    else toast("Terminal cleared; Open in external shell will open settings");
+}
+
 static void opt_button(int id) {
     char dir[PATH_MAX];
     switch (id) {
@@ -721,6 +749,7 @@ static void options_open(void) {
     char sc[16] = "";
     if (g_scroll_custom) snprintf(sc, sizeof sc, "#%06X", g_scroll_custom & 0xFFFFFF);
     te_set(&g_opt.scroll_color, sc, (int)strlen(sc), (int)strlen(sc));
+    te_set(&g_opt.terminal_path, g_external_terminal, (int)strlen(g_external_terminal), (int)strlen(g_external_terminal));
     term_scan_start();
     themes_scan(); // pick up new/edited theme files
     theme_apply();
@@ -759,6 +788,23 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
     draw_rrect(t.x, t.y, t.w, t.h, t.h * 0.5f, on ? C(hv ? COL_ACCENT_HOVER : COL_ACCENT) : C(hv ? COL_CONTROL_HOVER : COL_CHIP));
     f32 kx = on ? t.x + t.w - t.h * 0.5f : t.x + t.h * 0.5f;
     draw_rrect(kx - kr, t.y + t.h * 0.5f - kr, kr * 2, kr * 2, kr, C(on ? COL_ON_ACCENT : COL_KNOB_OFF));
+}
+
+// Apply/reset actions use a visible accent hover, independent of the subtle control shades.
+static u32 g_opt_action_bg, g_opt_action_fg; // selftest probe: last colours drawn
+
+static void opt_action_button(Rect r, const char *label, bool enabled) {
+    bool hv = hand_if(enabled && A.mouse_in && in_rect(r, A.mx, A.my));
+    u32 bg = !enabled ? COL_CONTROL_OFF : hv ? COL_ACCENT_HOVER : COL_CONTROL;
+    u32 fg = !enabled ? COL_TEXT_FAINT : hv ? COL_ON_ACCENT : COL_TEXT;
+    draw_rrect(r.x, r.y, r.w, r.h, S(7), C(bg));
+    Font *f = &A.font;
+    f32 tw = text_width(f, label, (int)strlen(label));
+    draw_text(f, r.x + (r.w - tw) * 0.5f, text_y(f, r.y, r.h), label, (int)strlen(label), C(fg));
+    if (A.selftest) {
+        g_opt_action_bg = bg;
+        g_opt_action_fg = fg;
+    }
 }
 
 static bool opt_hover(Rect r) { return hot(r); }
@@ -872,6 +918,20 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             opt_hit(r, HP_TEXT, o->id, 1);
             sheet_button(b, "Apply", false, true);
             opt_hit(b, HP_BUTTON, o->id, 0);
+            break;
+        }
+        if (o->id == OPT_TERMINAL_PATH) {
+            f32 gap = roundf(S(6));
+            f32 bw = MAX(roundf(S(80)), MAX(text_width(f, "Apply", 5), text_width(f, "Default", 7)) + S(28));
+            Rect reset = {x + w - bw, y, bw, ch}, apply = {reset.x - gap - bw, y, bw, ch};
+            Rect r = {x, y, MAX(0.f, apply.x - gap - x), ch};
+            sheet_field(r, &g_opt.terminal_path, g_opt.terminal_path_focus, "Executable name or path");
+            opt_hit(r, HP_TEXT, o->id, 0);
+            bool valid = opt_terminal_path_valid(g_opt.terminal_path.buf);
+            opt_action_button(apply, "Apply", valid);
+            opt_action_button(reset, "Default", true);
+            if (valid) opt_hit(apply, HP_EDIT_APPLY, o->id, 0);
+            opt_hit(reset, HP_EDIT_RESET, o->id, 0);
             break;
         }
         Rect r = {x + w - MIN(roundf(S(260)), w), y, MIN(roundf(S(260)), w), ch};
@@ -1300,7 +1360,7 @@ static void options_click(f32 x, f32 y, int clicks) {
     }
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
     if (sheet_scrollbar_press(x, y)) return;
-    g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; // a click elsewhere drops the keyboard (typing a letter still searches)
+    g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.terminal_path_focus = false; // a click elsewhere drops the keyboard (typing a letter still searches)
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];
         if (hp->r.w <= 0 || !in_rect(hp->r, x, y)) continue;
@@ -1325,7 +1385,15 @@ static void options_click(f32 x, f32 y, int clicks) {
             return;
         case HP_BUTTON: opt_button(hp->opt); return;
         case HP_LNAME: g_opt.lname_focus = true; return;
-        case HP_TEXT: *(hp->arg ? &g_opt.scroll_focus : &g_opt.brand_focus) = true; return;
+        case HP_TEXT:
+            if (hp->opt == OPT_TERMINAL_PATH) g_opt.terminal_path_focus = true;
+            else *(hp->arg ? &g_opt.scroll_focus : &g_opt.brand_focus) = true;
+            return;
+        case HP_EDIT_APPLY: opt_terminal_path_apply(); return;
+        case HP_EDIT_RESET:
+            te_set(&g_opt.terminal_path, "", 0, 0); // empty is Automatic: $TERMINAL / the desktop's own
+            opt_terminal_path_apply();
+            return;
         case HP_LSAVE: opt_layout_save(); return;
         case HP_LOPEN: {
             int li = hp->arg;
