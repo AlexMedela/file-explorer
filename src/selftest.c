@@ -2530,6 +2530,21 @@ static int run_selftest_m8(void) {
     st_select(p, "abc.txt");
     do_action(p, ACT_OPEN_WITH);
     ST_CHECK(g_sheet.kind == SHEET_OPENWITH && !strcmp(g_sheet.mime, "text/plain") && g_sheet.napps >= 1);
+    { // the "default" label keeps contrast on the dark inset well; selected rows keep their own colour
+        int saved = g_theme_cur;
+        u32 dark_well = rgb_mix(COL_POPUP, 0x000000, 0.22f);
+        g_theme_cur = theme_find("Dark");
+        theme_apply();
+        ST_CHECK(rgb_luma(dark_well) < 0.5f);
+        ST_CHECK(ow_default_label_color(dark_well, false) == rgb_mix(COL_ACCENT, 0xFFFFFF, 0.15f));
+        ST_CHECK(ow_default_label_color(dark_well, true) == COL_SEL_DIM);
+        g_theme_cur = theme_find("Light");
+        theme_apply();
+        ST_CHECK(ow_default_label_color(rgb_mix(COL_POPUP, 0x000000, 0.04f), false) == COL_ACCENT);
+        ST_CHECK(ow_default_label_color(rgb_mix(COL_POPUP, 0x000000, 0.04f), true) == COL_SEL_DIM);
+        g_theme_cur = saved;
+        theme_apply();
+    }
     st_frames(2);
     st_shot("openwith");
     { // all apps: the list scrolls inside its container; wheel scrolling sticks; clicks hit the right row
