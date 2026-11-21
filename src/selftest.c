@@ -4032,6 +4032,7 @@ static int run_selftest_m9(void) {
         st_shot("m9-transparent-pathbar");
         settings_save();
         settings_load();
+        init_places();
         theme_apply();
         ST_CHECK(g_surface_bright[SURF_PATHBAR] == 10 && g_surface_bright[SURF_SEARCHBAR] == -10 && g_transparent_pathbar);
         char cfgp[PATH_MAX];
@@ -4043,6 +4044,7 @@ static int run_selftest_m9(void) {
             fclose(cf);
         }
         settings_load();
+        init_places();
         ST_CHECK(g_surface_bright[SURF_PATHBAR] == 30 && g_surface_bright[SURF_SEARCHBAR] == -30 && g_transparent_pathbar);
         // No settings_version bump: an older config must leave the new keys at their defaults.
         cf = fopen(cfgp, "w");
@@ -4052,6 +4054,7 @@ static int run_selftest_m9(void) {
             fclose(cf);
         }
         settings_load();
+        init_places();
         ST_CHECK(!g_surface_bright[SURF_PATHBAR] && !g_surface_bright[SURF_SEARCHBAR] && !g_transparent_pathbar);
         memset(g_surface_bright, 0, sizeof g_surface_bright);
         g_transparent_pathbar = false;

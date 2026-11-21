@@ -101,8 +101,9 @@ static bool g_accent_desktop; // Options: the desktop's accent with every theme,
 static bool g_unified_surfaces; // Options: sidebar, header, preview and status bar take the file area's background
 static char g_theme_pick[2][64] = {"Light", "Dark"}; // Theme > System: the theme while the desktop is light / dark (by name)
 // Options > Surfaces brightness: -30..+30 % per part (darker / lighter), 0 = the theme's own colour.
-enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_STATUS, SURF_COUNT };
+enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_STATUS, SURF_PATHBAR, SURF_SEARCHBAR, SURF_COUNT };
 static int g_surface_bright[SURF_COUNT];
+static bool g_transparent_pathbar; // Options: remove only the path field's fill (pills and search stay filled)
 static u32 g_scroll_custom; // Options: scrollbar colour; 0 = Auto, else 0x01000000 | rgb
 static bool g_separators = true; // Options: the lines between the window's parts (a hovered / dragged edge always shows)
 static u32 g_status_bg; // the status bar: the toolbar's colour, unless its brightness moves it
@@ -205,6 +206,11 @@ static u32 surface_adjust(u32 c, int part) {
     int pct = CLAMP(g_surface_bright[part], -30, 30);
     return pct ? rgb_mix(c, pct < 0 ? 0x000000 : 0xFFFFFF, (f32)abs(pct) / 100.f) : c;
 }
+
+// Field colours are independent of the header strip: only the path/pill and search brightness settings move them.
+// T.field itself is never adjusted in theme_apply().
+static u32 pathbar_field_color(void) { return surface_adjust(T.field, SURF_PATHBAR); }
+static u32 searchbar_field_color(void) { return surface_adjust(T.field, SURF_SEARCHBAR); }
 
 static int theme_find(const char *name);
 

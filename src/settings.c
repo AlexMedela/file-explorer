@@ -91,6 +91,7 @@ static void settings_defaults(void) {
     g_folders_first = true;
     g_separators = true;
     g_scroll_custom = 0;
+    g_transparent_pathbar = false;
     memset(g_surface_bright, 0, sizeof g_surface_bright);
     A.ui_font[0] = 0;
     A.font_size = 13;
@@ -340,6 +341,9 @@ static void settings_load(void) {
         else if (!strcmp(k, "main_brightness")) g_surface_bright[SURF_FILES] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "preview_brightness")) g_surface_bright[SURF_PREVIEW] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "status_brightness")) g_surface_bright[SURF_STATUS] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "pathbar_brightness")) g_surface_bright[SURF_PATHBAR] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "searchbar_brightness")) g_surface_bright[SURF_SEARCHBAR] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "transparent_pathbar")) g_transparent_pathbar = atoi(v) != 0;
         else if (!strcmp(k, "theme")) snprintf(A.theme_name, sizeof A.theme_name, "%s", v);
         else if (!strcmp(k, "accent")) {
             u32 c;
@@ -570,8 +574,9 @@ static void settings_write(FILE *f) {
     fprintf(f, "theme_light=%s\ntheme_dark=%s\n", g_theme_pick[0], g_theme_pick[1]);
     if (g_scroll_custom) fprintf(f, "scrollbar_color=#%06X\n", g_scroll_custom & 0xFFFFFF);
     else fprintf(f, "scrollbar_color=auto\n");
-    fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\n",
-            g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_STATUS]);
+    fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\npathbar_brightness=%d\nsearchbar_brightness=%d\ntransparent_pathbar=%d\n",
+            g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_STATUS],
+            g_surface_bright[SURF_PATHBAR], g_surface_bright[SURF_SEARCHBAR], g_transparent_pathbar);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
     fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",

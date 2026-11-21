@@ -318,13 +318,13 @@ static void draw_panel_bar(Panel *pn) {
         Tab *first = panel_tab(pn, 0), *last = panel_tab(pn, -1);
         f32 pad = roundf(S(3));
         if (first && last)
-            draw_rrect(first->r.x - pad, first->r.y - pad, last->r.x + last->r.w - first->r.x + pad * 2, first->r.h + pad * 2, S(9), C(COL_FIELD));
+            draw_rrect(first->r.x - pad, first->r.y - pad, last->r.x + last->r.w - first->r.x + pad * 2, first->r.h + pad * 2, S(9), C(pathbar_field_color()));
         for (int i = 0; i < A.ntabs; i++) {
             Tab *t = A.tabs[i];
             if (t->panel != pn) continue;
             bool cur = pn->cur == t, hover = A.mouse_in && A.drag == DRAG_NONE && in_rect(t->r, A.mx, A.my);
             if (cur || hover)
-                draw_rrect(t->r.x, t->r.y, t->r.w, t->r.h, S(7), C(rgb_mix(COL_FIELD, COL_ACCENT, !cur ? 0.08f : active_panel || !multi ? 0.40f : 0.24f)));
+                draw_rrect(t->r.x, t->r.y, t->r.w, t->r.h, S(7), C(rgb_mix(pathbar_field_color(), COL_ACCENT, !cur ? 0.08f : active_panel || !multi ? 0.40f : 0.24f)));
         }
     }
     // Backgrounds first, so the active card (and its flares) sits on top of a hovered neighbour:
@@ -373,7 +373,7 @@ static void draw_panel_bar(Panel *pn) {
         bool cur = pn->cur == t;
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my));
         bool dragging = A.drag == DRAG_TAB && A.drag_tab == t;
-        if (!pills && prev && !cur && pn->cur != prev && !hover) draw_rect(r.x - 1, r.y + S(9), 1, r.h - S(18), C(COL_FIELD));
+        if (!pills && prev && !cur && pn->cur != prev && !hover) draw_rect(r.x - 1, r.y + S(9), 1, r.h - S(18), C(pathbar_field_color()));
         prev = t;
         if (A.drop_tab == t) draw_rrect_outline(r.x + S(1), r.y + S(1), r.w - S(2), r.h - S(4), S(6), MAX(1.f, S(1.3f)), C(COL_ACCENT));
         if (dragging) g_alpha = 0.45f;
@@ -531,7 +531,9 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);
     if (hover) A.ptr_text = true; // a click outside the crumbs edits the path
-    draw_rrect(pb.x, pb.y, pb.w, pb.h, S(7), C(editing ? COL_FIELD_HOVER : COL_FIELD));
+    draw_rrect(pb.x, pb.y, pb.w, pb.h, S(7), CA(editing ? COL_FIELD_HOVER : pathbar_field_color(), editing || !g_transparent_pathbar ? 1.f : 0.f));
+    if (g_transparent_pathbar && !editing)
+        draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(7), MAX(1.f, S(1.f)), CA(COL_BORDER, 0.7f));
     if (editing) draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
 
     Font *f = &A.font;
@@ -2427,7 +2429,7 @@ static void draw_searchbar(Pane *p) {
     Rect field, toggle, close, cont, opt[3];
     search_bar_layout(p, &field, &toggle, &close, &cont, opt);
     bool focused = A.search_pane == p;
-    draw_rrect(field.x, field.y, field.w, field.h, S(7), C(focused ? COL_FIELD_HOVER : COL_FIELD));
+    draw_rrect(field.x, field.y, field.w, field.h, S(7), C(focused ? COL_FIELD_HOVER : searchbar_field_color()));
     if (focused) draw_rrect_outline(field.x, field.y, field.w, field.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
     // magnifier
     f32 r = roundf(S(5)), cx = field.x + S(15), cy = field.y + field.h * 0.5f - S(1);
