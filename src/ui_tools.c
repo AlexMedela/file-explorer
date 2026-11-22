@@ -366,7 +366,7 @@ static void openwith_go(void) {
 // The accent is too dim on the dark inset well; selected rows already have their own dimmed colour.
 static u32 ow_default_label_color(u32 well, bool sel) {
     if (sel) return COL_SEL_DIM;
-    return rgb_luma(well) < 0.5f ? rgb_mix(COL_ACCENT, 0xFFFFFF, 0.15f) : COL_ACCENT;
+    return rgb_luma(well) < 0.5f ? rgb_mix(COL_ACCENT, 0xFFFFFF, 0.15f) : rgb_mix(COL_ACCENT, 0x000000, 0.35f);
 }
 
 static void openwith_draw(void) {

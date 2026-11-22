@@ -2540,7 +2540,7 @@ static int run_selftest_m8(void) {
         ST_CHECK(ow_default_label_color(dark_well, true) == COL_SEL_DIM);
         g_theme_cur = theme_find("Light");
         theme_apply();
-        ST_CHECK(ow_default_label_color(rgb_mix(COL_POPUP, 0x000000, 0.04f), false) == COL_ACCENT);
+        ST_CHECK(ow_default_label_color(rgb_mix(COL_POPUP, 0x000000, 0.04f), false) == rgb_mix(COL_ACCENT, 0x000000, 0.35f));
         ST_CHECK(ow_default_label_color(rgb_mix(COL_POPUP, 0x000000, 0.04f), true) == COL_SEL_DIM);
         g_theme_cur = saved;
         theme_apply();
