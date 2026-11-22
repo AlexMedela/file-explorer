@@ -27,8 +27,8 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_ACCENT_DESKTOP, "Desktop's accent colour", "Use the desktop's accent with every theme, where it has one (else the colour above)"},
     {OC_APPEARANCE, OK_TEXT, OPT_SCROLL_COLOR, "Scrollbar colour", "Empty: Auto, the theme's own (System: the desktop's accent); or #RRGGBB / #RGB, then Apply"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders; System: the desktop's icon theme"},
-    {OC_APPEARANCE, OK_TEXT, OPT_APP_ICON, "Application icon", "Absolute SVG/PNG path; the preview shows the current icon (the built-in default when empty). Apply to use it"},
-    {OC_APPEARANCE, OK_TEXT, OPT_TITLE_ICON, "Title bar icon", "Icon at the left of the title bar: absolute SVG/PNG path, or empty for the built-in logo. Apply to use it; Logo off hides it"},
+    {OC_APPEARANCE, OK_TEXT, OPT_APP_ICON, "Application icon", "Absolute SVG/PNG path: Apply uses it, System follows the desktop icon theme, Default restores the built-in icon"},
+    {OC_APPEARANCE, OK_TEXT, OPT_TITLE_ICON, "Title bar icon", "Icon at the left of the title bar: absolute SVG/PNG path; Apply uses it, Default restores the built-in logo. Logo off hides it"},
     {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "Show the icon before the name above the sidebar; off hides a custom title bar icon too"},
     {OC_APPEARANCE, OK_CHOICE, OPT_FONT, "Font", "Interface font family"},
     {OC_APPEARANCE, OK_INT, OPT_FONT_SIZE, "Font size", "Text size at 100% zoom"},
@@ -629,7 +629,7 @@ static void opt_scroll_color_apply(void) {
 static void opt_app_icon_chosen(const char *path) {
     if (!app_icon_path_ok(path)) { toast("Application icon: an absolute .svg or .png path"); return; }
     snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", path ? path : "");
-    g_app_icon_mode = g_app_icon_path[0] ? APP_ICON_CUSTOM : APP_ICON_DEFAULT;
+    g_app_icon_mode = APP_ICON_CUSTOM;
     g_logo_changed = true;
     window_icon_update();
     app_icon_sync();
@@ -651,6 +651,33 @@ static void opt_title_icon_chosen(const char *path) {
 }
 
 static void opt_title_icon_apply(void) { opt_title_icon_chosen(g_opt.title_icon.buf); }
+
+static void opt_app_icon_set_mode(AppIconMode m) {
+    g_app_icon_mode = m;
+    g_logo_changed = true;
+    window_icon_update();
+    app_icon_sync();
+    A.settings_dirty = true;
+}
+
+static void opt_title_icon_default(void) {
+    g_title_icon_path[0] = 0;
+    A.settings_dirty = true;
+    A.redraw = true;
+    te_set(&g_opt.title_icon, "", 0, 0);
+    g_opt.title_icon_focus = false;
+}
+
+static void opt_icon_button(int opt, int arg) {
+    if (opt == OPT_APP_ICON) {
+        if (arg == 0) opt_app_icon_apply();
+        else if (arg == 1) opt_app_icon_set_mode(APP_ICON_SYSTEM);
+        else if (arg == 2) opt_app_icon_set_mode(APP_ICON_DEFAULT);
+    } else if (opt == OPT_TITLE_ICON) {
+        if (arg == 0) opt_title_icon_apply();
+        else if (arg == 1) opt_title_icon_default();
+    }
+}
 
 static void opt_button(int id) {
     char dir[PATH_MAX];
@@ -801,31 +828,67 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
 
 static bool opt_hover(Rect r) { return hot(r); }
 
-// An icon-path row's controls, left to right, inside a strip of w pixels. Shrink the button and the preview before
-// letting the path field vanish: even the minimum window must keep all three usable on one row.
-static void opt_app_icon_layout(f32 w, f32 ch, Rect *p, Rect *r, Rect *a) {
-    f32 maxlab = text_width(&A.font, "Apply", 5);
-    f32 gap = S(6), ps = ch, bw = MAX(roundf(S(64)), maxlab + S(14));
-    f32 fw = w - ps - bw - 2 * gap;
+// The last-set active mode owns the primary button; title Apply is active while a custom path is set.
+static const char *opt_icon_button_label(int opt, int arg) {
+    if (opt == OPT_APP_ICON) return arg == 0 ? "Apply" : arg == 1 ? "System" : "Default";
+    return arg == 0 ? "Apply" : "Default";
+}
+
+static bool opt_icon_button_active(int opt, int arg) {
+    if (opt == OPT_APP_ICON)
+        return (arg == 0 && g_app_icon_mode == APP_ICON_CUSTOM) || (arg == 1 && g_app_icon_mode == APP_ICON_SYSTEM)
+            || (arg == 2 && g_app_icon_mode == APP_ICON_DEFAULT);
+    return (arg == 0 && g_title_icon_path[0]) || (arg == 1 && !g_title_icon_path[0]);
+}
+
+static f32 opt_icon_row_button_w(int n) {
+    static const char *labels[3] = {"Apply", "System", "Default"};
+    f32 w = 0;
+    for (int i = 0; i < MIN(n, 3); i++) w = MAX(w, text_width(&A.font, labels[i], (int)strlen(labels[i])));
+    return w;
+}
+
+// An icon-path row's controls, left to right, inside a strip of w pixels. Shrink the gaps, then the preview and the
+// buttons before letting the path field vanish: even a narrow window keeps every button usable on one row.
+static void opt_icon_row_layout(f32 w, f32 ch, int n, Rect *p, Rect *r, Rect *b) {
+    if (n < 1) n = 1;
+    if (n > 3) n = 3;
+    f32 maxlab = opt_icon_row_button_w(n);
+    f32 gap = S(6), ps = ch, bw = MAX(roundf(S(52)), maxlab + S(14));
+    f32 nf = (f32)n, ng = (f32)(n + 1);
+    f32 fw = w - ps - nf * bw - ng * gap;
     if (fw < roundf(S(110))) {
         gap = S(4);
-        bw = MAX(roundf(S(52)), maxlab + S(10));
-        fw = w - ps - bw - 2 * gap;
+        bw = MAX(roundf(S(48)), maxlab + S(10));
+        fw = w - ps - nf * bw - ng * gap;
     }
     if (fw < roundf(S(40))) {
-        ps = MIN(ps, MAX(roundf(S(20)), w - bw - 2 * gap - roundf(S(40))));
-        fw = w - ps - bw - 2 * gap;
+        ps = MIN(ps, MAX(roundf(S(20)), w - nf * bw - ng * gap - roundf(S(40))));
+        fw = w - ps - nf * bw - ng * gap;
+    }
+    if (fw < S(1)) {
+        gap = S(2);
+        ps = MIN(ps, roundf(S(16)));
+        f32 avail = (w - ps - S(1) - ng * gap) / nf;
+        bw = MAX(S(1), MIN(bw, avail));
+        fw = w - ps - nf * bw - ng * gap;
     }
     if (fw < S(1)) fw = S(1);
+    if (ps < S(1)) ps = S(1);
     *p = (Rect){0, 0, ps, ch};
     *r = (Rect){ps + gap, 0, fw, ch};
-    *a = (Rect){r->x + fw + gap, 0, bw, ch};
+    f32 bx = r->x + fw + gap;
+    for (int k = 0; k < n; k++) {
+        b[k] = (Rect){bx, 0, bw, ch};
+        bx += bw + gap;
+    }
 }
 
 // Leave the controls enough room, taking it from the label first; at narrow widths the label simply truncates.
-static f32 opt_app_icon_ctlw(f32 row_w) {
-    f32 maxlab = text_width(&A.font, "Apply", 5);
-    f32 need = roundf(S(30)) + MAX(roundf(S(52)), maxlab + S(10)) + 2 * S(4) + roundf(S(40));
+static f32 opt_icon_row_ctlw(f32 row_w, int n) {
+    f32 maxlab = opt_icon_row_button_w(n);
+    f32 bw = MAX(roundf(S(48)), maxlab + S(10));
+    f32 need = roundf(S(30)) + roundf(S(40)) + (f32)n * bw + (f32)(n + 1) * S(4);
     return MAX(MIN(roundf(S(600)), row_w * 0.75f), MIN(row_w - S(16), need));
 }
 
@@ -936,17 +999,21 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             bool header = o->id == OPT_TITLE_ICON;
             TextEdit *field = header ? &g_opt.title_icon : &g_opt.app_icon;
             bool focused = header ? g_opt.title_icon_focus : g_opt.app_icon_focus;
-            Rect p, r, a;
-            opt_app_icon_layout(w, ch, &p, &r, &a);
-            p.x += x; r.x += x; a.x += x;
-            p.y = r.y = a.y = y;
-            draw_rrect(p.x, p.y, p.w, ch, S(4), C(COL_CHIP));
+            int nb = header ? 2 : 3;
+            Rect p, r, b[3];
+            opt_icon_row_layout(w, ch, nb, &p, &r, b);
+            p.x += x; r.x += x;
+            p.y = r.y = y;
+            for (int k = 0; k < nb; k++) { b[k].x += x; b[k].y = y; }
             if (header) draw_title_icon_preview(p.x, p.y, p.w);
             else draw_app_icon_preview(p.x, p.y, p.w);
             sheet_field(r, field, focused, "Default");
             opt_hit(r, HP_TEXT, o->id, header ? 3 : 2);
-            sheet_button(a, "Apply", false, true);
-            opt_hit(a, HP_BUTTON, o->id, 0);
+            for (int k = 0; k < nb; k++) {
+                const char *l = opt_icon_button_label(o->id, k);
+                sheet_button(b[k], l, opt_icon_button_active(o->id, k), true);
+                opt_hit(b[k], HP_BUTTON, o->id, k);
+            }
             break;
         }
         if (o->id == OPT_SCROLL_COLOR) {
@@ -1273,7 +1340,8 @@ static void options_draw(void) {
                 bool hv = opt_hover(rr) && opt_hover(list) && g_opt.drop_opt < 0;
                 if (hv) g_opt.hover_row = k; // (no highlight: rows are static, their controls react)
                 f32 tx = rr.x + S(16), ctlw = MIN(roundf(S(380)), rr.w * 0.55f), lw = rr.w - ctlw - S(44);
-                if (ok->id == OPT_APP_ICON || ok->id == OPT_TITLE_ICON) ctlw = opt_app_icon_ctlw(rr.w); // preview + field + Apply
+                if (ok->id == OPT_APP_ICON || ok->id == OPT_TITLE_ICON) // preview + field + mode buttons
+                    ctlw = opt_icon_row_ctlw(rr.w, ok->id == OPT_APP_ICON ? 3 : 2);
                 if (ok->kind == OK_BOOL || ok->kind == OK_BUTTON) lw = rr.w - roundf(S(200)); // (narrow controls: more room for text)
                 else lw = rr.w - ctlw - S(44);
                 draw_text_fit(f, tx, roundf(y + rh * 0.5f - f->line_h + S(2)), lw, ok->label, (int)strlen(ok->label), C(COL_TEXT), 0);
@@ -1411,7 +1479,10 @@ static void options_click(f32 x, f32 y, int clicks) {
             theme_apply();
             A.settings_dirty = true;
             return;
-        case HP_BUTTON: opt_button(hp->opt); return;
+        case HP_BUTTON:
+            if (hp->opt == OPT_APP_ICON || hp->opt == OPT_TITLE_ICON) opt_icon_button(hp->opt, hp->arg);
+            else opt_button(hp->opt);
+            return;
         case HP_LNAME: g_opt.lname_focus = true; return;
         case HP_TEXT:
             if (hp->arg == 3) g_opt.title_icon_focus = true;

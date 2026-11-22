@@ -157,16 +157,20 @@ File icons > **System** (`icon_theme=System`) uses the desktop's icon theme for 
 the settings portal names (else KDE's or GTK's settings), followed when it changes. The bundled icon shows until the
 desktop's is there, and wherever its theme has none.
 
-`app_icon` (Options -> Appearance -> Application icon, directly under File icons, empty by default) is an absolute
-path to an `.svg` or `.png` used for the window and launcher icon instead of the built-in logo. The one row previews
-the icon currently in effect - the accent-coloured built-in logo when no path is set - and has a path field and Apply.
-SVG keeps its own colours; press Apply to use a path you typed, or clear the field and press Apply to restore the
-built-in logo.
+`app_icon_mode=custom|system|default` (Options -> Appearance -> Application icon, directly under File icons) selects
+the window and launcher icon. `app_icon` (empty by default) remembers the absolute `.svg`/`.png` path typed in that
+row; the path survives mode changes. The row previews the icon in effect with no background chip, and its active
+button is primary. **Apply** uses the typed path (SVG keeps its own colours) and selects Custom; **System** follows the
+desktop icon theme's `dev.fileexplorer` artwork, falling back to the built-in icon when the theme has none; **Default**
+uses the accent-coloured built-in logo. System installs no launcher override and removes one this app previously
+wrote; Default restores the recoloured built-in artwork. Older settings with a non-empty `app_icon` are treated as
+Custom, and an empty one as Default.
 
 `title_icon` (Options -> Appearance -> Title bar icon, directly below Application icon, empty by default) is an
 absolute `.svg` or `.png` path that overrides the icon at the left of the title bar. Its row previews the icon in effect
-and has a path field and Apply; clearing the field restores the built-in accent-coloured logo. This override follows
-the **Logo** toggle below it: with Logo off, no icon is drawn in that slot.
+without a background chip and has **Apply** and **Default** buttons; Default clears the path and restores the small
+built-in logo, while the typed field keeps its path until you press Default. This override follows the **Logo** toggle
+below it: with Logo off, no icon is drawn in that slot.
 
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`

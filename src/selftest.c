@@ -4055,13 +4055,27 @@ static int run_selftest_m9(void) {
         g_opt.scroll = 0;
         st_frames(2);
         st_shot("options-app-icon");
-        { // one row: Apply sits at the same height as the path field, even in a narrow window; no Browse hit
-            OptHit *ap = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0), *field = st_opt_hit(HP_TEXT, OPT_APP_ICON, 2);
-            ST_CHECK(!st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1));
-            ST_CHECK(ap && field && field->r.w > 0 && fabsf(ap->r.y - field->r.y) < 0.5f);
-            Rect pv, fld, apw;
-            opt_app_icon_layout(S(186), S(30), &pv, &fld, &apw);
-            ST_CHECK(fld.w > 0 && apw.x >= fld.x + fld.w && apw.x + apw.w <= S(186) + 0.5f);
+        { // both icon rows: every button shares the field height and stays inside a narrow control strip
+            OptHit *af = st_opt_hit(HP_TEXT, OPT_APP_ICON, 2), *tf = st_opt_hit(HP_TEXT, OPT_TITLE_ICON, 3);
+            OptHit *aa = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0), *as = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1), *ad = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 2);
+            OptHit *ta = st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 0), *td = st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1);
+            ST_CHECK(af && tf && aa && as && ad && ta && td);
+            ST_CHECK(af && aa && fabsf(aa->r.y - af->r.y) < 0.5f && fabsf(as->r.y - af->r.y) < 0.5f && fabsf(ad->r.y - af->r.y) < 0.5f);
+            ST_CHECK(tf && ta && fabsf(ta->r.y - tf->r.y) < 0.5f && fabsf(td->r.y - tf->r.y) < 0.5f);
+            ST_CHECK(strstr(g_opts[ia].desc, "Apply") && strstr(g_opts[ia].desc, "System") && strstr(g_opts[ia].desc, "Default"));
+            ST_CHECK(strstr(g_opts[it].desc, "Apply") && strstr(g_opts[it].desc, "Default"));
+            Rect pv, fld, bb[3];
+            opt_icon_row_layout(S(186), S(30), 3, &pv, &fld, bb);
+            ST_CHECK(fld.w > 0 && pv.x <= fld.x && fld.x + fld.w <= bb[0].x - 0.5f);
+            for (int k = 0; k < 3; k++) {
+                ST_CHECK(bb[k].x >= fld.x + fld.w - 0.5f && bb[k].x + bb[k].w <= S(186) + 0.5f);
+                if (k) ST_CHECK(bb[k].x >= bb[k - 1].x + bb[k - 1].w - 0.5f);
+            }
+            Rect pv2, fld2, bb2[2];
+            opt_icon_row_layout(S(186), S(30), 2, &pv2, &fld2, bb2);
+            ST_CHECK(fld2.w > 0 && bb2[0].x + bb2[0].w <= bb2[1].x + 0.5f && bb2[1].x + bb2[1].w <= S(186) + 0.5f);
+            ST_CHECK(opt_icon_row_ctlw(S(760), 3) > 0 && opt_icon_row_ctlw(S(760), 2) > 0);
+            st_shot("options-icon-modes");
         }
         char svg[PATH_MAX], dh[PATH_MAX], dest[PATH_MAX + 64];
         snprintf(svg, sizeof svg, M9_BASE "/app-icon.svg");
@@ -4094,6 +4108,20 @@ static int run_selftest_m9(void) {
         ST_CHECK(custom_win && !memcmp(custom_win, custom_prev, 16 * 16 * 4));
         free(custom_win);
         free(px);
+        { // the real buttons switch modes and keep the typed path for a later Apply
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1));
+            ST_CHECK(g_app_icon_mode == APP_ICON_SYSTEM && !strcmp(g_app_icon_path, svg));
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 2));
+            ST_CHECK(g_app_icon_mode == APP_ICON_DEFAULT && !strcmp(g_app_icon_path, svg));
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
+            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
+            te_set(&g_opt.app_icon, "", 0, 0);
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
+            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !g_app_icon_path[0]);
+            te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
+            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
+        }
         { // System mode previews the desktop theme's dev.fileexplorer artwork; a missing theme falls back to Default
             char theme_home[PATH_MAX], old_data[PATH_MAX] = "", old_dirs[PATH_MAX] = "", old_icons[64];
             const char *ev = getenv("XDG_DATA_HOME");
@@ -4186,6 +4214,11 @@ static int run_selftest_m9(void) {
             free(custom_title);
             free(def_title);
             te_set(&g_opt.title_icon, "relative.svg", 12, 12);
+            opt_title_icon_apply();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1));
+            ST_CHECK(!g_title_icon_path[0] && !g_opt.title_icon.buf[0]);
+            te_set(&g_opt.title_icon, ti, (int)strlen(ti), (int)strlen(ti));
             opt_title_icon_apply();
             ST_CHECK(!strcmp(g_title_icon_path, ti));
             settings_save();
