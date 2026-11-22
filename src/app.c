@@ -11915,6 +11915,8 @@ static void preview_update(void) {
     }
 }
 
+static bool g_caret_anim; // set by text-field drawing when caret blink/slide needs repaint
+
 #include "text_pointer.c"
 #include "input.c"
 
@@ -12068,7 +12070,7 @@ static bool menu_autoscrolling(void) {
 }
 
 static bool animating(void) {
-    if (band_autoscrolling() || menu_autoscrolling()) return true;
+    if (g_caret_anim || band_autoscrolling() || menu_autoscrolling()) return true;
     if (fabsf(A.side_scroll_target - A.side_scroll) > 0.5f || glide_on() || wheel_busy()) return true;
     for (int i = 0; i < A.npanels; i++) {
         Pane *p = A.panels[i]->cur ? &A.panels[i]->cur->pane[0] : NULL;
@@ -12079,6 +12081,7 @@ static bool animating(void) {
 
 static void frame_draw(void) {
     g_text_field_count = 0; // (each te_draw records its field again)
+    g_caret_anim = false;
     draw_clip(NULL);
     fit_tip_begin(A.mx, A.my);
     g_alpha = 1.f;
