@@ -444,7 +444,11 @@ static void opt_choice_set(int id, int i) {
         snprintf(g_theme_pick[id == OPT_THEME_DARK], sizeof g_theme_pick[0], "%s", g_themes[opt_pick_theme(i)].name);
         theme_apply();
         break;
-    case OPT_ICON_THEME: icon_set_theme(i); desktop_look_sync(); break;
+    case OPT_ICON_THEME:
+        icon_set_theme(i);
+        desktop_look_sync();
+        if (g_app_icon_mode == APP_ICON_FILE_ICON) window_icon_update();
+        break;
     case OPT_TERM_LOOK: g_term_look_setting = i; tc_reload_all(); break;
     case OPT_TERMINAL: {
         char pick[PATH_MAX];
@@ -671,7 +675,7 @@ static void opt_title_icon_default(void) {
 static void opt_icon_button(int opt, int arg) {
     if (opt == OPT_APP_ICON) {
         if (arg == 0) opt_app_icon_apply();
-        else if (arg == 1) opt_app_icon_set_mode(APP_ICON_SYSTEM);
+        else if (arg == 1) opt_app_icon_set_mode(APP_ICON_FILE_ICON);
         else if (arg == 2) opt_app_icon_set_mode(APP_ICON_DEFAULT);
     } else if (opt == OPT_TITLE_ICON) {
         if (arg == 0) opt_title_icon_apply();
@@ -836,7 +840,7 @@ static const char *opt_icon_button_label(int opt, int arg) {
 
 static bool opt_icon_button_active(int opt, int arg) {
     if (opt == OPT_APP_ICON)
-        return (arg == 0 && g_app_icon_mode == APP_ICON_CUSTOM) || (arg == 1 && g_app_icon_mode == APP_ICON_SYSTEM)
+        return (arg == 0 && g_app_icon_mode == APP_ICON_CUSTOM) || (arg == 1 && g_app_icon_mode == APP_ICON_FILE_ICON)
             || (arg == 2 && g_app_icon_mode == APP_ICON_DEFAULT);
     return (arg == 0 && g_title_icon_path[0]) || (arg == 1 && !g_title_icon_path[0]);
 }

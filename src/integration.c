@@ -699,6 +699,7 @@ static void dlook_apply(void *arg) { // (main thread)
     if (icons && icon_system_selected()) {
         sysi_reset();
         icons_flush();
+        if (g_app_icon_mode == APP_ICON_FILE_ICON) window_icon_update(); // its artwork comes from this theme too
     }
 }
 

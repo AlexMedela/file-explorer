@@ -12009,10 +12009,11 @@ static void window_close_requested(void) {
 }
 
 #include "term.c"
-#include "integration.c"
-// Options (ui_tools.c / options.c) applies the application icon before these two are defined below.
+// integration.c reacts to desktop icon-theme changes, and Options (ui_tools.c / options.c) applies the app icon before
+// these two are defined below.
 static void window_icon_update(void);
 static void app_icon_sync(void);
+#include "integration.c"
 
 #include "ui_tools.c"
 #include "picker.c"
@@ -12126,7 +12127,7 @@ static void frame_draw(void) {
     cursor_apply();
 }
 
-static void window_icon_update(void) { // the icon in effect (custom / System / Default) for X11 and taskbars
+static void window_icon_update(void) { // the icon in effect (custom / File-Icon / Default) for X11 and taskbars
     u8 *logo = app_icon_window_raster(128);
     if (!logo) return;
     SDL_Surface *ic = SDL_CreateSurfaceFrom(128, 128, SDL_PIXELFORMAT_RGBA32, logo, 128 * 4);
@@ -12171,9 +12172,9 @@ static bool app_icon_install(const char *src, const char *dst, bool *changed) {
     return ok;
 }
 
-static char g_app_icon_installed[PATH_MAX]; // last custom artwork installed, so System can take it away again
+static char g_app_icon_installed[PATH_MAX]; // last custom artwork installed, so File-Icon can take it away again
 
-// System mode: remove both overrides. g_app_icon_installed is empty after a restart, so check the files themselves:
+// File-Icon mode: remove both overrides. g_app_icon_installed is empty after a restart, so check the files themselves:
 // a recoloured built-in copy from an earlier Default session must go too. Callers want the theme folder timestamp bumped.
 static bool app_icon_remove_override(const char *dh) {
     char dir[PATH_MAX], svg[PATH_MAX + 48], png[PATH_MAX + 48];
