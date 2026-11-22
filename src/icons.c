@@ -419,8 +419,9 @@ static f32 icon_pixel_lightness(const u8 *pixels, size_t count) {
 }
 
 static f32 icon_contrast_scale(f32 ink, f32 background) {
-    if (background < 0.65f || ink <= 0) return 1.f;
-    return MIN(1.f, MAX(0.15f, background - 0.45f) / ink);
+    if (background < 0.65f || ink <= 0.01f) return 1.f;
+    f32 s = (background - 0.55f) / ink;
+    return CLAMP(s, 0.28f, 1.f);
 }
 
 // Set only while drawing navigation/sidebar/toolbar/tab icons; 0 = an ordinary surface, no contrast change.

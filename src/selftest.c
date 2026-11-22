@@ -2192,9 +2192,9 @@ static int run_selftest_m7(void) {
     { // icon contrast: pale artwork is darkened only on light navigation surfaces, keeping its hue
         ST_CHECK(icon_contrast_scale(0.8f, 0.64f) == 1.f);       // dark surface: no change
         ST_CHECK(icon_contrast_scale(0.f, 0.8f) == 1.f);          // transparent ink: no change
-        ST_CHECK(fabsf(icon_contrast_scale(0.8f, 0.8f) - 0.4375f) < 0.001f); // (0.8 - 0.45) / 0.8
-        ST_CHECK(fabsf(icon_contrast_scale(0.5f, 0.7f) - 0.5f) < 0.001f);
-        ST_CHECK(fabsf(icon_contrast_scale(4.f, 0.8f) - 0.0875f) < 0.001f); // 0.35 / 4: the 0.15 floor is on the numerator
+        ST_CHECK(fabsf(icon_contrast_scale(0.8f, 0.8f) - 0.3125f) < 0.001f); // (0.8 - 0.55) / 0.8
+        ST_CHECK(fabsf(icon_contrast_scale(0.5f, 0.7f) - 0.30f) < 0.001f);
+        ST_CHECK(fabsf(icon_contrast_scale(4.f, 0.8f) - 0.28f) < 0.001f); // clamped floor
         u8 white[16], clear[16] = {0};
         for (int i = 0; i < 4; i++) { white[i * 4] = white[i * 4 + 1] = white[i * 4 + 2] = 255; white[i * 4 + 3] = 255; }
         ST_CHECK(fabsf(icon_pixel_lightness(white, 4) - 1.f) < 0.001f);
