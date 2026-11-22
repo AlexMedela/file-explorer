@@ -238,8 +238,10 @@ static void path_normalize(char *p) {
     memcpy(p, out, n + 1);
 }
 
+// (an absolute name is taken as it is: a listing's entries from elsewhere, e.g. other drives' trashes)
 static void path_join(char *out, size_t cap, const char *dir, const char *name) {
-    if (dir[0] == '/' && dir[1] == 0) snprintf(out, cap, "/%s", name);
+    if (name[0] == '/') snprintf(out, cap, "%s", name);
+    else if (dir[0] == '/' && dir[1] == 0) snprintf(out, cap, "/%s", name);
     else snprintf(out, cap, "%s/%s", dir, name);
 }
 

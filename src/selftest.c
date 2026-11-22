@@ -3134,6 +3134,92 @@ static int run_selftest_m8(void) {
     for (int k = 0; k < 300 && !A.toast[0]; k++) { st_frames(1); SDL_Delay(5); }
     ST_CHECK(!A.dlg.open && !strcmp(A.toast, "The trash is already empty"));
 
+    // other drives' trashes (a made-up mount table): listed in the Trash beside the home one's items (the same name
+    // twice is fine), Path= relative to the drive, restored onto the drive, counted in the size, emptied with the rest
+    {
+        char dt[256], df[300], di[300], mi[300], ip[400];
+        snprintf(dt, sizeof dt, M8_BASE "/drive/.Trash-%u", (unsigned)getuid());
+        snprintf(df, sizeof df, "%s/files", dt);
+        snprintf(di, sizeof di, "%s/info", dt);
+        mkdir(M8_BASE "/drive", 0755);
+        mkdir(M8_BASE "/drive/docs", 0755);
+        mkdir(dt, 0700);
+        mkdir(df, 0700);
+        mkdir(di, 0700);
+        mkdir(M8_BASE "/drive/.Trash", 0777); // a shared .Trash without the sticky bit: not a trash
+        char fp[400];
+        snprintf(fp, sizeof fp, "%s/abc.txt", df);
+        st_write(fp, 7);
+        snprintf(ip, sizeof ip, "%s/abc.txt.trashinfo", di);
+        FILE *f = fopen(ip, "w");
+        if (f) { fputs("[Trash Info]\nPath=docs/abc%20x.txt\nDeletionDate=2026-11-20T10:00:00\n", f); fclose(f); }
+        st_write(M8_BASE "/xdg/Trash/files/abc.txt", 3);
+        f = fopen(M8_BASE "/xdg/Trash/info/abc.txt.trashinfo", "w");
+        if (f) { fputs("[Trash Info]\nPath=" M8_BASE "/abc-home.txt\nDeletionDate=2026-11-20T11:00:00\n", f); fclose(f); }
+        snprintf(mi, sizeof mi, M8_BASE "/mountinfo");
+        f = fopen(mi, "w");
+        if (f) {
+            fputs("22 1 0:21 / /proc rw - proc proc rw\n", f);
+            fputs("40 1 8:1 / " M8_BASE "/drive rw,relatime - ext4 /dev/sdz1 rw\n", f);
+            fputs("41 1 8:1 / " M8_BASE "/drive rw,relatime - ext4 /dev/sdz1 rw\n", f); // (mounted twice: one trash)
+            fputs("42 1 0:50 / " M8_BASE " rw - fuse.sshfs me@host:/ rw\n", f);      // (network: never looked at)
+            fclose(f);
+        }
+        g_trash_mountinfo = M8_BASE "/mountinfo";
+        trash_roots_refresh();
+        for (int k = 0; k < 300 && !g_ntroots; k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(g_ntroots == 1 && !strcmp(g_troots[0].dir, dt) && !strcmp(g_troots[0].top, M8_BASE "/drive"));
+        pane_navigate(p, A.places[ti].path, true); st_wait();
+        ST_CHECK(pane_is_trash(p) && p->count == 2 && p->L->nextra == 1);
+        char orig[PATH_MAX], date[32];
+        ST_CHECK(trash_info(fp, orig, sizeof orig, date, sizeof date) && !strcmp(orig, M8_BASE "/drive/docs/abc x.txt") &&
+                 !strcmp(date, "2026-11-20 10:00"));
+        ST_CHECK(trash_info("abc.txt", orig, sizeof orig, date, sizeof date) && !strcmp(orig, M8_BASE "/abc-home.txt"));
+        char a[PATH_MAX + 16], b[PATH_MAX + 16], nested[500];
+        snprintf(nested, sizeof nested, "%s/abc.txt/inner", df);
+        ST_CHECK(!trash_item_paths(nested, a, b, sizeof a, NULL, 0) && !trash_item_paths("abc.txt/inner", a, b, sizeof a, NULL, 0));
+        trash_size_refresh();
+        for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(A.trash_known && A.trash_size == 10 && !A.trash_empty);
+        { // a folder inside the drive's trash: "Trash" crumb, which leads back to the one Trash
+            char sub[400];
+            snprintf(sub, sizeof sub, "%s/folder", df);
+            mkdir(sub, 0755);
+            pane_navigate(p, sub, true); st_wait();
+            layout_crumbs(p);
+            ST_CHECK(p->ly.crumbs_trash && p->ly.ncrumbs == 2 && p->ly.crumbs[0].end == (int)strlen(df));
+            pane_navigate(p, df, true); st_wait();
+            ST_CHECK(pane_is_trash(p));
+            rmdir(sub);
+            for (int k = 0; k < 400 && p->count != 2; k++) { st_frames(1); SDL_Delay(5); }
+        }
+        ST_CHECK(p->count == 2 && st_select(p, fp));
+        do_action(p, ACT_TRASH_RESTORE);
+        st_wait_ops();
+        ST_CHECK(st_size(M8_BASE "/drive/docs/abc x.txt") == 7 && !st_exists(fp) && !st_exists(ip));
+        for (int k = 0; k < 400 && p->count != 1; k++) { st_frames(1); SDL_Delay(5); } // (seen by the drive trash's watch)
+        ST_CHECK(p->count == 1 && !strcmp(p->L->entries[p->order[0]].name, "abc.txt"));
+        snprintf(fp, sizeof fp, "%s/z.bin", df);
+        st_write(fp, 4);
+        snprintf(ip, sizeof ip, "%s/z.bin.trashinfo", di);
+        st_write(ip, 1);
+        for (int k = 0; k < 400 && p->count != 2; k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(p->count == 2);
+        do_action(p, ACT_TRASH_EMPTY);
+        for (int k = 0; k < 300 && !A.dlg.open; k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(A.dlg.open && strstr(A.dlg.msg, "all 2 items"));
+        st_key(SDLK_RETURN, SDL_KMOD_NONE);
+        st_wait_ops();
+        ST_CHECK(!st_exists(fp) && !st_exists(ip) && !st_exists(M8_BASE "/xdg/Trash/files/abc.txt"));
+        for (int k = 0; k < 300 && A.trash_job; k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(A.trash_known && A.trash_empty);
+        g_trash_mountinfo = "";
+        trash_roots_refresh();
+        for (int k = 0; k < 300 && g_ntroots; k++) { st_frames(1); SDL_Delay(5); }
+        ST_CHECK(!g_ntroots);
+        pane_navigate(p, M8_BASE, true); st_wait();
+    }
+
     // archives: compress a folder, browse into the zip, extract, read-only, zip-slip
     pane_navigate(p, M8_BASE, true); st_wait();
     mkdir(M8_BASE "/proj", 0755);

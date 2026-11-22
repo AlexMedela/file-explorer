@@ -77,6 +77,8 @@ typedef struct Listing {
     int tf_mode;      // type filter: 0 all, 1 files only, 2 folders only
     char tf_exts[512]; // hidden extensions "|png|jpg|" ("||" = files without extension)
     char *tree;        // tree view: expanded folders as "\nsub\nsub/deeper\n" (entries then use relative names); NULL = flat
+    char **extra;      // more folders listed into this one, their entries named by absolute path (the trashes of other drives)
+    int nextra;
     // contents search: each matching file is followed by its ENT_MATCH entries (line in size, column | length << 32
     // in btime, the file's name); cinfo: for a file the number of its match entries (| CI_COLLAPSED), for a match its
     // distance back to the file; ctext: the line of a match entry
@@ -134,6 +136,8 @@ static void listing_release(Listing *L) {
     free(L->order);
     free(L->path);
     free(L->tree);
+    for (int i = 0; i < L->nextra; i++) free(L->extra[i]);
+    free(L->extra);
     free(L->cinfo);
     free(L->ctext);
     if (L->cq) {
@@ -246,6 +250,30 @@ static int group_rank(const Entry *e, int group, bool meta, i64 day0, char *labe
     return r == 8 ? -1 : r;
 }
 
+// The name an entry is shown and sorted by: entries of an extra folder are named by absolute path, show their base.
+static const char *ent_label(const Entry *e) {
+    if (e->name[0] != '/') return e->name;
+    const char *s = strrchr(e->name, '/');
+    return s + 1;
+}
+
+// Is the folder name[0..len) one of L's extra folders (the top of its entries)?
+static bool listing_is_extra(const Listing *L, const char *name, size_t len) {
+    for (int i = 0; i < L->nextra; i++)
+        if (strlen(L->extra[i]) == len && !memcmp(L->extra[i], name, len)) return true;
+    return false;
+}
+
+// Tree view depth of an entry (entries of an extra folder: counted from that folder).
+static int ent_depth(const Listing *L, const char *name) {
+    if (name[0] == '/')
+        for (int i = 0; i < L->nextra; i++) {
+            size_t l = strlen(L->extra[i]);
+            if (!strncmp(name, L->extra[i], l) && name[l] == '/') return rel_depth(name + l + 1);
+        }
+    return rel_depth(name);
+}
+
 static int cmp_group(const SortCtx *c, const Entry *x, const Entry *y) {
     int a = group_rank(x, c->group, c->meta, c->day0, NULL, 0), b = group_rank(y, c->group, c->meta, c->day0, NULL, 0);
     if (a != b) return a < b ? -1 : 1;
@@ -288,7 +316,7 @@ static int cmp_entries(const void *pa, const void *pb, void *pctx) {
         if (c->meta) r = (x->uid > y->uid) - (x->uid < y->uid);
         break;
     }
-    if (!r) r = natcmp(x->name, y->name);
+    if (!r) r = natcmp(ent_label(x), ent_label(y));
     if (!r) r = strcmp(x->name, y->name);
     return c->desc ? -r : r;
 }
@@ -345,7 +373,7 @@ static u32 tree_order(const Listing *L, u32 *o, u32 m) {
         const Entry *e = &L->entries[i];
         const char *slash = memrchr(e->name, '/', e->name_len);
         u32 par = NONE;
-        if (slash) {
+        if (slash && !listing_is_extra(L, e->name, (size_t)(slash - e->name))) { // (top of an extra folder: a root)
             u32 pl = (u32)(slash - e->name), h = 2166136261u;
             for (u32 c = 0; c < pl; c++) h = (h ^ (u8)e->name[c]) * 16777619u;
             for (;; h++) {
@@ -392,7 +420,10 @@ static void listing_build_order_ex(const Listing *L, const OrderOpts *op, u32 **
         const Entry *e = &L->entries[i];
         if (e->flags & ENT_MATCH) continue; // contents search: placed under their file afterwards (content_rows)
         if (!op->hidden && (e->flags & ENT_HIDDEN)) continue;
-        if (op->filter && op->filter[0] && !name_matches(op->filter, e->name, (int)e->name_len)) continue;
+        if (op->filter && op->filter[0]) {
+            const char *nm = ent_label(e);
+            if (!name_matches(op->filter, nm, (int)(e->name_len - (u32)(nm - e->name)))) continue;
+        }
         if ((op->tf_mode || (op->tf_exts && op->tf_exts[0])) && type_hidden(e, op->tf_mode, op->tf_exts)) continue;
         o[m++] = i;
     }
@@ -547,6 +578,12 @@ static void scan_job(void *arg) {
     u32 cap = 1024, n = 0;
     Entry *ents = xmalloc(cap * sizeof(Entry));
     scan_dir(L, fd, NULL, buf, BUFSZ, &ents, &n, &cap);
+    for (int i = 0; i < L->nextra && !atomic_load_explicit(&L->cancel, memory_order_relaxed); i++) {
+        int efd = open(L->extra[i], O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (efd < 0) continue; // (unmounted meanwhile)
+        scan_dir(L, efd, L->extra[i], buf, BUFSZ, &ents, &n, &cap);
+        close(efd);
+    }
     if (L->tree) // tree view: expanded folders (and expanded folders inside them, as they get appended)
         for (u32 i = 0; i < n && !atomic_load_explicit(&L->cancel, memory_order_relaxed); i++) {
             if (!(ents[i].flags & ENT_DIR) || !tree_has(L->tree, ents[i].name, ents[i].name_len)) continue;

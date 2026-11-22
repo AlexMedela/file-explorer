@@ -53,7 +53,7 @@ nothing touches your settings or recent list, and a running instance is left alo
 - `./build/file-explorer --selftest-m4` – palette, recursive search, live refresh, folder sizes
 - `./build/file-explorer --selftest-m6` – panels, tab drag & drop, layout save/restore
 - `./build/file-explorer --selftest-m7` – icons, columns, views & thumbnails, grouping, folder views
-- `./build/file-explorer --selftest-m8` – Open with, Properties, batch rename, type filter, trash, archives
+- `./build/file-explorer --selftest-m8` – Open with, Properties, batch rename, type filter, trash (also other drives' trashes), archives
 - `./build/file-explorer --selftest-m9` – themes, Options, shortcuts, mouse options, layouts, Quick Access, tree view
 - `FE_RECORD=/tmp/fe-rec ./build/file-explorer` – diagnostics: saves the frames shown right after each click (half
   size BMPs) plus a state log, to track down visual glitches

@@ -628,6 +628,76 @@ static void find_topdir(const char *path, dev_t dev, char *out, size_t cap) {
     snprintf(out, cap, "%s", cur);
 }
 
+// $topdir/.Trash/$uid when an admin made a shared .Trash there (a real folder with the sticky bit), per the spec.
+static bool trash_admin_dir(const char *top, char *out, size_t cap) {
+    char d[PATH_MAX];
+    struct stat st;
+    snprintf(d, sizeof d, "%s/.Trash", strcmp(top, "/") ? top : "");
+    if (lstat(d, &st) || !S_ISDIR(st.st_mode) || !(st.st_mode & S_ISVTX)) return false;
+    snprintf(out, cap, "%s/%u", d, (unsigned)getuid());
+    return true;
+}
+
+// Other drives' trashes, read from the mount table: $topdir/.Trash/$uid or $topdir/.Trash-$uid on every mounted
+// disk filesystem (no network ones: a server that's gone mustn't hang the scan).
+#define MAX_TRASH_ROOTS 32
+typedef struct {
+    char top[PATH_MAX]; // mount point: Path= in its .trashinfo files is relative to it
+    char dir[PATH_MAX]; // the trash (files/ + info/ inside)
+} TrashRoot;
+static const char *g_trash_mountinfo; // self-tests: a made-up mount table
+static TrashRoot g_troots[MAX_TRASH_ROOTS]; // (main thread) the last scan
+static int g_ntroots;
+
+static bool trash_disk_fs(const char *t) {
+    static const char *ok[] = {"ext2", "ext3", "ext4", "btrfs", "xfs", "vfat", "exfat", "ntfs", "ntfs3", "fuseblk",
+                               "f2fs", "jfs", "reiserfs", "zfs", "bcachefs", "hfsplus", "udf", "nilfs2"};
+    for (size_t i = 0; i < ARRAY_COUNT(ok); i++)
+        if (!strcmp(t, ok[i])) return true;
+    return false;
+}
+
+static bool trash_root_ok(const char *dir, bool ours) {
+    struct stat st;
+    return lstat(dir, &st) == 0 && S_ISDIR(st.st_mode) && (!ours || st.st_uid == getuid());
+}
+
+// (worker) Returns how many were found; the same trash seen through several mounts (bind mounts) counts once.
+static int trash_roots_scan(TrashRoot *out, int max) {
+    FILE *f = fopen(g_trash_mountinfo ? g_trash_mountinfo : "/proc/self/mountinfo", "r");
+    if (!f) return 0;
+    dev_t devs[MAX_TRASH_ROOTS];
+    ino_t inos[MAX_TRASH_ROOTS];
+    int n = 0;
+    char line[PATH_MAX * 2];
+    while (n < max && n < MAX_TRASH_ROOTS && fgets(line, sizeof line, f)) {
+        char raw[PATH_MAX], top[PATH_MAX], fstype[64] = "";
+        if (sscanf(line, "%*d %*d %*s %*s %4095s", raw) != 1) continue;
+        const char *dash = strstr(line, " - ");
+        if (!dash || sscanf(dash + 3, "%63s", fstype) != 1 || !trash_disk_fs(fstype)) continue;
+        mount_unescape(raw, top, sizeof top);
+        char cand[2][PATH_MAX];
+        int nc = 0;
+        if (trash_admin_dir(top, cand[nc], sizeof cand[nc]) && trash_root_ok(cand[nc], false)) nc++;
+        snprintf(cand[nc], sizeof cand[nc], "%s/.Trash-%u", strcmp(top, "/") ? top : "", (unsigned)getuid());
+        if (trash_root_ok(cand[nc], true)) nc++;
+        for (int c = 0; c < nc && n < max; c++) {
+            struct stat st;
+            if (stat(cand[c], &st)) continue;
+            bool seen = false;
+            for (int k = 0; k < n && !seen; k++) seen = devs[k] == st.st_dev && inos[k] == st.st_ino;
+            if (seen) continue;
+            devs[n] = st.st_dev;
+            inos[n] = st.st_ino;
+            snprintf(out[n].top, sizeof out[n].top, "%s", top);
+            snprintf(out[n].dir, sizeof out[n].dir, "%s", cand[c]);
+            n++;
+        }
+    }
+    fclose(f);
+    return n;
+}
+
 static int trash_one(Op *op, const char *src) {
     struct stat st;
     if (lstat(src, &st)) { op_error(op, "Can't trash \"%s\": %s", path_basename(src), strerror(errno)); return -1; }
@@ -641,7 +711,10 @@ static int trash_one(Op *op, const char *src) {
     } else {
         char top[PATH_MAX];
         find_topdir(src, st.st_dev, top, sizeof top);
-        snprintf(trash, sizeof trash, "%s/.Trash-%u", strcmp(top, "/") ? top : "", (unsigned)getuid());
+        struct stat ts;
+        if (!trash_admin_dir(top, trash, sizeof trash) || (mkdir(trash, 0700) && errno != EEXIST) || lstat(trash, &ts) ||
+            !S_ISDIR(ts.st_mode)) // no shared .Trash (or no room of ours in it): our own .Trash-$uid
+            snprintf(trash, sizeof trash, "%s/.Trash-%u", strcmp(top, "/") ? top : "", (unsigned)getuid());
         size_t tl = strlen(top);
         snprintf(info_path_value, sizeof info_path_value, "%s", strcmp(top, "/") ? src + tl + 1 : src + 1);
     }
