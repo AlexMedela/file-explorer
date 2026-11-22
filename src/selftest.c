@@ -4204,11 +4204,16 @@ static int run_selftest_m9(void) {
             char ti[PATH_MAX];
             snprintf(ti, sizeof ti, M9_BASE "/title-icon.svg");
             st_write_text(ti, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#00ff00\"/></svg>");
-            u8 *def_title = title_icon_preview_raster(16);
-            ST_CHECK(def_title && !g_title_icon_path[0]);
+            u8 *def_title = title_icon_preview_raster(16), *small_title = icon_raster(ICON_LOGO_SMALL, 16, 16);
+            ST_CHECK(def_title && small_title && !g_title_icon_path[0]);
+            ST_CHECK(!memcmp(def_title, small_title, 16 * 16 * 4));
+            free(small_title);
             te_set(&g_opt.title_icon, ti, (int)strlen(ti), (int)strlen(ti));
             opt_title_icon_apply();
             ST_CHECK(!strcmp(g_title_icon_path, ti));
+            Glyph *h1 = title_icon_header_glyph(23), *p1 = title_icon_preview_glyph(30);
+            Glyph *h2 = title_icon_header_glyph(23), *p2 = title_icon_preview_glyph(30);
+            ST_CHECK(h1 && p1 && h1 == h2 && p1 == p2 && h1 != p1);
             u8 *custom_title = title_icon_preview_raster(16);
             ST_CHECK(custom_title && memcmp(def_title, custom_title, 16 * 16 * 4) != 0);
             free(custom_title);
@@ -4229,7 +4234,7 @@ static int run_selftest_m9(void) {
             g_opt.scroll = 0;
             st_frames(2);
             ST_CHECK(st_opt_hit(HP_TEXT, OPT_TITLE_ICON, 3) != NULL);
-            ST_CHECK(title_icon_glyph(24) != NULL);
+            ST_CHECK(title_icon_header_glyph(24) && title_icon_preview_glyph(30));
             sheet_close();
             st_frames(5);
             ST_CHECK(st_brand_icon_green()); // the custom artwork is drawn in the header, not just previewed
@@ -4241,6 +4246,21 @@ static int run_selftest_m9(void) {
             if (logo) opt_bool_toggle(OPT_BRAND_LOGO);
             st_frames(5);
             ST_CHECK(A.brand_logo && st_brand_icon_green());
+            { // title Default clears the path, restores the small logo and removes the custom header pixels
+                options_open();
+                g_opt.cat = OC_APPEARANCE;
+                g_opt.scroll = 0;
+                st_frames(2);
+                st_opt_click(st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1));
+                ST_CHECK(!g_title_icon_path[0] && !g_opt.title_icon.buf[0]);
+                u8 *after = title_icon_preview_raster(16), *small = icon_raster(ICON_LOGO_SMALL, 16, 16);
+                ST_CHECK(after && small && !memcmp(after, small, 16 * 16 * 4));
+                free(after);
+                free(small);
+                sheet_close();
+                st_frames(5);
+                ST_CHECK(A.brand_logo && !st_brand_icon_green());
+            }
         }
         data_home(dh, sizeof dh);
         snprintf(dest, sizeof dest, "%s/icons/hicolor/scalable/apps/dev.fileexplorer.svg", dh);

@@ -548,21 +548,22 @@ static u8 *title_icon_raster(int px) {
     return g_title_icon_path[0] ? sysi_raster(g_title_icon_path, px, COL_ACCENT) : NULL;
 }
 
-// RGBA of the title-bar icon currently in effect: chosen artwork, or the built-in logo.
+// RGBA of the title-bar icon currently in effect: chosen artwork, or the small built-in logo.
 static u8 *title_icon_preview_raster(int px) {
     u8 *custom = title_icon_raster(px);
-    return custom ? custom : icon_raster(ICON_LOGO, px, px);
+    return custom ? custom : icon_raster(ICON_LOGO_SMALL, px, px);
 }
 
-// One atlas slot for the header, rebuilt when the path, accent or size changes. Synthetic id -2 cannot collide with
-// file icons or the app-icon preview.
-static Glyph *title_icon_glyph(int px) {
-    static char key_path[PATH_MAX];
-    static u32 key_accent;
-    static int key_px, slot = -1;
+// Separate atlas slots for the Options preview and the header: their sizes differ, and sharing one slot would rebuild
+// it on every frame while Options is open. Synthetic ids -2/-3 cannot collide with file icons or each other.
+static Glyph *title_icon_cached_glyph(int px, int which, int id) {
+    static char key_path[2][PATH_MAX];
+    static u32 key_accent[2];
+    static int key_px[2], slot[2] = {-1, -1};
     u32 accent = COL_ACCENT & 0xFFFFFF;
-    if (slot >= 0 && slot < g_icon_cache_n && key_px == px && key_accent == accent && g_icon_cache[slot].id == -2
-        && !strcmp(key_path, g_title_icon_path)) return &g_icon_cache[slot].g;
+    if (slot[which] >= 0 && slot[which] < g_icon_cache_n && key_px[which] == px && key_accent[which] == accent
+        && g_icon_cache[slot[which]].id == id && !strcmp(key_path[which], g_title_icon_path))
+        return &g_icon_cache[slot[which]].g;
     u8 *buf = title_icon_preview_raster(px);
     if (!buf) return NULL;
     int ax, ay;
@@ -570,23 +571,26 @@ static Glyph *title_icon_glyph(int px) {
     for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
     free(buf);
     if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0;
-    slot = g_icon_cache_n;
+    slot[which] = g_icon_cache_n;
     IconSlot *s = &g_icon_cache[g_icon_cache_n++];
-    s->id = -2;
+    s->id = id;
     s->px = px;
     memset(&s->g, 0, sizeof s->g);
     s->g.x = (u16)ax;
     s->g.y = (u16)ay;
     s->g.w = (u16)px;
     s->g.h = (u16)px;
-    snprintf(key_path, sizeof key_path, "%s", g_title_icon_path);
-    key_accent = accent;
-    key_px = px;
+    snprintf(key_path[which], sizeof key_path[which], "%s", g_title_icon_path);
+    key_accent[which] = accent;
+    key_px[which] = px;
     return &s->g;
 }
 
+static Glyph *title_icon_preview_glyph(int px) { return title_icon_cached_glyph(px, 0, -2); }
+static Glyph *title_icon_header_glyph(int px) { return title_icon_cached_glyph(px, 1, -3); }
+
 static void draw_title_icon_preview(f32 x, f32 y, f32 s) {
-    Glyph *g = title_icon_glyph((int)roundf(s));
+    Glyph *g = title_icon_preview_glyph((int)roundf(s));
     if (g) draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
 }
 

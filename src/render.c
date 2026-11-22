@@ -622,8 +622,8 @@ static void draw_brand(void) {
     f32 lh = roundf(S(17)), lw = roundf(lh * 624.f / 456.f), lx = roundf(r.x + S(18)), ly = roundf(r.y + (r.h - lh) * 0.5f);
     f32 tx = lx;
     if (A.brand_logo) {
-        Glyph *g = title_icon_glyph((int)lw); // the custom icon, or the built-in logo when no path is set
-        if (!g) g = icon_glyph(lh < 48 ? ICON_LOGO_SMALL : ICON_LOGO, (int)lw); // square raster, logo centred in it
+        Glyph *g = g_title_icon_path[0] ? title_icon_header_glyph((int)lw) : NULL; // custom artwork only
+        if (!g) g = icon_glyph(lh < 48 ? ICON_LOGO_SMALL : ICON_LOGO, (int)lw); // original small-logo appearance
         if (g) draw_glyph(g, lx, roundf(ly - (lw - lh) * 0.5f), (Color){1, 1, 1, 1});
         tx += lw + roundf(S(8));
     }
