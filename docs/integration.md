@@ -59,6 +59,37 @@ background (its passphrase from the keyring; Borg 2 doesn't lock it, so backups 
 the settings file as `borg=` lines. A Borg 1 repository in an SFTP folder is read by borg on the server (`ssh://`, over the
 connection the folder uses, or your ssh keys / agent); without borg there it is read through the folder, slower.
 
+## Custom actions
+Your own commands in the right-click menu, as in Nemo: put `*.action` files (Nemo's `*.nemo_action` files work as
+they are) in `~/.local/share/file-explorer/actions/`. They are read each time a menu opens, listed by file name just
+above **Properties**.
+
+```ini
+[Action]
+Name=Copy image
+Exec=sh -c "cat %F | wl-copy"
+Selection=s
+Extensions=jpg;jpeg;png;webp;
+```
+
+| Key | |
+|---|---|
+| `Name` | The menu label (required); may use the codes below. |
+| `Exec` | The command (required). `<script.sh>` runs a script that sits in the actions folder. |
+| `Selection` | `s` / `single`, `m` / `multiple`, a number, `any` / `notnone` (one or more, the default), or `none`: the folder's own menu (right-click on empty space). |
+| `Extensions` | `;`-separated: extensions (any case, `tar.gz` works), `dir`, `nodirs`, `none` (no extension) or `any`. |
+| `Mimetypes` | `;`-separated types, `image/*` style patterns allowed. With neither list, everything matches. |
+| `Dependencies` | Programs (or absolute paths) that must exist; `!prog` must not. Otherwise the action is hidden. |
+| `Terminal` | `true`: run it in the terminal app. |
+| `Active` | `false` hides it. |
+
+Codes in `Exec` and `Name`: `%F` the selected paths, `%U` the same as `file://` URIs, `%f` the first one's name,
+`%e` that name without its extension, `%P` the current folder, `%p` its name, `%%` a percent sign.
+
+`Exec` runs without a shell, so a file name is only ever an argument: a word that is just `%F` becomes one argument
+per file. For pipes and the like use `sh -c "..."`: the names are quoted for the script, whatever they contain.
+The command starts in the current folder. Actions don't show in archives or the Trash.
+
 ## Administrator actions
 "Retry as administrator" runs a small helper through `pkexec`, so it needs polkit and an authentication agent.
 Full desktops start one; on tiling compositors start e.g. `hyprpolkitagent` or `polkit-gnome`.

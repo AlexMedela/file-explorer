@@ -2499,6 +2499,13 @@ static bool c_media_done(void) { return g_sheet.media && atomic_load(&g_sheet.me
 static bool c_stats_done(void) { return g_sheet.stats && atomic_load(&g_sheet.stats->done); }
 static bool c_sum_done(void) { return g_sheet.sum && atomic_load(&g_sheet.sum->done); }
 
+// The menu's item with this label (-1: none; also the git suite's).
+static int st_menu_find(const char *label) {
+    for (int i = 0; i < A.menu.n; i++)
+        if (A.menu.items[i].label && !strcmp(A.menu.items[i].label, label)) return i;
+    return -1;
+}
+
 static int run_selftest_m8(void) {
     st_wait();
     Pane *p = active_pane();
@@ -3524,6 +3531,82 @@ static int run_selftest_m8(void) {
         ST_CHECK(!strcmp(A.last_opened, "run-terminal:" M8_BASE "/run/notes.sh"));
         A.exec_open = saved_exec;
         pane_navigate(p, M8_BASE, true); st_wait();
+    }
+
+    { // custom actions (*.action files): which menus list them, and what runs - file names only ever as arguments
+        mkdir(M8_BASE "/xdg/file-explorer", 0755);
+        mkdir(M8_BASE "/xdg/file-explorer/actions", 0755);
+        mkdir(M8_BASE "/ua", 0755);
+        mkdir(M8_BASE "/ua/sub", 0755);
+        st_write(M8_BASE "/ua/x$(touch PWNED).png", 1);
+        st_write(M8_BASE "/ua/it's.png", 1);
+        st_write(M8_BASE "/ua/notes.txt", 1);
+#define UA_FILE(name, text) st_write_text(M8_BASE "/xdg/file-explorer/actions/" name, text)
+        UA_FILE("a-copy.action", "[Nemo Action]\nName=Copy %f\nExec=sh -c \"cat %F | wl-copy\"\nSelection=any\nExtensions=png;jpg;\n");
+        UA_FILE("b-arq.nemo_action", "[Nemo Action]\nName=Compress\nExec=arqiver --aa %P/%e.tar.zst %F\nSelection=m\nExtensions=any;\n");
+        UA_FILE("c-here.action", "[Action]\nName=Here\nExec=<run.sh> %P\nSelection=none\nExtensions=any;\n");
+        UA_FILE("d-off.action", "[Action]\nActive=false\nName=Off\nExec=true\n");
+        UA_FILE("e-dep.action", "[Action]\nName=Missing\nExec=true\nDependencies=fe-no-such-program;\n");
+        UA_FILE("f-dir.action", "[Action]\nName=Dir only\nExec=echo %F\nSelection=s\nExtensions=dir;\n");
+        UA_FILE("g-mime.action", "[Action]\nName=Text\nExec=xed %F\nSelection=single\nMimetypes=text/*;\nTerminal=true\n");
+        UA_FILE("h-quotes.action", "[Action]\nName=Echo\nExec=sh -c \"echo \\\"%f\\\" '%f'\"\nSelection=s\nExtensions=png;\n");
+        UA_FILE("j-subst.action", "[Action]\nName=Words\nExec=sh -c \"echo \\\"$(wc -w < %F) in %f\\\"\"\nSelection=s\nExtensions=png;\n");
+        UA_FILE("i-pct.action", "[Action]\nName=Pct %%\nExec=printf \"%%s 100%%\" %f\nSelection=s\nExtensions=txt;\n");
+        UA_FILE("notes.txt", "[Action]\nName=Not an action file\nExec=true\n");
+#undef UA_FILE
+        pane_navigate(p, M8_BASE "/ua", true);
+        st_wait();
+        sel_clear(p);
+        for (u32 i = 0; i < p->count; i++)
+            if (strstr(p->L->entries[p->order[i]].name, ".png")) { sel_set(p, i, true); p->cursor = i; } // (right-clicked one)
+        ST_CHECK(p->sel_count == 2);
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        int copy = st_menu_find("Copy it's.png"); // (Name's codes filled in: the first selected)
+        ST_CHECK(copy >= 0 && st_menu_find("Compress") > copy && st_menu_find("Properties") > st_menu_find("Compress"));
+        ST_CHECK(st_menu_find("Here") < 0 && st_menu_find("Off") < 0 && st_menu_find("Missing") < 0 && st_menu_find("Dir only") < 0);
+        ST_CHECK(st_menu_find("Text") < 0 && st_menu_find("Echo") < 0 && st_menu_find("Not an action file") < 0);
+        st_frames(2);
+        st_shot("custom-actions");
+        A.last_opened[0] = 0;
+        menu_activate(copy); // a script for sh: each name a single-quoted word, so $(...) stays a name
+        ST_CHECK(!strcmp(A.last_opened, "action:[sh][-c][cat '" M8_BASE "/ua/it'\\''s.png' '" M8_BASE "/ua/x$(touch PWNED).png' | wl-copy]"));
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        menu_activate(st_menu_find("Compress")); // no shell: the names go in as they are, %F one argument each
+        ST_CHECK(!strcmp(A.last_opened, "action:[arqiver][--aa][" M8_BASE "/ua/it's.tar.zst][" M8_BASE "/ua/it's.png][" M8_BASE "/ua/x$(touch PWNED).png]"));
+
+        sel_clear(p);
+        st_select(p, "it's.png");
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        ST_CHECK(st_menu_find("Copy it's.png") >= 0 && st_menu_find("Compress") < 0);
+        menu_activate(st_menu_find("Echo")); // inside the script's "..." and '...': quoted for each
+        ST_CHECK(!strcmp(A.last_opened, "action:[sh][-c][echo \"\"'it'\\''s.png'\"\" 'it'\\''s.png']"));
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        menu_activate(st_menu_find("Words")); // inside "$( )" quotes start afresh: a plain quoted word there
+        ST_CHECK(!strcmp(A.last_opened, "action:[sh][-c][echo \"$(wc -w < '" M8_BASE "/ua/it'\\''s.png') in \"'it'\\''s.png'\"\"]"));
+
+        st_select(p, "sub");
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        ST_CHECK(st_menu_find("Copy sub") < 0 && st_menu_find("Text") < 0);
+        menu_activate(st_menu_find("Dir only"));
+        ST_CHECK(!strcmp(A.last_opened, "action:[echo][" M8_BASE "/ua/sub]"));
+
+        st_select(p, "notes.txt");
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        ST_CHECK(st_menu_find("Dir only") < 0 && st_menu_find("Pct %") >= 0);
+        menu_activate(st_menu_find("Text")); // a type pattern; in the terminal
+        ST_CHECK(!strcmp(A.last_opened, "action-terminal:[xed][" M8_BASE "/ua/notes.txt]"));
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        menu_activate(st_menu_find("Pct %"));
+        ST_CHECK(!strcmp(A.last_opened, "action:[printf][%s 100%][notes.txt]"));
+
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), false); // the folder's own menu: Selection=none ones
+        ST_CHECK(st_menu_find("Here") >= 0 && st_menu_find("Copy it's.png") < 0 && st_menu_find("Text") < 0);
+        menu_activate(st_menu_find("Here")); // <prog>: in the actions folder
+        ST_CHECK(!strcmp(A.last_opened, "action:[" M8_BASE "/xdg/file-explorer/actions/run.sh][" M8_BASE "/ua]"));
+        ST_CHECK(!st_exists(M8_BASE "/ua/PWNED"));
+        A.menu.open = false;
+        pane_navigate(p, M8_BASE, true);
+        st_wait();
     }
 
     st_rmrf(M8_BASE);
@@ -6914,12 +6997,6 @@ static void st_git_settle(void) {
 }
 
 static u8 st_gs(const GitResult *g, const char *prefix, const char *name) { return git_state(g, prefix, name, strlen(name)); }
-
-static int st_menu_find(const char *label) {
-    for (int i = 0; i < A.menu.n; i++)
-        if (A.menu.items[i].label && !strcmp(A.menu.items[i].label, label)) return i;
-    return -1;
-}
 
 static const char *st_menu_value(const char *key) {
     int i = st_menu_find(key);
