@@ -48,7 +48,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_TRANSPARENT_PATHBAR, "Transparent path bar", "Remove only the path field fill; pills and search stay filled"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_SIDEBAR, "Sidebar brightness", "With the name above it; darker or lighter than the theme's own colour, -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_HEADER, "Header brightness", "Tab strip and toolbar, -30% to +30%"},
-    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_PATHBAR, "Path bar and pills brightness", "Path field and pill-tab enclosure: -30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_PATHBAR, "Path bar and pills enclosure brightness", "Path field and pill-tab enclosure: -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_SEARCHBAR, "Folder search background brightness", "Folder search field only: -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_FILES, "File area brightness", "The background of the files, -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_PREVIEW, "Preview panel brightness", "-30% to +30%"},

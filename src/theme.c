@@ -212,6 +212,25 @@ static u32 surface_adjust(u32 c, int part) {
 static u32 pathbar_field_color(void) { return surface_adjust(T.field, SURF_PATHBAR); }
 static u32 searchbar_field_color(void) { return surface_adjust(T.field, SURF_SEARCHBAR); }
 
+// Pills enclosure: darker default than field; "Path bar and pills enclosure brightness" moves only this enclosure.
+static u32 tab_container_color(void) {
+    u32 base = rgb_mix(T.field, COL_BG, theme_is_light(&T) ? 0.18f : 0.14f);
+    return surface_adjust(base, SURF_PATHBAR);
+}
+
+// Pill tab fill: only drawn on hover/focus. Derived from enclosure so enclosure brightness control affects it.
+static u32 tab_surface_color(bool cur, bool primary) {
+    u32 base = tab_container_color();
+    return rgb_mix(base, COL_ACCENT, !cur ? 0.08f : primary ? 0.40f : 0.24f);
+}
+
+// Final safety net: if fg and bg are too close in luma, swap to dark or white for readable text/icons.
+static u32 surface_foreground_color(u32 fg, u32 bg) {
+    f32 fgl = rgb_luma(fg), bgl = rgb_luma(bg);
+    if (fabsf(fgl - bgl) >= 0.45f) return fg;
+    return bgl > 0.5f ? 0x111111u : 0xFFFFFFu;
+}
+
 static int theme_find(const char *name);
 
 // Theme "System": the theme picked for light or for dark (Options: Light theme / Dark theme), as the desktop prefers.
