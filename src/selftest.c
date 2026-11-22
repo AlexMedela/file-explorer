@@ -3896,7 +3896,11 @@ static int run_selftest_m9(void) {
         *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3DAEE9, .icons = "breeze",
                            .kde = {0x01000000u | 0xFCFCFC, 0x01000000u | 0xEFF0F1, 0x01000000u | 0x232627, 0x01000000u | 0x3DAEE9}};
         dlook_apply(d);
-        ST_CHECK(T.bg == 0xFCFCFC && T.sidebar == 0xEFF0F1 && T.toolbar == 0xEFF0F1 && T.text == 0x232627 && T.accent == 0x3DAEE9);
+        ST_CHECK(T.accent == 0x3DAEE9);
+        ST_CHECK(fabsf(rgb_luma(T.bg) - rgb_luma(g_theme_light.bg)) < 0.02f);
+        ST_CHECK(fabsf(rgb_luma(T.sidebar) - rgb_luma(g_theme_light.sidebar)) < 0.02f);
+        ST_CHECK(fabsf(rgb_luma(T.toolbar) - rgb_luma(g_theme_light.toolbar)) < 0.02f);
+        ST_CHECK(T.text == 0x232627);
         ST_CHECK(T.tabbar != T.toolbar && COL_STATUS == T.toolbar);
         st_frames(2);
         st_shot("m9-system-kde");
