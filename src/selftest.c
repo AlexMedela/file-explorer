@@ -4057,11 +4057,11 @@ static int run_selftest_m9(void) {
         st_shot("options-app-icon");
         { // both icon rows: every button shares the field height and stays inside a narrow control strip
             OptHit *af = st_opt_hit(HP_TEXT, OPT_APP_ICON, 2), *tf = st_opt_hit(HP_TEXT, OPT_TITLE_ICON, 3);
-            OptHit *aa = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0), *as = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1), *ad = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 2);
-            OptHit *ta = st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 0), *td = st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1);
-            ST_CHECK(af && tf && aa && as && ad && ta && td);
-            ST_CHECK(af && aa && fabsf(aa->r.y - af->r.y) < 0.5f && fabsf(as->r.y - af->r.y) < 0.5f && fabsf(ad->r.y - af->r.y) < 0.5f);
-            ST_CHECK(tf && ta && fabsf(ta->r.y - tf->r.y) < 0.5f && fabsf(td->r.y - tf->r.y) < 0.5f);
+            OptHit *as = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1), *ad = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 2);
+            OptHit *td = st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1);
+            ST_CHECK(af && tf && as && ad && td); // Apply has no hit when its field is empty
+            ST_CHECK(af && as && fabsf(as->r.y - af->r.y) < 0.5f && fabsf(ad->r.y - af->r.y) < 0.5f);
+            ST_CHECK(tf && td && fabsf(td->r.y - tf->r.y) < 0.5f);
             ST_CHECK(!strcmp(g_opts[ia].label, "App icon"));
             ST_CHECK(strstr(g_opts[ia].desc, "Apply") && strstr(g_opts[ia].desc, "File-Icon") && strstr(g_opts[ia].desc, "Default"));
             ST_CHECK(!strstr(g_opts[ia].desc, "System"));
@@ -4139,9 +4139,9 @@ static int run_selftest_m9(void) {
             free(after);
             free(logo);
             te_set(&g_opt.app_icon, "", 0, 0);
-            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
-            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !g_app_icon_path[0] && !g_opt.app_icon.buf[0]);
+            ST_CHECK(!st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0)); // Apply is disabled until a path is typed
             te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
+            st_frames(1);
             st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
             ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
         }
@@ -4180,7 +4180,7 @@ static int run_selftest_m9(void) {
         }
         free(custom_prev);
         free(def_prev);
-        { // Apply from the path field: invalid paths are rejected, an empty field restores the default
+        { // Apply from the path field: invalid paths are rejected; an empty field leaves the current choice alone
             te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
             opt_app_icon_apply();
             ST_CHECK(!strcmp(g_app_icon_path, svg));
@@ -4189,7 +4189,7 @@ static int run_selftest_m9(void) {
             ST_CHECK(!strcmp(g_app_icon_path, svg));
             te_set(&g_opt.app_icon, "", 0, 0);
             opt_app_icon_apply();
-            ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
+            ST_CHECK(!strcmp(g_app_icon_path, svg) && g_app_icon_mode == APP_ICON_CUSTOM);
         }
         { // the mode persists, the typed path survives it, and a legacy path-only config means custom
             opt_app_icon_chosen(svg);

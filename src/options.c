@@ -642,7 +642,10 @@ static void opt_app_icon_chosen(const char *path) {
     g_opt.app_icon_focus = false;
 }
 
-static void opt_app_icon_apply(void) { opt_app_icon_chosen(g_opt.app_icon.buf); }
+static void opt_app_icon_apply(void) {
+    if (!g_opt.app_icon.buf[0]) return; // Apply needs a typed path; Default clears it
+    opt_app_icon_chosen(g_opt.app_icon.buf);
+}
 
 // Title bar icon: an absolute .svg/.png replaces the header logo; empty restores it.
 static void opt_title_icon_chosen(const char *path) {
@@ -1024,8 +1027,9 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             opt_hit(r, HP_TEXT, o->id, header ? 3 : 2);
             for (int k = 0; k < nb; k++) {
                 const char *l = opt_icon_button_label(o->id, k);
-                sheet_button(b[k], l, opt_icon_button_active(o->id, k), true);
-                opt_hit(b[k], HP_BUTTON, o->id, k);
+                bool enabled = !(k == 0 && !field->buf[0]); // Apply needs a typed path; Default/File-Icon do not
+                sheet_button(b[k], l, opt_icon_button_active(o->id, k), enabled);
+                if (enabled) opt_hit(b[k], HP_BUTTON, o->id, k);
             }
             break;
         }

@@ -12264,6 +12264,7 @@ static void frame(void) {
     icons_sync_theme();
     if (g_logo_changed) { g_logo_changed = false; window_icon_update(); }
     app_icon_sync();
+    if (g_app_icon_preview_changed) { g_app_icon_preview_changed = false; A.redraw = true; }
     check_conflicts();
     ops_gc();
     ops_schedule();

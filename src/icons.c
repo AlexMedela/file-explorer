@@ -501,17 +501,23 @@ static Glyph *icon_glyph(int id, int px) {
     return &s->g;
 }
 
-// Options-row preview of the icon in effect. One atlas slot, rebuilt when the applied path, accent or size changes;
-// a reset of g_icon_cache_n (atlas rebuild) also drops it. The synthetic id -1 cannot collide with a file icon.
+// Options-row preview of the icon in effect. One atlas slot, rebuilt when the applied path, accent, File icons
+// selection or size changes; a reset of g_icon_cache_n (atlas rebuild) also drops it. The synthetic id -1 cannot
+// collide with a file icon.
+static char g_app_icon_prev_path[PATH_MAX];
+static u32 g_app_icon_prev_accent;
+static AppIconMode g_app_icon_prev_mode;
+static int g_app_icon_prev_px, g_app_icon_prev_theme, g_app_icon_prev_slot = -1;
+static bool g_app_icon_preview_changed;
+
+static void app_icon_preview_invalidate(void) { g_app_icon_prev_slot = -1; g_app_icon_preview_changed = true; }
+
 static Glyph *app_icon_preview_glyph(int px) {
-    static char key_path[PATH_MAX];
-    static u32 key_accent;
-    static AppIconMode key_mode;
-    static int key_px, key_theme, slot = -1;
     u32 accent = COL_ACCENT & 0xFFFFFF;
-    if (slot >= 0 && slot < g_icon_cache_n && key_px == px && key_accent == accent && key_mode == g_app_icon_mode
-        && key_theme == g_icon_theme && g_icon_cache[slot].id == -1 && !strcmp(key_path, g_app_icon_path))
-        return &g_icon_cache[slot].g;
+    if (g_app_icon_prev_slot >= 0 && g_app_icon_prev_slot < g_icon_cache_n && g_app_icon_prev_px == px
+        && g_app_icon_prev_accent == accent && g_app_icon_prev_mode == g_app_icon_mode && g_app_icon_prev_theme == g_icon_theme
+        && g_icon_cache[g_app_icon_prev_slot].id == -1 && !strcmp(g_app_icon_prev_path, g_app_icon_path))
+        return &g_icon_cache[g_app_icon_prev_slot].g;
     u8 *buf = app_icon_preview_raster(px);
     if (!buf) return NULL;
     int ax, ay;
@@ -519,7 +525,7 @@ static Glyph *app_icon_preview_glyph(int px) {
     for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
     free(buf);
     if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0;
-    slot = g_icon_cache_n;
+    g_app_icon_prev_slot = g_icon_cache_n;
     IconSlot *s = &g_icon_cache[g_icon_cache_n++];
     s->id = -1;
     s->px = px;
@@ -528,11 +534,11 @@ static Glyph *app_icon_preview_glyph(int px) {
     s->g.y = (u16)ay;
     s->g.w = (u16)px;
     s->g.h = (u16)px;
-    snprintf(key_path, sizeof key_path, "%s", g_app_icon_path);
-    key_mode = g_app_icon_mode;
-    key_theme = g_icon_theme;
-    key_accent = accent;
-    key_px = px;
+    snprintf(g_app_icon_prev_path, sizeof g_app_icon_prev_path, "%s", g_app_icon_path);
+    g_app_icon_prev_mode = g_app_icon_mode;
+    g_app_icon_prev_theme = g_icon_theme;
+    g_app_icon_prev_accent = accent;
+    g_app_icon_prev_px = px;
     return &s->g;
 }
 
@@ -654,6 +660,8 @@ static SDL_Texture *big_icon_tex(int id, int px) {
     return tex;
 }
 
+static bool g_logo_changed; // the window icon should be rebuilt (app.c)
+
 // The desktop's icon (system_icons.c) arrived: over the bundled one drawn meanwhile, in place in the atlas; big copies
 // are made again.
 static void icons_replace(int id, int px, const u8 *rgba) {
@@ -671,10 +679,12 @@ static void icons_replace(int id, int px, const u8 *rgba) {
             SDL_DestroyTexture(g_big_icons[i].tex);
             g_big_icons[i--] = g_big_icons[--g_nbig];
         }
+    // A desktop icon can arrive after the glyph was cached in File-Icon mode, or while System file icons are selected.
+    if (g_app_icon_mode == APP_ICON_FILE_ICON || icon_system_selected()) app_icon_preview_invalidate();
+    if (g_app_icon_mode == APP_ICON_FILE_ICON && id == icon_find("folder")) g_logo_changed = true;
 }
 
 // Theme changed: icons using the theme colour mark are parsed and rasterized again.
-static bool g_logo_changed; // the window icon should be rebuilt (app.c)
 
 static void icons_sync_theme(void) {
     if ((g_logo_img || g_logo_small_img) && g_logo_accent != COL_ACCENT) { // accent changed: recolour the logo
