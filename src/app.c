@@ -481,6 +481,7 @@ typedef struct {
 // g_menu_build while it's set (a submenu being built), else A.menu.
 static Menu g_menu_sub;
 static int g_menu_sub_of = -1; // the A.menu item it belongs to
+static int g_menu_sub_building = -1; // the item whose submenu is being built (custom actions' groups: which one)
 static Menu *g_menu_build;
 
 #define MAX_OPS 32
@@ -5964,6 +5965,7 @@ static void drop_menu_do(int act);
 static void open_with_menu_app(Pane *p, int k);
 #define ACT_UA_BASE 700 // custom actions (*.action files): + index in g_ua
 #define UA_MAX 32
+#define ACT_UAG_BASE (ACT_UA_BASE + UA_MAX) // their groups (submenus): + index in g_uag
 _Static_assert(CMD_LAYOUT_BASE + MAX_LAYOUTS <= ACT_UA_BASE, "custom actions' ids must stay above the layouts'");
 static void ua_run(Pane *p, int idx);
 
@@ -6635,13 +6637,60 @@ static void open_with_menu_app(Pane *p, int k) {
 // are a script: the names go in quoted for where they land (outside quotes, inside "..." or '...'), so a name like
 // $(...) stays a name. Read on every menu open (a few small files; edits show at once).
 typedef struct {
-    char file[NAME_MAX + 1], name[128], exec[1024], exts[256], mimes[256], deps[256];
+    char file[NAME_MAX + 1], name[128], exec[1024], exts[256], mimes[256], deps[256], group[64];
     int sel_min, sel_max; // how many selected items it's for; 0 (Selection=none): the folder's own menu
+    int icon;             // in g_ua_icons (-1: the default)
     bool terminal, active, deps_ok; // (all files are kept, for Options > Actions; the menu skips the off ones)
 } UserAction;
 
 static UserAction g_ua[UA_MAX];
 static int g_nua;
+
+// Groups (Group=): the actions of one group are a submenu. Their icons are in groups.conf ("[Images]" + "Icon=image").
+typedef struct {
+    char name[64];
+    int icon; // in g_ua_icons (-1: the default, a folder)
+} UaGroup;
+
+static UaGroup g_uag[UA_MAX];
+static int g_nuag;
+
+// The icons an action (Icon=) or a group can have, by name.
+static const struct { const char *name, *label; int ui; } g_ua_icons[] = {
+    {"zap", "Lightning", UI_ZAP}, {"folder", "Folder", UI_FOLDER}, {"image", "Image", UI_IMAGE}, {"video", "Video", UI_VIDEO},
+    {"audio", "Audio", UI_AUDIO_LINES}, {"text", "Text", UI_FILE_TEXT}, {"archive", "Archive", UI_ARCHIVE}, {"code", "Code", UI_CODE},
+    {"terminal", "Terminal", UI_TERMINAL}, {"copy", "Copy", UI_COPY}, {"clipboard", "Clipboard", UI_CLIPBOARD_PASTE},
+    {"hash", "Checksum", UI_HASH}, {"lock", "Lock", UI_LOCK}, {"key", "Key", UI_KEY_ROUND}, {"link", "Link", UI_LINK},
+    {"globe", "Web", UI_GLOBE}, {"download", "Download", UI_DOWNLOAD}, {"upload", "Upload", UI_UPLOAD}, {"share", "Share", UI_SHARE_2},
+    {"play", "Run", UI_PLAY}, {"camera", "Camera", UI_CAMERA}, {"edit", "Edit", UI_PENCIL}, {"scissors", "Cut", UI_SCISSORS},
+    {"search", "Search", UI_SEARCH}, {"eye", "View", UI_EYE}, {"star", "Star", UI_STAR}, {"wand", "Magic", UI_WAND_SPARKLES},
+    {"settings", "Settings", UI_SETTINGS}, {"git", "Git", UI_GIT_BRANCH}, {"refresh", "Refresh", UI_REFRESH_CW},
+    {"external", "Open outside", UI_EXTERNAL_LINK}, {"trash", "Trash", UI_TRASH},
+};
+
+// Icon= by name; Nemo's Icon-Name= (a theme icon: "image-x-generic", "utilities-terminal") by what it names.
+static int ua_icon_find(const char *v, bool theme) {
+    for (int i = 0; i < (int)ARRAY_COUNT(g_ua_icons); i++)
+        if (!strcasecmp(v, g_ua_icons[i].name)) return i;
+    if (!theme || !v[0]) return -1;
+    static const char *hint[][2] = {{"image", "image"}, {"photo", "image"}, {"video", "video"}, {"audio", "audio"}, {"music", "audio"},
+                                    {"terminal", "terminal"}, {"text", "text"}, {"archive", "archive"}, {"package", "archive"},
+                                    {"folder", "folder"}, {"edit", "edit"}, {"copy", "copy"}, {"search", "search"}, {"web", "globe"},
+                                    {"key", "key"}, {"lock", "lock"}, {"system", "settings"}};
+    for (size_t k = 0; k < ARRAY_COUNT(hint); k++)
+        if (strcasestr(v, hint[k][0])) return ua_icon_find(hint[k][1], false);
+    return -1;
+}
+
+static int ua_icon_ui(int icon, bool group) {
+    return icon >= 0 && icon < (int)ARRAY_COUNT(g_ua_icons) ? g_ua_icons[icon].ui : group ? UI_FOLDER : UI_ZAP;
+}
+
+static int ua_group_find(const char *name) {
+    for (int g = 0; g < g_nuag; g++)
+        if (!strcmp(g_uag[g].name, name)) return g;
+    return -1;
+}
 static char g_ua_dir[PATH_MAX];
 static char g_ua_label[UA_MAX][160]; // the menu's labels (Name with its codes filled in; the menu keeps the pointers)
 
@@ -6670,7 +6719,7 @@ static void ua_parse(const char *file) {
     if (g_nua >= UA_MAX) return;
     FILE *f = fopen(file, "r");
     if (!f) return;
-    UserAction a = {.sel_min = 1, .sel_max = INT_MAX, .active = true};
+    UserAction a = {.sel_min = 1, .sel_max = INT_MAX, .active = true, .icon = -1};
     char line[2048];
     bool in_sect = false;
     snprintf(a.file, sizeof a.file, "%s", path_basename(file));
@@ -6691,6 +6740,9 @@ static void ua_parse(const char *file) {
         else if (!strcmp(k, "Mimetypes")) snprintf(a.mimes, sizeof a.mimes, "%s", v);
         else if (!strcmp(k, "Dependencies")) snprintf(a.deps, sizeof a.deps, "%s", v);
         else if (!strcmp(k, "Terminal")) a.terminal = !strcasecmp(v, "true");
+        else if (!strcmp(k, "Group")) snprintf(a.group, sizeof a.group, "%s", v);
+        else if (!strcmp(k, "Icon")) a.icon = ua_icon_find(v, false);
+        else if (!strcmp(k, "Icon-Name") && a.icon < 0) a.icon = ua_icon_find(v, true);
         else if (!strcmp(k, "Selection")) { // s / single, m / multiple, a count, none, any / notnone (both: one or more)
             int c = atoi(v);
             if (!strcasecmp(v, "s") || !strcasecmp(v, "single")) a.sel_min = a.sel_max = 1;
@@ -6707,9 +6759,30 @@ static void ua_parse(const char *file) {
 // In the menu: on, complete, and its programs there.
 static bool ua_usable(const UserAction *a) { return a->active && a->deps_ok && a->name[0] && a->exec[0]; }
 
+// groups.conf: a section per group, its Icon=.
+static void ua_load_groups(void) {
+    char path[PATH_MAX], line[512];
+    g_nuag = 0;
+    path_join(path, sizeof path, g_ua_dir, "groups.conf");
+    FILE *f = fopen(path, "r");
+    while (f && fgets(line, sizeof line, f)) {
+        char *s = ua_trim(line), *eq, *end;
+        if (s[0] == '[' && (end = strchr(s, ']')) && g_nuag < UA_MAX) {
+            *end = 0;
+            g_uag[g_nuag] = (UaGroup){.icon = -1};
+            snprintf(g_uag[g_nuag++].name, sizeof g_uag[0].name, "%s", s + 1);
+        } else if (g_nuag && (eq = strchr(s, '='))) {
+            *eq = 0;
+            if (!strcmp(ua_trim(s), "Icon")) g_uag[g_nuag - 1].icon = ua_icon_find(ua_trim(eq + 1), false);
+        }
+    }
+    if (f) fclose(f);
+}
+
 static void ua_load(void) {
     char dh[PATH_MAX];
     g_nua = 0;
+    g_nuag = 0;
     data_home(dh, sizeof dh);
     snprintf(g_ua_dir, sizeof g_ua_dir, "%s/file-explorer/actions", dh);
     DIR *d = opendir(g_ua_dir);
@@ -6728,6 +6801,19 @@ static void ua_load(void) {
         ua_parse(full);
         free(names[i]);
     }
+    // the groups: those of groups.conf that actions use (in its order), then the others as actions name them
+    int nconf = (ua_load_groups(), g_nuag), keep = 0;
+    for (int g = 0; g < nconf; g++) {
+        bool used = false;
+        for (int i = 0; i < g_nua && !used; i++) used = !strcmp(g_ua[i].group, g_uag[g].name);
+        if (used) g_uag[keep++] = g_uag[g];
+    }
+    g_nuag = keep;
+    for (int i = 0; i < g_nua; i++)
+        if (g_ua[i].group[0] && ua_group_find(g_ua[i].group) < 0 && g_nuag < UA_MAX) {
+            g_uag[g_nuag] = (UaGroup){.icon = -1};
+            snprintf(g_uag[g_nuag++].name, sizeof g_uag[0].name, "%s", g_ua[i].group);
+        }
 }
 
 // Extensions: any, dir, nodirs, none (no extension), or extensions (case-insensitive suffixes, so tar.gz works);
@@ -6972,45 +7058,80 @@ static void ua_run(Pane *p, int idx) {
     free(dirs);
 }
 
-// The custom actions for the selection, or (folder) for the folder's own menu: Selection=none ones. Before Properties.
+static bool g_ua_shown[UA_MAX]; // in the menu that is open (its groups' submenus list them)
+
+// The actions in a group's submenu.
+static void ua_menu_sub(Pane *p) {
+    (void)p;
+    int g = g_menu_sub_building >= 0 && g_menu_sub_building < A.menu.n ? A.menu.items[g_menu_sub_building].act - ACT_UAG_BASE : -1;
+    if (g < 0 || g >= g_nuag) return;
+    for (int i = 0; i < g_nua; i++)
+        if (g_ua_shown[i] && !strcmp(g_ua[i].group, g_uag[g].name)) menu_add(g_ua_label[i], "", ACT_UA_BASE + i, true);
+}
+
+// The custom actions for the selection, or (folder) for the folder's own menu: Selection=none ones. Between
+// separators, before Properties; a group's actions are a submenu where its first one would be.
 static void ua_menu_items(Pane *p, bool folder) {
     if (pane_is_archive(p) || pane_is_trash(p) || pane_du_on(p)) return;
     ua_load();
     int n = 0, shown = 0;
-    bool *dirs = NULL;
+    bool *dirs = NULL, gadded[UA_MAX] = {0};
     char **paths = folder ? NULL : ua_selection(p, &n, &dirs);
     UaCtx c = {paths, n, p->path};
     for (int i = 0; i < g_nua; i++) {
-        if (!ua_match(&g_ua[i], paths, dirs, n)) continue;
+        g_ua_shown[i] = ua_match(&g_ua[i], paths, dirs, n);
+        if (!g_ua_shown[i]) continue;
         UaBuf b = {0};
         ua_fill(&b, &c, g_ua[i].name, false);
         snprintf(g_ua_label[i], sizeof g_ua_label[i], "%s", b.s);
         free(b.s);
         if (!shown++) menu_sep();
-        menu_add(g_ua_label[i], "", ACT_UA_BASE + i, true);
+        int g = g_ua[i].group[0] ? ua_group_find(g_ua[i].group) : -1;
+        if (g < 0) menu_add(g_ua_label[i], "", ACT_UA_BASE + i, true);
+        else if (!gadded[g]) {
+            gadded[g] = true;
+            menu_add(g_uag[g].name, "", ACT_UAG_BASE + g, true);
+            Menu *m = g_menu_build ? g_menu_build : &A.menu;
+            m->items[m->n - 1].sub = ua_menu_sub;
+        }
     }
+    if (shown) menu_sep();
     strv_free(paths, n);
     free(dirs);
 }
 
-// Options > Actions writes the files: only the keys it edits change, in the first section; comments, translations
-// (Name[de]=) and keys it doesn't show stay as they are. A missing file is created.
-static bool ua_file_set(const char *path, const char *const *keys, const char *const *vals, int n) {
+// Options > Actions writes the files: only the keys it edits change, in one section (NULL: the first; groups.conf has
+// one per group); comments, translations (Name[de]=) and keys it doesn't show stay as they are. What's missing (the
+// section, the file) is added.
+static void ua_put_keys(UaBuf *out, const char *const *keys, const char *const *vals, int n, bool *done) {
+    if (out->n && out->s[out->n - 1] != '\n') ub_str(out, "\n");
+    for (int i = 0; i < n; i++)
+        if (!done[i]) {
+            ub_str(out, keys[i]);
+            ub_str(out, "=");
+            ub_str(out, vals[i]);
+            ub_str(out, "\n");
+            done[i] = true;
+        }
+}
+
+static bool ua_file_set(const char *path, const char *section, const char *const *keys, const char *const *vals, int n) {
     UaBuf out = {0};
     bool done[16] = {0};
-    int sect = 0; // 0: before the first section, 1: in it, 2: after it
+    int state = 0; // 0: before the section, 1: in it, 2: after it
+    size_t sl = section ? strlen(section) : 0;
     ub_str(&out, "");
     FILE *f = fopen(path, "r");
     char line[4096];
     while (f && fgets(line, sizeof line, f)) {
         const char *s = line;
         while (*s == ' ' || *s == '\t') s++;
-        if (*s == '[' && sect < 2) {
-            if (sect == 1) // the keys it lacked, at the end of the first section
-                for (int i = 0; i < n; i++)
-                    if (!done[i]) { ub_str(&out, keys[i]); ub_str(&out, "="); ub_str(&out, vals[i]); ub_str(&out, "\n"); done[i] = true; }
-            sect++;
-        } else if (sect == 1) {
+        if (*s == '[') {
+            if (state == 1) { // the keys it lacked, at the end of the section
+                ua_put_keys(&out, keys, vals, n, done);
+                state = 2;
+            } else if (state == 0 && (!section || (!strncmp(s + 1, section, sl) && s[1 + sl] == ']'))) state = 1;
+        } else if (state == 1) {
             int k = -1;
             for (int i = 0; i < n && k < 0; i++) {
                 size_t kl = strlen(keys[i]);
@@ -7026,13 +7147,29 @@ static bool ua_file_set(const char *path, const char *const *keys, const char *c
         ub_str(&out, line);
     }
     if (f) fclose(f);
-    if (out.n && out.s[out.n - 1] != '\n') ub_str(&out, "\n");
-    if (sect == 0) ub_str(&out, "[Action]\n");
-    for (int i = 0; i < n; i++)
-        if (!done[i]) { ub_str(&out, keys[i]); ub_str(&out, "="); ub_str(&out, vals[i]); ub_str(&out, "\n"); }
+    if (state == 0) {
+        if (out.n && out.s[out.n - 1] != '\n') ub_str(&out, "\n");
+        if (out.n && section) ub_str(&out, "\n");
+        ub_str(&out, "[");
+        ub_str(&out, section ? section : "Action");
+        ub_str(&out, "]\n");
+    }
+    ua_put_keys(&out, keys, vals, n, done);
     bool ok = write_file_atomic(path, out.s);
     free(out.s);
     return ok;
+}
+
+// A group's icon (-1: the default), in groups.conf.
+static bool ua_group_set_icon(int g, int icon) {
+    if (g < 0 || g >= g_nuag) return false;
+    char path[PATH_MAX];
+    mkdir_p(g_ua_dir, 0755);
+    path_join(path, sizeof path, g_ua_dir, "groups.conf");
+    const char *k[1] = {"Icon"}, *v[1] = {icon >= 0 ? g_ua_icons[icon].name : ""};
+    if (!ua_file_set(path, g_uag[g].name, k, v, 1)) return false;
+    g_uag[g].icon = icon;
+    return true;
 }
 
 // A file name's own part, without the number that orders it ("020-copy-image.action" -> "copy-image.action").
@@ -7961,6 +8098,8 @@ static void qa_pin_paths(char **paths, int n, int g) {
 // in a list (sort keys, columns, apps...) where the check mark says enough, and for anything not listed here.
 static int menu_action_icon(const MenuItem *it) {
     int a = it->act;
+    if (a >= ACT_UA_BASE && a < ACT_UA_BASE + g_nua) return ua_icon_ui(g_ua[a - ACT_UA_BASE].icon, false); // custom actions
+    if (a >= ACT_UAG_BASE && a < ACT_UAG_BASE + g_nuag) return ua_icon_ui(g_uag[a - ACT_UAG_BASE].icon, true);
     if (a >= ACT_VIEW_BASE && a < ACT_VIEW_BASE + ZOOM_COUNT) {
         int lv = a - ACT_VIEW_BASE;
         return lv == 0 ? UI_TABLE_2 : lv == 1 ? UI_LIST : UI_LAYOUT_GRID; // Details, List, icons
@@ -8207,6 +8346,7 @@ static void menu_sub_open(int i, bool kb) {
     sm->keep_open = false;
     sm->reopen = NULL;
     g_menu_build = sm;
+    g_menu_sub_building = i;
     m->items[i].sub(m->pane);
     g_menu_build = NULL;
     if (!sm->n) return;

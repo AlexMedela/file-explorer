@@ -83,10 +83,15 @@ Extensions=jpg;jpeg;png;webp;
 | `Mimetypes` | `;`-separated types, `image/*` style patterns allowed. With neither list, everything matches. |
 | `Dependencies` | Programs (or absolute paths) that must exist; `!prog` must not. Otherwise the action is hidden. |
 | `Terminal` | `true`: run it in the terminal app. |
+| `Group` | Actions with the same group are a submenu of that name (where its first action would be). |
+| `Icon` | Its icon in the menu: `zap` (the default), `folder`, `image`, `video`, `audio`, `text`, `archive`, `code`, `terminal`, `copy`, `clipboard`, `hash`, `lock`, `key`, `link`, `globe`, `download`, `upload`, `share`, `play`, `camera`, `edit`, `scissors`, `search`, `eye`, `star`, `wand`, `settings`, `git`, `refresh`, `external`, `trash`. Nemo's `Icon-Name` picks the closest of these. |
 | `Active` | `false` hides it. |
 
 Codes in `Exec` and `Name`: `%F` the selected paths, `%U` the same as `file://` URIs, `%f` the first one's name,
 `%e` that name without its extension, `%P` the current folder, `%p` its name, `%%` a percent sign.
+
+A group's icon is set in Options > Actions (Groups), kept in `groups.conf` in the same folder: a `[Group name]`
+section with `Icon=` (a folder by default). The actions sit between separators in the menu, above Properties.
 
 `Exec` runs without a shell, so a file name is only ever an argument: a word that is just `%F` becomes one argument
 per file. For pipes and the like use `sh -c "..."`: the names are quoted for the script, whatever they contain.

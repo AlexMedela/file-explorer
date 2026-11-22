@@ -120,16 +120,17 @@ static const char *g_tab_style_labels[] = {"Cards", "Pills"}; // TABS_*
 static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
 
 // Options > Actions: its controls (not rows of g_opts), what "Shows for" writes, and the templates
-enum { OPT_ACT_SEL = 1000, OPT_ACT_TERM, OPT_ACT_TEMPLATE };
+enum { OPT_ACT_SEL = 1000, OPT_ACT_TERM, OPT_ACT_TEMPLATE, OPT_ACT_ICON, OPT_ACT_GICON = 1100 }; // (OPT_ACT_GICON + group index)
+static bool opt_is_gicon(int id) { return id >= OPT_ACT_GICON && id < OPT_ACT_GICON + UA_MAX; }
 static const char *g_act_sel_labels[] = {"One or more items", "One item", "Several items", "Empty space (folder menu)"};
 static const char *g_act_sel_values[] = {"any", "s", "m", "none"};
-static const struct { const char *name, *exec, *exts, *deps; int sel; bool term; } g_act_templates[] = {
-    {"Copy image to clipboard", "sh -c \"wl-copy < %F\"", "png; jpg; jpeg; webp; gif; svg", "wl-copy", 1, false},
-    {"Open in VS Code", "code %F", "any", "code", 0, false},
-    {"SHA-256 checksums", "sh -c \"sha256sum %F | zenity --text-info --title=SHA-256 --width=800 --height=300\"", "nodirs", "sha256sum; zenity", 0, false},
-    {"Convert to PNG", "sh -c \"for f in %F; do magick \\\"$f\\\" \\\"${f%%.*}.png\\\"; done\"", "jpg; jpeg; webp; gif; bmp; tiff; heic; avif", "magick", 0, false},
-    {"Make executable", "chmod +x %F", "nodirs", "", 0, false},
-    {"File details in a terminal", "sh -c \"stat %F; printf '\\\\nPress Enter to close'; read -r _\"", "any", "", 0, true},
+static const struct { const char *name, *exec, *exts, *deps, *icon; int sel; bool term; } g_act_templates[] = {
+    {"Copy image to clipboard", "sh -c \"wl-copy < %F\"", "png; jpg; jpeg; webp; gif; svg", "wl-copy", "copy", 1, false},
+    {"Open in VS Code", "code %F", "any", "code", "code", 0, false},
+    {"SHA-256 checksums", "sh -c \"sha256sum %F | zenity --text-info --title=SHA-256 --width=800 --height=300\"", "nodirs", "sha256sum; zenity", "hash", 0, false},
+    {"Convert to PNG", "sh -c \"for f in %F; do magick \\\"$f\\\" \\\"${f%%.*}.png\\\"; done\"", "jpg; jpeg; webp; gif; bmp; tiff; heic; avif", "magick", "image", 0, false},
+    {"Make executable", "chmod +x %F", "nodirs", "", "play", 0, false},
+    {"File details in a terminal", "sh -c \"stat %F; printf '\\\\nPress Enter to close'; read -r _\"", "any", "", "terminal", 0, true},
 };
 static void opt_act_template(int t);
 
@@ -173,12 +174,14 @@ static struct {
     // actions page: the list, or (act_edit >= 0: an index in g_ua, UA_MAX for a new one) the editor
     int act_edit;
     bool act_new;
-    TextEdit act_te[4]; // name, command, file types (Extensions), needed programs (Dependencies)
+    TextEdit act_te[5]; // name, command, file types (Extensions), needed programs (Dependencies), group
     int act_focus;      // the field with the keyboard (-1: none)
+    bool act_reveal;    // scroll it into view (Tab moved there)
     int act_sel;        // g_act_sel_labels
     bool act_term;
-    char act_init[4][1024]; // the fields as the editor opened: only what changed is written
-    int act_init_sel;
+    int act_icon;           // in g_ua_icons (-1: the default)
+    char act_init[5][1024]; // the fields as the editor opened: only what changed is written
+    int act_init_sel, act_init_icon;
     bool act_init_term;
 } g_opt;
 
@@ -342,6 +345,7 @@ static int opt_pick_choice(int light) {
 }
 
 static int opt_choice_count(int id) {
+    if (opt_is_gicon(id)) return 1 + (int)ARRAY_COUNT(g_ua_icons);
     switch (id) {
     case OPT_THEME: return g_nthemes;
     case OPT_THEME_LIGHT: case OPT_THEME_DARK: return g_nthemes - (opt_pick_sys() < g_nthemes);
@@ -360,12 +364,14 @@ static int opt_choice_count(int id) {
     case OPT_TRANSFERS: return (int)ARRAY_COUNT(g_transfer_counts);
     case OPT_EXEC_OPEN: return (int)ARRAY_COUNT(g_exec_labels);
     case OPT_ACT_SEL: return (int)ARRAY_COUNT(g_act_sel_labels);
+    case OPT_ACT_ICON: return 1 + (int)ARRAY_COUNT(g_ua_icons);
     case OPT_ACT_TEMPLATE: return 1 + (int)ARRAY_COUNT(g_act_templates);
     }
     return 0;
 }
 
 static const char *opt_choice_label(int id, int i) {
+    if (opt_is_gicon(id)) return i ? g_ua_icons[i - 1].label : "Default";
     switch (id) {
     case OPT_THEME: return g_themes[i].name;
     case OPT_THEME_LIGHT: case OPT_THEME_DARK: return g_themes[opt_pick_theme(i)].name;
@@ -400,11 +406,13 @@ static const char *opt_choice_label(int id, int i) {
     case OPT_EXEC_OPEN: return g_exec_labels[i];
     case OPT_ACT_SEL: return g_act_sel_labels[i];
     case OPT_ACT_TEMPLATE: return i ? g_act_templates[i - 1].name : "Choose a template\xE2\x80\xA6";
+    case OPT_ACT_ICON: return i ? g_ua_icons[i - 1].label : "Default";
     }
     return "";
 }
 
 static int opt_choice_get(int id) {
+    if (opt_is_gicon(id)) return id - OPT_ACT_GICON < g_nuag ? g_uag[id - OPT_ACT_GICON].icon + 1 : 0;
     switch (id) {
     case OPT_THEME: return g_theme_cur;
     case OPT_THEME_LIGHT: return opt_pick_choice(0);
@@ -442,6 +450,7 @@ static int opt_choice_get(int id) {
             if (A.transfers_at_once == g_transfer_counts[i]) return i;
         return 0;
     case OPT_ACT_SEL: return g_opt.act_sel;
+    case OPT_ACT_ICON: return g_opt.act_icon + 1;
     }
     return 0;
 }
@@ -463,6 +472,11 @@ static bool apply_ui_font(const char *family) {
 
 static void opt_choice_set(int id, int i) {
     if (id == OPT_ACT_SEL) { g_opt.act_sel = i; return; } // (the editor's: saved with Save)
+    if (id == OPT_ACT_ICON) { g_opt.act_icon = i - 1; return; }
+    if (opt_is_gicon(id)) { // a group's: saved at once (groups.conf)
+        if (!ua_group_set_icon(id - OPT_ACT_GICON, i - 1)) toast("Couldn't save groups.conf: %s", strerror(errno));
+        return;
+    }
     if (id == OPT_ACT_TEMPLATE) { if (i > 0) opt_act_template(i - 1); return; }
     switch (id) {
     case OPT_THEME: g_theme_cur = i; theme_apply(); desktop_look_sync(); break;
@@ -800,6 +814,12 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
 
 static bool opt_hover(Rect r) { return hot(r); }
 
+// The icon of choice i of a dropdown (-1: none): the custom actions' icons.
+static int opt_choice_icon(int id, int i) {
+    if (id != OPT_ACT_ICON && !opt_is_gicon(id)) return -1;
+    return ua_icon_ui(i - 1, id != OPT_ACT_ICON);
+}
+
 // Control area of one row (right-aligned inside [x, x + w]).
 static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     Font *f = &A.font, *fs = &A.font_small;
@@ -849,7 +869,13 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             if (open) draw_rrect_outline(r.x, r.y, r.w, r.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
             const char *l = cur < n ? opt_choice_label(o->id, cur) : "";
             if (o->id == OPT_FONT && A.ui_font[0] && cur == 0) l = A.ui_font; // not in the list (yet)
-            draw_text_fit(f, r.x + S(10), text_y(f, y, ch), r.w - S(36), l, (int)strlen(l), C(COL_TEXT), 0);
+            f32 lx = r.x + S(10);
+            int ic = opt_choice_icon(o->id, cur);
+            if (ic >= 0) {
+                draw_ui_icon(ic, lx, roundf(cy - S(8)), roundf(S(16)), C(COL_TEXT));
+                lx += S(24);
+            }
+            draw_text_fit(f, lx, text_y(f, y, ch), r.x + r.w - S(26) - lx, l, (int)strlen(l), C(COL_TEXT), 0);
             draw_chevron(r.x + r.w - S(16), cy, S(6), 3, MAX(1.f, S(1.4f)), C(COL_TEXT_DIM));
             opt_hit(r, HP_DROP, o->id, 0);
         }
@@ -968,7 +994,13 @@ static void opt_draw_dropdown(void) {
         if (sel) draw_rrect(ir.x, ir.y, ir.w, ir.h, S(6), C(COL_SEL_FOCUS));
         int ci = g_opt.drop_map[k];
         const char *l = opt_choice_label(id, ci);
-        draw_text_fit(f, ir.x + S(26), text_y(f, ir.y, rh), ir.w - S(34), l, (int)strlen(l), C(sel ? COL_SEL_TEXT : COL_TEXT), 0);
+        f32 lx = ir.x + S(26);
+        int ic = opt_choice_icon(id, ci);
+        if (ic >= 0) {
+            draw_ui_icon(ic, lx, roundf(ir.y + (rh - S(16)) * 0.5f), roundf(S(16)), C(sel ? COL_SEL_TEXT : COL_TEXT));
+            lx += S(24);
+        }
+        draw_text_fit(f, lx, text_y(f, ir.y, rh), ir.x + ir.w - S(8) - lx, l, (int)strlen(l), C(sel ? COL_SEL_TEXT : COL_TEXT), 0);
         if (ci == cur) { // check mark
             f32 cx = ir.x + S(9), cyy = ir.y + rh * 0.5f, t = MAX(1.5f, S(1.6f));
             Color cc = C(sel ? COL_SEL_TEXT : COL_ACCENT);
@@ -1170,17 +1202,20 @@ static const char *opt_act_summary(const UserAction *a) {
     else snprintf(sel, sizeof sel, a->sel_min >= 2 ? "Several items" : "One or more items");
     if (!a->deps_ok) snprintf(miss, sizeof miss, "Hidden, needs %s \xC2\xB7 ", a->deps);
     const char *types = a->sel_max == 0 ? "" : a->exts[0] ? a->exts : a->mimes[0] ? a->mimes : "any type";
-    snprintf(b, sizeof b, "%s%s%s%s%s", miss, sel, types[0] ? " \xC2\xB7 " : "", types, a->terminal ? " \xC2\xB7 in the terminal" : "");
+    char grp[96] = "";
+    if (a->group[0]) snprintf(grp, sizeof grp, "In %s \xC2\xB7 ", a->group);
+    snprintf(b, sizeof b, "%s%s%s%s%s%s", miss, grp, sel, types[0] ? " \xC2\xB7 " : "", types, a->terminal ? " \xC2\xB7 in the terminal" : "");
     return b;
 }
 
-static void opt_act_fill(const char *name, const char *exec, const char *exts, const char *deps, int sel, bool term) {
-    const char *v[4] = {name, exec, exts, deps};
-    for (int k = 0; k < 4; k++) {
+static void opt_act_fill(const char *name, const char *exec, const char *exts, const char *deps, const char *group, int sel, int icon, bool term) {
+    const char *v[5] = {name, exec, exts, deps, group};
+    for (int k = 0; k < 5; k++) {
         te_set(&g_opt.act_te[k], v[k], (int)strlen(v[k]), (int)strlen(v[k]));
         snprintf(g_opt.act_init[k], sizeof g_opt.act_init[k], "%s", v[k]);
     }
     g_opt.act_sel = g_opt.act_init_sel = sel;
+    g_opt.act_icon = g_opt.act_init_icon = icon;
     g_opt.act_term = g_opt.act_init_term = term;
     g_opt.act_focus = 0;
     g_opt.scroll = 0;
@@ -1192,11 +1227,11 @@ static void opt_act_edit(int i) {
         const UserAction *a = &g_ua[i];
         g_opt.act_edit = i;
         g_opt.act_new = false;
-        opt_act_fill(a->name, a->exec, a->exts, a->deps, opt_act_sel_of(a), a->terminal);
+        opt_act_fill(a->name, a->exec, a->exts, a->deps, a->group, opt_act_sel_of(a), a->icon, a->terminal);
     } else {
         g_opt.act_edit = UA_MAX;
         g_opt.act_new = true;
-        opt_act_fill("", "", "", "", 0, false);
+        opt_act_fill("", "", "", "", "", 0, -1, false);
     }
 }
 
@@ -1208,6 +1243,7 @@ static void opt_act_template(int t) {
     te_set(&g_opt.act_te[2], g_act_templates[t].exts, 0, 0);
     te_set(&g_opt.act_te[3], g_act_templates[t].deps, 0, 0);
     g_opt.act_sel = g_act_templates[t].sel;
+    g_opt.act_icon = ua_icon_find(g_act_templates[t].icon, false);
     g_opt.act_term = g_act_templates[t].term;
 }
 
@@ -1224,17 +1260,18 @@ static bool opt_act_write(char *path, size_t cap) {
     if (g_opt.act_new) ua_new_file(name, path, cap);
     else if (g_opt.act_edit < g_nua) path_join(path, cap, g_ua_dir, g_ua[g_opt.act_edit].file);
     else return false;
-    static const char *keys[4] = {"Name", "Exec", "Extensions", "Dependencies"};
-    const char *k[8], *v[8];
+    static const char *keys[5] = {"Name", "Exec", "Extensions", "Dependencies", "Group"};
+    const char *k[10], *v[10];
     int n = 0;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         const char *val = g_opt.act_te[i].buf;
         if (i == 2 && !val[0]) val = "any;"; // (Nemo wants Extensions or Mimetypes)
         if (g_opt.act_new ? i < 3 || val[0] : strcmp(g_opt.act_te[i].buf, g_opt.act_init[i])) k[n] = keys[i], v[n++] = val;
     }
     if (g_opt.act_new || g_opt.act_sel != g_opt.act_init_sel) k[n] = "Selection", v[n++] = g_act_sel_values[g_opt.act_sel];
     if (g_opt.act_new ? g_opt.act_term : g_opt.act_term != g_opt.act_init_term) k[n] = "Terminal", v[n++] = g_opt.act_term ? "true" : "false";
-    if (n && !ua_file_set(path, k, v, n)) { toast("Couldn't save %s: %s", path_basename(path), strerror(errno)); return false; }
+    if (g_opt.act_new ? g_opt.act_icon >= 0 : g_opt.act_icon != g_opt.act_init_icon) k[n] = "Icon", v[n++] = g_opt.act_icon >= 0 ? g_ua_icons[g_opt.act_icon].name : "";
+    if (n && !ua_file_set(path, NULL, k, v, n)) { toast("Couldn't save %s: %s", path_basename(path), strerror(errno)); return false; }
     if (g_opt.act_new) ua_put_last(path, cap); // after the others (the files get numbered)
     return true;
 }
@@ -1268,7 +1305,7 @@ static void opt_act_toggle(int i) {
     char path[PATH_MAX];
     path_join(path, sizeof path, g_ua_dir, g_ua[i].file);
     const char *k[1] = {"Active"}, *v[1] = {g_ua[i].active ? "false" : "true"};
-    if (ua_file_set(path, k, v, 1)) g_ua[i].active = !g_ua[i].active;
+    if (ua_file_set(path, NULL, k, v, 1)) g_ua[i].active = !g_ua[i].active;
     else toast("Couldn't save %s: %s", g_ua[i].file, strerror(errno));
 }
 
@@ -1305,15 +1342,23 @@ static const struct { const char *code, *label; } g_act_codes[] = {
 static f32 opt_draw_act_editor(f32 x, f32 y, f32 w, Rect list) {
     Font *f = &A.font;
     f32 rh = roundf(S(58)), ch = roundf(S(30)), ctlw = MIN(roundf(S(440)), w * 0.58f), lw = w - ctlw - S(44);
-    static const char *labels[] = {"Name", "Command", "Insert", "Shows for", "File types", "Needs programs", "Run in terminal"};
-    static const char *descs[] = {"Its label in the menu", "Runs without a shell", "Click to add to the command", "How many items selected",
-                                  "png; jpg \xC2\xB7 dir \xC2\xB7 nodirs", "Hidden while one is missing", "For commands that print or ask"};
-    static const char *ph[] = {"Copy image", "sh -c \"wl-copy < %F\"", NULL, NULL, "Any", "None"};
-    static const int field[] = {0, 1, -1, -1, 2, 3, -1};
+    static const char *labels[] = {"Name", "Icon", "Command", "Insert", "Shows for", "File types", "Needs programs", "Group", "Run in terminal"};
+    static const char *descs[] = {"Its label in the menu", "Next to it in the menu", "Runs without a shell", "Click to add to the command",
+                                  "How many items selected", "png; jpg \xC2\xB7 dir \xC2\xB7 nodirs", "Hidden while one is missing",
+                                  "Same group, same submenu", "For commands that print or ask"};
+    static const char *ph[] = {"Copy image", NULL, "sh -c \"wl-copy < %F\"", NULL, NULL, "Any", "None", "None: in the menu itself", NULL};
+    static const int field[] = {0, -1, 1, -1, -1, 2, 3, 4, -1};
+    enum { R_ICON = 1, R_CODES = 3, R_SEL = 4, R_TERM = 8 };
     y = props_heading(x, y, g_opt.act_new ? "New action" : "Edit action");
     int nrows = (int)ARRAY_COUNT(labels);
     props_card(x, y, w, nrows, rh, 0);
     for (int r = 0; r < nrows; r++, y += rh) {
+        if (g_opt.act_reveal && field[r] == g_opt.act_focus) { // (applied on the next frame)
+            if (y < list.y) g_opt.scroll -= list.y - y;
+            else if (y + rh > list.y + list.h) g_opt.scroll += y + rh - list.y - list.h;
+            g_opt.act_reveal = false;
+            A.redraw = true;
+        }
         if (y + rh <= list.y || y >= list.y + list.h) continue;
         opt_row_text(x, y, rh, lw, labels[r], descs[r], false);
         f32 cx = x + w - ctlw - S(14), cy = y + rh * 0.5f, fy = roundf(cy - ch * 0.5f);
@@ -1321,7 +1366,7 @@ static f32 opt_draw_act_editor(f32 x, f32 y, f32 w, Rect list) {
             Rect fr = {cx, fy, ctlw, ch};
             sheet_field(fr, &g_opt.act_te[field[r]], g_opt.act_focus == field[r] && g_opt.drop_opt < 0, ph[r]);
             opt_hit(fr, HP_ACT_FIELD, -1, field[r]);
-        } else if (r == 2) { // the codes
+        } else if (r == R_CODES) {
             f32 bx = cx + ctlw;
             for (int k = (int)ARRAY_COUNT(g_act_codes) - 1; k >= 0; k--) {
                 f32 bw = text_width(f, g_act_codes[k].label, (int)strlen(g_act_codes[k].label)) + S(20);
@@ -1331,8 +1376,9 @@ static f32 opt_draw_act_editor(f32 x, f32 y, f32 w, Rect list) {
                 opt_hit(br, HP_ACT_CODE, -1, k);
                 bx -= S(6);
             }
-        } else if (r == 3) opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_SEL, "", ""}, cx, cy, ctlw);
-        else opt_draw_control(&(OptDef){OC_ACTIONS, OK_BOOL, OPT_ACT_TERM, "", ""}, cx, cy, ctlw);
+        } else if (r == R_ICON) opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_ICON, "", ""}, cx, cy, ctlw);
+        else if (r == R_SEL) opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_SEL, "", ""}, cx, cy, ctlw);
+        else if (r == R_TERM) opt_draw_control(&(OptDef){OC_ACTIONS, OK_BOOL, OPT_ACT_TERM, "", ""}, cx, cy, ctlw);
     }
     // buttons: Edit as text (and Delete) on the left, Cancel + Save on the right
     y += roundf(S(14));
@@ -1387,7 +1433,8 @@ static f32 opt_draw_actions(f32 x, f32 y, f32 w, Rect list, const char *q) {
             f32 by = roundf(y + (rh - ch) * 0.5f), bx = x + w - S(12) - bw;
             Rect rdel = {bx, by, bw, ch}, rdown = {rdel.x - S(8) - aw, by, aw, ch}, rup = {rdown.x - S(4) - aw, by, aw, ch};
             Rect redit = {rup.x - S(8) - bw, by, bw, ch}, rtog = {redit.x - S(14) - roundf(S(40)), roundf(y + rh * 0.5f - S(10)), roundf(S(40)), roundf(S(20))};
-            opt_row_text(x, y, rh, rtog.x - x - S(24), a->name[0] ? a->name : a->file, opt_act_summary(a), !ua_usable(a));
+            draw_ui_icon(ua_icon_ui(a->icon, false), x + S(16), roundf(y + (rh - S(18)) * 0.5f), roundf(S(18)), C(ua_usable(a) ? COL_TEXT : COL_TEXT_DIM));
+            opt_row_text(x + S(30), y, rh, rtog.x - x - S(54), a->name[0] ? a->name : a->file, opt_act_summary(a), !ua_usable(a));
             opt_toggle_draw(rtog, a->active, opt_hover(rtog));
             opt_hit(rtog, HP_ACT_TOGGLE, -1, i);
             sheet_button(redit, "Edit", false, true);
@@ -1404,6 +1451,20 @@ static f32 opt_draw_actions(f32 x, f32 y, f32 w, Rect list, const char *q) {
         y += rh;
     }
     if (!q[0] && !g_nua) draw_text(&A.font_small, x + S(14), y + S(10), "No actions yet", 14, C(COL_TEXT_FAINT));
+    if (!q[0] && g_nuag) { // the groups (Group= in the editor): their icons
+        y = props_heading(x, y + gap, "Groups");
+        props_card(x, y, w, g_nuag, rh, 0);
+        for (int g = 0; g < g_nuag; g++, y += rh) {
+            if (y + rh <= list.y || y >= list.y + list.h) continue;
+            int na = 0;
+            for (int i = 0; i < g_nua; i++) na += !strcmp(g_ua[i].group, g_uag[g].name);
+            char d[64];
+            snprintf(d, sizeof d, "%d action%s \xC2\xB7 a submenu", na, na == 1 ? "" : "s");
+            draw_ui_icon(ua_icon_ui(g_uag[g].icon, true), x + S(16), roundf(y + (rh - S(18)) * 0.5f), roundf(S(18)), C(COL_TEXT));
+            opt_row_text(x + S(30), y, rh, w - roundf(S(320)), g_uag[g].name, d, false);
+            opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_GICON + g, "", ""}, x + w - S(14) - roundf(S(260)), y + rh * 0.5f, roundf(S(260)));
+        }
+    }
     return y;
 }
 
@@ -1574,7 +1635,7 @@ static bool options_text_focus(TextEdit *edit, bool focused) {
     if (g_opt.rec_def >= 0) return false; // the click ends recording a shortcut first (options_click)
     if (g_opt.drop_opt >= 0) return edit == &g_opt.drop_filter;
     int act = -1;
-    for (int k = 0; k < 4; k++)
+    for (int k = 0; k < 5; k++)
         if (edit == &g_opt.act_te[k]) act = k;
     if (edit != &g_opt.search && edit != &g_opt.lname && edit != &g_opt.brand && edit != &g_opt.scroll_color && act < 0) return focused;
     g_opt.search_focus = edit == &g_opt.search;
@@ -1711,7 +1772,7 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
     if (g_opt.act_focus >= 0 && g_opt.drop_opt < 0) { // the action editor: Tab between its fields, Enter saves
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_act_save();
         else if (k == SDLK_ESCAPE) g_opt.act_focus = -1;
-        else if (k == SDLK_TAB) g_opt.act_focus = (g_opt.act_focus + (mod & SDL_KMOD_SHIFT ? 3 : 1)) % 4;
+        else if (k == SDLK_TAB) g_opt.act_focus = (g_opt.act_focus + (mod & SDL_KMOD_SHIFT ? 4 : 1)) % 5, g_opt.act_reveal = true;
         else te_key(&g_opt.act_te[g_opt.act_focus], k, mod);
         return;
     }

@@ -3553,6 +3553,9 @@ static int run_selftest_m8(void) {
         UA_FILE("j-subst.action", "[Action]\nName=Words\nExec=sh -c \"echo \\\"$(wc -w < %F) in %f\\\"\"\nSelection=s\nExtensions=png;\n");
         UA_FILE("i-pct.action", "[Action]\nName=Pct %%\nExec=printf \"%%s 100%%\" %f\nSelection=s\nExtensions=txt;\n");
         UA_FILE("notes.txt", "[Action]\nName=Not an action file\nExec=true\n");
+        UA_FILE("k-tool1.action", "[Action]\nName=Tool one\nExec=t1 %F\nSelection=s\nExtensions=txt;\nGroup=Tools\nIcon=terminal\n");
+        UA_FILE("k-tool2.action", "[Action]\nName=Tool two\nExec=t2 %F\nSelection=s\nExtensions=txt;\nGroup=Tools\n");
+        UA_FILE("groups.conf", "[Tools]\nIcon=wand\n");
 #undef UA_FILE
         pane_navigate(p, M8_BASE "/ua", true);
         st_wait();
@@ -3598,6 +3601,21 @@ static int run_selftest_m8(void) {
         menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
         menu_activate(st_menu_find("Pct %"));
         ST_CHECK(!strcmp(A.last_opened, "action:[printf][%s 100%][notes.txt]"));
+        { // a group: one submenu item (with the group's icon) where its first action would be; actions' own icons; a separator
+          // before Properties
+            menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+            int gi = st_menu_find("Tools"), pi = st_menu_find("Properties"), ti = st_menu_find("Text");
+            ST_CHECK(gi >= 0 && A.menu.items[gi].sub && st_menu_find("Tool one") < 0 && st_menu_find("Tool two") < 0);
+            ST_CHECK(menu_action_icon(&A.menu.items[gi]) == UI_WAND_SPARKLES && ti >= 0 && menu_action_icon(&A.menu.items[ti]) == UI_ZAP);
+            ST_CHECK(pi > gi && A.menu.items[pi - 1].sep && A.menu.items[ti - 1].sep);
+            menu_sub_open(gi, true);
+            ST_CHECK(menu_sub_shown() && g_menu_sub.n == 2 && !strcmp(g_menu_sub.items[0].label, "Tool one") && !strcmp(g_menu_sub.items[1].label, "Tool two"));
+            ST_CHECK(menu_action_icon(&g_menu_sub.items[0]) == UI_TERMINAL && menu_action_icon(&g_menu_sub.items[1]) == UI_ZAP);
+            st_frames(2);
+            st_shot("custom-actions-group");
+            menu_sub_activate(1);
+            ST_CHECK(!strcmp(A.last_opened, "action:[t2][" M8_BASE "/ua/notes.txt]"));
+        }
 
         menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), false); // the folder's own menu: Selection=none ones
         ST_CHECK(st_menu_find("Here") >= 0 && st_menu_find("Copy it's.png") < 0 && st_menu_find("Text") < 0);
@@ -4887,6 +4905,8 @@ static int run_selftest_m9(void) {
         st_frames(1);
         st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_SEL, 1)); // One item
         ST_CHECK(g_opt.act_sel == 1 && g_opt.drop_opt < 0);
+        g_opt.scroll = 1e6f; // (the editor is taller than the window: its buttons are at the bottom)
+        st_frames(2);
         st_opt_click(st_opt_hit(HP_ACT_SAVE, -1, 0)); // last in the menu: the files get numbered
         ST_CHECK(g_nua == 3 && !strcmp(g_ua[0].file, "010-nemo.nemo_action") && !strcmp(g_ua[1].file, "020-off.action"));
         ST_CHECK(!strcmp(g_ua[2].file, "030-open-in-gimp.action") && g_opt.act_edit < 0);
@@ -4908,11 +4928,55 @@ static int run_selftest_m9(void) {
         ST_CHECK(!strcmp(g_opt.act_te[3].buf, "wl-copy"));
         st_frames(1);
         A.last_opened[0] = 0;
+        g_opt.scroll = 1e6f; // (the editor is taller than the window: its buttons are at the bottom)
+        st_frames(2);
         st_opt_click(st_opt_hit(HP_ACT_TEXT, -1, 0)); // Edit as text: saved first, then the file in the editor
         ST_CHECK(g_nua == 4 && !strcmp(A.last_opened, "edit:" M9_ACT "040-copy-image-to-clipboard.action"));
         st_read_text(M9_ACT "040-copy-image-to-clipboard.action", buf, sizeof buf);
         ST_CHECK(!strcmp(buf, "[Action]\nName=Copy image to clipboard\nExec=sh -c \"wl-copy < %F\"\nExtensions=png; jpg; jpeg; webp; gif; svg\n"
-                              "Dependencies=wl-copy\nSelection=s\n"));
+                              "Dependencies=wl-copy\nSelection=s\nIcon=copy\n"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_EDIT, -1, 1)); // a group and an icon: Group= and Icon=; the group gets its row
+        st_opt_click(st_opt_hit(HP_DROP, OPT_ACT_ICON, 0));
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_ICON, 1 + ua_icon_find("image", false)));
+        ST_CHECK(g_opt.act_icon == ua_icon_find("image", false));
+        g_opt.scroll = 0;
+        st_frames(2);
+        st_text_click(&g_opt.act_te[0], 0, 1, 0);
+        for (int k = 0; k < 4; k++) st_key(SDLK_TAB, SDL_KMOD_NONE); // Tab down to Group
+        ST_CHECK(g_opt.act_focus == 4);
+        g_opt.scroll = 1e6f;
+        st_frames(2);
+        f32 bottom = g_opt.scroll;
+        st_key(SDLK_TAB, SDL_KMOD_NONE); // round to Name, out of view at the top: scrolled to it
+        st_frames(3);
+        ST_CHECK(g_opt.act_focus == 0 && bottom > 0 && g_opt.scroll < bottom && st_opt_hit(HP_ACT_FIELD, -1, 0));
+        st_key(SDLK_TAB, SDL_KMOD_SHIFT); // back to Group
+        st_frames(2);
+        ST_CHECK(g_opt.act_focus == 4 && st_opt_hit(HP_ACT_FIELD, -1, 4));
+        st_type("Images");
+        st_frames(1);
+        st_shot("options-actions-edit-group");
+        st_key(SDLK_RETURN, SDL_KMOD_NONE);
+        st_read_text(M9_ACT "020-open-in-gimp.action", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "[Action]\nName=Open in Gimp\nExec=gimp %F\nExtensions=any;\nSelection=s\nGroup=Images\nIcon=image\n"));
+        ST_CHECK(g_nuag == 1 && !strcmp(g_uag[0].name, "Images") && g_uag[0].icon < 0 && g_ua[1].icon == ua_icon_find("image", false));
+        g_opt.scroll = 1e6f; // (the groups are at the bottom)
+        st_frames(2);
+        st_opt_click(st_opt_hit(HP_DROP, OPT_ACT_GICON, 0)); // the group's icon: groups.conf; typing filters the list
+        st_type("camera");
+        st_frames(1);
+        ST_CHECK(g_opt.drop_n == 1);
+        st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_GICON, 0));
+        st_read_text(M9_ACT "groups.conf", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "[Images]\nIcon=camera\n") && g_uag[0].icon == ua_icon_find("camera", false));
+        ua_load(); // (read back)
+        ST_CHECK(g_nuag == 1 && g_uag[0].icon == ua_icon_find("camera", false));
+        g_opt.scroll = 0;
+        st_frames(2);
+        st_shot("options-actions-groups");
 
         st_frames(1);
         st_opt_click(st_opt_hit(HP_ACT_EDIT, -1, 0)); // Esc: the field lets go, then the editor closes unsaved
