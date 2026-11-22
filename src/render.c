@@ -705,6 +705,13 @@ u32 g_sidebar_meta_drawn[2]; // selftest probe: 0 = Trash amount, 1 = drive free
 
 static u32 sidebar_meta_color(void) { return COL_TEXT_DIM; }
 
+// Category/section headers: stronger on light sidebars, slightly lighter on dark ones for readability.
+static u32 sidebar_header_text_color(bool hover) {
+    bool light = rgb_luma(COL_SIDEBAR) >= 0.5f;
+    if (hover) return COL_TEXT;
+    return light ? COL_TEXT_DIM : rgb_mix(COL_TEXT_FAINT, COL_TEXT_DIM, 0.75f);
+}
+
 static void draw_sidebar(void) {
     Pane *p = active_pane();
     Rect sb = A.r_sidebar;
@@ -729,20 +736,21 @@ static void draw_sidebar(void) {
             }
             f32 tx = r.x + S(10), tmax = r.x + r.w - S(6);
             pl->eject = (Rect){0, 0, 0, 0};
+            u32 hc = sidebar_header_text_color(hover);
             if (pl->kind == PK_NETHDR || pl->kind == PK_CLOUDHDR || pl->kind == PK_ADDONHDR) { // + : connect to a server / rclone config / add-on
                 f32 bs = roundf(S(20));
                 Rect pr = {roundf(r.x + r.w - bs - S(4)), roundf(r.y + (r.h - bs) * 0.5f), bs, bs};
                 pl->eject = pr;
                 bool ph = A.mouse_in && in_rect(pr, A.mx, A.my);
                 if (ph) draw_rrect(pr.x, pr.y, pr.w, pr.h, S(5), C(COL_CHIP));
-                draw_plus(pr.x + bs * 0.5f, pr.y + bs * 0.5f, S(10), MAX(2.f, S(1.6f)), C(ph ? COL_TEXT : hover ? COL_TEXT_DIM : COL_TEXT_FAINT));
+                draw_plus(pr.x + bs * 0.5f, pr.y + bs * 0.5f, S(10), MAX(2.f, S(1.6f)), C(ph ? COL_TEXT : hc));
                 tmax = pr.x - S(4);
             }
             { // collapse chevron
                 bool col = pl->kind == PK_GROUP ? A.qa[pl->group].collapsed : pl->kind == PK_DEVICES ? A.devs_collapsed
                          : pl->kind == PK_ADDONHDR ? addon_section_collapsed(pl) : pl->kind == PK_CLOUDHDR ? g_cloud_collapsed
                          : pl->kind == PK_BORGHDR ? A.borgs_collapsed : A.nets_collapsed;
-                draw_chevron(r.x + S(9), r.y + r.h * 0.5f, S(4), col ? 1 : 3, MAX(1.f, S(1.3f)), C(hover ? COL_TEXT_DIM : COL_TEXT_FAINT));
+                draw_chevron(r.x + S(9), r.y + r.h * 0.5f, S(4), col ? 1 : 3, MAX(1.f, S(1.3f)), C(hc));
                 tx = r.x + S(18);
             }
             if (editing) {
@@ -752,7 +760,7 @@ static void draw_sidebar(void) {
                 te_draw(&A.qa_te, fs, er, roundf(S(4)), C(COL_TEXT));
             } else {
                 draw_text_fit(fs, tx, text_y(fs, r.y, r.h), tmax - tx, pl->label, (int)strlen(pl->label),
-                              C(hover ? COL_TEXT_DIM : COL_TEXT_FAINT), 0);
+                              C(hc), 0);
             }
             continue;
         }
