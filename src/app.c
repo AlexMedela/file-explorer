@@ -13474,6 +13474,12 @@ int main(int argc, char **argv) {
         active_pane()->du = true;
         A.du_style = !strcmp(getenv("FE_SHOT_DU"), "sunburst");
     }
+    if (A.screenshot && getenv("FE_SHOT_TABS")) // visual checks of tab icons: a letter per tab, d disk usage, s snapshots
+        for (const char *v = getenv("FE_SHOT_TABS"); *v && v - getenv("FE_SHOT_TABS") < A.ntabs; v++) {
+            Pane *tp = &A.tabs[v - getenv("FE_SHOT_TABS")]->pane[0];
+            if (*v == 'd') tp->du = true;
+            else if (*v == 's') tp->snapv = true;
+        }
     if (split_path) open_target(split_path, true, true);
     if (A.screenshot && getenv("FE_SHOT_CMP") && A.npanels > 1) { // visual checks of folder compare ("diff": differences only)
         g_cmp.diff_only = !strcmp(getenv("FE_SHOT_CMP"), "diff");

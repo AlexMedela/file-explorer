@@ -300,6 +300,36 @@ static void draw_tri(f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2, Color c) {
     draw_line(x2, y2, x0, y0, 1.f, c);
 }
 
+// Filled convex polygon (vertices clockwise on screen), anti-aliased with a 1 px feather along its outline.
+static void draw_convex(const f32 *px, const f32 *py, int n, Color c) {
+    enum { MAXV = 96 };
+    if (n < 3 || n > MAXV) return;
+    f32 nx[MAXV], ny[MAXV];
+    for (int i = 0; i < n; i++) { // outward normal at each vertex: between its two edges', mitred (shorter at sharp tips)
+        int pi = (i + n - 1) % n, ni = (i + 1) % n;
+        f32 ax = px[i] - px[pi], ay = py[i] - py[pi], bx = px[ni] - px[i], by = py[ni] - py[i];
+        f32 la = sqrtf(ax * ax + ay * ay), lb = sqrtf(bx * bx + by * by);
+        if (la <= 0 || lb <= 0) { nx[i] = ny[i] = 0; continue; }
+        f32 mx = ay / la + by / lb, my = -ax / la - bx / lb, ml = mx * mx + my * my; // sum of the edge normals
+        f32 k = ml < 1.f ? 2.f / sqrtf(MAX(ml, 1e-6f)) : 2.f / ml; // a unit offset of both edges, at most 2 long
+        nx[i] = mx * k;
+        ny[i] = my * k;
+    }
+    Color co = c;
+    co.a = 0;
+    draw_reserve(n * 2, (n - 2) * 3 + n * 6);
+    int base = g_nv;
+    for (int i = 0; i < n; i++) {
+        dv(px[i] - nx[i] * 0.5f, py[i] - ny[i] * 0.5f, c, WU, WU);
+        dv(px[i] + nx[i] * 0.5f, py[i] + ny[i] * 0.5f, co, WU, WU);
+    }
+    for (int i = 1; i + 1 < n; i++) di3(base, base + 2 * i, base + 2 * i + 2);
+    for (int i = 0; i < n; i++) {
+        int j = (i + 1) % n;
+        di4(base + 2 * i, base + 2 * i + 1, base + 2 * j + 1, base + 2 * j);
+    }
+}
+
 // Ring segment between radii r0 and r1 from angle a0 to a1 (radians, clockwise from +x on screen).
 static void draw_arc_band(f32 cx, f32 cy, f32 r0, f32 r1, f32 a0, f32 a1, Color c) {
     if (a1 <= a0 || r1 <= r0) return;
