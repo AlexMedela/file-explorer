@@ -157,16 +157,16 @@ File icons > **System** (`icon_theme=System`) uses the desktop's icon theme for 
 the settings portal names (else KDE's or GTK's settings), followed when it changes. The bundled icon shows until the
 desktop's is there, and wherever its theme has none.
 
-`app_icon_mode=custom|system|default` (Options -> Appearance -> Application icon, directly under File icons) selects
+`app_icon_mode=custom|file_icon|default` (Options -> Appearance -> App icon, directly under File icons) selects
 the window and launcher icon. `app_icon` (empty by default) remembers the absolute `.svg`/`.png` path typed in that
-row; the path survives mode changes. The row previews the icon in effect with no background chip, and its active
-button is primary. **Apply** uses the typed path (SVG keeps its own colours) and selects Custom; **System** follows the
-desktop icon theme's `dev.fileexplorer` artwork, falling back to the built-in icon when the theme has none; **Default**
-uses the accent-coloured built-in logo. System installs no launcher override and removes one this app previously
-wrote; Default restores the recoloured built-in artwork. Older settings with a non-empty `app_icon` are treated as
-Custom, and an empty one as Default.
+row. The row previews the icon in effect with no background chip, and its active button is primary. **Apply** uses the
+typed path (SVG keeps its own colours) and selects Custom; **File-Icon** uses the folder icon of the currently selected
+File icons set and follows changes to that setting live; **Default** clears `app_icon`, shows the `Default` placeholder
+in the field, and restores the accent-coloured built-in logo. File-Icon installs no launcher override and removes one
+this app previously wrote; Default restores the recoloured built-in artwork. Older settings with a non-empty
+`app_icon` are treated as Custom, an empty one as Default, and a legacy `app_icon_mode=system` as File-Icon.
 
-`title_icon` (Options -> Appearance -> Title bar icon, directly below Application icon, empty by default) is an
+`title_icon` (Options -> Appearance -> Title bar icon, directly below App icon, empty by default) is an
 absolute `.svg` or `.png` path that overrides the icon at the left of the title bar. Its row previews the icon in effect
 without a background chip and has **Apply** and **Default** buttons; Default clears the path and restores the small
 built-in logo, while the typed field keeps its path until you press Default. This override follows the **Logo** toggle

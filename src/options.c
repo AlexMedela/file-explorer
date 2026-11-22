@@ -27,7 +27,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_ACCENT_DESKTOP, "Desktop's accent colour", "Use the desktop's accent with every theme, where it has one (else the colour above)"},
     {OC_APPEARANCE, OK_TEXT, OPT_SCROLL_COLOR, "Scrollbar colour", "Empty: Auto, the theme's own (System: the desktop's accent); or #RRGGBB / #RGB, then Apply"},
     {OC_APPEARANCE, OK_CHOICE, OPT_ICON_THEME, "File icons", "Icon set for files and folders; System: the desktop's icon theme"},
-    {OC_APPEARANCE, OK_TEXT, OPT_APP_ICON, "Application icon", "Absolute SVG/PNG path: Apply uses it, System follows the desktop icon theme, Default restores the built-in icon"},
+    {OC_APPEARANCE, OK_TEXT, OPT_APP_ICON, "App icon", "Absolute SVG/PNG path: Apply uses it, File-Icon follows the current File icons folder icon, Default restores the built-in icon and clears the path"},
     {OC_APPEARANCE, OK_TEXT, OPT_TITLE_ICON, "Title bar icon", "Icon at the left of the title bar: absolute SVG/PNG path; Apply uses it, Default restores the built-in logo. Logo off hides it"},
     {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "Show the icon before the name above the sidebar; off hides a custom title bar icon too"},
     {OC_APPEARANCE, OK_CHOICE, OPT_FONT, "Font", "Interface font family"},
@@ -629,9 +629,9 @@ static void opt_scroll_color_apply(void) {
     g_opt.scroll_focus = false;
 }
 
-// Application icon: an absolute .svg/.png keeps its own colours; empty puts the built-in logo back.
+// App icon: an absolute .svg/.png keeps its own colours; empty leaves the built-in logo in effect.
 static void opt_app_icon_chosen(const char *path) {
-    if (!app_icon_path_ok(path)) { toast("Application icon: an absolute .svg or .png path"); return; }
+    if (!app_icon_path_ok(path)) { toast("App icon: an absolute .svg or .png path"); return; }
     snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", path ? path : "");
     g_app_icon_mode = APP_ICON_CUSTOM;
     g_logo_changed = true;
@@ -664,6 +664,15 @@ static void opt_app_icon_set_mode(AppIconMode m) {
     A.settings_dirty = true;
 }
 
+// Default forgets the custom artwork completely: the field falls back to its "Default" placeholder.
+static void opt_app_icon_default(void) {
+    g_app_icon_path[0] = 0;
+    opt_app_icon_set_mode(APP_ICON_DEFAULT);
+    A.redraw = true;
+    te_set(&g_opt.app_icon, "", 0, 0);
+    g_opt.app_icon_focus = false;
+}
+
 static void opt_title_icon_default(void) {
     g_title_icon_path[0] = 0;
     A.settings_dirty = true;
@@ -676,7 +685,7 @@ static void opt_icon_button(int opt, int arg) {
     if (opt == OPT_APP_ICON) {
         if (arg == 0) opt_app_icon_apply();
         else if (arg == 1) opt_app_icon_set_mode(APP_ICON_FILE_ICON);
-        else if (arg == 2) opt_app_icon_set_mode(APP_ICON_DEFAULT);
+        else if (arg == 2) opt_app_icon_default();
     } else if (opt == OPT_TITLE_ICON) {
         if (arg == 0) opt_title_icon_apply();
         else if (arg == 1) opt_title_icon_default();
@@ -834,7 +843,7 @@ static bool opt_hover(Rect r) { return hot(r); }
 
 // The last-set active mode owns the primary button; title Apply is active while a custom path is set.
 static const char *opt_icon_button_label(int opt, int arg) {
-    if (opt == OPT_APP_ICON) return arg == 0 ? "Apply" : arg == 1 ? "System" : "Default";
+    if (opt == OPT_APP_ICON) return arg == 0 ? "Apply" : arg == 1 ? "File-Icon" : "Default";
     return arg == 0 ? "Apply" : "Default";
 }
 
@@ -846,7 +855,7 @@ static bool opt_icon_button_active(int opt, int arg) {
 }
 
 static f32 opt_icon_row_button_w(int n) {
-    static const char *labels[3] = {"Apply", "System", "Default"};
+    static const char *labels[3] = {"Apply", "File-Icon", "Default"};
     f32 w = 0;
     for (int i = 0; i < MIN(n, 3); i++) w = MAX(w, text_width(&A.font, labels[i], (int)strlen(labels[i])));
     return w;

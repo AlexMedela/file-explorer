@@ -4062,7 +4062,10 @@ static int run_selftest_m9(void) {
             ST_CHECK(af && tf && aa && as && ad && ta && td);
             ST_CHECK(af && aa && fabsf(aa->r.y - af->r.y) < 0.5f && fabsf(as->r.y - af->r.y) < 0.5f && fabsf(ad->r.y - af->r.y) < 0.5f);
             ST_CHECK(tf && ta && fabsf(ta->r.y - tf->r.y) < 0.5f && fabsf(td->r.y - tf->r.y) < 0.5f);
-            ST_CHECK(strstr(g_opts[ia].desc, "Apply") && strstr(g_opts[ia].desc, "System") && strstr(g_opts[ia].desc, "Default"));
+            ST_CHECK(!strcmp(g_opts[ia].label, "App icon"));
+            ST_CHECK(strstr(g_opts[ia].desc, "Apply") && strstr(g_opts[ia].desc, "File-Icon") && strstr(g_opts[ia].desc, "Default"));
+            ST_CHECK(!strstr(g_opts[ia].desc, "System"));
+            ST_CHECK(!strcmp(opt_icon_button_label(OPT_APP_ICON, 1), "File-Icon"));
             ST_CHECK(strstr(g_opts[it].desc, "Apply") && strstr(g_opts[it].desc, "Default"));
             Rect pv, fld, bb[3];
             opt_icon_row_layout(S(186), S(30), 3, &pv, &fld, bb);
@@ -4126,16 +4129,18 @@ static int run_selftest_m9(void) {
             free(fi_prev);
             free(fi_win);
         }
-        { // the real buttons switch modes and keep the typed path for a later Apply
+        { // the real buttons switch modes; Default erases the path and clears the field to its placeholder
             st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1));
             ST_CHECK(g_app_icon_mode == APP_ICON_FILE_ICON && !strcmp(g_app_icon_path, svg));
             st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 2));
-            ST_CHECK(g_app_icon_mode == APP_ICON_DEFAULT && !strcmp(g_app_icon_path, svg));
-            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
-            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
+            ST_CHECK(g_app_icon_mode == APP_ICON_DEFAULT && !g_app_icon_path[0] && !g_opt.app_icon.buf[0]);
+            u8 *after = app_icon_preview_raster(16), *logo = icon_raster(ICON_LOGO, 16, 16);
+            ST_CHECK(after && logo && !memcmp(after, logo, 16 * 16 * 4));
+            free(after);
+            free(logo);
             te_set(&g_opt.app_icon, "", 0, 0);
             st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
-            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !g_app_icon_path[0]);
+            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !g_app_icon_path[0] && !g_opt.app_icon.buf[0]);
             te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
             st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
             ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
