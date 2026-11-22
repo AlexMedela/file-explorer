@@ -7,8 +7,8 @@ enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 enum {
     OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
-    OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
-    OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
+    OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_POPUP, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
+    OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY, OPT_HIDE_SINGLE_TAB,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_FOLDERS_FIRST, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
@@ -36,7 +36,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_SIZE_BARS, "Folder size bars", "Bars behind folder sizes, relative to the largest"},
     {OC_APPEARANCE, OK_BOOL, OPT_LOAD_TIMES, "Load times", "How long the folder took to list, in the status bar"},
     {OC_APPEARANCE, OK_BOOL, OPT_SMOOTH, "Smooth scrolling", "Ease scrolling, go further on quick wheel turns, let touchpad swipes glide on"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Cards: the open tab joins the folder below it; Pills: rounded tabs centred in a box"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Classic tabs: the open tab joins the folder below it, above the navigation bar; Pills: rounded tabs centred in a box below it"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: Explorer's own on every desktop (Automatic), or the desktop's title bar (System)"},
     {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_BUTTONS, "Window buttons", "Minimise, maximise and close at the top right of Explorer's own title bar; without them, the desktop's keys close it"},
     {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
@@ -49,6 +49,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_HEADER, "Header brightness", "Tab strip and toolbar, -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_FILES, "File area brightness", "The background of the files, -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_PREVIEW, "Preview panel brightness", "-30% to +30%"},
+    {OC_APPEARANCE, OK_INT, OPT_BRIGHT_POPUP, "Pop-up panel brightness", "Options and other popup panels: -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_STATUS, "Status bar brightness", "-30% to +30%"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Font, colours, padding and cursor of terminal tabs (F4)"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_NEW, "Create theme from current colours", "Writes a JSON scheme you can edit"},
@@ -60,6 +61,7 @@ static const OptDef g_opts[] = {
     {OC_BEHAVIOUR, OK_BOOL, OPT_SEARCH_SUB, "Search in subfolders", "Default for the search bar toggle (Alt+R)"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_PREVIEW, "Preview panel", "Show the preview panel (Space / Ctrl+I)"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_RESTORE, "Restore tabs on startup", "Reopen the panels and tabs from last time"},
+    {OC_BEHAVIOUR, OK_BOOL, OPT_HIDE_SINGLE_TAB, "Hide tab bar with one tab", "Give the tab row back to the folder while only one tab is open; it returns as soon as you open another"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_SINGLE_INSTANCE, "Open in the running window", "Folders opened from other apps or the terminal become tabs here"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_AUTOSTART, "Start Explorer at login", "Starts in the background when you log in, ready to open instantly"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_TRAY, "Keep running in the tray when closed", "Closing the window hides it; quit from the tray icon or Ctrl+Q (needs a tray in your panel)"},
@@ -116,7 +118,7 @@ static const char *g_renderer_labels[] = {"Automatic", "Vulkan", "OpenGL", "Soft
 static const int g_transfer_counts[] = {1, 2, 4, 0}; // A.transfers_at_once (0 = no limit)
 static const char *g_transfer_labels[] = {"One at a time", "Two at a time", "Four at a time", "All at once"};
 static const char *g_exec_labels[] = {"Ask", "Run", "Run in terminal", "Open as a document (programs still ask)"}; // EXEC_*
-static const char *g_tab_style_labels[] = {"Cards", "Pills"}; // TABS_*
+static const char *g_tab_style_labels[] = {"Classic tabs (above)", "Pills"}; // TABS_*
 static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
 
 // hit parts recorded while drawing, tested on click
@@ -499,6 +501,7 @@ static bool opt_bool_get(int id) {
     case OPT_DBLCLICK_UP: return A.dblclick_up;
     case OPT_DROP_ASK: return A.drop_ask;
     case OPT_SINGLE_INSTANCE: return A.single_instance;
+    case OPT_HIDE_SINGLE_TAB: return g_hide_single_tab;
     case OPT_AUTOSTART: return autostart_enabled();
     case OPT_TRAY: return A.close_to_tray;
     case OPT_VERIFY: return A.verify_copies;
@@ -550,6 +553,7 @@ static void opt_bool_toggle(int id) {
     case OPT_SINGLE_CLICK: A.single_click = !A.single_click; break;
     case OPT_DBLCLICK_UP: A.dblclick_up = !A.dblclick_up; break;
     case OPT_DROP_ASK: A.drop_ask = !A.drop_ask; break;
+    case OPT_HIDE_SINGLE_TAB: g_hide_single_tab = !g_hide_single_tab; layout(); break;
     case OPT_SINGLE_INSTANCE:
         A.single_instance = !A.single_instance;
         if (A.single_instance && g_ipc_fd < 0) ipc_listen(ipc_handle);

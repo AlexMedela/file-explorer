@@ -138,7 +138,8 @@ enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
 enum { TITLEBAR_AUTO, TITLEBAR_SYSTEM, TITLEBAR_APP }; // A.title_bar
 enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
 enum { EXEC_ASK, EXEC_RUN, EXEC_TERMINAL, EXEC_OPEN }; // A.exec_open: opening an executable file asks, runs it (here / in a terminal), or opens it as a document
-enum { TABS_CARDS, TABS_PILLS }; // A.tab_style
+enum { TABS_CARDS, TABS_PILLS }; // A.tab_style: classic tabs above the navigation bar, pills below it
+static bool g_hide_single_tab = false; // Behavior: give the folder the tab row back when only one tab is open
 static const struct { int view, px; const char *label; } g_zoom[] = {
     {VIEW_DETAILS, 0, "Details"},       {VIEW_LIST, 0, "List"},          {VIEW_GRID, 48, "Small icons"},
     {VIEW_GRID, 72, "Small+ icons"},    {VIEW_GRID, 96, "Medium icons"}, {VIEW_GRID, 128, "Medium+ icons"},
@@ -313,7 +314,7 @@ static void term_send(Term *t, const char *s);
 // The window is a tree of panels (File Pilot style): every panel has its own tab bar.
 struct Panel {
     Tab *cur; // visible tab
-    Rect area, bar, plus, splitbtn;
+    Rect area, bar, plus, splitbtn, body; // body: below both bands (which one holds the tabs depends on the tab style)
     f32 tabs_w; // room for the tabs (bar minus + and split)
 };
 
@@ -906,38 +907,65 @@ static Rect item_rect(const Pane *p, i64 i) {
                   ly->cell_w, ly->cell_h};
 }
 
+typedef struct { f32 navigation_y, tabs_y, nav_h, tabs_h, content_y; } TabBands;
+
+// The navigation band is 46 high, the tab band 38. Classic tabs sit above the navigation bar, pills below it.
+static TabBands tab_bands(f32 y, f32 scale, int count) {
+    TabBands b;
+    b.nav_h = roundf(46.f * scale);
+    b.tabs_h = g_hide_single_tab && count <= 1 ? 0.f : roundf((A.tab_style == TABS_PILLS ? 44.f : 38.f) * scale);
+    if (A.tab_style == TABS_CARDS) {
+        b.tabs_y = y;
+        b.navigation_y = y + b.tabs_h;
+    } else {
+        b.navigation_y = y;
+        b.tabs_y = y + b.nav_h;
+    }
+    b.content_y = y + b.nav_h + b.tabs_h;
+    return b;
+}
+
+// Only the top row shares the window controls; a band below it keeps the full pane width.
+static f32 nav_available_width(f32 x, f32 y, f32 width) {
+    return A.csd && A.r_wctl.w > 0 && y < 0.5f ? MAX(0.f, MIN(width, A.r_wctl.x - x)) : width;
+}
+
+// area is the whole panel: the folder starts at content_y, but the navigation band stays inside the pane's hit rect.
 static void layout_pane(Pane *p, Rect area) {
     PaneLayout *ly = &p->ly;
     ly->area = area;
+    TabBands bands = tab_bands(area.y, S(1.f), panel_ntabs(tab_of(p)->panel));
+    f32 nav_y = bands.navigation_y;
     f32 tb = roundf(S(46));
-    ly->toolbar = (Rect){area.x, area.y, area.w, tb};
-    f32 bs = roundf(S(30)), by = area.y + roundf((tb - bs) * 0.5f), gap = roundf(S(2));
+    f32 width = nav_available_width(area.x, nav_y, area.w);
+    ly->toolbar = (Rect){area.x, nav_y, width, tb};
+    f32 bs = roundf(S(30)), by = nav_y + roundf((tb - bs) * 0.5f), gap = roundf(S(2));
     ly->back = (Rect){area.x + roundf(S(8)), by, bs, bs};
     ly->fwd = (Rect){ly->back.x + bs + gap, by, bs, bs};
     ly->up = (Rect){ly->fwd.x + bs + gap, by, bs, bs};
     f32 px = ly->up.x + bs + roundf(S(8));
-    ly->morebtn = (Rect){area.x + area.w - bs - roundf(S(8)), by, bs, bs};
+    ly->morebtn = (Rect){area.x + width - bs - roundf(S(8)), by, bs, bs};
     ly->filterbtn = (Rect){ly->morebtn.x - bs - gap, by, bs, bs};
     ly->sortbtn = (Rect){ly->filterbtn.x - bs - gap, by, bs, bs};
     // A narrow split keeps the path usable: back / forward / up go first (their keys and the mouse's side buttons
     // still work), then sort (it stays in the folder's menu), then filter and the menu (a right click on empty space).
     f32 path_right = ly->sortbtn.x - roundf(S(4));
-    if (area.w < S(240) || path_right - px < S(80)) {
+    if (width < S(240) || path_right - px < S(80)) {
         ly->back = ly->fwd = ly->up = (Rect){0};
         px = area.x + roundf(S(8));
     }
-    if (area.w < S(120) || path_right - px < S(80)) {
+    if (width < S(120) || path_right - px < S(80)) {
         ly->sortbtn = (Rect){0};
         path_right = ly->filterbtn.x - roundf(S(4));
     }
-    if (area.w < S(80)) {
+    if (width < S(80)) {
         ly->morebtn = ly->filterbtn = (Rect){0};
-        path_right = area.x + area.w - roundf(S(8));
+        path_right = area.x + width - roundf(S(8));
     }
     ly->pathbar = (Rect){px, by, MAX(0.f, path_right - px), bs};
     f32 hh = p->view == VIEW_DETAILS && !pane_du_on(p) && !pane_snap_on(p) ? roundf(S(32)) : 0; // list/grid sort from the menu, no header
-    ly->header = (Rect){area.x, area.y + tb, area.w, hh};
-    ly->list = (Rect){area.x, area.y + tb + hh, area.w, area.h - tb - hh};
+    ly->header = (Rect){area.x, bands.content_y, area.w, hh};
+    ly->list = (Rect){area.x, bands.content_y + hh, area.w, area.h - (bands.content_y - area.y) - hh};
     ly->has_trashbar = pane_is_trash(p);
     if (ly->has_trashbar) {
         f32 tbh = roundf(S(44));
@@ -1090,30 +1118,36 @@ static void col_toggle(int id) {
 
 static void layout_panel(Panel *pn, Rect r) {
     pn->area = r;
-    f32 tb = roundf(S(38));
-    pn->bar = (Rect){r.x, r.y, r.w, tb};
-    f32 bw = roundf(S(26)), by = r.y + roundf(S(6));
+    TabBands bands = tab_bands(r.y, S(1.f), panel_ntabs(pn));
+    f32 tb = bands.tabs_h;
+    pn->bar = (Rect){r.x, bands.tabs_y, r.w, tb};
+    f32 bw = roundf(S(26)), by = bands.tabs_y + roundf(S(6));
     f32 right = r.x + r.w; // a panel at the top right ends its tabs before the window buttons
     if (A.r_wctl.w > 0 && r.y < 1 && right > A.r_wctl.x) right = MAX(r.x + S(140), A.r_wctl.x);
-    pn->splitbtn = (Rect){right - bw - roundf(S(6)), by, bw, bw};
+    f32 split_x = right - bw - roundf(S(6));
+    pn->splitbtn = tb ? (Rect){split_x, by, bw, bw} : (Rect){0};
     int n = panel_ntabs(pn);
     bool pills = A.tab_style == TABS_PILLS;
     f32 gap = pills ? roundf(S(4)) : 0; // (cards touch: the open one's flares cover the seams)
     f32 x0 = r.x + roundf(S(6));
-    f32 avail = pn->splitbtn.x - roundf(S(6)) - (bw + roundf(S(4))) - x0;
+    // Measure against the would-be split button even when the band is hidden: tabs_w decides whether a new tab fits.
+    f32 avail = split_x - roundf(S(6)) - (bw + roundf(S(4))) - x0;
     pn->tabs_w = avail;
     f32 tw = n ? MAX(roundf(S(48)), MIN(roundf(S(200)), roundf((avail - gap * (f32)(n - 1)) / (f32)n))) : 0;
     f32 group = n ? tw * (f32)n + gap * (f32)(n - 1) : 0;
     if (pills) x0 = MAX(x0, MIN(roundf(r.x + (right - r.x - group) * 0.5f), x0 + avail - group)); // centred, clear of + and split
-    Rect body = {r.x, r.y + tb, r.w, r.h - tb};
+    Rect body = {r.x, bands.content_y, r.w, r.h - (bands.content_y - r.y)};
+    pn->body = body;
     int k = 0;
+    f32 pill_h = MIN(tb - roundf(S(18)), roundf(S(28)));
+    f32 pill_y = bands.tabs_y + roundf((tb - pill_h) * 0.5f);
     for (int i = 0; i < A.ntabs; i++) {
         Tab *t = A.tabs[i];
         if (t->panel != pn) continue;
-        t->r = pills ? (Rect){x0 + k * (tw + gap), r.y + roundf(S(5)), tw, tb - roundf(S(10))}
-                     : (Rect){x0 + k * tw, r.y + roundf(S(6)), tw, tb - roundf(S(6))};
+        t->r = pills ? (Rect){x0 + k * (tw + gap), pill_y, tw, pill_h}
+                     : (Rect){x0 + k * tw, bands.tabs_y + roundf(S(6)), tw, tb - roundf(S(6))};
         k++;
-        Rect pb = body;
+        Rect pb = r; // layout_pane needs the whole panel so the navigation band stays inside its hit rect
         t->dock_r = t->dock_div = t->dock_x = (Rect){0, 0, 0, 0};
         if (t->dock_on && !t->term) { // the terminal panel takes the bottom (the folder keeps at least a little)
             f32 dh = MIN(roundf(S(A.dock_h)), roundf(body.h * 0.8f));
@@ -1125,10 +1159,15 @@ static void layout_panel(Panel *pn, Rect r) {
             t->dock_x = (Rect){t->dock_r.x + t->dock_r.w - xs - roundf(S(8)), t->dock_r.y + roundf(S(8)), xs, xs};
         }
         layout_pane(&t->pane[0], pb);
+        if (t->term) { // terminal content starts below both bands, not under the tabs
+            PaneLayout *ly = &t->pane[0].ly;
+            ly->area.y = bands.content_y;
+            ly->area.h = MAX(0.f, pb.y + pb.h - bands.content_y);
+        }
     }
     // + : a round button after the last tab, centred on the tab labels (clear of the active tab's flare)
-    f32 ps = roundf(S(26)), pcy = pills ? r.y + tb * 0.5f : r.y + roundf(S(6)) + (tb - roundf(S(6))) * 0.5f;
-    pn->plus = (Rect){MIN(x0 + group + roundf(S(10)), pn->splitbtn.x - ps - roundf(S(4))), roundf(pcy - ps * 0.5f), ps, ps};
+    f32 ps = roundf(S(26)), pcy = pills ? bands.tabs_y + tb * 0.5f : bands.tabs_y + roundf(S(6)) + (tb - roundf(S(6))) * 0.5f;
+    pn->plus = tb ? (Rect){MIN(x0 + group + roundf(S(10)), pn->splitbtn.x - ps - roundf(S(4))), roundf(pcy - ps * 0.5f), ps, ps} : (Rect){0};
 }
 
 static void layout_node(Node *n, Rect r) {
@@ -1856,14 +1895,14 @@ static void shadow_draw(void) {
     SDL_SetRenderViewport(A.ren, &(SDL_Rect){m, m, A.W, A.H});
 }
 
-// The parts of the title bar that move the window: the logo, the strip above the preview, and the tab strips
-// along the top edge outside their tabs and buttons.
+// The parts of the title bar that move the window: the logo, the strip above the preview, and the empty part of
+// each tab band outside its tabs and buttons (the band follows the tab position setting).
 static bool titlebar_drag_at(f32 x, f32 y) {
     if (!A.csd || in_rect(A.r_wctl, x, y)) return false;
     if (in_rect(A.r_brand, x, y) || in_rect(A.r_wstrip, x, y)) return true;
     for (int i = 0; i < A.npanels; i++) {
         Panel *pn = A.panels[i];
-        if (pn->bar.y > 0.5f || !in_rect(pn->bar, x, y)) continue;
+        if (!in_rect(pn->bar, x, y)) continue;
         if (in_rect(pn->plus, x, y) || in_rect(pn->splitbtn, x, y)) return false;
         for (int k = 0; k < A.ntabs; k++)
             if (A.tabs[k]->panel == pn && in_rect(A.tabs[k]->r, x, y)) return false;
@@ -7844,10 +7883,13 @@ static bool drag_all_dirs(Pane *p) {
     return true;
 }
 
-// Thin strip along a panel's edges (below its tab bar) where dragged folders open in a new split; the rest of
+// The folder area of a panel: below both bands when tabs are above, or below the navigation band when they are not.
+static Rect panel_content_rect(Panel *pn) { return pn->body; }
+
+// Thin strip along a panel's edges (below its bands) where dragged folders open in a new split; the rest of
 // the panel stays a normal drop. ZONE_* or -1.
 static int panel_edge_zone(Panel *pn, f32 x, f32 y) {
-    Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
+    Rect a = panel_content_rect(pn);
     if (!in_rect(a, x, y)) return -1;
     f32 bw = MIN(S(44), a.w * 0.15f), bh = MIN(S(44), a.h * 0.15f);
     f32 d[4] = {(x - a.x) / bw, (a.x + a.w - x) / bw, (y - a.y) / bh, (a.y + a.h - y) / bh};

@@ -4012,6 +4012,74 @@ static int run_selftest_m9(void) {
         g_theme_cur = saved;
         theme_apply();
     }
+    { // two tab modes: Classic above the navigation bar, Pill below it; one tab can give its row back (Behavior setting)
+        ST_CHECK(opt_choice_count(OPT_TAB_STYLE) == 2);
+        ST_CHECK(!strcmp(opt_choice_label(OPT_TAB_STYLE, 0), "Classic tabs (above)") &&
+                 !strcmp(opt_choice_label(OPT_TAB_STYLE, 1), "Pills"));
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        TabBands b = tab_bands(100.f, 1.f, 2);
+        ST_CHECK(b.tabs_y == 100.f && b.tabs_h == 38.f);
+        ST_CHECK(b.navigation_y == 138.f && b.nav_h == 46.f);
+        ST_CHECK(b.content_y == b.navigation_y + b.nav_h);
+        opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
+        b = tab_bands(100.f, 1.f, 2);
+        ST_CHECK(b.navigation_y == 100.f && b.nav_h == 46.f);
+        ST_CHECK(b.tabs_y == 146.f && b.tabs_h == 44.f);
+        ST_CHECK(b.content_y == b.tabs_y + b.tabs_h);
+        ST_CHECK(tab_bands(100.f, 1.f, 1).tabs_h == 44.f); // default: the strip stays
+        ST_CHECK(!g_hide_single_tab);
+        opt_bool_toggle(OPT_HIDE_SINGLE_TAB);
+        ST_CHECK(g_hide_single_tab);
+        b = tab_bands(100.f, 1.f, 1);
+        ST_CHECK(b.tabs_h == 0.f && b.content_y == b.navigation_y + b.nav_h);
+        ST_CHECK(tab_bands(100.f, 1.f, 2).tabs_h == 44.f);
+        opt_bool_toggle(OPT_HIDE_SINGLE_TAB);
+        ST_CHECK(!g_hide_single_tab);
+        Panel *pn = A.ap;
+        opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
+        layout();
+        ST_CHECK(pn->bar.y == pn->area.y + 46.f);
+        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn)).content_y);
+        {
+            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn));
+            PaneLayout *pnly = &pn->cur->pane[0].ly;
+            ST_CHECK(pnly->toolbar.y == pnb.navigation_y);
+            ST_CHECK(pnly->header.y == pnb.content_y && pnly->list.y == pnb.content_y + pnly->header.h);
+        }
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        layout();
+        ST_CHECK(pn->bar.y == pn->area.y);
+        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn)).content_y);
+        {
+            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn));
+            PaneLayout *pnly = &pn->cur->pane[0].ly;
+            ST_CHECK(pnly->toolbar.y == pnb.navigation_y);
+            ST_CHECK(pnly->header.y == pnb.content_y && pnly->list.y == pnb.content_y + pnly->header.h);
+        }
+        opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
+        g_hide_single_tab = true;
+        layout();
+        ST_CHECK(pn->bar.h == 0.f && pn->splitbtn.w == 0.f);
+        { // a hidden band must not make the panel look full: a new tab still fits
+            ST_CHECK(pn->tabs_w >= TAB_MIN_W && tab_target_panel(pn) == pn);
+            int nt0 = A.ntabs;
+            Tab *nt = tab_new_fit(pn, M9_BASE, panel_end_index(pn), false);
+            ST_CHECK(nt && A.ntabs == nt0 + 1);
+            if (nt) tab_close(tab_index(nt));
+            ST_CHECK(A.ntabs == nt0);
+        }
+        settings_save();
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        g_hide_single_tab = false;
+        settings_load();
+        init_places();
+        ST_CHECK(A.tab_style == TABS_PILLS && g_hide_single_tab);
+        st_frames(2);
+        st_shot("m9-tab-pill-below-nav");
+        g_hide_single_tab = false;
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        layout();
+    }
     { // scrollbar colour: Auto (the theme's own; System: the desktop's accent), or #RRGGBB / #RGB typed and applied
         int saved = g_theme_cur;
         g_theme_cur = theme_find("Dark");
@@ -4678,7 +4746,7 @@ static int run_selftest_m9(void) {
         ST_CHECK(A.csd && A.r_wctl.w > 0 && fabsf(A.r_wctl.x + A.r_wctl.w - (f32)A.W) < 1);
         Panel *tr = NULL; // the panel at the top right
         for (int i = 0; i < A.npanels; i++)
-            if (A.panels[i]->bar.y < 1 && A.panels[i]->bar.x + A.panels[i]->bar.w >= A.r_content.x + A.r_content.w - 1) tr = A.panels[i];
+            if (A.panels[i]->area.y < 1 && A.panels[i]->area.x + A.panels[i]->area.w >= A.r_content.x + A.r_content.w - 1) tr = A.panels[i];
         ST_CHECK(tr && tr->splitbtn.x + tr->splitbtn.w <= A.r_wctl.x);
         f32 d = SDL_GetWindowPixelDensity(A.win);
         #define ST_HIT(px, py) window_hit_test(A.win, &(SDL_Point){(int)((px) / d), (int)((py) / d)}, NULL)
@@ -4709,6 +4777,7 @@ static int run_selftest_m9(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, A.W - S(20), S(15), SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
         ST_CHECK(strncmp(A.last_opened, "window:", 7) != 0);
+        A.menu.open = false; // the top row is the navigation band now: that click can open the folder menu
         st_frames(1);
         st_shot("m9-titlebar-nobuttons");
         opt_bool_toggle(OPT_WINDOW_BUTTONS);

@@ -88,7 +88,7 @@ static void cursor_apply(void) {
     // dragging items, a tab or a sidebar place: the grabbing hand from the start (not only once it leaves the window)
     bool grab = A.cur_grab && (A.drag == DRAG_ITEMS || A.drag == DRAG_TAB || A.drag == DRAG_PLACE);
     int edge = cursor_edge();
-    int want = edge ? edge : A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_hand ? 3 : A.ptr_text ? 4 : 0;
+    int want = edge ? edge : A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_text ? 4 : A.ptr_hand ? 3 : 0;
     if (want == A.cursor_shown) return;
     A.cursor_shown = want;
     SDL_Cursor *c[] = {A.cur_default, A.cur_ew, A.cur_ns, A.cur_hand, A.cur_text, A.cur_grab, A.cur_nwse, A.cur_nesw};
@@ -308,17 +308,20 @@ static void draw_split_icon(Rect sr, bool down, Color ic) {
 
 static void draw_panel_bar(Panel *pn) {
     Rect tb = pn->bar;
+    if (tb.h <= 0) return; // the single-tab setting gave this row back to the folder
     bool active_panel = pn == A.ap, multi = A.npanels > 1;
-    draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TABBAR));
+    bool pills = A.tab_style == TABS_PILLS;
+    draw_rect(tb.x, tb.y, tb.w, tb.h, C(pills ? COL_BG : COL_TABBAR));
     Font *f = &A.font;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)tb.x, (int)tb.y, (int)tb.w, (int)tb.h});
     Rect pr = pn->plus;
-    bool pills = A.tab_style == TABS_PILLS;
-    if (pills) { // Tab style Pills: a field-coloured box round the tabs, the open one tinted with the accent
+    if (pills) { // Tab style Pills: enclosure is styled separately; darker by default, visible gap to row
         Tab *first = panel_tab(pn, 0), *last = panel_tab(pn, -1);
-        f32 pad = roundf(S(3));
-        if (first && last)
-            draw_rrect(first->r.x - pad, first->r.y - pad, last->r.x + last->r.w - first->r.x + pad * 2, first->r.h + pad * 2, S(9), C(COL_FIELD));
+        f32 padx = roundf(S(10)), pady = roundf(S(5));
+        if (first && last) {
+            Rect box = {first->r.x - padx, first->r.y - pady, last->r.x + last->r.w - first->r.x + padx * 2, first->r.h + pady * 2};
+            draw_rrect(box.x, box.y, box.w, box.h, S(10), C(rgb_mix(COL_FIELD, COL_BG, 0.35f)));
+        }
         for (int i = 0; i < A.ntabs; i++) {
             Tab *t = A.tabs[i];
             if (t->panel != pn) continue;
@@ -395,7 +398,7 @@ static void draw_panel_bar(Panel *pn) {
         bool show_close = A.ntabs > 1 && (cur || hover) && r.w > S(90);
         f32 tx = ix + is + roundf(S(8));
         f32 maxw = r.x + r.w - tx - (show_close ? csz + S(12) : S(10));
-        Color tc = cur ? (active_panel || !multi ? C(COL_TEXT) : C(COL_TEXT2)) : C(COL_TEXT_DIM);
+        Color tc = cur ? (active_panel || !multi ? C(COL_TEXT) : C(COL_TEXT2)) : C(COL_TEXT_FAINT);
         if (on_term) tc = C(active_panel || !multi ? tfg : rgb_mix(tfg, tbg, 0.25f));
         draw_text_fit(f, tx, text_y(f, r.y, r.h), maxw, label, (int)strlen(label), tc, 0);
         if (show_close) {
@@ -443,7 +446,7 @@ static void draw_node_dividers(Node *n) {
 
 // Where a dropped tab / folder would go in panel pn: the half on side zone, or all of it (ZONE_CENTER).
 static void draw_split_zone(Panel *pn, int zone) {
-    Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
+    Rect a = panel_content_rect(pn);
     Rect z = a;
     if (zone == ZONE_LEFT) z.w = roundf(a.w * 0.5f);
     else if (zone == ZONE_RIGHT) { z.w = roundf(a.w * 0.5f); z.x = a.x + a.w - z.w; }
