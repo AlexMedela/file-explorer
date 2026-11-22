@@ -5962,8 +5962,9 @@ static void paste_dir(Pane *p, char *out, size_t cap) {
 
 static void drop_menu_do(int act);
 static void open_with_menu_app(Pane *p, int k);
-#define ACT_UA_BASE 700 // user actions (*.action files): + index in g_ua
-#define UA_MAX 16
+#define ACT_UA_BASE 700 // custom actions (*.action files): + index in g_ua
+#define UA_MAX 32
+_Static_assert(CMD_LAYOUT_BASE + MAX_LAYOUTS <= ACT_UA_BASE, "custom actions' ids must stay above the layouts'");
 static void ua_run(Pane *p, int idx);
 
 static void borg_close(Pane *p);
@@ -6628,221 +6629,354 @@ static void open_with_menu_app(Pane *p, int k) {
     strv_free(paths, n);
 }
 
-// user actions: ~/.local/share/file-explorer/actions/*.action
+// Custom actions: *.action files (Nemo's format; its *.nemo_action files work as they are) in
+// ~/.local/share/file-explorer/actions, as items of the context menu. Exec is split into arguments like a .desktop
+// file's and run without a shell, so a file name is only ever an argument. Words given to "sh -c" (or bash, zsh...)
+// are a script: the names go in quoted for where they land (outside quotes, inside "..." or '...'), so a name like
+// $(...) stays a name. Read on every menu open (a few small files; edits show at once).
 typedef struct {
-    char name[96],
-    exec[1024],
-    exts[256];
-    int sel;
-    bool quote;
-
-} UserAction; // sel: 0 any, 1 single, 2 multiple, 3 none
+    char name[128], exec[1024], exts[256], mimes[256];
+    int sel_min, sel_max; // how many selected items it's for; 0 (Selection=none): the folder's own menu
+    bool terminal;
+} UserAction;
 
 static UserAction g_ua[UA_MAX];
 static int g_nua;
+static char g_ua_dir[PATH_MAX];
+static char g_ua_label[UA_MAX][160]; // the menu's labels (Name with its codes filled in; the menu keeps the pointers)
 
 static char *ua_trim(char *s) {
-    while (*s == ' ' || *s == '\t') {
-        s++;
-    }
-
+    while (*s == ' ' || *s == '\t') s++;
     size_t l = strlen(s);
-    while (l && strchr(" \t\r\n", s[l - 1])) {
-        s[--l] = 0;
-    }
+    while (l && strchr(" \t\r\n", s[l - 1])) s[--l] = 0;
     return s;
 }
 
-static void ua_parse(const char *file) {
-    FILE *f = fopen(file, "r");
-    if (!f || g_nua >= UA_MAX)
-    {
-        if (f) fclose(f);
-        return;
+// Dependencies=prog;/abs/path;!other; - all there (a "!" one: not there).
+static bool ua_deps_ok(const char *deps) {
+    char l[256], *save = NULL;
+    snprintf(l, sizeof l, "%s", deps);
+    for (char *t = strtok_r(l, ";", &save); t; t = strtok_r(NULL, ";", &save)) {
+        t = ua_trim(t);
+        bool neg = t[0] == '!';
+        if (neg) t = ua_trim(t + 1);
+        if (!t[0]) continue;
+        if ((t[0] == '/' ? access(t, F_OK) == 0 : in_path(t)) == neg) return false;
     }
+    return true;
+}
 
-    UserAction a = {.quote = true};
+static void ua_parse(const char *file) {
+    if (g_nua >= UA_MAX) return;
+    FILE *f = fopen(file, "r");
+    if (!f) return;
+    UserAction a = {.sel_min = 1, .sel_max = INT_MAX};
+    char deps[256] = "", line[2048];
     bool active = true, in_sect = false;
-    char line[2048];
     while (fgets(line, sizeof line, f)) {
         char *s = ua_trim(line), *eq;
-        if (!s[0] || s[0] == '#') continue;
-        if (s[0] == '[') {
+        if (s[0] == '[') { // the first section only
             if (in_sect) break;
             in_sect = true;
             continue;
         }
-        if (!(eq = strchr(s, '='))) continue;
-
+        if (!s[0] || s[0] == '#' || !(eq = strchr(s, '='))) continue;
         *eq = 0;
         char *k = ua_trim(s), *v = ua_trim(eq + 1);
-        if (!strcmp(k, "Active")) active = strcmp(v, "false") != 0;
+        if (!strcmp(k, "Active")) active = strcasecmp(v, "false") != 0;
         else if (!strcmp(k, "Name")) snprintf(a.name, sizeof a.name, "%s", v);
         else if (!strcmp(k, "Exec")) snprintf(a.exec, sizeof a.exec, "%s", v);
         else if (!strcmp(k, "Extensions")) snprintf(a.exts, sizeof a.exts, "%s", v);
-        else if (!strcmp(k, "Selection")) a.sel = !strcmp(v, "single") ? 1 : !strcmp(v, "multiple") ? 2 : !strcmp(v, "none") ? 3 : 0;
-        else if (!strcmp(k, "Quote")) a.quote = strcmp(v, "none") != 0;
+        else if (!strcmp(k, "Mimetypes")) snprintf(a.mimes, sizeof a.mimes, "%s", v);
+        else if (!strcmp(k, "Dependencies")) snprintf(deps, sizeof deps, "%s", v);
+        else if (!strcmp(k, "Terminal")) a.terminal = !strcasecmp(v, "true");
+        else if (!strcmp(k, "Selection")) { // s / single, m / multiple, a count, none, any / notnone (both: one or more)
+            int c = atoi(v);
+            if (!strcasecmp(v, "s") || !strcasecmp(v, "single")) a.sel_min = a.sel_max = 1;
+            else if (!strcasecmp(v, "m") || !strcasecmp(v, "multiple")) a.sel_min = 2;
+            else if (!strcasecmp(v, "none")) a.sel_min = a.sel_max = 0;
+            else if (c > 0) a.sel_min = a.sel_max = c;
+        }
     }
     fclose(f);
-    if (active && a.name[0] && a.exec[0]) g_ua[g_nua++] = a;
+    if (active && a.name[0] && a.exec[0] && ua_deps_ok(deps)) g_ua[g_nua++] = a;
 }
 
 static void ua_load(void) {
-    char dh[PATH_MAX], dir[PATH_MAX];
+    char dh[PATH_MAX];
     g_nua = 0;
     data_home(dh, sizeof dh);
-    snprintf(dir, sizeof dir, "%s/file-explorer/actions", dh);
-    DIR *d = opendir(dir);
+    snprintf(g_ua_dir, sizeof g_ua_dir, "%s/file-explorer/actions", dh);
+    DIR *d = opendir(g_ua_dir);
     if (!d) return;
-    char *names[64];
+    char *names[UA_MAX * 2];
     int n = 0;
-    for (struct dirent *e; (e = readdir(d)) && n < 64;) {
-        size_t l = strlen(e->d_name);
-        if (l > 7 && !strcmp(e->d_name + l - 7, ".action")) names[n++] = strdup(e->d_name);
+    for (struct dirent *e; (e = readdir(d)) && n < (int)ARRAY_COUNT(names);) {
+        const char *dot = strrchr(e->d_name, '.');
+        if (dot && dot != e->d_name && (!strcmp(dot, ".action") || !strcmp(dot, ".nemo_action"))) names[n++] = strdup(e->d_name);
     }
     closedir(d);
-    qsort(names, (size_t)n, sizeof(char *), cmp_strp);
+    qsort(names, (size_t)n, sizeof(char *), cmp_strp); // (in the menu by file name)
     for (int i = 0; i < n; i++) {
         char full[PATH_MAX];
-        path_join(full, sizeof full, dir, names[i]);
+        path_join(full, sizeof full, g_ua_dir, names[i]);
         ua_parse(full);
         free(names[i]);
     }
 }
 
-static bool ua_item_ok(const UserAction *a, const char *path) {
-    struct stat st;
-    bool dir = stat(path, &st) == 0 && S_ISDIR(st.st_mode);
-    const char *name = path_basename(path);
+// Extensions: any, dir, nodirs, none (no extension), or extensions (case-insensitive suffixes, so tar.gz works);
+// Mimetypes: types or type/*. Either list may let it in; with neither it's for everything.
+static bool ua_item_ok(const UserAction *a, const char *name, bool dir) {
+    if (!a->exts[0] && !a->mimes[0]) return true;
+    char l[256], *save = NULL;
     size_t nl = strlen(name);
-    char ex[256];
-    snprintf(ex, sizeof ex, "%s", a->exts);
-    char *save = NULL;
-    bool any = true; // an empty list means any
-    for (char *t = strtok_r(ex, ";", &save); t; t = strtok_r(NULL, ";", &save)) {
+    snprintf(l, sizeof l, "%s", a->exts);
+    for (char *t = strtok_r(l, ";", &save); t; t = strtok_r(NULL, ";", &save)) {
         t = ua_trim(t);
-        if (!t[0]) continue;
-        any = false;
         size_t tl = strlen(t);
-        if (!strcasecmp(t, "any")) return true;
-        if (!strcasecmp(t, "dir")) {
-            if (dir) return true;
+        if (t[0] == '.') t++, tl--;
+        if (!tl) continue;
+        if (!strcasecmp(t, "any") || (!strcasecmp(t, "dir") && dir) || (!strcasecmp(t, "nodirs") && !dir)) return true;
+        if (!strcasecmp(t, "none")) {
+            if (!dir && !strrchr(name + 1, '.')) return true;
             continue;
         }
-        if (!dir && nl > tl + 1 && name[nl - tl - 1] == '.' && !strcasecmp(name + nl - tl, t)) {
-            return true;
-        }
+        if (!dir && nl > tl + 1 && name[nl - tl - 1] == '.' && !strcasecmp(name + nl - tl, t)) return true;
     }
-    return any;
+    if (!a->mimes[0]) return false;
+    const char *mime = mime_for_file(name, dir);
+    snprintf(l, sizeof l, "%s", a->mimes);
+    for (char *t = strtok_r(l, ";", &save); t; t = strtok_r(NULL, ";", &save)) {
+        t = ua_trim(t);
+        size_t tl = strlen(t);
+        if (!tl) continue;
+        if (!strcmp(t, "*") || !strcmp(t, "*/*") || !strcasecmp(t, mime)) return true;
+        if (tl > 2 && !strcmp(t + tl - 2, "/*") && !strncasecmp(t, mime, tl - 1)) return true;
+    }
+    return false;
 }
 
-static bool ua_match(const UserAction *a, char **paths, int n) {
-    if (n < 1 || a->sel == 3 || (a->sel == 1 && n != 1) || (a->sel == 2 && n < 2)) return false;
-    for (int i = 0; i < n; i++) {
-        if (!ua_item_ok(a, paths[i])) return false;
-    }
+static bool ua_match(const UserAction *a, char **paths, const bool *dirs, int n) {
+    if (n < a->sel_min || n > a->sel_max) return false;
+    for (int i = 0; i < n; i++)
+        if (!ua_item_ok(a, path_basename(paths[i]), dirs[i])) return false;
     return true;
 }
 
-static void ua_add(char *out, size_t cap, const char *s, bool quote) {
-    char q[PATH_MAX * 2 + 8];
-    if (!s[0]) return;
-    if (quote) sh_quote(q, sizeof q, s);
-    else snprintf(q, sizeof q, "%s", s);
-    size_t o = strlen(out);
-    snprintf(out + o, cap - o, "%s", q);
+// The selected items (as pane_selection_paths) and which of them are folders, from the listing: no stat, the folder
+// may be a slow mount.
+static char **ua_selection(Pane *p, int *n, bool **dirs) {
+    *n = 0;
+    *dirs = NULL;
+    if (!p->order || !p->L) return NULL;
+    bool use_cursor = !p->sel_count && p->cursor >= 0 && p->cursor < (i64)p->count;
+    u32 cnt = use_cursor ? 1 : p->sel_count;
+    if (!cnt) return NULL;
+    char **v = xmalloc(cnt * sizeof(char *));
+    bool *d = xmalloc(cnt * sizeof(bool));
+    char full[PATH_MAX];
+    const char *last = NULL; // contents search: a file and its selected lines are one path
+    for (u32 i = use_cursor ? (u32)p->cursor : 0; i < p->count && *n < (int)cnt; i++) {
+        if (!use_cursor && !p->sel[p->order[i]]) continue;
+        const Entry *e = &p->L->entries[p->order[i]];
+        if (e->name == last) continue;
+        last = e->name;
+        path_join(full, sizeof full, p->path, e->name);
+        d[*n] = e->flags & ENT_DIR;
+        v[(*n)++] = strdup(full);
+    }
+    *dirs = d;
+    return v;
 }
 
-// %F all selected, %f name of the first, %p its path, %P its folder, %% a percent sign
-static void ua_expand(const UserAction *a, const char *dir, char **paths, int n, char *out, size_t cap) {
-    char par[PATH_MAX], one[3];
-    if (n) parent_of(paths[0], par, sizeof par);
-    else snprintf(par, sizeof par, "%s", dir);
-    out[0] = 0;
-    for (const char *c = a->exec; *c; c++) {
-        if (c[0] != '%' || !c[1]) {
-            one[0] = *c;
-            one[1] = 0;
-            ua_add(out, cap, one, false);
+typedef struct { char *s; size_t n, cap; } UaBuf;
+
+static void ub_add(UaBuf *b, const char *s, size_t len) {
+    if (b->n + len + 1 > b->cap) {
+        b->cap = MAX(b->cap * 2, b->n + len + 64);
+        b->s = xrealloc(b->s, b->cap);
+    }
+    memcpy(b->s + b->n, s, len);
+    b->n += len;
+    b->s[b->n] = 0;
+}
+
+static void ub_str(UaBuf *b, const char *s) { ub_add(b, s, strlen(s)); }
+
+// s with every ' as '\'' (inside a single-quoted shell word).
+static void ub_sq_body(UaBuf *b, const char *s) {
+    for (const char *c = s; *c; c++) ub_add(b, *c == '\'' ? "'\\''" : c, *c == '\'' ? 4 : 1);
+}
+
+typedef struct {
+    char **paths;
+    int n;
+    const char *dir; // the folder the menu is about (%P)
+} UaCtx;
+
+// Item i of a field code's value: %F / %U one per selected item, the others one; NULL: not a code (kept as it is).
+static const char *ua_code(const UaCtx *c, char code, int i, char *tmp, size_t cap) {
+    const char *first = c->n ? path_basename(c->paths[0]) : "";
+    switch (code) {
+    case 'F': return c->paths[i];
+    case 'U': {
+        char enc[PATH_MAX * 3];
+        url_encode_path(c->paths[i], enc, sizeof enc);
+        snprintf(tmp, cap, "file://%s", enc);
+        return tmp;
+    }
+    case 'f': case 'N': return first;
+    case 'e': { // the name without its extension
+        snprintf(tmp, cap, "%s", first);
+        char *dot = strrchr(tmp, '.');
+        if (dot && dot != tmp) *dot = 0;
+        return tmp;
+    }
+    case 'P': return c->dir;
+    case 'p': return path_basename(c->dir);
+    default: return NULL;
+    }
+}
+
+static bool ua_is_code(char code) { return code && strchr("FUfNePp", code); }
+
+// Fill in the codes of s. sh: s is a shell script - each value quoted for the quotes it lands in.
+static void ua_fill(UaBuf *b, const UaCtx *c, const char *s, bool sh) {
+    char tmp[PATH_MAX * 3 + 16];
+    char q = 0; // the script's quote at this point: 0, '\'' or '"'
+    ub_str(b, "");
+    for (const char *k = s; *k; k++) {
+        if (sh && *k == '\\' && q != '\'' && k[1]) { ub_add(b, k, 2); k++; continue; }
+        if (sh && (*k == '\'' || *k == '"') && (!q || q == *k)) { q = q ? 0 : *k; ub_add(b, k, 1); continue; }
+        if (*k != '%' || !ua_is_code(k[1])) {
+            ub_add(b, k, 1);
+            if (*k == '%' && k[1] == '%') k++; // %% -> %
             continue;
         }
-        c++;
-        if (*c == 'F') {
-            for (int i = 0; i < n; i++) {
-                if (i) {
-                    ua_add(out, cap, " ", false);
-                }
-                ua_add(out, cap, paths[i], a->quote);
-            }
+        char code = *++k;
+        int cnt = code == 'F' || code == 'U' ? c->n : 1;
+        if (sh && q == '"') ub_str(b, "\"'"); // out of the double quotes into single ones, and back after
+        for (int i = 0; i < cnt; i++) {
+            const char *v = ua_code(c, code, i, tmp, sizeof tmp);
+            if (i) ub_str(b, " ");
+            if (sh && !q) ub_str(b, "'"); // outside quotes: a quoted word each
+            if (sh) ub_sq_body(b, v);
+            else ub_str(b, v);
+            if (sh && !q) ub_str(b, "'");
         }
-        else if (*c == 'f') ua_add(out, cap, n ? path_basename(paths[0]) : "", a->quote);
-        else if (*c == 'p') ua_add(out, cap, n ? paths[0] : par, a->quote);
-        else if (*c == 'P') ua_add(out, cap, par, a->quote);
-        else if (*c == '%') ua_add(out, cap, "%", false);
-        else {
-            one[0] = '%';
-            one[1] = *c;
-            one[2] = 0;
-            ua_add(out, cap, one, false);
-        }
+        if (sh && q == '"') ub_str(b, "'\"");
     }
+}
+
+// Exec as words: spaces separate them, '...' and "..." group (inside "...", \ escapes " $ ` and \), \ escapes outside.
+static int ua_words(const char *s, char **w, int max) {
+    int n = 0;
+    while (*s && n < max) {
+        while (*s == ' ' || *s == '\t') s++;
+        if (!*s) break;
+        UaBuf b = {0};
+        ub_str(&b, "");
+        char q = 0;
+        for (; *s && (q || (*s != ' ' && *s != '\t')); s++) {
+            if (!q && (*s == '\'' || *s == '"')) q = *s;
+            else if (q && *s == q) q = 0;
+            else if (*s == '\\' && s[1] && (!q || (q == '"' && strchr("\"$`\\", s[1])))) ub_add(&b, ++s, 1);
+            else ub_add(&b, s, 1);
+        }
+        w[n++] = b.s;
+    }
+    return n;
+}
+
+// The command line: a word that is just %F / %U becomes one argument per item; a script given to a shell's -c gets
+// its values quoted (ua_fill); in any other word they go in as they are (no shell reads it). <prog>: in the actions
+// folder (Nemo's way of naming a script that comes with the action). NULL-terminated, *argc words.
+static char **ua_argv(const UserAction *a, const UaCtx *c, int *argc) {
+    char *w[128];
+    int nw = ua_words(a->exec, w, (int)ARRAY_COUNT(w)), script = -1;
+    *argc = 0;
+    if (!nw) return NULL;
+    size_t l0 = strlen(w[0]);
+    if (l0 > 2 && w[0][0] == '<' && w[0][l0 - 1] == '>') {
+        char full[PATH_MAX];
+        w[0][l0 - 1] = 0;
+        path_join(full, sizeof full, g_ua_dir, w[0] + 1);
+        free(w[0]);
+        w[0] = strdup(full);
+    }
+    static const char *shells[] = {"sh", "bash", "dash", "zsh", "ksh", "mksh", "ash"};
+    for (size_t k = 0; k < ARRAY_COUNT(shells) && script < 0; k++)
+        if (!strcmp(path_basename(w[0]), shells[k]))
+            for (int i = 1; i < nw && script < 0; i++)
+                if (w[i - 1][0] == '-' && w[i - 1][1] != '-' && strchr(w[i - 1], 'c')) script = i; // -c, -lc, -ec ...
+    int cap = nw * MAX(c->n, 1) + 1, n = 0;
+    char **v = xmalloc((size_t)cap * sizeof(char *));
+    char tmp[PATH_MAX * 3 + 16];
+    for (int i = 0; i < nw; i++) {
+        if (i != script && (!strcmp(w[i], "%F") || !strcmp(w[i], "%U"))) {
+            for (int k = 0; k < c->n; k++) v[n++] = strdup(ua_code(c, w[i][1], k, tmp, sizeof tmp));
+        } else {
+            UaBuf b = {0};
+            ua_fill(&b, c, w[i], i == script);
+            v[n++] = b.s;
+        }
+        free(w[i]);
+    }
+    v[n] = NULL;
+    *argc = n;
+    return v;
 }
 
 static void ua_run(Pane *p, int idx) {
-
     if (idx < 0 || idx >= g_nua) return;
-    bool none = g_ua[idx].sel == 3;
-    int n = 0;
-    char **paths = none ? NULL : pane_selection_paths(p, &n);
-    if (!none && (!n || !ua_match(&g_ua[idx], paths, n))) {
-        strv_free(paths, n);
-        return;
+    const UserAction *a = &g_ua[idx];
+    int n = 0, argc = 0;
+    bool *dirs = NULL;
+    char **paths = A.menu.act_folder ? NULL : ua_selection(p, &n, &dirs);
+    char **argv = NULL;
+    if (ua_match(a, paths, dirs, n)) { // (the selection may have changed since the menu opened)
+        UaCtx c = {paths, n, p->path};
+        argv = ua_argv(a, &c, &argc);
     }
-
-    char cmd[8192];
-    ua_expand(&g_ua[idx], p->path, paths, n, cmd, sizeof cmd);
+    if (!argc) {
+    } else if (A.selftest) { // record what would run: each argument in []
+        size_t o = (size_t)snprintf(A.last_opened, sizeof A.last_opened, "action%s:", a->terminal ? "-terminal" : "");
+        for (int i = 0; i < argc && o < sizeof A.last_opened; i++) o += (size_t)snprintf(A.last_opened + o, sizeof A.last_opened - o, "[%s]", argv[i]);
+    } else if (a->terminal) spawn_terminal(p->path, argv);
+    else {
+        posix_spawn_file_actions_t fa;
+        posix_spawn_file_actions_init(&fa);
+        posix_spawn_file_actions_addchdir_np(&fa, p->path);
+        pid_t pid;
+        int err = posix_spawnp(&pid, argv[0], &fa, spawn_attr(), argv, environ);
+        posix_spawn_file_actions_destroy(&fa);
+        if (err) toast("Couldn't run %s: %s", a->name, strerror(err));
+    }
+    strv_free(argv, argc);
     strv_free(paths, n);
-
-    if (A.selftest) {
-        snprintf(A.last_opened, sizeof A.last_opened, "action:%s", cmd);
-        return;
-    }
-    char *argv[] = {"/bin/sh", "-c", cmd, NULL};
-    posix_spawn_file_actions_t fa;
-    posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_addchdir_np(&fa, p->path);
-    pid_t pid;
-    int err = posix_spawn(&pid, "/bin/sh", &fa, spawn_attr(), argv, environ);
-    posix_spawn_file_actions_destroy(&fa);
-    if (err) toast("Couldn't run %s: %s", g_ua[idx].name, strerror(err));
+    free(dirs);
 }
 
-// Selection=none actions
-static void ua_folder_items(Pane *p) {
-    int shown = 0;
-    fprintf(stderr, "ua_folder_items called\n");
-    if (pane_is_archive(p)) return;
+// The custom actions for the selection, or (folder) for the folder's own menu: Selection=none ones. Before Properties.
+static void ua_menu_items(Pane *p, bool folder) {
+    if (pane_is_archive(p) || pane_is_trash(p) || pane_du_on(p)) return;
     ua_load();
-    for (int i = 0; i < g_nua; i++) {
-        if (g_ua[i].sel != 3) continue;
-        if (!shown++) menu_sep();
-        menu_add(g_ua[i].name, "", ACT_UA_BASE + i, true);
-    }
-}
-
-static void ua_menu_items(Pane *p) {
     int n = 0, shown = 0;
-    if (pane_is_archive(p)) return;
-    char **paths = pane_selection_paths(p, &n);
-
-    ua_load();
-
+    bool *dirs = NULL;
+    char **paths = folder ? NULL : ua_selection(p, &n, &dirs);
+    UaCtx c = {paths, n, p->path};
     for (int i = 0; i < g_nua; i++) {
-        if (!ua_match(&g_ua[i], paths, n)) continue;
+        if (!ua_match(&g_ua[i], paths, dirs, n)) continue;
+        UaBuf b = {0};
+        ua_fill(&b, &c, g_ua[i].name, false);
+        snprintf(g_ua_label[i], sizeof g_ua_label[i], "%s", b.s);
+        free(b.s);
         if (!shown++) menu_sep();
-        menu_add(g_ua[i].name, "", ACT_UA_BASE + i, true);
+        menu_add(g_ua_label[i], "", ACT_UA_BASE + i, true);
     }
     strv_free(paths, n);
+    free(dirs);
 }
 
 static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
@@ -6924,7 +7058,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         menu_add("Copy path", "Ctrl+Shift+C", ACT_COPY_PATH, true);
         if (snap_in(p->path)) menu_add("Restore to where it is now\xE2\x80\xA6", "", ACT_SNAP_RESTORE, true);
         menu_terminal_items(p);
-        ua_menu_items(p);
+        ua_menu_items(p, false);
         menu_add("Properties", "Alt+Enter", ACT_PROPERTIES, true);
     } else {
         if (pane_is_archive(p)) {
@@ -6974,7 +7108,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         menu_add("Copy path", "Ctrl+Shift+C", ACT_COPY_PATH, true);
         menu_add_open_with("Open this folder with", "inode/directory", !pane_is_archive(p) && !pane_is_trash(p));
         menu_terminal_items(p);
-        ua_folder_items(p);
+        ua_menu_items(p, true);
         menu_add("Properties", "Alt+Enter", ACT_PROPERTIES, true);
     }
     menu_finish(x, y);
