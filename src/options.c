@@ -137,7 +137,7 @@ static void opt_act_template(int t);
 // hit parts recorded while drawing, tested on click
 enum { HP_NONE, HP_NAV, HP_TOGGLE, HP_SEG, HP_DROP, HP_MINUS, HP_PLUS, HP_SWATCH, HP_BUTTON, HP_DROPITEM, HP_SEARCH, HP_CLOSE,
        HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT,
-       HP_ACT_NEW, HP_ACT_FOLDER, HP_ACT_TOGGLE, HP_ACT_EDIT, HP_ACT_UP, HP_ACT_DOWN, HP_ACT_DELETE, HP_ACT_FIELD, HP_ACT_CODE,
+       HP_ACT_NEW, HP_ACT_FOLDER, HP_ACT_TOGGLE, HP_ACT_EDIT, HP_ACT_UP, HP_ACT_DOWN, HP_ACT_DELETE, HP_ACT_FIELD,
        HP_ACT_TEXT, HP_ACT_CANCEL, HP_ACT_SAVE };
 typedef struct { Rect r; int part, opt, arg; } OptHit;
 
@@ -1335,20 +1335,16 @@ static void opt_row_text(f32 x, f32 y, f32 rh, f32 lw, const char *label, const 
     draw_text_fit(fs, x + S(14), roundf(y + rh * 0.5f + S(3)), lw, desc, (int)strlen(desc), C(COL_TEXT_DIM), 0);
 }
 
-static const struct { const char *code, *label; } g_act_codes[] = {
-    {"%F", "%F files"}, {"%f", "%f name"}, {"%e", "%e base"}, {"%P", "%P folder"}, {"%U", "%U URIs"},
-};
-
 static f32 opt_draw_act_editor(f32 x, f32 y, f32 w, Rect list) {
     Font *f = &A.font;
     f32 rh = roundf(S(58)), ch = roundf(S(30)), ctlw = MIN(roundf(S(440)), w * 0.58f), lw = w - ctlw - S(44);
-    static const char *labels[] = {"Name", "Icon", "Command", "Insert", "Shows for", "File types", "Needs programs", "Group", "Run in terminal"};
-    static const char *descs[] = {"Its label in the menu", "Next to it in the menu", "Runs without a shell", "Click to add to the command",
-                                  "How many items selected", "png; jpg \xC2\xB7 dir \xC2\xB7 nodirs", "Hidden while one is missing",
-                                  "Same group, same submenu", "For commands that print or ask"};
-    static const char *ph[] = {"Copy image", NULL, "sh -c \"wl-copy < %F\"", NULL, NULL, "Any", "None", "None: in the menu itself", NULL};
-    static const int field[] = {0, -1, 1, -1, -1, 2, 3, 4, -1};
-    enum { R_ICON = 1, R_CODES = 3, R_SEL = 4, R_TERM = 8 };
+    static const char *labels[] = {"Name", "Icon", "Command", "Shows for", "File types", "Needs programs", "Group", "Run in terminal"};
+    static const char *descs[] = {"Its label in the menu", "Next to it in the menu", "%F files \xC2\xB7 %f name \xC2\xB7 %P folder", "How many items selected",
+                                  "png; jpg \xC2\xB7 dir \xC2\xB7 nodirs", "Hidden while one is missing", "Same group, same submenu",
+                                  "For commands that print or ask"};
+    static const char *ph[] = {"Copy image", NULL, "sh -c \"wl-copy < %F\"", NULL, "Any", "None", "None: in the menu itself", NULL};
+    static const int field[] = {0, -1, 1, -1, 2, 3, 4, -1};
+    enum { R_ICON = 1, R_SEL = 3, R_TERM = 7 };
     y = props_heading(x, y, g_opt.act_new ? "New action" : "Edit action");
     int nrows = (int)ARRAY_COUNT(labels);
     props_card(x, y, w, nrows, rh, 0);
@@ -1366,16 +1362,6 @@ static f32 opt_draw_act_editor(f32 x, f32 y, f32 w, Rect list) {
             Rect fr = {cx, fy, ctlw, ch};
             sheet_field(fr, &g_opt.act_te[field[r]], g_opt.act_focus == field[r] && g_opt.drop_opt < 0, ph[r]);
             opt_hit(fr, HP_ACT_FIELD, -1, field[r]);
-        } else if (r == R_CODES) {
-            f32 bx = cx + ctlw;
-            for (int k = (int)ARRAY_COUNT(g_act_codes) - 1; k >= 0; k--) {
-                f32 bw = text_width(f, g_act_codes[k].label, (int)strlen(g_act_codes[k].label)) + S(20);
-                bx -= bw;
-                Rect br = {bx, fy, bw, ch};
-                sheet_button(br, g_act_codes[k].label, false, true);
-                opt_hit(br, HP_ACT_CODE, -1, k);
-                bx -= S(6);
-            }
         } else if (r == R_ICON) opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_ICON, "", ""}, cx, cy, ctlw);
         else if (r == R_SEL) opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_SEL, "", ""}, cx, cy, ctlw);
         else if (r == R_TERM) opt_draw_control(&(OptDef){OC_ACTIONS, OK_BOOL, OPT_ACT_TERM, "", ""}, cx, cy, ctlw);
@@ -1727,10 +1713,6 @@ static void options_click(f32 x, f32 y, int clicks) {
         case HP_ACT_DOWN: ua_move(hp->arg, +1); return;
         case HP_ACT_DELETE: opt_act_delete(hp->arg); return;
         case HP_ACT_FIELD: g_opt.act_focus = hp->arg; return;
-        case HP_ACT_CODE: // into the command where the caret is
-            g_opt.act_focus = 1;
-            te_insert(&g_opt.act_te[1], g_act_codes[hp->arg].code);
-            return;
         case HP_ACT_TEXT: opt_act_edit_text(); return;
         case HP_ACT_CANCEL: opt_act_close(); return;
         case HP_ACT_SAVE: opt_act_save(); return;

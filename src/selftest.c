@@ -4892,14 +4892,13 @@ static int run_selftest_m9(void) {
         st_read_text(M9_ACT "off.action", buf, sizeof buf);
         ST_CHECK(g_ua[1].active && !strcmp(buf, "[Action]\nActive=true\nName=Off one\nExec=true\n"));
 
-        st_opt_click(st_opt_hit(HP_ACT_NEW, -1, 0)); // a new one: Tab between the fields, a code at the caret, Shows for
+        st_opt_click(st_opt_hit(HP_ACT_NEW, -1, 0)); // a new one: Tab between the fields, Shows for
         ST_CHECK(g_opt.act_new && g_opt.act_focus == 0);
         st_type("Open in Gimp");
         st_key(SDLK_TAB, SDL_KMOD_NONE);
         ST_CHECK(g_opt.act_focus == 1);
-        st_type("gimp ");
-        st_opt_click(st_opt_hit(HP_ACT_CODE, -1, 0));
-        ST_CHECK(!strcmp(g_opt.act_te[1].buf, "gimp %F") && g_opt.act_focus == 1);
+        st_type("gimp %F");
+        ST_CHECK(!strcmp(g_opt.act_te[1].buf, "gimp %F"));
         st_opt_click(st_opt_hit(HP_DROP, OPT_ACT_SEL, 0));
         ST_CHECK(g_opt.drop_opt == OPT_ACT_SEL);
         st_frames(1);
@@ -4950,9 +4949,9 @@ static int run_selftest_m9(void) {
         g_opt.scroll = 1e6f;
         st_frames(2);
         f32 bottom = g_opt.scroll;
-        st_key(SDLK_TAB, SDL_KMOD_NONE); // round to Name, out of view at the top: scrolled to it
+        st_key(SDLK_TAB, SDL_KMOD_NONE); // round to Name (out of view at the top when the editor scrolls): shown
         st_frames(3);
-        ST_CHECK(g_opt.act_focus == 0 && bottom > 0 && g_opt.scroll < bottom && st_opt_hit(HP_ACT_FIELD, -1, 0));
+        ST_CHECK(g_opt.act_focus == 0 && (bottom == 0 || g_opt.scroll < bottom) && st_opt_hit(HP_ACT_FIELD, -1, 0));
         st_key(SDLK_TAB, SDL_KMOD_SHIFT); // back to Group
         st_frames(2);
         ST_CHECK(g_opt.act_focus == 4 && st_opt_hit(HP_ACT_FIELD, -1, 4));
