@@ -3550,6 +3550,7 @@ static int run_selftest_m8(void) {
         UA_FILE("f-dir.action", "[Action]\nName=Dir only\nExec=echo %F\nSelection=s\nExtensions=dir;\n");
         UA_FILE("g-mime.action", "[Action]\nName=Text\nExec=xed %F\nSelection=single\nMimetypes=text/*;\nTerminal=true\n");
         UA_FILE("h-quotes.action", "[Action]\nName=Echo\nExec=sh -c \"echo \\\"%f\\\" '%f'\"\nSelection=s\nExtensions=png;\n");
+        UA_FILE("j-subst.action", "[Action]\nName=Words\nExec=sh -c \"echo \\\"$(wc -w < %F) in %f\\\"\"\nSelection=s\nExtensions=png;\n");
         UA_FILE("i-pct.action", "[Action]\nName=Pct %%\nExec=printf \"%%s 100%%\" %f\nSelection=s\nExtensions=txt;\n");
         UA_FILE("notes.txt", "[Action]\nName=Not an action file\nExec=true\n");
 #undef UA_FILE
@@ -3579,6 +3580,9 @@ static int run_selftest_m8(void) {
         ST_CHECK(st_menu_find("Copy it's.png") >= 0 && st_menu_find("Compress") < 0);
         menu_activate(st_menu_find("Echo")); // inside the script's "..." and '...': quoted for each
         ST_CHECK(!strcmp(A.last_opened, "action:[sh][-c][echo \"\"'it'\\''s.png'\"\" 'it'\\''s.png']"));
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        menu_activate(st_menu_find("Words")); // inside "$( )" quotes start afresh: a plain quoted word there
+        ST_CHECK(!strcmp(A.last_opened, "action:[sh][-c][echo \"$(wc -w < '" M8_BASE "/ua/it'\\''s.png') in \"'it'\\''s.png'\"\"]"));
 
         st_select(p, "sub");
         menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);

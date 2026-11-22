@@ -6844,10 +6844,19 @@ static bool ua_is_code(char code) { return code && strchr("FUfNePp", code); }
 // Fill in the codes of s. sh: s is a shell script - each value quoted for the quotes it lands in.
 static void ua_fill(UaBuf *b, const UaCtx *c, const char *s, bool sh) {
     char tmp[PATH_MAX * 3 + 16];
-    char q = 0; // the script's quote at this point: 0, '\'' or '"'
+    char q = 0, outer[16]; // the script's quote at this point: 0, '\'' or '"'; outer: around each $( ) we're in
+    int depth = 0;
     ub_str(b, "");
     for (const char *k = s; *k; k++) {
         if (sh && *k == '\\' && q != '\'' && k[1]) { ub_add(b, k, 2); k++; continue; }
+        if (sh && *k == '$' && k[1] == '(' && q != '\'' && depth < (int)sizeof outer) { // quotes start afresh inside
+            outer[depth++] = q;
+            q = 0;
+            ub_add(b, k, 2);
+            k++;
+            continue;
+        }
+        if (sh && *k == ')' && !q && depth) { q = outer[--depth]; ub_add(b, k, 1); continue; }
         if (sh && (*k == '\'' || *k == '"') && (!q || q == *k)) { q = q ? 0 : *k; ub_add(b, k, 1); continue; }
         if (*k != '%' || !ua_is_code(k[1])) {
             ub_add(b, k, 1);
