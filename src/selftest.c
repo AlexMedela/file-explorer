@@ -3574,20 +3574,26 @@ static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
 
-    { // Options text actions: accent hover while enabled, subtle control otherwise
+    { // Options text actions: accent hover/active for enabled, subtle control otherwise
         Rect b = {10, 10, 80, 30};
         bool mouse = A.mouse_in;
         f32 mx = A.mx, my = A.my;
         A.mouse_in = false;
         A.mx = A.my = -1;
-        opt_action_button(b, "Apply", true);
+        opt_action_button(b, "Apply", true, false);
         ST_CHECK(g_opt_action_bg == COL_CONTROL && g_opt_action_fg == COL_TEXT);
         A.mouse_in = true;
         A.mx = b.x + 2;
         A.my = b.y + 2;
-        opt_action_button(b, "Apply", true);
+        opt_action_button(b, "Apply", true, false);
         ST_CHECK(g_opt_action_bg == COL_ACCENT_HOVER && g_opt_action_fg == COL_ON_ACCENT);
-        opt_action_button(b, "Apply", false);
+        opt_action_button(b, "Auto", true, true);
+        ST_CHECK(g_opt_action_bg == COL_ACCENT_HOVER && g_opt_action_fg == COL_ON_ACCENT);
+        A.mouse_in = false;
+        A.mx = A.my = -1;
+        opt_action_button(b, "Auto", true, true);
+        ST_CHECK(g_opt_action_bg == COL_ACCENT && g_opt_action_fg == COL_ON_ACCENT);
+        opt_action_button(b, "Apply", false, false);
         ST_CHECK(g_opt_action_bg == COL_CONTROL_OFF && g_opt_action_fg == COL_TEXT_FAINT);
         A.mouse_in = mouse;
         A.mx = mx;

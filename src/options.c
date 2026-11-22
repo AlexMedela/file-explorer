@@ -619,6 +619,10 @@ static void opt_scroll_color_apply(void) {
     g_opt.scroll_focus = false;
 }
 
+static bool opt_scroll_color_auto(void) {
+    return g_scroll_custom == 0;
+}
+
 static void opt_button(int id) {
     char dir[PATH_MAX];
     switch (id) {
@@ -764,10 +768,10 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
 // Apply/reset actions use a visible accent hover, independent of the subtle control shades.
 static u32 g_opt_action_bg, g_opt_action_fg; // selftest probe: last colours drawn
 
-static void opt_action_button(Rect r, const char *label, bool enabled) {
+static void opt_action_button(Rect r, const char *label, bool enabled, bool active) {
     bool hv = hand_if(enabled && A.mouse_in && in_rect(r, A.mx, A.my));
-    u32 bg = !enabled ? COL_CONTROL_OFF : hv ? COL_ACCENT_HOVER : COL_CONTROL;
-    u32 fg = !enabled ? COL_TEXT_FAINT : hv ? COL_ON_ACCENT : COL_TEXT;
+    u32 bg = !enabled ? COL_CONTROL_OFF : active ? (hv ? COL_ACCENT_HOVER : COL_ACCENT) : hv ? COL_ACCENT_HOVER : COL_CONTROL;
+    u32 fg = !enabled ? COL_TEXT_FAINT : (active || hv) ? COL_ON_ACCENT : COL_TEXT;
     draw_rrect(r.x, r.y, r.w, r.h, S(7), C(bg));
     Font *f = &A.font;
     f32 tw = text_width(f, label, (int)strlen(label));
@@ -886,10 +890,12 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             f32 gap = roundf(S(6)), bw = MAX(roundf(S(80)), text_width(f, "Apply", 5) + S(28)), fw = roundf(S(140));
             Rect reset = {x + w - bw, y, bw, ch}, apply = {reset.x - gap - bw, y, bw, ch};
             Rect r = {apply.x - gap - fw, y, fw, ch};
+            bool is_auto = opt_scroll_color_auto();
             sheet_field(r, &g_opt.scroll_color, g_opt.scroll_focus, "Auto");
             opt_hit(r, HP_TEXT, o->id, 1);
-            opt_action_button(apply, "Apply", true);
-            opt_action_button(reset, "Auto", true);
+            bool apply_enabled = !is_auto || g_opt.scroll_color.buf[0] != 0;
+            opt_action_button(apply, "Apply", apply_enabled, !is_auto);
+            opt_action_button(reset, "Auto", !is_auto, is_auto);
             opt_hit(apply, HP_EDIT_APPLY, o->id, 0);
             opt_hit(reset, HP_EDIT_RESET, o->id, 0);
             break;
