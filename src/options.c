@@ -120,7 +120,7 @@ static const char *g_tab_style_labels[] = {"Cards", "Pills"}; // TABS_*
 static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
 
 // Options > Actions: its controls (not rows of g_opts), what "Shows for" writes, and the templates
-enum { OPT_ACT_SEL = 1000, OPT_ACT_TERM, OPT_ACT_TEMPLATE, OPT_ACT_ICON, OPT_ACT_GICON = 1100 }; // (OPT_ACT_GICON + group index)
+enum { OPT_ACT_SEL = 1000, OPT_ACT_TERM, OPT_ACT_TEMPLATE, OPT_ACT_ICON, OPT_ACT_GROUP, OPT_ACT_GICON = 1100 }; // (OPT_ACT_GICON + group index)
 static bool opt_is_gicon(int id) { return id >= OPT_ACT_GICON && id < OPT_ACT_GICON + UA_MAX; }
 static const char *g_act_sel_labels[] = {"One or more items", "One item", "Several items", "Empty space (folder menu)"};
 static const char *g_act_sel_values[] = {"any", "s", "m", "none"};
@@ -133,11 +133,17 @@ static const struct { const char *name, *exec, *exts, *deps, *icon; int sel; boo
     {"File details in a terminal", "sh -c \"stat %F; printf '\\\\nPress Enter to close'; read -r _\"", "any", "", "terminal", 0, true},
 };
 static void opt_act_template(int t);
+// "Common types": buttons that add a kind of file to File types
+static const struct { const char *label, *exts; } g_act_types[] = {
+    {"Images", "png; jpg; jpeg; gif; webp; svg; bmp; tiff; heic; avif"}, {"Video", "mp4; mkv; webm; mov; avi"},
+    {"Audio", "mp3; flac; ogg; opus; wav; m4a"}, {"Documents", "pdf; txt; md; odt; docx"}, {"Archives", "zip; tar; gz; xz; zst; 7z; rar"},
+    {"Folders", "dir"}, {"Files only", "nodirs"},
+};
 
 // hit parts recorded while drawing, tested on click
 enum { HP_NONE, HP_NAV, HP_TOGGLE, HP_SEG, HP_DROP, HP_MINUS, HP_PLUS, HP_SWATCH, HP_BUTTON, HP_DROPITEM, HP_SEARCH, HP_CLOSE,
        HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT,
-       HP_ACT_NEW, HP_ACT_FOLDER, HP_ACT_TOGGLE, HP_ACT_EDIT, HP_ACT_UP, HP_ACT_DOWN, HP_ACT_DELETE, HP_ACT_FIELD,
+       HP_ACT_NEW, HP_ACT_FOLDER, HP_ACT_TOGGLE, HP_ACT_EDIT, HP_ACT_UP, HP_ACT_DOWN, HP_ACT_DELETE, HP_ACT_FIELD, HP_ACT_TYPE, HP_ACT_GROUPS, HP_ACT_NEEDS,
        HP_ACT_TEXT, HP_ACT_CANCEL, HP_ACT_SAVE };
 typedef struct { Rect r; int part, opt, arg; } OptHit;
 
@@ -177,6 +183,7 @@ static struct {
     TextEdit act_te[5]; // name, command, file types (Extensions), needed programs (Dependencies), group
     int act_focus;      // the field with the keyboard (-1: none)
     bool act_reveal;    // scroll it into view (Tab moved there)
+    Rect act_group_r;   // the Group field + its button (where the list of groups opens)
     int act_sel;        // g_act_sel_labels
     bool act_term;
     int act_icon;           // in g_ua_icons (-1: the default)
@@ -365,6 +372,7 @@ static int opt_choice_count(int id) {
     case OPT_EXEC_OPEN: return (int)ARRAY_COUNT(g_exec_labels);
     case OPT_ACT_SEL: return (int)ARRAY_COUNT(g_act_sel_labels);
     case OPT_ACT_ICON: return 1 + (int)ARRAY_COUNT(g_ua_icons);
+    case OPT_ACT_GROUP: return 1 + g_nuag;
     case OPT_ACT_TEMPLATE: return 1 + (int)ARRAY_COUNT(g_act_templates);
     }
     return 0;
@@ -407,6 +415,7 @@ static const char *opt_choice_label(int id, int i) {
     case OPT_ACT_SEL: return g_act_sel_labels[i];
     case OPT_ACT_TEMPLATE: return i ? g_act_templates[i - 1].name : "Choose a template\xE2\x80\xA6";
     case OPT_ACT_ICON: return i ? g_ua_icons[i - 1].label : "Default";
+    case OPT_ACT_GROUP: return i ? g_uag[i - 1].name : "None (in the menu itself)";
     }
     return "";
 }
@@ -451,6 +460,7 @@ static int opt_choice_get(int id) {
         return 0;
     case OPT_ACT_SEL: return g_opt.act_sel;
     case OPT_ACT_ICON: return g_opt.act_icon + 1;
+    case OPT_ACT_GROUP: return ua_group_find(g_opt.act_te[4].buf) + 1;
     }
     return 0;
 }
@@ -473,6 +483,11 @@ static bool apply_ui_font(const char *family) {
 static void opt_choice_set(int id, int i) {
     if (id == OPT_ACT_SEL) { g_opt.act_sel = i; return; } // (the editor's: saved with Save)
     if (id == OPT_ACT_ICON) { g_opt.act_icon = i - 1; return; }
+    if (id == OPT_ACT_GROUP) {
+        const char *g = i > 0 && i <= g_nuag ? g_uag[i - 1].name : "";
+        te_set(&g_opt.act_te[4], g, (int)strlen(g), (int)strlen(g));
+        return;
+    }
     if (opt_is_gicon(id)) { // a group's: saved at once (groups.conf)
         if (!ua_group_set_icon(id - OPT_ACT_GICON, i - 1)) toast("Couldn't save groups.conf: %s", strerror(errno));
         return;
@@ -816,6 +831,7 @@ static bool opt_hover(Rect r) { return hot(r); }
 
 // The icon of choice i of a dropdown (-1: none): the custom actions' icons.
 static int opt_choice_icon(int id, int i) {
+    if (id == OPT_ACT_GROUP) return i > 0 && i <= g_nuag ? ua_icon_ui(g_uag[i - 1].icon, true) : -1;
     if (id != OPT_ACT_ICON && !opt_is_gicon(id)) return -1;
     return ua_icon_ui(i - 1, id != OPT_ACT_ICON);
 }
@@ -1335,16 +1351,115 @@ static void opt_row_text(f32 x, f32 y, f32 rh, f32 lw, const char *label, const 
     draw_text_fit(fs, x + S(14), roundf(y + rh * 0.5f + S(3)), lw, desc, (int)strlen(desc), C(COL_TEXT_DIM), 0);
 }
 
+// Is this program there (a name on $PATH, or a path)? The last answer is kept: asked on every frame of the editor.
+static bool opt_act_prog_ok(const char *prog) {
+    static char last[256];
+    static bool ok;
+    if (strcmp(prog, last)) {
+        snprintf(last, sizeof last, "%s", prog);
+        ok = strchr(prog, '/') ? access(prog, X_OK) == 0 : in_path(prog);
+    }
+    return ok;
+}
+
+// What the command would run - for the files selected in the window, else an example - or what's wrong with it.
+// Returns true for a warning; prog: a program that isn't installed (else "").
+static bool opt_act_preview(char *out, size_t cap, char *prog, size_t pcap, bool *for_sel) {
+    const char *exec = g_opt.act_te[1].buf;
+    out[0] = prog[0] = 0;
+    *for_sel = false;
+    if (!exec[0]) return false;
+    char q = 0;
+    for (const char *c = exec; *c; c++) {
+        if (*c == '\\' && c[1] && q != '\'') c++;
+        else if (!q && (*c == '\'' || *c == '"')) q = *c;
+        else if (q && *c == q) q = 0;
+    }
+    if (q) { snprintf(out, cap, "A %s quote isn't closed", q == '"' ? "double" : "single"); return true; }
+    for (const char *c = exec; *c; c++) {
+        if (*c != '%') continue;
+        if (c[1] == '%') { c++; continue; }
+        if (!ua_is_code(c[1])) {
+            snprintf(out, cap, "%%%c isn't a code: %%F %%U %%f %%e %%P %%p, or %%%% for a %%", c[1] ? c[1] : ' ');
+            return true;
+        }
+        c++;
+    }
+    Pane *p = active_pane();
+    int n = 0;
+    bool *dirs = NULL;
+    char **paths = NULL, ex[PATH_MAX];
+    const char *home = getenv("HOME") ? getenv("HOME") : "/";
+    if (g_opt.act_sel != 3) { // (the folder's menu: no items)
+        paths = p ? ua_selection(p, &n, &dirs) : NULL;
+        *for_sel = n > 0;
+        if (!n) { // an example of the file types (the first one)
+            char t[64] = "";
+            sscanf(g_opt.act_te[2].buf, " %63[^; ]", t);
+            if (!strcmp(t, "dir")) snprintf(ex, sizeof ex, "%s/Documents", home);
+            else snprintf(ex, sizeof ex, "%s/example.%s", home, t[0] && strcmp(t, "any") && strcmp(t, "nodirs") && strcmp(t, "none") ? t : "txt");
+            free(paths);
+            paths = strv_dup((char *[]){ex}, 1);
+            n = 1;
+        }
+    }
+    UserAction a = {0};
+    snprintf(a.exec, sizeof a.exec, "%s", exec);
+    UaCtx c = {paths, n, p ? p->path : home};
+    int argc = 0;
+    char **argv = ua_argv(&a, &c, &argc);
+    bool warn = false;
+    if (argc && !opt_act_prog_ok(argv[0])) {
+        snprintf(prog, pcap, "%s", argv[0]);
+        snprintf(out, cap, "\xE2\x80\x9C%s\xE2\x80\x9D isn't installed", path_basename(argv[0]));
+        warn = true;
+    } else { // the arguments as a shell would take them: quoted where they need it
+        size_t o = 0;
+        for (int i = 0; i < argc && o < cap; i++) {
+            char qa[PATH_MAX * 2];
+            bool plain = argv[i][0] != 0;
+            for (const char *k = argv[i]; *k && plain; k++) plain = isalnum((unsigned char)*k) || strchr("_./%:=,+@-", *k);
+            if (plain) snprintf(qa, sizeof qa, "%s", argv[i]);
+            else sh_quote(qa, sizeof qa, argv[i]);
+            o += (size_t)snprintf(out + o, cap - o, "%s%s", i ? " " : "", qa);
+        }
+    }
+    strv_free(argv, argc);
+    strv_free(paths, n);
+    free(dirs);
+    return warn;
+}
+
+// A preset's file types added to the field (those it has already stay once).
+static void opt_act_add_types(int k) {
+    char cur[1024], add[256], *save = NULL;
+    snprintf(cur, sizeof cur, "%s", g_opt.act_te[2].buf);
+    snprintf(add, sizeof add, "%s", g_act_types[k].exts);
+    for (char *t = strtok_r(add, "; ", &save); t; t = strtok_r(NULL, "; ", &save)) {
+        bool have = false;
+        char scan[1024], *s2 = NULL;
+        snprintf(scan, sizeof scan, "%s", cur);
+        for (char *u = strtok_r(scan, "; ", &s2); u && !have; u = strtok_r(NULL, "; ", &s2)) have = !strcasecmp(u, t) || !strcasecmp(u, "any");
+        if (have) continue;
+        size_t l = strlen(cur);
+        while (l && (cur[l - 1] == ' ' || cur[l - 1] == ';')) cur[--l] = 0;
+        snprintf(cur + l, sizeof cur - l, "%s%s", l ? "; " : "", t);
+    }
+    te_set(&g_opt.act_te[2], cur, (int)strlen(cur), (int)strlen(cur));
+}
+
 static f32 opt_draw_act_editor(f32 x, f32 y, f32 w, Rect list) {
     Font *f = &A.font;
     f32 rh = roundf(S(58)), ch = roundf(S(30)), ctlw = MIN(roundf(S(440)), w * 0.58f), lw = w - ctlw - S(44);
-    static const char *labels[] = {"Name", "Icon", "Command", "Shows for", "File types", "Needs programs", "Group", "Run in terminal"};
-    static const char *descs[] = {"Its label in the menu", "Next to it in the menu", "%F files \xC2\xB7 %f name \xC2\xB7 %P folder", "How many items selected",
-                                  "png; jpg \xC2\xB7 dir \xC2\xB7 nodirs", "Hidden while one is missing", "Same group, same submenu",
-                                  "For commands that print or ask"};
-    static const char *ph[] = {"Copy image", NULL, "sh -c \"wl-copy < %F\"", NULL, "Any", "None", "None: in the menu itself", NULL};
-    static const int field[] = {0, -1, 1, -1, 2, 3, 4, -1};
-    enum { R_ICON = 1, R_SEL = 3, R_TERM = 7 };
+    static const char *labels[] = {"Name", "Icon", "Command", "Runs", "Shows for", "File types", "Common types", "Needs programs", "Group", "Run in terminal"};
+    static const char *descs[] = {"Its label in the menu", "Next to it in the menu", "%F files \xC2\xB7 %f name \xC2\xB7 %P folder", "",
+                                  "How many items selected", "png; jpg \xC2\xB7 dir \xC2\xB7 nodirs", "Add to File types",
+                                  "Hidden while one is missing", "Same group, same submenu", "For commands that print or ask"};
+    static const char *ph[] = {"Copy image", NULL, "sh -c \"wl-copy < %F\"", NULL, NULL, "Any", NULL, "None", "None: in the menu itself", NULL};
+    static const int field[] = {0, -1, 1, -1, -1, 2, -1, 3, 4, -1};
+    enum { R_ICON = 1, R_RUNS = 3, R_SEL = 4, R_TYPES = 6, R_GROUP = 8, R_TERM = 9 };
+    char pv[1200], prog[256];
+    bool for_sel, warn = opt_act_preview(pv, sizeof pv, prog, sizeof prog, &for_sel);
     y = props_heading(x, y, g_opt.act_new ? "New action" : "Edit action");
     int nrows = (int)ARRAY_COUNT(labels);
     props_card(x, y, w, nrows, rh, 0);
@@ -1356,9 +1471,48 @@ static f32 opt_draw_act_editor(f32 x, f32 y, f32 w, Rect list) {
             A.redraw = true;
         }
         if (y + rh <= list.y || y >= list.y + list.h) continue;
-        opt_row_text(x, y, rh, lw, labels[r], descs[r], false);
+        const char *desc = r != R_RUNS ? descs[r] : !g_opt.act_te[1].buf[0] ? "What the command will do"
+                         : warn ? "Check the command" : for_sel ? "For the selected files" : "For an example file";
+        opt_row_text(x, y, rh, r == R_TYPES ? roundf(S(110)) : lw, labels[r], desc, false);
         f32 cx = x + w - ctlw - S(14), cy = y + rh * 0.5f, fy = roundf(cy - ch * 0.5f);
-        if (field[r] >= 0) {
+        if (r == R_GROUP) { // the field, and a button listing the groups there are
+            Rect br = {cx + ctlw - ch, fy, ch, ch}, fr = {cx, fy, ctlw - ch - S(6), ch};
+            sheet_field(fr, &g_opt.act_te[4], g_opt.act_focus == 4 && g_opt.drop_opt < 0, ph[r]);
+            opt_hit(fr, HP_ACT_FIELD, -1, 4);
+            sheet_button(br, "", false, g_nuag > 0);
+            draw_chevron(br.x + ch * 0.5f, cy, S(6), 3, MAX(1.f, S(1.4f)), C(g_nuag ? COL_TEXT : COL_TEXT_FAINT));
+            g_opt.act_group_r = (Rect){cx, fy, ctlw, ch};
+            if (g_nuag) opt_hit(br, HP_ACT_GROUPS, -1, 0);
+        } else if (r == R_RUNS) { // the preview, or a warning (a missing program: a button adds it to Needs programs)
+            Font *fs = &A.font_small;
+            f32 tx = cx, tw = ctlw;
+            bool listed = false;
+            if (prog[0]) {
+                char deps[512], *save = NULL;
+                snprintf(deps, sizeof deps, "%s", g_opt.act_te[3].buf);
+                for (char *t = strtok_r(deps, "; ", &save); t && !listed; t = strtok_r(NULL, "; ", &save)) listed = !strcmp(t, prog);
+            }
+            if (prog[0] && !listed) {
+                const char *bl = "Add to Needs programs";
+                f32 bw = text_width(f, bl, (int)strlen(bl)) + S(24);
+                Rect br = {cx + ctlw - bw, fy, bw, ch};
+                sheet_button(br, bl, false, true);
+                opt_hit(br, HP_ACT_NEEDS, -1, 0);
+                tw -= bw + S(10);
+            }
+            if (prog[0] && listed) snprintf(pv + strlen(pv), sizeof pv - strlen(pv), " (hidden until it is)");
+            if (pv[0]) draw_text_fit(fs, tx, text_y(fs, fy, ch), tw, pv, (int)strlen(pv), C(warn ? COL_WARN : COL_TEXT_DIM), 0);
+        } else if (r == R_TYPES) { // presets, right-aligned
+            f32 bx = x + w - S(14);
+            for (int k = (int)ARRAY_COUNT(g_act_types) - 1; k >= 0; k--) {
+                f32 bw = text_width(f, g_act_types[k].label, (int)strlen(g_act_types[k].label)) + S(18);
+                bx -= bw;
+                Rect br = {bx, fy, bw, ch};
+                sheet_button(br, g_act_types[k].label, false, true);
+                opt_hit(br, HP_ACT_TYPE, -1, k);
+                bx -= S(6);
+            }
+        } else if (field[r] >= 0) {
             Rect fr = {cx, fy, ctlw, ch};
             sheet_field(fr, &g_opt.act_te[field[r]], g_opt.act_focus == field[r] && g_opt.drop_opt < 0, ph[r]);
             opt_hit(fr, HP_ACT_FIELD, -1, field[r]);
@@ -1714,6 +1868,18 @@ static void options_click(f32 x, f32 y, int clicks) {
         case HP_ACT_DELETE: opt_act_delete(hp->arg); return;
         case HP_ACT_FIELD: g_opt.act_focus = hp->arg; return;
         case HP_ACT_TEXT: opt_act_edit_text(); return;
+        case HP_ACT_TYPE: opt_act_add_types(hp->arg); return;
+        case HP_ACT_GROUPS: opt_drop_open(OPT_ACT_GROUP, g_opt.act_group_r); return;
+        case HP_ACT_NEEDS: { // the missing program into Needs programs
+            char pv[1200], prog[256], v[1024];
+            bool fs;
+            opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fs);
+            if (!prog[0]) return;
+            const char *cur = g_opt.act_te[3].buf;
+            snprintf(v, sizeof v, "%s%s%s", cur, cur[0] ? "; " : "", prog); // (a path stays one: Dependencies checks it)
+            te_set(&g_opt.act_te[3], v, (int)strlen(v), (int)strlen(v));
+            return;
+        }
         case HP_ACT_CANCEL: opt_act_close(); return;
         case HP_ACT_SAVE: opt_act_save(); return;
         case HP_KEYCHIP: opt_rec_start(hp->opt, hp->arg); return;

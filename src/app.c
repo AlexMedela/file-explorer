@@ -7028,6 +7028,71 @@ static char **ua_argv(const UserAction *a, const UaCtx *c, int *argc) {
     return v;
 }
 
+// An action that fails says so (else a wrong command just does nothing): its stderr comes back through a pipe, with
+// the exit code as a last line from the sh around it (SIGCHLD is ignored app-wide, so waitpid can't tell).
+#define UA_RC_MARK "\n@fe-action-rc="
+
+// The toast for what came back (err: the start of stderr, with the exit line); false: it went fine.
+static bool ua_failure_text(const char *name, const char *err, int rc, char *msg, size_t cap) {
+    if (rc == 0) return false;
+    char line[200] = "";
+    const char *s = err;
+    while (*s == '\n' || *s == ' ') s++;
+    size_t l = strcspn(s, "\n");
+    if (!strncmp(s, UA_RC_MARK + 1, strlen(UA_RC_MARK) - 1)) l = 0; // (nothing before the exit line)
+    snprintf(line, sizeof line, "%.*s", (int)MIN(l, sizeof line - 1), s);
+    const char *why = rc == 127 ? "command not found" : rc == 126 ? "can't run it" : NULL;
+    char code[48];
+    if (why) snprintf(code, sizeof code, "%s", why);
+    else snprintf(code, sizeof code, "exit %d", rc);
+    snprintf(msg, cap, "\xE2\x80\x9C%s\xE2\x80\x9D failed (%s)%s%s", name, code, line[0] ? ": " : "", line);
+    return true;
+}
+
+typedef struct { int fd; char name[128]; } UaWatch;
+
+static void ua_failed_toast(void *arg) {
+    toast("%s", (char *)arg);
+    free(arg);
+}
+
+// (its own thread: an action can run for long - an editor, a dialog - and a pool worker shouldn't wait on it)
+static void *ua_watch_thread(void *arg) {
+    UaWatch *w = arg;
+    char head[2048], tail[64] = "", buf[4096];
+    size_t nh = 0;
+    int rc = -1;
+    for (;;) {
+        ssize_t r = read(w->fd, buf, sizeof buf);
+        if (r < 0 && errno == EINTR) continue;
+        if (r <= 0) break;
+        if (rc >= 0) continue; // (decided: the rest is drained - what it started may still write)
+        size_t take = MIN((size_t)r, sizeof head - 1 - nh);
+        memcpy(head + nh, buf, take);
+        nh += take;
+        // the exit line, which may straddle reads: look in the last bytes seen plus these
+        size_t tl = strlen(tail);
+        char win[sizeof tail + sizeof buf];
+        memcpy(win, tail, tl);
+        memcpy(win + tl, buf, (size_t)r);
+        win[tl + (size_t)r] = 0;
+        char *m = strstr(win, UA_RC_MARK);
+        if (m && strchr(m + strlen(UA_RC_MARK), '\n')) {
+            rc = atoi(m + strlen(UA_RC_MARK));
+            head[nh] = 0;
+            char msg[400];
+            if (ua_failure_text(w->name, head, rc, msg, sizeof msg)) main_post(ua_failed_toast, strdup(msg));
+            continue;
+        }
+        size_t keep = MIN(tl + (size_t)r, sizeof tail - 1);
+        memmove(tail, win + tl + (size_t)r - keep, keep);
+        tail[keep] = 0;
+    }
+    close(w->fd);
+    free(w);
+    return NULL;
+}
+
 static void ua_run(Pane *p, int idx) {
     if (idx < 0 || idx >= g_nua) return;
     const UserAction *a = &g_ua[idx];
@@ -7043,15 +7108,34 @@ static void ua_run(Pane *p, int idx) {
     } else if (A.selftest) { // record what would run: each argument in []
         size_t o = (size_t)snprintf(A.last_opened, sizeof A.last_opened, "action%s:", a->terminal ? "-terminal" : "");
         for (int i = 0; i < argc && o < sizeof A.last_opened; i++) o += (size_t)snprintf(A.last_opened + o, sizeof A.last_opened - o, "[%s]", argv[i]);
-    } else if (a->terminal) spawn_terminal(p->path, argv);
-    else {
+    } else if (a->terminal) spawn_terminal(p->path, argv); // (its output shows there)
+    else { // under sh, which reports the exit code; stderr to ua_watch_thread
+        int pfd[2] = {-1, -1};
+        bool watch = pipe2(pfd, O_CLOEXEC) == 0;
+        char **av = xmalloc((size_t)(argc + 5) * sizeof(char *));
+        av[0] = "sh";
+        av[1] = "-c";
+        av[2] = "\"$@\"; printf '" UA_RC_MARK "%d\\n' $? >&2";
+        av[3] = "sh";
+        for (int i = 0; i <= argc; i++) av[4 + i] = argv[i];
         posix_spawn_file_actions_t fa;
         posix_spawn_file_actions_init(&fa);
         posix_spawn_file_actions_addchdir_np(&fa, p->path);
+        if (watch) posix_spawn_file_actions_adddup2(&fa, pfd[1], 2);
         pid_t pid;
-        int err = posix_spawnp(&pid, argv[0], &fa, spawn_attr(), argv, environ);
+        int err = posix_spawn(&pid, "/bin/sh", &fa, spawn_attr(), av, environ);
         posix_spawn_file_actions_destroy(&fa);
+        free(av);
+        if (watch) close(pfd[1]);
         if (err) toast("Couldn't run %s: %s", a->name, strerror(err));
+        if (watch && !err) {
+            UaWatch *w = xcalloc(1, sizeof *w);
+            w->fd = pfd[0];
+            snprintf(w->name, sizeof w->name, "%s", a->name);
+            pthread_t t;
+            if (pthread_create(&t, NULL, ua_watch_thread, w) == 0) pthread_detach(t);
+            else { close(pfd[0]); free(w); }
+        } else if (watch) close(pfd[0]);
     }
     strv_free(argv, argc);
     strv_free(paths, n);

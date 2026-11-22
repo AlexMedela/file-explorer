@@ -3616,6 +3616,25 @@ static int run_selftest_m8(void) {
             menu_sub_activate(1);
             ST_CHECK(!strcmp(A.last_opened, "action:[t2][" M8_BASE "/ua/notes.txt]"));
         }
+        { // a failing action says why: the start of its stderr and its exit code (read from the pipe the sh around it writes)
+            char msg[400];
+            ST_CHECK(!ua_failure_text("X", "noise\n" UA_RC_MARK "0\n", 0, msg, sizeof msg));
+            ST_CHECK(ua_failure_text("Word count", "sh: 1: notify-send: not found\n" UA_RC_MARK "127\n", 127, msg, sizeof msg));
+            ST_CHECK(!strcmp(msg, "\xE2\x80\x9CWord count\xE2\x80\x9D failed (command not found): sh: 1: notify-send: not found"));
+            ST_CHECK(ua_failure_text("X", UA_RC_MARK "2\n", 2, msg, sizeof msg) && !strcmp(msg, "\xE2\x80\x9CX\xE2\x80\x9D failed (exit 2)"));
+            int pfd[2];
+            ST_CHECK(pipe(pfd) == 0);
+            static const char out[] = "convert: no such file\nmore\n" UA_RC_MARK "1\n";
+            ST_CHECK(write(pfd[1], out, sizeof out - 1) == (ssize_t)(sizeof out - 1));
+            close(pfd[1]);
+            UaWatch *w = xcalloc(1, sizeof *w);
+            w->fd = pfd[0];
+            snprintf(w->name, sizeof w->name, "Convert");
+            A.toast[0] = 0;
+            ua_watch_thread(w); // (here, not on its thread: it posts the toast to the main loop)
+            st_frames(2);
+            ST_CHECK(!strcmp(A.toast, "\xE2\x80\x9C" "Convert\xE2\x80\x9D failed (exit 1): convert: no such file"));
+        }
 
         menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), false); // the folder's own menu: Selection=none ones
         ST_CHECK(st_menu_find("Here") >= 0 && st_menu_find("Copy it's.png") < 0 && st_menu_find("Text") < 0);
@@ -4977,6 +4996,57 @@ static int run_selftest_m9(void) {
         g_opt.scroll = 0;
         st_frames(2);
         st_shot("options-actions-groups");
+
+        { // the editor checks the command as it's typed: a preview, or what's wrong (a missing program goes into Needs
+          // programs with a click); Common types add to File types; the Group button lists the groups
+            st_opt_click(st_opt_hit(HP_ACT_NEW, -1, 0));
+            char pv[1200], prog[256];
+            bool fsel;
+            te_set(&g_opt.act_te[1], "fe-no-such-program %F", 0, 0);
+            ST_CHECK(opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !strcmp(prog, "fe-no-such-program"));
+            ST_CHECK(!strcmp(pv, "\xE2\x80\x9C" "fe-no-such-program\xE2\x80\x9D isn't installed"));
+            st_frames(2);
+            st_shot("options-actions-warning");
+            st_opt_click(st_opt_hit(HP_ACT_NEEDS, -1, 0));
+            ST_CHECK(!strcmp(g_opt.act_te[3].buf, "fe-no-such-program"));
+            st_frames(1);
+            ST_CHECK(!st_opt_hit(HP_ACT_NEEDS, -1, 0)); // (listed now: hidden until it's installed)
+            te_set(&g_opt.act_te[1], "echo \"open", 0, 0);
+            ST_CHECK(opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !strcmp(pv, "A double quote isn't closed"));
+            te_set(&g_opt.act_te[1], "echo %x", 0, 0);
+            ST_CHECK(opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !strncmp(pv, "%x isn't a code", 15));
+            te_set(&g_opt.act_te[1], "echo 100%% %f", 0, 0);
+            ST_CHECK(!opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !prog[0] && !strncmp(pv, "echo 100% ", 10));
+            Pane *ap = active_pane(); // nothing selected, no cursor: an example of the file types
+            i64 cur = ap->cursor;
+            sel_clear(ap);
+            ap->cursor = -1;
+            te_set(&g_opt.act_te[2], "png; jpg", 0, 0);
+            te_set(&g_opt.act_te[1], "sh -c \"cat %F | wl-copy\"", 0, 0);
+            ST_CHECK(!opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !fsel);
+            char want[PATH_MAX + 64];
+            snprintf(want, sizeof want, "sh -c 'cat '\\''%s/example.png'\\'' | wl-copy'", getenv("HOME"));
+            ST_CHECK(!strcmp(pv, want));
+            ap->cursor = cur;
+            te_set(&g_opt.act_te[2], "", 0, 0);
+            st_frames(1);
+            st_opt_click(st_opt_hit(HP_ACT_TYPE, -1, 0)); // Images
+            ST_CHECK(!strncmp(g_opt.act_te[2].buf, "png; jpg; jpeg; gif", 19));
+            size_t l1 = strlen(g_opt.act_te[2].buf);
+            st_opt_click(st_opt_hit(HP_ACT_TYPE, -1, 0)); // (again: nothing twice)
+            st_opt_click(st_opt_hit(HP_ACT_TYPE, -1, 5)); // Folders
+            ST_CHECK(strlen(g_opt.act_te[2].buf) == l1 + 5 && !strcmp(g_opt.act_te[2].buf + l1, "; dir"));
+            g_opt.scroll = 1e6f;
+            st_frames(2);
+            st_opt_click(st_opt_hit(HP_ACT_GROUPS, -1, 0));
+            ST_CHECK(g_opt.drop_opt == OPT_ACT_GROUP && g_opt.drop_n == 2);
+            st_frames(1);
+            st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_GROUP, 1));
+            ST_CHECK(!strcmp(g_opt.act_te[4].buf, "Images"));
+            st_key(SDLK_ESCAPE, SDL_KMOD_NONE); // (unsaved)
+            ST_CHECK(g_opt.act_edit < 0 && g_nua == 4);
+            g_opt.scroll = 0;
+        }
 
         st_frames(1);
         st_opt_click(st_opt_hit(HP_ACT_EDIT, -1, 0)); // Esc: the field lets go, then the editor closes unsaved

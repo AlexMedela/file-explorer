@@ -64,7 +64,10 @@ Your own commands in the right-click menu, as in Nemo. **Options > Actions** lis
 template), edit it in a form or as text, switch it off, change the order or delete it. Each action is a `*.action` file
 in `~/.local/share/file-explorer/actions/` (Nemo's `*.nemo_action` files work as they are), read each time a menu opens
 and listed by file name just above **Properties**. The page numbers the files (`010-`, `020-`...) to keep the order you
-set, and saving changes only the keys the form shows: comments, translations and other keys stay.
+set, and saving changes only the keys the form shows: comments, translations and other keys stay. While you type, the
+form shows what the command will run (for the selected files, or an example) or what's wrong with it: a quote left
+open, an unknown code, a program that isn't installed (one click adds it to Needs programs). An action that fails
+says so in a message with its exit code and the first line of its error output.
 
 ```ini
 [Action]
