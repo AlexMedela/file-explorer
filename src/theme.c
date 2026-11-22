@@ -105,6 +105,8 @@ enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_STATUS, SURF_CO
 static int g_surface_bright[SURF_COUNT];
 static u32 g_scroll_custom; // Options: scrollbar colour; 0 = Auto, else 0x01000000 | rgb
 static bool g_separators = true; // Options: the lines between the window's parts (a hovered / dragged edge always shows)
+static int g_navigation_selection_opacity = 40; // Options: accent mix for sidebar / Options navigation / pill selections
+static bool g_nav_selector_mark = true;         // Options: show the small accent edge on navigation selections
 static u32 g_status_bg; // the status bar: the toolbar's colour, unless its brightness moves it
 // The desktop's look, read off the UI thread (integration.c, "desktop look") only while Theme or File icons is System.
 // accent and kde[]: 0 = none, else 0x01000000 | rgb; kde[]: KDE's colour scheme (all 0 elsewhere).
@@ -204,6 +206,11 @@ static bool theme_is_system(void) {
 static u32 surface_adjust(u32 c, int part) {
     int pct = CLAMP(g_surface_bright[part], -30, 30);
     return pct ? rgb_mix(c, pct < 0 ? 0x000000 : 0xFFFFFF, (f32)abs(pct) / 100.f) : c;
+}
+
+// Navigation selections mix the surface with the accent; unselected/hover rows keep the faint 8% tint.
+static u32 navigation_surface_color(u32 bg, bool selected) {
+    return rgb_mix(bg, COL_ACCENT, selected ? (f32)g_navigation_selection_opacity / 100.f : 0.08f);
 }
 
 static int theme_find(const char *name);

@@ -21,6 +21,11 @@ on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
 strip and toolbar), the preview panel and the status bar the file area's background; the lines between them stay.
 `show_separators=0` (Options -> Appearance -> Separator lines, on by default) leaves out the lines between the sidebar,
 header, column headings, preview, terminal panel and status bar; an edge you can drag still lights up on hover.
+`navigation_selection_opacity` (Options -> Appearance -> Navigation selection opacity, 40 by default) sets the accent
+mix, from 0 to 100 in steps of 5, for selected sidebar rows, selected Options categories and the active pill tab.
+`navigation_selector_mark=1` (Options -> Appearance -> Toggle navigation selector mark, On by default) shows the small
+accent edge on selected sidebar and Options navigation rows; off keeps the selection fill without that mark. The file
+list's own selection colours and hover tints are unchanged.
 `sidebar_brightness`, `header_brightness`, `main_brightness` (the file area), `preview_brightness` and
 `status_brightness` (Options -> Appearance -> Surfaces, 0 by default) make that part darker (down to -30) or lighter
 (up to 30, in percent) than the theme's own colour.

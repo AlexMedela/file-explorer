@@ -7,7 +7,7 @@ enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 enum {
     OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
-    OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, // (OPT_BRIGHT_*: SURF_* order)
+    OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_STATUS, OPT_SEPARATORS, OPT_NAV_SELECTION_OPACITY, OPT_NAV_SELECTOR_MARK, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_FOLDERS_FIRST, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
@@ -45,6 +45,8 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "The logo before the name above the sidebar"},
     {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED, "Unified surfaces", "Sidebar, header, preview and status bar take the file area's background; the lines between them stay"},
     {OC_APPEARANCE, OK_BOOL, OPT_SEPARATORS, "Separator lines", "Lines between the sidebar, header, columns, preview and status bar (an edge you can drag shows on hover)"},
+    {OC_APPEARANCE, OK_INT, OPT_NAV_SELECTION_OPACITY, "Navigation selection opacity", "Accent mix for sidebar, Options categories and pill tab selections, 0% to 100%"},
+    {OC_APPEARANCE, OK_BOOL, OPT_NAV_SELECTOR_MARK, "Toggle navigation selector mark", "Show the small accent edge on selected sidebar and Options navigation rows"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_SIDEBAR, "Sidebar brightness", "With the name above it; darker or lighter than the theme's own colour, -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_HEADER, "Header brightness", "Tab strip and toolbar, -30% to +30%"},
     {OC_APPEARANCE, OK_INT, OPT_BRIGHT_FILES, "File area brightness", "The background of the files, -30% to +30%"},
@@ -396,6 +398,7 @@ static int opt_choice_get(int id) {
             if (str_ieq(g_opt.families[i], A.ui_font)) return i + 1;
         return 0;
     case OPT_ROW_SPACING: return A.row_spacing;
+    case OPT_NAV_SELECTION_OPACITY: return g_navigation_selection_opacity;
     case OPT_DEF_VIEW:
         for (int i = 0; i < ZOOM_COUNT; i++)
             if (g_zoom[i].view == A.def_view && (A.def_view != VIEW_GRID || g_zoom[i].px == A.def_icon)) return i;
@@ -457,6 +460,7 @@ static void opt_choice_set(int id, int i) {
         if (!apply_ui_font(i == 0 ? "" : g_opt.families[i - 1])) toast("Couldn't load that font");
         break;
     case OPT_ROW_SPACING: A.row_spacing = i; break;
+    case OPT_NAV_SELECTION_OPACITY: g_navigation_selection_opacity = CLAMP(i, 0, 100); break;
     case OPT_DEF_VIEW:
         A.def_view = g_zoom[i].view;
         if (g_zoom[i].view == VIEW_GRID) A.def_icon = g_zoom[i].px;
@@ -481,6 +485,7 @@ static bool opt_bool_get(int id) {
     case OPT_BRAND_LOGO: return A.brand_logo;
     case OPT_UNIFIED: return g_unified_surfaces;
     case OPT_SEPARATORS: return g_separators;
+    case OPT_NAV_SELECTOR_MARK: return g_nav_selector_mark;
     case OPT_ACCENT_DESKTOP: return g_accent_desktop;
     case OPT_ALT_ROWS: return A.alt_rows;
     case OPT_SIZE_BARS: return A.size_bars;
@@ -525,6 +530,7 @@ static void opt_bool_toggle(int id) {
         break;
     case OPT_BRAND_LOGO: A.brand_logo = !A.brand_logo; break;
     case OPT_SEPARATORS: g_separators = !g_separators; break;
+    case OPT_NAV_SELECTOR_MARK: g_nav_selector_mark = !g_nav_selector_mark; break;
     case OPT_ACCENT_DESKTOP:
         g_accent_desktop = !g_accent_desktop;
         theme_apply();
@@ -1143,10 +1149,12 @@ static void options_draw(void) {
         Rect nr = {r.x + S(12), ny, navw - S(32), roundf(S(30))}; // clear of the divider
         bool on = !q[0] && g_opt.cat == c;
         if (on) {
-            draw_rrect(nr.x, nr.y, nr.w, nr.h, S(7), C(rgb_mix(COL_SEL_IDLE, COL_ACCENT, 0.16f)));
-            ClipSave ac = draw_clip_push((SDL_Rect){(int)nr.x, (int)nr.y, (int)roundf(S(3)), (int)nr.h});
-            draw_rrect(nr.x, nr.y, nr.w, nr.h, S(7), C(COL_ACCENT));
-            draw_clip_pop(ac);
+            draw_rrect(nr.x, nr.y, nr.w, nr.h, S(7), C(navigation_surface_color(COL_POPUP, true)));
+            if (g_nav_selector_mark) {
+                ClipSave ac = draw_clip_push((SDL_Rect){(int)nr.x, (int)nr.y, (int)roundf(S(3)), (int)nr.h});
+                draw_rrect(nr.x, nr.y, nr.w, nr.h, S(7), C(COL_ACCENT));
+                draw_clip_pop(ac);
+            }
         } else if (opt_hover(nr)) draw_rrect(nr.x, nr.y, nr.w, nr.h, S(7), C(COL_HOVER));
         draw_text(f, nr.x + S(14), text_y(f, nr.y, nr.h), g_opt_cats[c], (int)strlen(g_opt_cats[c]), C(on ? COL_TEXT : COL_TEXT_DIM));
         opt_hit(nr, HP_NAV, -1, c);

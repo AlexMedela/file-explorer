@@ -761,9 +761,9 @@ static void draw_sidebar(void) {
         if (A.drop_place == i) {
             draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), CA(COL_ACCENT, 0.25f));
             draw_rrect_outline(r.x, r.y + 1, r.w, r.h - 2, S(6), MAX(1.f, S(1.2f)), C(COL_ACCENT));
-        } else if (active) draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(rgb_mix(COL_SEL_IDLE, COL_ACCENT, 0.16f))); // accent-tinted
+        } else if (active) draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(navigation_surface_color(COL_SIDEBAR, true)));
         else if (hover && A.drag == DRAG_NONE) draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(COL_HOVER));
-        if (active) { // accent edge: the left strip of the row's own rounded shape, full height
+        if (active && g_nav_selector_mark) { // accent edge: the left strip of the row's own rounded shape, full height
             ClipSave ac = draw_clip_push((SDL_Rect){(int)r.x, (int)r.y, (int)roundf(S(3)), (int)r.h});
             draw_rrect(r.x, r.y + 1, r.w, r.h - 2, S(6), C(COL_ACCENT));
             draw_clip_pop(ac);
