@@ -893,9 +893,8 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             bool is_auto = opt_scroll_color_auto();
             sheet_field(r, &g_opt.scroll_color, g_opt.scroll_focus, "Auto");
             opt_hit(r, HP_TEXT, o->id, 1);
-            bool apply_enabled = !is_auto || g_opt.scroll_color.buf[0] != 0;
-            opt_action_button(apply, "Apply", apply_enabled, !is_auto);
-            opt_action_button(reset, "Auto", !is_auto, is_auto);
+            opt_action_button(apply, "Apply", true, !is_auto);
+            opt_action_button(reset, "Auto", true, is_auto);
             opt_hit(apply, HP_EDIT_APPLY, o->id, 0);
             opt_hit(reset, HP_EDIT_RESET, o->id, 0);
             break;
