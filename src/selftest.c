@@ -4951,7 +4951,8 @@ static int run_selftest_m9(void) {
         f32 bottom = g_opt.scroll;
         st_key(SDLK_TAB, SDL_KMOD_NONE); // round to Name (out of view at the top when the editor scrolls): shown
         st_frames(3);
-        ST_CHECK(g_opt.act_focus == 0 && (bottom == 0 || g_opt.scroll < bottom) && st_opt_hit(HP_ACT_FIELD, -1, 0));
+        OptHit *nh = st_opt_hit(HP_ACT_FIELD, -1, 0);
+        ST_CHECK(g_opt.act_focus == 0 && g_opt.scroll <= bottom && nh && nh->r.h >= roundf(S(30)) - 1); // (all of it)
         st_key(SDLK_TAB, SDL_KMOD_SHIFT); // back to Group
         st_frames(2);
         ST_CHECK(g_opt.act_focus == 4 && st_opt_hit(HP_ACT_FIELD, -1, 4));
