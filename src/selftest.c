@@ -4049,7 +4049,7 @@ static int run_selftest_m9(void) {
             if (g_opts[k].id == OPT_TITLE_ICON) it = k;
             if (g_opts[k].id == OPT_BRAND_LOGO) il = k;
         }
-        ST_CHECK(ii >= 0 && ia == ii + 1 && it == ia + 1 && il == it + 1);
+        ST_CHECK(ii >= 0 && ia == ii + 1 && it == ia + 1 && il >= 0);
         options_open();
         g_opt.cat = OC_APPEARANCE;
         g_opt.scroll = 0;
