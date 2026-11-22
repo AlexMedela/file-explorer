@@ -406,9 +406,22 @@ static NSVGimage *icon_image(int id) {
 
 #include "system_icons.c"
 
-// Options > Appearance > Application icon: an absolute SVG/PNG beside the app's own name, or empty for System.
-// Kept here because rasterising it reuses sysi_raster(), which lives in system_icons.c above.
+// Options > Appearance > Application icon. Custom uses the typed artwork, System uses the desktop theme's
+// dev.fileexplorer icon, and Default uses the app's own accent-coloured logo. Kept here because rasterising reuses
+// sysi_raster(), which lives in system_icons.c above.
+typedef enum { APP_ICON_CUSTOM, APP_ICON_SYSTEM, APP_ICON_DEFAULT } AppIconMode;
+static AppIconMode g_app_icon_mode = APP_ICON_DEFAULT;
 static char g_app_icon_path[PATH_MAX];
+
+static AppIconMode app_icon_mode_parse(const char *v) {
+    if (v && !strcmp(v, "custom")) return APP_ICON_CUSTOM;
+    if (v && !strcmp(v, "system")) return APP_ICON_SYSTEM;
+    return APP_ICON_DEFAULT;
+}
+
+static const char *app_icon_mode_name(AppIconMode m) {
+    return m == APP_ICON_CUSTOM ? "custom" : m == APP_ICON_SYSTEM ? "system" : "default";
+}
 
 static bool app_icon_path_ok(const char *p) {
     if (!p || !*p) return true;
@@ -417,9 +430,17 @@ static bool app_icon_path_ok(const char *p) {
     return ext && (!strcasecmp(ext, ".svg") || !strcasecmp(ext, ".png"));
 }
 
-// NULL means System (the recoloured built-in logo). Caller frees.
+// The typed custom artwork only; NULL when no custom path is set. Caller frees.
 static u8 *app_icon_raster(int px) {
     return g_app_icon_path[0] ? sysi_raster(g_app_icon_path, px, COL_ACCENT) : NULL;
+}
+
+// System mode's artwork from the active desktop theme. NULL when the theme has no dev.fileexplorer icon; the callers
+// fall back to the built-in logo. Caller frees.
+static u8 *system_app_icon_raster(int px) {
+    char path[PATH_MAX];
+    if (!sysi_lookup(g_desktop.icons, "dev.fileexplorer", px, path, sizeof path)) return NULL;
+    return sysi_raster(path, px, COL_ACCENT);
 }
 
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
@@ -439,12 +460,21 @@ static u8 *icon_raster(int id, int w, int h) {
     return buf;
 }
 
-// RGBA of the icon currently in effect: the chosen artwork, or the built-in accent-coloured logo on System.
-// Caller frees. Defined after icon_raster(), which supplies the default.
-static u8 *app_icon_preview_raster(int px) {
-    u8 *custom = app_icon_raster(px);
-    return custom ? custom : icon_raster(ICON_LOGO, px, px);
+// RGBA of the icon currently in effect. Defined after icon_raster(), which supplies the Default artwork. Caller frees.
+static u8 *app_icon_mode_raster(int px) {
+    if (g_app_icon_mode == APP_ICON_CUSTOM) {
+        u8 *custom = app_icon_raster(px);
+        if (custom) return custom;
+    } else if (g_app_icon_mode == APP_ICON_SYSTEM) {
+        u8 *sys = system_app_icon_raster(px);
+        if (sys) return sys;
+    }
+    return icon_raster(ICON_LOGO, px, px);
 }
+
+static u8 *app_icon_window_raster(int px) { return app_icon_mode_raster(px); }
+
+static u8 *app_icon_preview_raster(int px) { return app_icon_mode_raster(px); }
 
 typedef struct { int id, px; Glyph g; } IconSlot;
 static IconSlot g_icon_cache[512];
@@ -477,10 +507,11 @@ static Glyph *icon_glyph(int id, int px) {
 static Glyph *app_icon_preview_glyph(int px) {
     static char key_path[PATH_MAX];
     static u32 key_accent;
+    static AppIconMode key_mode;
     static int key_px, slot = -1;
     u32 accent = COL_ACCENT & 0xFFFFFF;
-    if (slot >= 0 && slot < g_icon_cache_n && key_px == px && key_accent == accent && g_icon_cache[slot].id == -1
-        && !strcmp(key_path, g_app_icon_path)) return &g_icon_cache[slot].g;
+    if (slot >= 0 && slot < g_icon_cache_n && key_px == px && key_accent == accent && key_mode == g_app_icon_mode
+        && g_icon_cache[slot].id == -1 && !strcmp(key_path, g_app_icon_path)) return &g_icon_cache[slot].g;
     u8 *buf = app_icon_preview_raster(px);
     if (!buf) return NULL;
     int ax, ay;
@@ -498,6 +529,7 @@ static Glyph *app_icon_preview_glyph(int px) {
     s->g.w = (u16)px;
     s->g.h = (u16)px;
     snprintf(key_path, sizeof key_path, "%s", g_app_icon_path);
+    key_mode = g_app_icon_mode;
     key_accent = accent;
     key_px = px;
     return &s->g;

@@ -75,6 +75,7 @@ static void settings_defaults(void) {
     A.view_per_folder = false;
     A.def_group = GROUP_NONE;
     snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "Material");
+    g_app_icon_mode = APP_ICON_DEFAULT;
     A.alt_rows = false;
     A.size_bars = true;
     A.load_times = true;
@@ -193,6 +194,7 @@ static void settings_load(void) {
     FILE *f = fopen(path, "r");
     if (!f) { g_settings_file_version = SETTINGS_VERSION; return; }
     char line[PATH_MAX * 2 + 64];
+    bool saw_app_icon_mode = false;
     while (fgets(line, sizeof line, f)) {
         line[strcspn(line, "\r\n")] = 0;
         if (!line[0] || line[0] == '#') continue;
@@ -329,6 +331,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "view_per_folder")) A.view_per_folder = atoi(v);
         else if (!strcmp(k, "group")) A.def_group = CLAMP(atoi(v), 0, GROUP_COUNT - 1);
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
+        else if (!strcmp(k, "app_icon_mode")) { g_app_icon_mode = app_icon_mode_parse(v); saw_app_icon_mode = true; }
         else if (!strcmp(k, "app_icon")) { if (app_icon_path_ok(v)) snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", v); }
         else if (!strcmp(k, "title_icon")) { if (app_icon_path_ok(v)) snprintf(g_title_icon_path, sizeof g_title_icon_path, "%s", v); }
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
@@ -388,6 +391,7 @@ static void settings_load(void) {
         else settings_keep_other(k, v);
     }
     fclose(f);
+    if (!saw_app_icon_mode) g_app_icon_mode = g_app_icon_path[0] ? APP_ICON_CUSTOM : APP_ICON_DEFAULT;
     if (g_settings_file_version < SETTINGS_VERSION) {
         char bak[PATH_MAX + 8];
         snprintf(bak, sizeof bak, "%s.bak", path);
@@ -562,6 +566,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "external_terminal=%s\n", g_external_terminal);
     for (int i = 0; i < A.nservers; i++) fprintf(f, "server=%s\t%s%s%s\n", A.servers[i].name, A.servers[i].uri, A.servers[i].icon[0] ? "\t" : "", A.servers[i].icon);
     fprintf(f, "icon_theme=%s\n", icon_theme_name(g_icon_theme));
+    fprintf(f, "app_icon_mode=%s\n", app_icon_mode_name(g_app_icon_mode));
     fprintf(f, "app_icon=%s\n", g_app_icon_path);
     fprintf(f, "title_icon=%s\n", g_title_icon_path);
     fprintf(f, "theme=%s\nfont=%s\nfont_size=%d\nrow_spacing=%d\nsmooth_scroll=%d\n",

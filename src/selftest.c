@@ -4066,22 +4066,75 @@ static int run_selftest_m9(void) {
         char svg[PATH_MAX], dh[PATH_MAX], dest[PATH_MAX + 64];
         snprintf(svg, sizeof svg, M9_BASE "/app-icon.svg");
         st_write_text(svg, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#ff0000\"/></svg>");
+        ST_CHECK(g_app_icon_mode == APP_ICON_DEFAULT);
+        ST_CHECK(app_icon_mode_parse("custom") == APP_ICON_CUSTOM);
+        ST_CHECK(app_icon_mode_parse("system") == APP_ICON_SYSTEM);
+        ST_CHECK(app_icon_mode_parse("default") == APP_ICON_DEFAULT);
+        ST_CHECK(app_icon_mode_parse("nonsense") == APP_ICON_DEFAULT);
+        ST_CHECK(!strcmp(app_icon_mode_name(APP_ICON_CUSTOM), "custom"));
+        ST_CHECK(!strcmp(app_icon_mode_name(APP_ICON_SYSTEM), "system"));
+        ST_CHECK(!strcmp(app_icon_mode_name(APP_ICON_DEFAULT), "default"));
         ST_CHECK(app_icon_path_ok(NULL) && app_icon_path_ok(""));
         ST_CHECK(app_icon_path_ok(svg) && !app_icon_path_ok("relative.svg"));
         ST_CHECK(!app_icon_path_ok(M9_BASE "/app-icon.txt"));
         ST_CHECK(!app_icon_path_ok(M9_BASE "/app\n-icon.svg"));
-        ST_CHECK(!app_icon_raster(16)); // System: no custom artwork
-        u8 *def_prev = app_icon_preview_raster(16); // the row previews the icon in effect: default with System
+        ST_CHECK(!app_icon_raster(16)); // no custom artwork selected yet
+        u8 *def_prev = app_icon_preview_raster(16); // the row previews the icon in effect: the built-in default
         ST_CHECK(def_prev != NULL);
+        u8 *def_win = app_icon_window_raster(16);
+        ST_CHECK(def_win && !memcmp(def_win, def_prev, 16 * 16 * 4));
+        free(def_win);
         opt_app_icon_chosen(svg);
         ST_CHECK(!strcmp(g_app_icon_path, svg));
         u8 *px = app_icon_raster(16);
         ST_CHECK(px != NULL);
         u8 *custom_prev = app_icon_preview_raster(16);
         ST_CHECK(custom_prev != NULL && memcmp(def_prev, custom_prev, 16 * 16 * 4) != 0);
+        u8 *custom_win = app_icon_window_raster(16);
+        ST_CHECK(custom_win && !memcmp(custom_win, custom_prev, 16 * 16 * 4));
+        free(custom_win);
+        free(px);
+        { // System mode previews the desktop theme's dev.fileexplorer artwork; a missing theme falls back to Default
+            char theme_home[PATH_MAX], old_data[PATH_MAX] = "", old_dirs[PATH_MAX] = "", old_icons[64];
+            const char *ev = getenv("XDG_DATA_HOME");
+            if (ev) snprintf(old_data, sizeof old_data, "%s", ev);
+            ev = getenv("XDG_DATA_DIRS");
+            if (ev) snprintf(old_dirs, sizeof old_dirs, "%s", ev);
+            snprintf(old_icons, sizeof old_icons, "%s", g_desktop.icons);
+            snprintf(theme_home, sizeof theme_home, "%s/data", M9_BASE);
+            mkdir_p(M9_BASE "/no-data", 0755);
+            setenv("XDG_DATA_HOME", theme_home, 1);
+            setenv("XDG_DATA_DIRS", M9_BASE "/no-data", 1);
+            snprintf(g_desktop.icons, sizeof g_desktop.icons, "NoSuchTheme");
+            sysi_reset();
+            ST_CHECK(!system_app_icon_raster(16));
+            char p[PATH_MAX];
+            snprintf(p, sizeof p, "%s/icons/AppIconTheme/scalable/apps", theme_home);
+            mkdir_p(p, 0755);
+            snprintf(p, sizeof p, "%s/icons/AppIconTheme/index.theme", theme_home);
+            st_write_text(p, "[Icon Theme]\nName=App Icon Theme\nDirectories=scalable/apps\n\n[scalable/apps]\nSize=256\nMinSize=8\nMaxSize=512\nType=Scalable\n");
+            snprintf(p, sizeof p, "%s/icons/AppIconTheme/scalable/apps/dev.fileexplorer.svg", theme_home);
+            st_write_text(p, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#0000ff\"/></svg>");
+            sysi_reset();
+            snprintf(g_desktop.icons, sizeof g_desktop.icons, "AppIconTheme");
+            g_app_icon_mode = APP_ICON_SYSTEM;
+            u8 *sys_prev = app_icon_preview_raster(16), *sys_win = system_app_icon_raster(16);
+            ST_CHECK(sys_prev && sys_win && !memcmp(sys_prev, sys_win, 16 * 16 * 4));
+            ST_CHECK(sys_prev && memcmp(sys_prev, def_prev, 16 * 16 * 4) && memcmp(sys_prev, custom_prev, 16 * 16 * 4));
+            snprintf(g_desktop.icons, sizeof g_desktop.icons, "NoSuchTheme");
+            u8 *fallback = app_icon_preview_raster(16);
+            ST_CHECK(fallback && memcmp(fallback, sys_prev, 16 * 16 * 4));
+            free(fallback);
+            free(sys_win);
+            free(sys_prev);
+            snprintf(g_desktop.icons, sizeof g_desktop.icons, "%s", old_icons);
+            setenv("XDG_DATA_HOME", old_data[0] ? old_data : "", 1);
+            setenv("XDG_DATA_DIRS", old_dirs[0] ? old_dirs : "", 1);
+            sysi_reset();
+            g_app_icon_mode = APP_ICON_DEFAULT;
+        }
         free(custom_prev);
         free(def_prev);
-        free(px);
         { // Apply from the path field: invalid paths are rejected, an empty field restores the default
             te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
             opt_app_icon_apply();
@@ -4092,6 +4145,32 @@ static int run_selftest_m9(void) {
             te_set(&g_opt.app_icon, "", 0, 0);
             opt_app_icon_apply();
             ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
+        }
+        { // the mode persists, the typed path survives it, and a legacy path-only config means custom
+            opt_app_icon_chosen(svg);
+            g_app_icon_mode = APP_ICON_SYSTEM;
+            settings_save();
+            g_app_icon_mode = APP_ICON_DEFAULT;
+            settings_load();
+            ST_CHECK(g_app_icon_mode == APP_ICON_SYSTEM && !strcmp(g_app_icon_path, svg));
+            char cfg[PATH_MAX], backup[262144] = "", legacy[PATH_MAX + 32];
+            settings_file(cfg, sizeof cfg, false);
+            FILE *f = fopen(cfg, "rb");
+            ST_CHECK(f != NULL);
+            if (f) {
+                size_t n = fread(backup, 1, sizeof backup - 1, f);
+                backup[n] = 0;
+                fclose(f);
+            }
+            snprintf(legacy, sizeof legacy, "app_icon=%s\n", svg);
+            st_write_text(cfg, legacy);
+            g_app_icon_path[0] = 0;
+            g_app_icon_mode = APP_ICON_DEFAULT;
+            settings_load();
+            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
+            st_write_text(cfg, backup);
+            settings_load();
+            g_app_icon_mode = APP_ICON_DEFAULT;
         }
         { // title bar icon: its own path setting, preview and Apply, independent of the app icon
             char ti[PATH_MAX];
@@ -4132,7 +4211,7 @@ static int run_selftest_m9(void) {
         }
         data_home(dh, sizeof dh);
         snprintf(dest, sizeof dest, "%s/icons/hicolor/scalable/apps/dev.fileexplorer.svg", dh);
-        ST_CHECK(app_icon_write_ex(dh, 0x123456, svg));
+        ST_CHECK(app_icon_write_ex(dh, 0x123456, svg, false));
         FILE *df = fopen(dest, "rb");
         ST_CHECK(df != NULL);
         if (df) {
@@ -4141,10 +4220,14 @@ static int run_selftest_m9(void) {
             fclose(df);
             ST_CHECK(n && strstr(body, "#ff0000"));
         }
-        ST_CHECK(!app_icon_write_ex(dh, 0x123456, svg)); // already installed: nothing changed
+        ST_CHECK(!app_icon_write_ex(dh, 0x123456, svg, false)); // already installed: nothing changed
+        g_app_icon_mode = APP_ICON_SYSTEM;
+        ST_CHECK(app_icon_write_ex(dh, 0x123456, NULL, false)); // System removes the installed override
+        ST_CHECK(access(dest, F_OK) != 0);
+        g_app_icon_mode = APP_ICON_DEFAULT;
         opt_app_icon_chosen("");
         ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
-        ST_CHECK(app_icon_write(dh, 0x123456)); // System restores the recoloured built-in artwork
+        ST_CHECK(app_icon_write(dh, 0x123456)); // Default restores the recoloured built-in artwork
         df = fopen(dest, "rb");
         ST_CHECK(df != NULL);
         if (df) {

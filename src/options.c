@@ -629,6 +629,7 @@ static void opt_scroll_color_apply(void) {
 static void opt_app_icon_chosen(const char *path) {
     if (!app_icon_path_ok(path)) { toast("Application icon: an absolute .svg or .png path"); return; }
     snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", path ? path : "");
+    g_app_icon_mode = g_app_icon_path[0] ? APP_ICON_CUSTOM : APP_ICON_DEFAULT;
     g_logo_changed = true;
     window_icon_update();
     app_icon_sync();
