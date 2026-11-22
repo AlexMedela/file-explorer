@@ -1364,6 +1364,7 @@ static void handle_event(SDL_Event *e) {
     case SDL_EVENT_WINDOW_MAXIMIZED:
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
         trash_size_refresh(); // other apps may have used the trash meanwhile
+        trash_roots_refresh(); // (also on another drive, for the first time)
         if (e->type == SDL_EVENT_WINDOW_FOCUS_GAINED) git_refresh_all(); // files may have been edited / committed elsewhere
         A.win_hidden = false;
         A.redraw = true;

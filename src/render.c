@@ -2300,7 +2300,7 @@ static void draw_list(Pane *p, bool active) {
                          sel && active ? C(COL_SEL_DIM) : C(COL_TEXT_DIM));
         }
         if (ind > 0 && L->tree) { // guide lines for nested rows
-            int d = rel_depth(e->name);
+            int d = ent_depth(L, e->name);
             for (int k = 0; k < d; k++)
                 draw_rect(roundf(ly->col_name + roundf(S(16)) * (f32)k + roundf(S(7))), y, 1, rh, CA(COL_TEXT_FAINT, 0.35f));
         }
@@ -2334,8 +2334,9 @@ static void draw_list(Pane *p, bool active) {
         } else if (pane_is_trash(p)) { // name + where it came from + when
             char orig[PATH_MAX], date[32], par[PATH_MAX], tp[PATH_MAX], extra[PATH_MAX + 48];
             f32 maxw = ly->name_end - nx - S(10);
-            f32 ex = nx + MIN(text_width(f, e->name, (int)e->name_len), maxw);
-            draw_text_fit(f, nx, ty, maxw, e->name, (int)e->name_len, name_c, 0);
+            const char *b = ent_label(e); // (other drives' items: named by absolute path)
+            f32 ex = nx + MIN(text_width(f, b, (int)strlen(b)), maxw);
+            draw_text_fit(f, nx, ty, maxw, b, (int)strlen(b), name_c, 0);
             if (trash_info(e->name, orig, sizeof orig, date, sizeof date)) {
                 parent_of(orig, par, sizeof par);
                 tilde_path(par, tp, sizeof tp);
@@ -2377,7 +2378,7 @@ static void draw_list(Pane *p, bool active) {
             if (boff && bw + S(30) < maxw)
                 draw_text_fit(f, nx + bw + S(12), ty, maxw - bw - S(12), e->name, boff - 1, bright ? C(COL_SEL_DIM) : C(COL_TEXT_FAINT), 0);
         } else {
-            const char *b = L->tree ? rel_base(e->name) : e->name;
+            const char *b = L->tree ? rel_base(e->name) : ent_label(e);
             draw_name_pill(p, e, f, nx, y, rh, name_end - nx - S(10), 0, b, (int)strlen(b), name_c, bright);
         }
 
