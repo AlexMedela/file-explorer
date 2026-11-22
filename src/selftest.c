@@ -355,6 +355,30 @@ static f32 st_row_y(Pane *p, const char *name) {
     return -1;
 }
 
+// Centre pixel of the brand icon slot: true when the pure-green test icon is being drawn there.
+static bool st_brand_icon_green(void) {
+    Rect r = A.r_brand;
+    if (r.h <= 0) return false;
+    f32 lh = roundf(S(17)), lw = roundf(lh * 624.f / 456.f);
+    f32 x = r.x + S(18) + lw * 0.5f;
+    f32 y = roundf(r.y + (r.h - lh) * 0.5f - (lw - lh) * 0.5f) + lw * 0.5f;
+    int sx = (int)roundf(x) + A.shadow_px, sy = (int)roundf(y) + A.shadow_px;
+    SDL_Texture *target = SDL_GetRenderTarget(A.ren);
+    SDL_SetRenderTarget(A.ren, NULL);
+    SDL_Surface *s = SDL_RenderReadPixels(A.ren, NULL);
+    SDL_SetRenderTarget(A.ren, target);
+    if (!s) return false;
+    SDL_Surface *c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_RGBA8888);
+    SDL_DestroySurface(s);
+    if (!c || sx < 0 || sy < 0 || sx >= c->w || sy >= c->h) { if (c) SDL_DestroySurface(c); return false; }
+    const u8 *px = (const u8 *)c->pixels + (size_t)sy * c->pitch + (size_t)sx * 4;
+    u8 rr, gg, bb, aa;
+    SDL_GetRGBA(*(const u32 *)px, SDL_GetPixelFormatDetails(c->format), SDL_GetSurfacePalette(c), &rr, &gg, &bb, &aa);
+    bool green = rr < 80 && gg > 180 && bb < 80 && aa > 0;
+    SDL_DestroySurface(c);
+    return green;
+}
+
 static void st_shot(const char *name) {
     const char *dir = getenv("FE_SHOTS");
     if (!dir) return;
@@ -4094,6 +4118,17 @@ static int run_selftest_m9(void) {
             st_frames(2);
             ST_CHECK(st_opt_hit(HP_TEXT, OPT_TITLE_ICON, 3) != NULL);
             ST_CHECK(title_icon_glyph(24) != NULL);
+            sheet_close();
+            st_frames(5);
+            ST_CHECK(st_brand_icon_green()); // the custom artwork is drawn in the header, not just previewed
+            bool logo = A.brand_logo;
+            if (logo) opt_bool_toggle(OPT_BRAND_LOGO);
+            st_frames(5);
+            ST_CHECK(!A.brand_logo && !st_brand_icon_green()); // Logo off hides the custom icon too
+            st_shot("options-title-icon-off");
+            if (logo) opt_bool_toggle(OPT_BRAND_LOGO);
+            st_frames(5);
+            ST_CHECK(A.brand_logo && st_brand_icon_green());
         }
         data_home(dh, sizeof dh);
         snprintf(dest, sizeof dest, "%s/icons/hicolor/scalable/apps/dev.fileexplorer.svg", dh);
