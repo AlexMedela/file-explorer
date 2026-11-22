@@ -17,6 +17,9 @@ for n in names:
     svg = re.sub(r"<!--.*?-->", "", svg, flags=re.S)
     svg = re.sub(r"\s+", " ", svg).replace("> <", "><").replace(" />", "/>").strip()
     svg = svg.replace("currentColor", "#FFFFFF")
+    # Lucide draws dots (the i of "info", list bullets) as a 0.01 long stroke with round caps; nanosvg leaves out such
+    # a short stroke, so they become filled circles of the stroke's width
+    svg = re.sub(r'<path d="M([\d.]+) ([\d.]+)[hv]\.01"/>', r'<circle cx="\1" cy="\2" r="1" fill="#FFFFFF" stroke="none"/>', svg)
     out.append('    "%s",' % svg.replace("\\", "\\\\").replace('"', '\\"'))
 out.append("};")
 open(OUT, "w").write("\n".join(out) + "\n")
