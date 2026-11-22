@@ -36,7 +36,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_SIZE_BARS, "Folder size bars", "Bars behind folder sizes, relative to the largest"},
     {OC_APPEARANCE, OK_BOOL, OPT_LOAD_TIMES, "Load times", "How long the folder took to list, in the status bar"},
     {OC_APPEARANCE, OK_BOOL, OPT_SMOOTH, "Smooth scrolling", "Ease scrolling, go further on quick wheel turns, let touchpad swipes glide on"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Classic tabs: the open tab joins the folder below it, above the navigation bar; Pills: rounded tabs centred in a box below it"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Classic: the open tab joins the folder below it, above the navigation bar; Pills: rounded tabs centred in a box below it"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: Explorer's own on every desktop (Automatic), or the desktop's title bar (System)"},
     {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_BUTTONS, "Window buttons", "Minimise, maximise and close at the top right of Explorer's own title bar; without them, the desktop's keys close it"},
     {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
@@ -118,7 +118,7 @@ static const char *g_renderer_labels[] = {"Automatic", "Vulkan", "OpenGL", "Soft
 static const int g_transfer_counts[] = {1, 2, 4, 0}; // A.transfers_at_once (0 = no limit)
 static const char *g_transfer_labels[] = {"One at a time", "Two at a time", "Four at a time", "All at once"};
 static const char *g_exec_labels[] = {"Ask", "Run", "Run in terminal", "Open as a document (programs still ask)"}; // EXEC_*
-static const char *g_tab_style_labels[] = {"Classic tabs (above)", "Pills"}; // TABS_*
+static const char *g_tab_style_labels[] = {"Classic", "Pills"}; // TABS_*
 static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
 
 // hit parts recorded while drawing, tested on click

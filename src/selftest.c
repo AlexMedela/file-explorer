@@ -4018,7 +4018,7 @@ static int run_selftest_m9(void) {
     }
     { // two tab modes: Classic above the navigation bar, Pill below it; one tab can give its row back (Behavior setting)
         ST_CHECK(opt_choice_count(OPT_TAB_STYLE) == 2);
-        ST_CHECK(!strcmp(opt_choice_label(OPT_TAB_STYLE, 0), "Classic tabs (above)") &&
+        ST_CHECK(!strcmp(opt_choice_label(OPT_TAB_STYLE, 0), "Classic") &&
                  !strcmp(opt_choice_label(OPT_TAB_STYLE, 1), "Pills"));
         opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
         TabBands b = tab_bands(100.f, 1.f, 2);
