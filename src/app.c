@@ -4630,7 +4630,7 @@ static void options_open(void);
 static void ipc_handle(char *msg);
 static bool exe_link_replaced(char *link);
 static bool options_is_open(void);
-enum { OC_APPEARANCE, OC_BEHAVIOUR, OC_VIEWS, OC_KEYBOARD, OC_LAYOUTS, OC_INTEGRATION, OC_UPDATES, OC_ADVANCED, OC_COUNT }; // Options pages
+enum { OC_APPEARANCE, OC_BEHAVIOUR, OC_VIEWS, OC_KEYBOARD, OC_LAYOUTS, OC_ACTIONS, OC_INTEGRATION, OC_UPDATES, OC_ADVANCED, OC_COUNT }; // Options pages
 static void options_open_page(int cat);
 typedef struct {
     char name[64];
@@ -6635,9 +6635,9 @@ static void open_with_menu_app(Pane *p, int k) {
 // are a script: the names go in quoted for where they land (outside quotes, inside "..." or '...'), so a name like
 // $(...) stays a name. Read on every menu open (a few small files; edits show at once).
 typedef struct {
-    char name[128], exec[1024], exts[256], mimes[256];
+    char file[NAME_MAX + 1], name[128], exec[1024], exts[256], mimes[256], deps[256];
     int sel_min, sel_max; // how many selected items it's for; 0 (Selection=none): the folder's own menu
-    bool terminal;
+    bool terminal, active, deps_ok; // (all files are kept, for Options > Actions; the menu skips the off ones)
 } UserAction;
 
 static UserAction g_ua[UA_MAX];
@@ -6670,9 +6670,10 @@ static void ua_parse(const char *file) {
     if (g_nua >= UA_MAX) return;
     FILE *f = fopen(file, "r");
     if (!f) return;
-    UserAction a = {.sel_min = 1, .sel_max = INT_MAX};
-    char deps[256] = "", line[2048];
-    bool active = true, in_sect = false;
+    UserAction a = {.sel_min = 1, .sel_max = INT_MAX, .active = true};
+    char line[2048];
+    bool in_sect = false;
+    snprintf(a.file, sizeof a.file, "%s", path_basename(file));
     while (fgets(line, sizeof line, f)) {
         char *s = ua_trim(line), *eq;
         if (s[0] == '[') { // the first section only
@@ -6683,12 +6684,12 @@ static void ua_parse(const char *file) {
         if (!s[0] || s[0] == '#' || !(eq = strchr(s, '='))) continue;
         *eq = 0;
         char *k = ua_trim(s), *v = ua_trim(eq + 1);
-        if (!strcmp(k, "Active")) active = strcasecmp(v, "false") != 0;
+        if (!strcmp(k, "Active")) a.active = strcasecmp(v, "false") != 0;
         else if (!strcmp(k, "Name")) snprintf(a.name, sizeof a.name, "%s", v);
         else if (!strcmp(k, "Exec")) snprintf(a.exec, sizeof a.exec, "%s", v);
         else if (!strcmp(k, "Extensions")) snprintf(a.exts, sizeof a.exts, "%s", v);
         else if (!strcmp(k, "Mimetypes")) snprintf(a.mimes, sizeof a.mimes, "%s", v);
-        else if (!strcmp(k, "Dependencies")) snprintf(deps, sizeof deps, "%s", v);
+        else if (!strcmp(k, "Dependencies")) snprintf(a.deps, sizeof a.deps, "%s", v);
         else if (!strcmp(k, "Terminal")) a.terminal = !strcasecmp(v, "true");
         else if (!strcmp(k, "Selection")) { // s / single, m / multiple, a count, none, any / notnone (both: one or more)
             int c = atoi(v);
@@ -6699,8 +6700,12 @@ static void ua_parse(const char *file) {
         }
     }
     fclose(f);
-    if (active && a.name[0] && a.exec[0] && ua_deps_ok(deps)) g_ua[g_nua++] = a;
+    a.deps_ok = ua_deps_ok(a.deps);
+    g_ua[g_nua++] = a;
 }
+
+// In the menu: on, complete, and its programs there.
+static bool ua_usable(const UserAction *a) { return a->active && a->deps_ok && a->name[0] && a->exec[0]; }
 
 static void ua_load(void) {
     char dh[PATH_MAX];
@@ -6758,7 +6763,7 @@ static bool ua_item_ok(const UserAction *a, const char *name, bool dir) {
 }
 
 static bool ua_match(const UserAction *a, char **paths, const bool *dirs, int n) {
-    if (n < a->sel_min || n > a->sel_max) return false;
+    if (!ua_usable(a) || n < a->sel_min || n > a->sel_max) return false;
     for (int i = 0; i < n; i++)
         if (!ua_item_ok(a, path_basename(paths[i]), dirs[i])) return false;
     return true;
@@ -6986,6 +6991,126 @@ static void ua_menu_items(Pane *p, bool folder) {
     }
     strv_free(paths, n);
     free(dirs);
+}
+
+// Options > Actions writes the files: only the keys it edits change, in the first section; comments, translations
+// (Name[de]=) and keys it doesn't show stay as they are. A missing file is created.
+static bool ua_file_set(const char *path, const char *const *keys, const char *const *vals, int n) {
+    UaBuf out = {0};
+    bool done[16] = {0};
+    int sect = 0; // 0: before the first section, 1: in it, 2: after it
+    ub_str(&out, "");
+    FILE *f = fopen(path, "r");
+    char line[4096];
+    while (f && fgets(line, sizeof line, f)) {
+        const char *s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        if (*s == '[' && sect < 2) {
+            if (sect == 1) // the keys it lacked, at the end of the first section
+                for (int i = 0; i < n; i++)
+                    if (!done[i]) { ub_str(&out, keys[i]); ub_str(&out, "="); ub_str(&out, vals[i]); ub_str(&out, "\n"); done[i] = true; }
+            sect++;
+        } else if (sect == 1) {
+            int k = -1;
+            for (int i = 0; i < n && k < 0; i++) {
+                size_t kl = strlen(keys[i]);
+                const char *e = s + kl;
+                while (*e == ' ' || *e == '\t') e++;
+                if (!strncmp(s, keys[i], kl) && *e == '=') k = i;
+            }
+            if (k >= 0) {
+                if (!done[k]) { ub_str(&out, keys[k]); ub_str(&out, "="); ub_str(&out, vals[k]); ub_str(&out, "\n"); done[k] = true; }
+                continue; // (a repeated key: once)
+            }
+        }
+        ub_str(&out, line);
+    }
+    if (f) fclose(f);
+    if (out.n && out.s[out.n - 1] != '\n') ub_str(&out, "\n");
+    if (sect == 0) ub_str(&out, "[Action]\n");
+    for (int i = 0; i < n; i++)
+        if (!done[i]) { ub_str(&out, keys[i]); ub_str(&out, "="); ub_str(&out, vals[i]); ub_str(&out, "\n"); }
+    bool ok = write_file_atomic(path, out.s);
+    free(out.s);
+    return ok;
+}
+
+// A file name's own part, without the number that orders it ("020-copy-image.action" -> "copy-image.action").
+static const char *ua_file_stem(const char *file) {
+    const char *s = file;
+    while (*s >= '0' && *s <= '9') s++;
+    return s != file && (*s == '-' || *s == '_' || *s == ' ') && s[1] ? s + 1 : file;
+}
+
+// A new action's file, named after it ("030-open-in-vs-code.action"; ua_put_last then puts it after the others).
+static void ua_new_file(const char *name, char *out, size_t cap) {
+    char slug[64];
+    size_t o = 0;
+    for (const char *c = name; *c && o < sizeof slug - 1; c++) {
+        if (isalnum((unsigned char)*c)) slug[o++] = (char)tolower((unsigned char)*c);
+        else if (o && slug[o - 1] != '-') slug[o++] = '-';
+    }
+    while (o && slug[o - 1] == '-') o--;
+    slug[o] = 0;
+    if (!o) snprintf(slug, sizeof slug, "action");
+    mkdir_p(g_ua_dir, 0755);
+    for (int k = 1; k < 1000; k++) {
+        char file[NAME_MAX + 1];
+        if (k == 1) snprintf(file, sizeof file, "%03d-%s.action", (g_nua + 1) * 10, slug);
+        else snprintf(file, sizeof file, "%03d-%s-%d.action", (g_nua + 1) * 10, slug, k);
+        path_join(out, cap, g_ua_dir, file);
+        if (access(out, F_OK) != 0) return;
+    }
+}
+
+// Number the files in g_ua's order ("010-", "020-"...: the menu lists them by name), renaming only those whose name
+// changes, by way of temporary names so no two ever meet.
+static void ua_renumber(void) {
+    char want[UA_MAX][NAME_MAX + 1], from[PATH_MAX], to[PATH_MAX], tmp[32];
+    bool move[UA_MAX] = {0};
+    for (int k = 0; k < g_nua; k++) {
+        snprintf(want[k], sizeof want[k], "%03d-%.200s", (k + 1) * 10, ua_file_stem(g_ua[k].file));
+        move[k] = strcmp(want[k], g_ua[k].file) != 0;
+    }
+    for (int k = 0; k < g_nua; k++) {
+        if (!move[k]) continue;
+        path_join(from, sizeof from, g_ua_dir, g_ua[k].file);
+        snprintf(tmp, sizeof tmp, ".fe-move-%d", k);
+        path_join(to, sizeof to, g_ua_dir, tmp);
+        move[k] = rename(from, to) == 0; // (gone meanwhile: left out)
+    }
+    for (int k = 0; k < g_nua; k++) {
+        if (!move[k]) continue;
+        snprintf(tmp, sizeof tmp, ".fe-move-%d", k);
+        path_join(from, sizeof from, g_ua_dir, tmp);
+        path_join(to, sizeof to, g_ua_dir, want[k]);
+        rename(from, to);
+    }
+    ua_load();
+}
+
+// Move action i one place up (-1) or down (+1) in the menu.
+static void ua_move(int i, int dir) {
+    int j = i + dir;
+    if (i < 0 || j < 0 || i >= g_nua || j >= g_nua) return;
+    UserAction t = g_ua[i];
+    g_ua[i] = g_ua[j];
+    g_ua[j] = t;
+    ua_renumber();
+}
+
+// A file just written (path, which then names it as it is now): last in the menu.
+static void ua_put_last(char *path, size_t cap) {
+    ua_load();
+    for (int k = 0; k < g_nua; k++)
+        if (!strcmp(g_ua[k].file, path_basename(path))) {
+            UserAction t = g_ua[k];
+            memmove(&g_ua[k], &g_ua[k + 1], (size_t)(g_nua - k - 1) * sizeof g_ua[0]);
+            g_ua[g_nua - 1] = t;
+            ua_renumber();
+            if (g_nua) path_join(path, cap, g_ua_dir, g_ua[g_nua - 1].file);
+            return;
+        }
 }
 
 static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {

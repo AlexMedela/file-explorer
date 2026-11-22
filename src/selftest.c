@@ -4839,6 +4839,106 @@ static int run_selftest_m9(void) {
         ST_CHECK(!A.csd && A.r_wctl.w == 0 && A.r_wstrip.w == 0);
     }
 
+    { // Options > Actions: the list, the editor (only what changed is written, the rest of the file stays), a new one,
+      // templates, on / off, order (the files get numbered), Edit as text, delete, search
+        char *old_dh = getenv("XDG_DATA_HOME") ? strdup(getenv("XDG_DATA_HOME")) : NULL;
+        setenv("XDG_DATA_HOME", M9_BASE "/xdg", 1); // (never the user's actions)
+        mkdir(M9_BASE "/xdg", 0755);
+        mkdir(M9_BASE "/xdg/file-explorer", 0755);
+        mkdir(M9_BASE "/xdg/file-explorer/actions", 0755);
+#define M9_ACT M9_BASE "/xdg/file-explorer/actions/"
+        static const char nemo_before[] = "# from Nemo\n[Nemo Action]\nActive=true\nName=Shrink\nName[de]=Verkleinern\nExec=mogrify -resize 50%% %F\n"
+                                          "Selection=m\nMimetypes=image/*;\nExtensions=png;\n\n[Other]\nName=Kept\n";
+        st_write_text(M9_ACT "nemo.nemo_action", nemo_before);
+        st_write_text(M9_ACT "off.action", "[Action]\nActive=false\nName=Off one\nExec=true\n");
+        options_open_page(OC_ACTIONS);
+        st_frames(2);
+        ST_CHECK(g_opt.cat == OC_ACTIONS && g_nua == 2 && !strcmp(g_ua[0].file, "nemo.nemo_action") && !g_ua[1].active);
+        st_shot("options-actions");
+        char buf[1024];
+
+        st_opt_click(st_opt_hit(HP_ACT_EDIT, -1, 0)); // a new name: only Name= changes
+        ST_CHECK(g_opt.act_edit == 0 && g_opt.act_focus == 0 && !strcmp(g_opt.act_te[0].buf, "Shrink") && g_opt.act_sel == 2);
+        st_frames(2);
+        st_shot("options-actions-edit");
+        te_set(&g_opt.act_te[0], "Shrink", 0, 6);
+        st_type("Half size");
+        st_key(SDLK_RETURN, SDL_KMOD_NONE); // Enter saves
+        st_read_text(M9_ACT "nemo.nemo_action", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "# from Nemo\n[Nemo Action]\nActive=true\nName=Half size\nName[de]=Verkleinern\nExec=mogrify -resize 50%% %F\n"
+                              "Selection=m\nMimetypes=image/*;\nExtensions=png;\n\n[Other]\nName=Kept\n"));
+        ST_CHECK(g_opt.act_edit < 0 && !strcmp(g_ua[0].name, "Half size"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_TOGGLE, -1, 1)); // on / off: Active=
+        st_read_text(M9_ACT "off.action", buf, sizeof buf);
+        ST_CHECK(g_ua[1].active && !strcmp(buf, "[Action]\nActive=true\nName=Off one\nExec=true\n"));
+
+        st_opt_click(st_opt_hit(HP_ACT_NEW, -1, 0)); // a new one: Tab between the fields, a code at the caret, Shows for
+        ST_CHECK(g_opt.act_new && g_opt.act_focus == 0);
+        st_type("Open in Gimp");
+        st_key(SDLK_TAB, SDL_KMOD_NONE);
+        ST_CHECK(g_opt.act_focus == 1);
+        st_type("gimp ");
+        st_opt_click(st_opt_hit(HP_ACT_CODE, -1, 0));
+        ST_CHECK(!strcmp(g_opt.act_te[1].buf, "gimp %F") && g_opt.act_focus == 1);
+        st_opt_click(st_opt_hit(HP_DROP, OPT_ACT_SEL, 0));
+        ST_CHECK(g_opt.drop_opt == OPT_ACT_SEL);
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_SEL, 1)); // One item
+        ST_CHECK(g_opt.act_sel == 1 && g_opt.drop_opt < 0);
+        st_opt_click(st_opt_hit(HP_ACT_SAVE, -1, 0)); // last in the menu: the files get numbered
+        ST_CHECK(g_nua == 3 && !strcmp(g_ua[0].file, "010-nemo.nemo_action") && !strcmp(g_ua[1].file, "020-off.action"));
+        ST_CHECK(!strcmp(g_ua[2].file, "030-open-in-gimp.action") && g_opt.act_edit < 0);
+        st_read_text(M9_ACT "030-open-in-gimp.action", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "[Action]\nName=Open in Gimp\nExec=gimp %F\nExtensions=any;\nSelection=s\n"));
+        st_read_text(M9_ACT "010-nemo.nemo_action", buf, sizeof buf);
+        ST_CHECK(strstr(buf, "Name=Half size\n") && strstr(buf, "[Other]\n"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_UP, -1, 2)); // order
+        ST_CHECK(g_nua == 3 && !strcmp(g_ua[1].file, "020-open-in-gimp.action") && !strcmp(g_ua[2].file, "030-off.action"));
+        ST_CHECK(st_exists(M9_ACT "020-open-in-gimp.action") && !st_exists(M9_ACT "030-open-in-gimp.action"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_DROP, OPT_ACT_TEMPLATE, 0)); // a template fills the editor
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_TEMPLATE, 1));
+        ST_CHECK(g_opt.act_new && !strcmp(g_opt.act_te[0].buf, "Copy image to clipboard") && g_opt.act_sel == 1);
+        ST_CHECK(!strcmp(g_opt.act_te[3].buf, "wl-copy"));
+        st_frames(1);
+        A.last_opened[0] = 0;
+        st_opt_click(st_opt_hit(HP_ACT_TEXT, -1, 0)); // Edit as text: saved first, then the file in the editor
+        ST_CHECK(g_nua == 4 && !strcmp(A.last_opened, "edit:" M9_ACT "040-copy-image-to-clipboard.action"));
+        st_read_text(M9_ACT "040-copy-image-to-clipboard.action", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "[Action]\nName=Copy image to clipboard\nExec=sh -c \"wl-copy < %F\"\nExtensions=png; jpg; jpeg; webp; gif; svg\n"
+                              "Dependencies=wl-copy\nSelection=s\n"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_EDIT, -1, 0)); // Esc: the field lets go, then the editor closes unsaved
+        st_type("x");
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        ST_CHECK(g_sheet.kind == SHEET_OPTIONS && g_opt.act_edit < 0 && !strcmp(g_ua[0].name, "Half size"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_DELETE, -1, 2)); // delete asks, then the file goes to the trash
+        ST_CHECK(A.dlg.open);
+        dialog_choose(1);
+        st_wait_ops();
+        ST_CHECK(g_nua == 3 && !st_exists(M9_ACT "030-off.action") && st_exists(M9_BASE "/xdg/Trash/files/030-off.action"));
+
+        st_type("gimp"); // search finds actions by name
+        st_frames(2);
+        ST_CHECK(st_opt_hit(HP_ACT_EDIT, -1, 1) && !st_opt_hit(HP_ACT_EDIT, -1, 0) && !st_opt_hit(HP_ACT_NEW, -1, 0));
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        sheet_close();
+#undef M9_ACT
+        if (old_dh) setenv("XDG_DATA_HOME", old_dh, 1);
+        else unsetenv("XDG_DATA_HOME");
+        free(old_dh);
+    }
+
     g_theme_cur = 0;
     theme_apply();
     st_frames(2);

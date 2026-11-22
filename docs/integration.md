@@ -60,9 +60,11 @@ the settings file as `borg=` lines. A Borg 1 repository in an SFTP folder is rea
 connection the folder uses, or your ssh keys / agent); without borg there it is read through the folder, slower.
 
 ## Custom actions
-Your own commands in the right-click menu, as in Nemo: put `*.action` files (Nemo's `*.nemo_action` files work as
-they are) in `~/.local/share/file-explorer/actions/`. They are read each time a menu opens, listed by file name just
-above **Properties**.
+Your own commands in the right-click menu, as in Nemo. **Options > Actions** lists them: add one (from scratch or from a
+template), edit it in a form or as text, switch it off, change the order or delete it. Each action is a `*.action` file
+in `~/.local/share/file-explorer/actions/` (Nemo's `*.nemo_action` files work as they are), read each time a menu opens
+and listed by file name just above **Properties**. The page numbers the files (`010-`, `020-`...) to keep the order you
+set, and saving changes only the keys the form shows: comments, translations and other keys stay.
 
 ```ini
 [Action]
