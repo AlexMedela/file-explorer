@@ -398,7 +398,6 @@ static int opt_choice_get(int id) {
             if (str_ieq(g_opt.families[i], A.ui_font)) return i + 1;
         return 0;
     case OPT_ROW_SPACING: return A.row_spacing;
-    case OPT_NAV_SELECTION_OPACITY: return g_navigation_selection_opacity;
     case OPT_DEF_VIEW:
         for (int i = 0; i < ZOOM_COUNT; i++)
             if (g_zoom[i].view == A.def_view && (A.def_view != VIEW_GRID || g_zoom[i].px == A.def_icon)) return i;
@@ -460,7 +459,6 @@ static void opt_choice_set(int id, int i) {
         if (!apply_ui_font(i == 0 ? "" : g_opt.families[i - 1])) toast("Couldn't load that font");
         break;
     case OPT_ROW_SPACING: A.row_spacing = i; break;
-    case OPT_NAV_SELECTION_OPACITY: g_navigation_selection_opacity = CLAMP(i, 0, 100); break;
     case OPT_DEF_VIEW:
         A.def_view = g_zoom[i].view;
         if (g_zoom[i].view == VIEW_GRID) A.def_icon = g_zoom[i].px;
@@ -584,6 +582,7 @@ static int opt_int_get(int id) {
     switch (id) {
     case OPT_FONT_SIZE: return A.font_size;
     case OPT_ZOOM: return (int)lroundf(A.zoom * 100);
+    case OPT_NAV_SELECTION_OPACITY: return g_navigation_selection_opacity;
     }
     if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) return g_surface_bright[id - OPT_BRIGHT_SIDEBAR];
     return 0;
@@ -596,6 +595,10 @@ static void opt_int_step(int id, int dir) {
         reload_fonts();
         break;
     case OPT_ZOOM: set_zoom(A.zoom + 0.1f * (f32)dir); break;
+    case OPT_NAV_SELECTION_OPACITY:
+        g_navigation_selection_opacity = CLAMP(g_navigation_selection_opacity + dir * 5, 0, 100);
+        A.settings_dirty = true;
+        return;
     }
     if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) {
         int *b = &g_surface_bright[id - OPT_BRIGHT_SIDEBAR];
@@ -606,7 +609,8 @@ static void opt_int_step(int id, int dir) {
 }
 
 static void opt_int_fmt(int id, char *buf, size_t cap) {
-    if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) snprintf(buf, cap, opt_int_get(id) ? "%+d%%" : "%d%%", opt_int_get(id));
+    if (id == OPT_NAV_SELECTION_OPACITY) snprintf(buf, cap, "%d%%", opt_int_get(id));
+    else if (id >= OPT_BRIGHT_SIDEBAR && id <= OPT_BRIGHT_STATUS) snprintf(buf, cap, opt_int_get(id) ? "%+d%%" : "%d%%", opt_int_get(id));
     else if (id == OPT_ZOOM) snprintf(buf, cap, "%d%%", opt_int_get(id));
     else snprintf(buf, cap, "%d px", opt_int_get(id));
 }
