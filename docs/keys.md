@@ -19,6 +19,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Drag on empty space / outside a name | Rubber-band select (Ctrl = add), auto-scrolls at edges |
 | Ctrl+T / Ctrl+W / Ctrl+Shift+T | New tab / close tab / reopen closed tab (in the active panel; when its tab bar is full the new tab goes to the panel with the most room, and when every bar is full + dims and nothing opens) |
 | Ctrl+Tab, Ctrl+PgUp/PgDn, Ctrl+1…9 | Switch tabs within the active panel (Ctrl+9 = last) |
+| (tab icons) | A tab's icon says what it shows: a pie for **Disk usage**, the snapshots clock (accent colour) for **Snapshots**, else the icon of the network share, cloud remote, phone or backup it is in (at any depth), else the folder's own. At the top of one of those places the tab is named like the sidebar ("OCI VM", not the mount folder's name) |
 | Middle-click folder or place, Ctrl+Enter | Open folder in a new tab |
 | Middle-click tab / double-click tab bar | Close tab / new tab |
 | Ctrl+\ / Ctrl+Shift+\, F3, panel split button | **Panels** (like File Pilot): split the active panel right / down (when it is too narrow / short to halve, or halving it would squeeze its tabs, the widest / tallest panel with room is split instead; when none has room the button dims and nothing happens); each panel has its own tabs; splits nest; drag dividers to resize |

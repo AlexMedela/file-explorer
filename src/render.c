@@ -220,6 +220,79 @@ static void draw_phone_icon(f32 x, f32 y, f32 s, bool camera, bool dim) {
     draw_rrect(roundf(bx + (bw - sw) * 0.5f), by + roundf((top - sl) * 0.5f), sw, sl, sl * 0.5f, C(accent));
 }
 
+// Disk usage, as a tab's icon: a solid pie in the map's category colours, every slice round the same centre with
+// gaps of one width (each slice's edges moved in parallel), so it reads as a chart even at 15 px.
+static void draw_du_icon(f32 x, f32 y, f32 s) {
+    static const struct { f32 a0, a1; int cat; } sl[] = {{-90, 0, DC_ARCHIVE}, {0, 120, DC_CODE}, {120, 200, DC_IMAGE}, {200, 270, DC_AUDIO}};
+    f32 cx = x + s * 0.5f, cy = y + s * 0.5f, r = s * 0.46f, h = MAX(0.5f, s * 0.035f); // h: half the gap
+    for (int i = 0; i < (int)ARRAY_COUNT(sl); i++) {
+        f32 a0 = sl[i].a0 * (f32)M_PI / 180.f, a1 = sl[i].a1 * (f32)M_PI / 180.f, mid = (a0 + a1) * 0.5f;
+        f32 vx[40], vy[40], d = h / sinf((a1 - a0) * 0.5f), e0 = asinf(h / r);
+        int n = 0, seg = CLAMP((int)((a1 - a0) * r / 2.f) + 2, 3, 36);
+        vx[n] = cx + cosf(mid) * d; vy[n++] = cy + sinf(mid) * d; // tip, where both moved edges meet
+        for (int k = 0; k <= seg; k++) { // outer arc between the moved edges
+            f32 a = a0 + e0 + (a1 - a0 - 2 * e0) * (f32)k / (f32)seg;
+            vx[n] = cx + cosf(a) * r; vy[n++] = cy + sinf(a) * r;
+        }
+        draw_convex(vx, vy, n, C(g_dcat[sl[i].cat].col));
+    }
+}
+
+static bool path_under(const char *path, const char *root) {
+    size_t l = strlen(root);
+    return l && !strncmp(path, root, l) && (path[l] == 0 || path[l] == '/');
+}
+
+// A tab's icon: what it shows (disk usage, snapshots), else where it is - inside a network share, a cloud remote, a
+// phone or a backup, at any depth (a tab deep inside one still says so) - else the folder's own icon.
+static void draw_tab_icon(f32 x, f32 y, f32 s, const Pane *p) {
+    if (pane_du_on(p)) { draw_du_icon(x, y, s); return; }
+    if (pane_snap_on(p)) { draw_ui_icon(UI_ROTATE_CCW_CLOCK, x, y, s, C(COL_ACCENT)); return; }
+    const char *path = p->path;
+    for (int i = 0; i < g_ncloud; i++)
+        if (g_cloud[i].listed && path_under(path, g_cloud[i].mount) && draw_net_icon(x, y, s, cloud_icon(&g_cloud[i]), 1.f)) return;
+    if (path_in_cloud(path) && draw_net_icon(x, y, s, "cloud", 1.f)) return; // a remote not listed (yet): still a cloud
+    for (int i = 0; i < A.nnets; i++) {
+        if (!path_under(path, A.nets[i].path)) continue;
+        const char *ic = ""; // the server's chosen icon; a share not saved as a server: the default one, as in the sidebar
+        for (int sv = 0; sv < A.nservers; sv++)
+            if (net_server_is_mount(A.servers[sv].uri, A.nets[i].path)) { ic = A.servers[sv].icon; break; }
+        if (draw_net_icon(x, y, s, ic, 1.f)) return;
+    }
+    for (int i = 0; i < A.devs.nph; i++)
+        if (path_under(path, A.devs.ph[i].mount)) { draw_phone_icon(x, y, s, A.devs.ph[i].kind == 'c', false); return; }
+    for (int k = 0; k < g_borg_n; k++)
+        if (path_under(path, g_borg[k].mp)) {
+            int i = borg_saved_of_mount(k);
+            if (draw_net_icon(x, y, s, i >= 0 && A.borgs[i].icon[0] ? A.borgs[i].icon : BORG_ICON_DEFAULT, 1.f)) return;
+        }
+    draw_path_icon(x, y, s, path);
+}
+
+// A tab's label at the top of a network share, cloud remote, phone or backup: its sidebar name ("OCI VM", not the
+// mount folder's "sftp:host=..."); NULL anywhere else (deeper in, the folder's own name says where you are).
+static const char *tab_place_name(const char *path) {
+    for (int i = 0; i < g_ncloud; i++)
+        if (g_cloud[i].listed && g_cloud[i].mount[0] && !strcmp(path, g_cloud[i].mount)) return g_cloud[i].name;
+    if (path_in_cloud(path)) return NULL; // a remote not listed (yet): its mount folder is named after it, not "name:"
+    for (int i = 0; i < A.nnets; i++) {
+        if (strcmp(path, A.nets[i].path)) continue;
+        const char *nm = dev_name_get(path); // the same order as the sidebar: renamed, saved server, the mount's own
+        if (nm) return nm;
+        for (int sv = 0; sv < A.nservers; sv++)
+            if (net_server_is_mount(A.servers[sv].uri, path)) return A.servers[sv].name;
+        return A.nets[i].label;
+    }
+    for (int i = 0; i < A.devs.nph; i++)
+        if (A.devs.ph[i].mount[0] && !strcmp(path, A.devs.ph[i].mount) && A.devs.ph[i].name[0]) return A.devs.ph[i].name;
+    for (int k = 0; k < g_borg_n; k++)
+        if (!strcmp(path, g_borg[k].mp)) {
+            int i = borg_saved_of_mount(k);
+            return i >= 0 ? A.borgs[i].name : path_basename(g_borg[k].dir);
+        }
+    return NULL;
+}
+
 static void draw_chevron(f32 cx, f32 cy, f32 s, int dir, f32 t, Color c) {
     // dir: 0 left, 1 right, 2 up, 3 down
     f32 h = s * 0.5f, q = s * 0.25f;
@@ -379,7 +452,8 @@ static void draw_panel_bar(Panel *pn) {
         if (dragging) g_alpha = 0.45f;
         f32 is = roundf(S(15)), ix = roundf(r.x + S(12)), iy = roundf(r.y + (r.h - is) * 0.5f);
         char dnb[NAME_MAX + 1];
-        const char *label = t->term ? term_label(t->term) : disp_name(p->path, dnb, sizeof dnb);
+        const char *label = t->term ? term_label(t->term) : tab_place_name(p->path);
+        if (!label) label = disp_name(p->path, dnb, sizeof dnb);
         // the active terminal tab sits on the terminal's own colour: use its foreground so the text stays readable
         bool on_term = t->term && cur && !pills;
         u32 tfg = on_term ? term_fg_color() : 0, tbg = on_term ? term_bg_color() : 0;
@@ -390,7 +464,7 @@ static void draw_panel_bar(Panel *pn) {
             draw_line(ix + is * 0.25f, iy + is * 0.35f, ix + is * 0.42f, iy + is * 0.5f, lt, tcc);
             draw_line(ix + is * 0.42f, iy + is * 0.5f, ix + is * 0.25f, iy + is * 0.65f, lt, tcc);
             draw_rect(roundf(ix + is * 0.5f), roundf(iy + is * 0.62f), roundf(is * 0.26f), lt, tcc);
-        } else draw_path_icon(ix, iy, is, p->path);
+        } else draw_tab_icon(ix, iy, is, p);
         f32 csz = roundf(S(18));
         bool show_close = A.ntabs > 1 && (cur || hover) && r.w > S(90);
         f32 tx = ix + is + roundf(S(8));
@@ -463,7 +537,8 @@ static void draw_tab_drop(void) {
         draw_split_zone(pn, A.tdrop_kind == TD_EDGE ? A.tdrop_zone : ZONE_CENTER);
     // ghost of the dragged tab under the cursor
     Pane *p = &A.drag_tab->pane[0];
-    const char *label = p->path[1] ? path_basename(p->path) : "/";
+    const char *label = tab_place_name(p->path);
+    if (!label) label = p->path[1] ? path_basename(p->path) : "/";
     Font *f = &A.font;
     f32 w = MIN(S(220), text_width(f, label, (int)strlen(label)) + S(48)), h = roundf(S(30));
     f32 x = roundf(A.mx - S(20)), y = roundf(A.my - h * 0.5f);
@@ -471,7 +546,7 @@ static void draw_tab_drop(void) {
     draw_rrect(x, y, w, h, S(7), C(COL_TOOLBAR));
     draw_rrect_outline(x, y, w, h, S(7), 1, C(COL_ACCENT));
     f32 is = roundf(S(15));
-    draw_path_icon(roundf(x + S(10)), roundf(y + (h - is) * 0.5f), is, p->path);
+    draw_tab_icon(roundf(x + S(10)), roundf(y + (h - is) * 0.5f), is, p);
     draw_text_fit(f, x + S(32), text_y(f, y, h), w - S(40), label, (int)strlen(label), C(COL_TEXT), 0);
 }
 
