@@ -1,6 +1,6 @@
 // options.c - Options window (Ctrl+,): every setting in one searchable sheet (included from ui_tools.c)
 
-static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Integration", "Updates", "Advanced"};
+static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Actions", "Integration", "Updates", "Advanced"};
 
 enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
@@ -119,9 +119,32 @@ static const char *g_exec_labels[] = {"Ask", "Run", "Run in terminal", "Open as 
 static const char *g_tab_style_labels[] = {"Cards", "Pills"}; // TABS_*
 static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
 
+// Options > Actions: its controls (not rows of g_opts), what "Shows for" writes, and the templates
+enum { OPT_ACT_SEL = 1000, OPT_ACT_TERM, OPT_ACT_TEMPLATE, OPT_ACT_ICON, OPT_ACT_GROUP, OPT_ACT_GICON = 1100 }; // (OPT_ACT_GICON + group index)
+static bool opt_is_gicon(int id) { return id >= OPT_ACT_GICON && id < OPT_ACT_GICON + UA_MAX; }
+static const char *g_act_sel_labels[] = {"One or more items", "One item", "Several items", "Empty space (folder menu)"};
+static const char *g_act_sel_values[] = {"any", "s", "m", "none"};
+static const struct { const char *name, *exec, *exts, *deps, *icon; int sel; bool term; } g_act_templates[] = {
+    {"Copy image to clipboard", "sh -c \"wl-copy < %F\"", "png; jpg; jpeg; webp; gif; svg", "wl-copy", "copy", 1, false},
+    {"Open in VS Code", "code %F", "any", "code", "code", 0, false},
+    {"SHA-256 checksums", "sh -c \"sha256sum %F | zenity --text-info --title=SHA-256 --width=800 --height=300\"", "nodirs", "sha256sum; zenity", "hash", 0, false},
+    {"Convert to PNG", "sh -c \"for f in %F; do magick \\\"$f\\\" \\\"${f%%.*}.png\\\"; done\"", "jpg; jpeg; webp; gif; bmp; tiff; heic; avif", "magick", "image", 0, false},
+    {"Make executable", "chmod +x %F", "nodirs", "", "play", 0, false},
+    {"File details in a terminal", "sh -c \"stat %F; printf '\\\\nPress Enter to close'; read -r _\"", "any", "", "terminal", 0, true},
+};
+static void opt_act_template(int t);
+// "Common types": buttons that add a kind of file to File types
+static const struct { const char *label, *exts; } g_act_types[] = {
+    {"Images", "png; jpg; jpeg; gif; webp; svg; bmp; tiff; heic; avif"}, {"Video", "mp4; mkv; webm; mov; avi"},
+    {"Audio", "mp3; flac; ogg; opus; wav; m4a"}, {"Documents", "pdf; txt; md; odt; docx"}, {"Archives", "zip; tar; gz; xz; zst; 7z; rar"},
+    {"Folders", "dir"}, {"Files only", "nodirs"},
+};
+
 // hit parts recorded while drawing, tested on click
 enum { HP_NONE, HP_NAV, HP_TOGGLE, HP_SEG, HP_DROP, HP_MINUS, HP_PLUS, HP_SWATCH, HP_BUTTON, HP_DROPITEM, HP_SEARCH, HP_CLOSE,
-       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT };
+       HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT,
+       HP_ACT_NEW, HP_ACT_FOLDER, HP_ACT_TOGGLE, HP_ACT_EDIT, HP_ACT_UP, HP_ACT_DOWN, HP_ACT_DELETE, HP_ACT_FIELD, HP_ACT_TYPE, HP_ACT_GROUPS, HP_ACT_NEEDS,
+       HP_ACT_TEXT, HP_ACT_CANCEL, HP_ACT_SAVE };
 typedef struct { Rect r; int part, opt, arg; } OptHit;
 
 static struct {
@@ -154,6 +177,19 @@ static struct {
     // the scrollbar colour (OK_TEXT, applied with Enter or Apply)
     TextEdit scroll_color;
     bool scroll_focus;
+    // actions page: the list, or (act_edit >= 0: an index in g_ua, UA_MAX for a new one) the editor
+    int act_edit;
+    bool act_new;
+    TextEdit act_te[5]; // name, command, file types (Extensions), needed programs (Dependencies), group
+    int act_focus;      // the field with the keyboard (-1: none)
+    bool act_reveal;    // scroll it into view (Tab moved there)
+    Rect act_group_r;   // the Group field + its button (where the list of groups opens)
+    int act_sel;        // g_act_sel_labels
+    bool act_term;
+    int act_icon;           // in g_ua_icons (-1: the default)
+    char act_init[5][1024]; // the fields as the editor opened: only what changed is written
+    int act_init_sel, act_init_icon;
+    bool act_init_term;
 } g_opt;
 
 // Options > Integration > Terminal app: the terminals installed (programs on $PATH), found on a worker each time
@@ -316,6 +352,7 @@ static int opt_pick_choice(int light) {
 }
 
 static int opt_choice_count(int id) {
+    if (opt_is_gicon(id)) return 1 + (int)ARRAY_COUNT(g_ua_icons);
     switch (id) {
     case OPT_THEME: return g_nthemes;
     case OPT_THEME_LIGHT: case OPT_THEME_DARK: return g_nthemes - (opt_pick_sys() < g_nthemes);
@@ -333,11 +370,16 @@ static int opt_choice_count(int id) {
     case OPT_RENDERER: return (int)ARRAY_COUNT(g_renderers);
     case OPT_TRANSFERS: return (int)ARRAY_COUNT(g_transfer_counts);
     case OPT_EXEC_OPEN: return (int)ARRAY_COUNT(g_exec_labels);
+    case OPT_ACT_SEL: return (int)ARRAY_COUNT(g_act_sel_labels);
+    case OPT_ACT_ICON: return 1 + (int)ARRAY_COUNT(g_ua_icons);
+    case OPT_ACT_GROUP: return 1 + g_nuag;
+    case OPT_ACT_TEMPLATE: return 1 + (int)ARRAY_COUNT(g_act_templates);
     }
     return 0;
 }
 
 static const char *opt_choice_label(int id, int i) {
+    if (opt_is_gicon(id)) return i ? g_ua_icons[i - 1].label : "Default";
     switch (id) {
     case OPT_THEME: return g_themes[i].name;
     case OPT_THEME_LIGHT: case OPT_THEME_DARK: return g_themes[opt_pick_theme(i)].name;
@@ -370,11 +412,16 @@ static const char *opt_choice_label(int id, int i) {
     case OPT_TAB_STYLE: return g_tab_style_labels[i];
     case OPT_TRANSFERS: return g_transfer_labels[i];
     case OPT_EXEC_OPEN: return g_exec_labels[i];
+    case OPT_ACT_SEL: return g_act_sel_labels[i];
+    case OPT_ACT_TEMPLATE: return i ? g_act_templates[i - 1].name : "Choose a template\xE2\x80\xA6";
+    case OPT_ACT_ICON: return i ? g_ua_icons[i - 1].label : "Default";
+    case OPT_ACT_GROUP: return i ? g_uag[i - 1].name : "None (in the menu itself)";
     }
     return "";
 }
 
 static int opt_choice_get(int id) {
+    if (opt_is_gicon(id)) return id - OPT_ACT_GICON < g_nuag ? g_uag[id - OPT_ACT_GICON].icon + 1 : 0;
     switch (id) {
     case OPT_THEME: return g_theme_cur;
     case OPT_THEME_LIGHT: return opt_pick_choice(0);
@@ -411,6 +458,9 @@ static int opt_choice_get(int id) {
         for (int i = 0; i < (int)ARRAY_COUNT(g_transfer_counts); i++)
             if (A.transfers_at_once == g_transfer_counts[i]) return i;
         return 0;
+    case OPT_ACT_SEL: return g_opt.act_sel;
+    case OPT_ACT_ICON: return g_opt.act_icon + 1;
+    case OPT_ACT_GROUP: return ua_group_find(g_opt.act_te[4].buf) + 1;
     }
     return 0;
 }
@@ -431,6 +481,18 @@ static bool apply_ui_font(const char *family) {
 }
 
 static void opt_choice_set(int id, int i) {
+    if (id == OPT_ACT_SEL) { g_opt.act_sel = i; return; } // (the editor's: saved with Save)
+    if (id == OPT_ACT_ICON) { g_opt.act_icon = i - 1; return; }
+    if (id == OPT_ACT_GROUP) {
+        const char *g = i > 0 && i <= g_nuag ? g_uag[i - 1].name : "";
+        te_set(&g_opt.act_te[4], g, (int)strlen(g), (int)strlen(g));
+        return;
+    }
+    if (opt_is_gicon(id)) { // a group's: saved at once (groups.conf)
+        if (!ua_group_set_icon(id - OPT_ACT_GICON, i - 1)) toast("Couldn't save groups.conf: %s", strerror(errno));
+        return;
+    }
+    if (id == OPT_ACT_TEMPLATE) { if (i > 0) opt_act_template(i - 1); return; }
     switch (id) {
     case OPT_THEME: g_theme_cur = i; theme_apply(); desktop_look_sync(); break;
     case OPT_THEME_LIGHT: case OPT_THEME_DARK:
@@ -507,11 +569,13 @@ static bool opt_bool_get(int id) {
     case OPT_IG_PICKER: return ig_picker_on();
     case OPT_IG_UPDATES: return A.ig_check_updates;
     case OPT_UPD_AUTO: return A.upd_auto;
+    case OPT_ACT_TERM: return g_opt.act_term;
     }
     return false;
 }
 
 static void opt_bool_toggle(int id) {
+    if (id == OPT_ACT_TERM) { g_opt.act_term = !g_opt.act_term; return; }
     switch (id) {
     case OPT_DIM_INACTIVE: A.dim_inactive = !A.dim_inactive; break;
     case OPT_ROUND_CORNERS:
@@ -717,6 +781,8 @@ static void options_open(void) {
     g_opt.drop_opt = -1;
     g_opt.hover_row = -1;
     g_opt.rec_def = -1;
+    g_opt.act_edit = g_opt.act_focus = -1;
+    ua_load(); // (Options > Actions; edited files show again)
     te_set(&g_opt.brand, A.brand_text, (int)strlen(A.brand_text), (int)strlen(A.brand_text));
     char sc[16] = "";
     if (g_scroll_custom) snprintf(sc, sizeof sc, "#%06X", g_scroll_custom & 0xFFFFFF);
@@ -762,6 +828,13 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
 }
 
 static bool opt_hover(Rect r) { return hot(r); }
+
+// The icon of choice i of a dropdown (-1: none): the custom actions' icons.
+static int opt_choice_icon(int id, int i) {
+    if (id == OPT_ACT_GROUP) return i > 0 && i <= g_nuag ? ua_icon_ui(g_uag[i - 1].icon, true) : -1;
+    if (id != OPT_ACT_ICON && !opt_is_gicon(id)) return -1;
+    return ua_icon_ui(i - 1, id != OPT_ACT_ICON);
+}
 
 // Control area of one row (right-aligned inside [x, x + w]).
 static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
@@ -812,7 +885,13 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             if (open) draw_rrect_outline(r.x, r.y, r.w, r.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
             const char *l = cur < n ? opt_choice_label(o->id, cur) : "";
             if (o->id == OPT_FONT && A.ui_font[0] && cur == 0) l = A.ui_font; // not in the list (yet)
-            draw_text_fit(f, r.x + S(10), text_y(f, y, ch), r.w - S(36), l, (int)strlen(l), C(COL_TEXT), 0);
+            f32 lx = r.x + S(10);
+            int ic = opt_choice_icon(o->id, cur);
+            if (ic >= 0) {
+                draw_ui_icon(ic, lx, roundf(cy - S(8)), roundf(S(16)), C(COL_TEXT));
+                lx += S(24);
+            }
+            draw_text_fit(f, lx, text_y(f, y, ch), r.x + r.w - S(26) - lx, l, (int)strlen(l), C(COL_TEXT), 0);
             draw_chevron(r.x + r.w - S(16), cy, S(6), 3, MAX(1.f, S(1.4f)), C(COL_TEXT_DIM));
             opt_hit(r, HP_DROP, o->id, 0);
         }
@@ -931,7 +1010,13 @@ static void opt_draw_dropdown(void) {
         if (sel) draw_rrect(ir.x, ir.y, ir.w, ir.h, S(6), C(COL_SEL_FOCUS));
         int ci = g_opt.drop_map[k];
         const char *l = opt_choice_label(id, ci);
-        draw_text_fit(f, ir.x + S(26), text_y(f, ir.y, rh), ir.w - S(34), l, (int)strlen(l), C(sel ? COL_SEL_TEXT : COL_TEXT), 0);
+        f32 lx = ir.x + S(26);
+        int ic = opt_choice_icon(id, ci);
+        if (ic >= 0) {
+            draw_ui_icon(ic, lx, roundf(ir.y + (rh - S(16)) * 0.5f), roundf(S(16)), C(sel ? COL_SEL_TEXT : COL_TEXT));
+            lx += S(24);
+        }
+        draw_text_fit(f, lx, text_y(f, ir.y, rh), ir.x + ir.w - S(8) - lx, l, (int)strlen(l), C(sel ? COL_SEL_TEXT : COL_TEXT), 0);
         if (ci == cur) { // check mark
             f32 cx = ir.x + S(9), cyy = ir.y + rh * 0.5f, t = MAX(1.5f, S(1.6f));
             Color cc = C(sel ? COL_SEL_TEXT : COL_ACCENT);
@@ -1114,6 +1199,415 @@ static f32 opt_draw_layouts(f32 x, f32 y, f32 w, Rect list, const char *q) {
     return y;
 }
 
+// --- actions page ----------------------------------------------------------------------------------------------
+
+static int opt_act_sel_of(const UserAction *a) {
+    if (a->sel_max == 0) return 3;
+    if (a->sel_min == 1 && a->sel_max == 1) return 1;
+    if (a->sel_min == 2 && a->sel_max == INT_MAX) return 2;
+    return 0; // (one or more; an exact count other than one also shows here, and stays unless changed)
+}
+
+// One line about an action under its name: what it's for, and why it doesn't show when it doesn't.
+static const char *opt_act_summary(const UserAction *a) {
+    static char b[480];
+    char sel[32], miss[256] = "";
+    if (!a->name[0] || !a->exec[0]) return "Incomplete: needs a name and a command";
+    if (a->sel_max == 0) snprintf(sel, sizeof sel, "Folder menu");
+    else if (a->sel_min == a->sel_max) snprintf(sel, sizeof sel, a->sel_min == 1 ? "One item" : "%d items", a->sel_min);
+    else snprintf(sel, sizeof sel, a->sel_min >= 2 ? "Several items" : "One or more items");
+    if (!a->deps_ok) snprintf(miss, sizeof miss, "Hidden, needs %s \xC2\xB7 ", a->deps);
+    const char *types = a->sel_max == 0 ? "" : a->exts[0] ? a->exts : a->mimes[0] ? a->mimes : "any type";
+    char grp[96] = "";
+    if (a->group[0]) snprintf(grp, sizeof grp, "In %s \xC2\xB7 ", a->group);
+    snprintf(b, sizeof b, "%s%s%s%s%s%s", miss, grp, sel, types[0] ? " \xC2\xB7 " : "", types, a->terminal ? " \xC2\xB7 in the terminal" : "");
+    return b;
+}
+
+static void opt_act_fill(const char *name, const char *exec, const char *exts, const char *deps, const char *group, int sel, int icon, bool term) {
+    const char *v[5] = {name, exec, exts, deps, group};
+    for (int k = 0; k < 5; k++) {
+        te_set(&g_opt.act_te[k], v[k], (int)strlen(v[k]), (int)strlen(v[k]));
+        snprintf(g_opt.act_init[k], sizeof g_opt.act_init[k], "%s", v[k]);
+    }
+    g_opt.act_sel = g_opt.act_init_sel = sel;
+    g_opt.act_icon = g_opt.act_init_icon = icon;
+    g_opt.act_term = g_opt.act_init_term = term;
+    g_opt.act_focus = 0;
+    g_opt.scroll = 0;
+}
+
+// The editor: action i, or (i < 0) a new one.
+static void opt_act_edit(int i) {
+    if (i >= 0 && i < g_nua) {
+        const UserAction *a = &g_ua[i];
+        g_opt.act_edit = i;
+        g_opt.act_new = false;
+        opt_act_fill(a->name, a->exec, a->exts, a->deps, a->group, opt_act_sel_of(a), a->icon, a->terminal);
+    } else {
+        g_opt.act_edit = UA_MAX;
+        g_opt.act_new = true;
+        opt_act_fill("", "", "", "", "", 0, -1, false);
+    }
+}
+
+static void opt_act_template(int t) {
+    if (t < 0 || t >= (int)ARRAY_COUNT(g_act_templates)) return;
+    opt_act_edit(-1); // (new: all its values get written)
+    te_set(&g_opt.act_te[0], g_act_templates[t].name, (int)strlen(g_act_templates[t].name), (int)strlen(g_act_templates[t].name));
+    te_set(&g_opt.act_te[1], g_act_templates[t].exec, 0, 0);
+    te_set(&g_opt.act_te[2], g_act_templates[t].exts, 0, 0);
+    te_set(&g_opt.act_te[3], g_act_templates[t].deps, 0, 0);
+    g_opt.act_sel = g_act_templates[t].sel;
+    g_opt.act_icon = ua_icon_find(g_act_templates[t].icon, false);
+    g_opt.act_term = g_act_templates[t].term;
+}
+
+static void opt_act_close(void) {
+    g_opt.act_edit = -1;
+    g_opt.act_focus = -1;
+    g_opt.scroll = 0;
+}
+
+// The editor's action file (path), saved: what changed since it opened (a new one: everything). False: not saved.
+static bool opt_act_write(char *path, size_t cap) {
+    const char *name = g_opt.act_te[0].buf, *exec = g_opt.act_te[1].buf;
+    if (!name[0] || !exec[0]) { toast("An action needs a name and a command"); return false; }
+    if (g_opt.act_new) ua_new_file(name, path, cap);
+    else if (g_opt.act_edit < g_nua) path_join(path, cap, g_ua_dir, g_ua[g_opt.act_edit].file);
+    else return false;
+    static const char *keys[5] = {"Name", "Exec", "Extensions", "Dependencies", "Group"};
+    const char *k[10], *v[10];
+    int n = 0;
+    for (int i = 0; i < 5; i++) {
+        const char *val = g_opt.act_te[i].buf;
+        if (i == 2 && !val[0]) val = "any;"; // (Nemo wants Extensions or Mimetypes)
+        if (g_opt.act_new ? i < 3 || val[0] : strcmp(g_opt.act_te[i].buf, g_opt.act_init[i])) k[n] = keys[i], v[n++] = val;
+    }
+    if (g_opt.act_new || g_opt.act_sel != g_opt.act_init_sel) k[n] = "Selection", v[n++] = g_act_sel_values[g_opt.act_sel];
+    if (g_opt.act_new ? g_opt.act_term : g_opt.act_term != g_opt.act_init_term) k[n] = "Terminal", v[n++] = g_opt.act_term ? "true" : "false";
+    if (g_opt.act_new ? g_opt.act_icon >= 0 : g_opt.act_icon != g_opt.act_init_icon) k[n] = "Icon", v[n++] = g_opt.act_icon >= 0 ? g_ua_icons[g_opt.act_icon].name : "";
+    if (n && !ua_file_set(path, NULL, k, v, n)) { toast("Couldn't save %s: %s", path_basename(path), strerror(errno)); return false; }
+    if (g_opt.act_new) ua_put_last(path, cap); // after the others (the files get numbered)
+    return true;
+}
+
+static void opt_act_save(void) {
+    char path[PATH_MAX];
+    if (!opt_act_write(path, sizeof path)) return;
+    toast("Saved \xE2\x80\x9C%s\xE2\x80\x9D", g_opt.act_te[0].buf);
+    ua_load();
+    opt_act_close();
+}
+
+// An action file in the text editor (the default app for text: .action files have no type of their own).
+static void opt_act_open_file(const char *path) {
+    if (A.selftest) { snprintf(A.last_opened, sizeof A.last_opened, "edit:%s", path); return; }
+    DesktopApp *a = (apps_load(), app_default_for("text/plain"));
+    if (!a || !app_launch(a, (char *[]){(char *)path}, 1)) open_path(path);
+}
+
+// "Edit as text": the form saved first (nothing typed is lost), then the file.
+static void opt_act_edit_text(void) {
+    char path[PATH_MAX];
+    if (!opt_act_write(path, sizeof path)) return;
+    ua_load();
+    opt_act_close();
+    opt_act_open_file(path);
+}
+
+static void opt_act_toggle(int i) {
+    if (i < 0 || i >= g_nua) return;
+    char path[PATH_MAX];
+    path_join(path, sizeof path, g_ua_dir, g_ua[i].file);
+    const char *k[1] = {"Active"}, *v[1] = {g_ua[i].active ? "false" : "true"};
+    if (ua_file_set(path, NULL, k, v, 1)) g_ua[i].active = !g_ua[i].active;
+    else toast("Couldn't save %s: %s", g_ua[i].file, strerror(errno));
+}
+
+static void opt_act_delete_cb(int choice, bool check, void *ud) {
+    (void)check;
+    int i = (int)(intptr_t)ud;
+    if (choice != 1 || i < 0 || i >= g_nua) return;
+    char path[PATH_MAX];
+    path_join(path, sizeof path, g_ua_dir, g_ua[i].file);
+    ops_start(op_new(OP_TRASH, (char *[]){path}, 1, NULL));
+    memmove(&g_ua[i], &g_ua[i + 1], (size_t)(g_nua - i - 1) * sizeof g_ua[0]); // (the trash takes it on a worker)
+    g_nua--;
+    opt_act_close();
+}
+
+static void opt_act_delete(int i) {
+    if (i < 0 || i >= g_nua) return;
+    static const char *btn[] = {"Cancel", "Delete"};
+    char msg[400];
+    snprintf(msg, sizeof msg, "\xE2\x80\x9C%s\xE2\x80\x9D (%s) moves to the Trash.", g_ua[i].name[0] ? g_ua[i].name : g_ua[i].file, g_ua[i].file);
+    dialog_open("Delete action?", msg, btn, 2, 1, 0, NULL, opt_act_delete_cb, (void *)(intptr_t)i);
+}
+
+static void opt_row_text(f32 x, f32 y, f32 rh, f32 lw, const char *label, const char *desc, bool dim) {
+    Font *f = &A.font, *fs = &A.font_small;
+    draw_text_fit(f, x + S(14), roundf(y + rh * 0.5f - f->line_h + S(2)), lw, label, (int)strlen(label), C(dim ? COL_TEXT_DIM : COL_TEXT), 0);
+    draw_text_fit(fs, x + S(14), roundf(y + rh * 0.5f + S(3)), lw, desc, (int)strlen(desc), C(COL_TEXT_DIM), 0);
+}
+
+// Is this program there (a name on $PATH, or a path)? The last answer is kept: asked on every frame of the editor.
+static bool opt_act_prog_ok(const char *prog) {
+    static char last[256];
+    static bool ok;
+    if (strcmp(prog, last)) {
+        snprintf(last, sizeof last, "%s", prog);
+        ok = strchr(prog, '/') ? access(prog, X_OK) == 0 : in_path(prog);
+    }
+    return ok;
+}
+
+// What the command would run - for the files selected in the window, else an example - or what's wrong with it.
+// Returns true for a warning; prog: a program that isn't installed (else "").
+static bool opt_act_preview(char *out, size_t cap, char *prog, size_t pcap, bool *for_sel) {
+    const char *exec = g_opt.act_te[1].buf;
+    out[0] = prog[0] = 0;
+    *for_sel = false;
+    if (!exec[0]) return false;
+    char q = 0;
+    for (const char *c = exec; *c; c++) {
+        if (*c == '\\' && c[1] && q != '\'') c++;
+        else if (!q && (*c == '\'' || *c == '"')) q = *c;
+        else if (q && *c == q) q = 0;
+    }
+    if (q) { snprintf(out, cap, "A %s quote isn't closed", q == '"' ? "double" : "single"); return true; }
+    for (const char *c = exec; *c; c++) {
+        if (*c != '%') continue;
+        if (c[1] == '%') { c++; continue; }
+        if (!ua_is_code(c[1])) {
+            snprintf(out, cap, "%%%c isn't a code: %%F %%U %%f %%e %%P %%p, or %%%% for a %%", c[1] ? c[1] : ' ');
+            return true;
+        }
+        c++;
+    }
+    Pane *p = active_pane();
+    int n = 0;
+    bool *dirs = NULL;
+    char **paths = NULL, ex[PATH_MAX];
+    const char *home = getenv("HOME") ? getenv("HOME") : "/";
+    if (g_opt.act_sel != 3) { // (the folder's menu: no items)
+        paths = p ? ua_selection(p, &n, &dirs) : NULL;
+        *for_sel = n > 0;
+        if (!n) { // an example of the file types (the first one)
+            char t[64] = "";
+            sscanf(g_opt.act_te[2].buf, " %63[^; ]", t);
+            if (!strcmp(t, "dir")) snprintf(ex, sizeof ex, "%s/Documents", home);
+            else snprintf(ex, sizeof ex, "%s/example.%s", home, t[0] && strcmp(t, "any") && strcmp(t, "nodirs") && strcmp(t, "none") ? t : "txt");
+            free(paths);
+            paths = strv_dup((char *[]){ex}, 1);
+            n = 1;
+        }
+    }
+    UserAction a = {0};
+    snprintf(a.exec, sizeof a.exec, "%s", exec);
+    UaCtx c = {paths, n, p ? p->path : home};
+    int argc = 0;
+    char **argv = ua_argv(&a, &c, &argc);
+    bool warn = false;
+    if (argc && !opt_act_prog_ok(argv[0])) {
+        snprintf(prog, pcap, "%s", argv[0]);
+        snprintf(out, cap, "\xE2\x80\x9C%s\xE2\x80\x9D isn't installed", path_basename(argv[0]));
+        warn = true;
+    } else { // the arguments as a shell would take them: quoted where they need it
+        size_t o = 0;
+        for (int i = 0; i < argc && o < cap; i++) {
+            char qa[PATH_MAX * 2];
+            bool plain = argv[i][0] != 0;
+            for (const char *k = argv[i]; *k && plain; k++) plain = isalnum((unsigned char)*k) || strchr("_./%:=,+@-", *k);
+            if (plain) snprintf(qa, sizeof qa, "%s", argv[i]);
+            else sh_quote(qa, sizeof qa, argv[i]);
+            o += (size_t)snprintf(out + o, cap - o, "%s%s", i ? " " : "", qa);
+        }
+    }
+    strv_free(argv, argc);
+    strv_free(paths, n);
+    free(dirs);
+    return warn;
+}
+
+// A preset's file types added to the field (those it has already stay once).
+static void opt_act_add_types(int k) {
+    char cur[1024], add[256], *save = NULL;
+    snprintf(cur, sizeof cur, "%s", g_opt.act_te[2].buf);
+    snprintf(add, sizeof add, "%s", g_act_types[k].exts);
+    for (char *t = strtok_r(add, "; ", &save); t; t = strtok_r(NULL, "; ", &save)) {
+        bool have = false;
+        char scan[1024], *s2 = NULL;
+        snprintf(scan, sizeof scan, "%s", cur);
+        for (char *u = strtok_r(scan, "; ", &s2); u && !have; u = strtok_r(NULL, "; ", &s2)) have = !strcasecmp(u, t) || !strcasecmp(u, "any");
+        if (have) continue;
+        size_t l = strlen(cur);
+        while (l && (cur[l - 1] == ' ' || cur[l - 1] == ';')) cur[--l] = 0;
+        snprintf(cur + l, sizeof cur - l, "%s%s", l ? "; " : "", t);
+    }
+    te_set(&g_opt.act_te[2], cur, (int)strlen(cur), (int)strlen(cur));
+}
+
+static f32 opt_draw_act_editor(f32 x, f32 y, f32 w, Rect list) {
+    Font *f = &A.font;
+    f32 rh = roundf(S(58)), ch = roundf(S(30)), ctlw = MIN(roundf(S(440)), w * 0.58f), lw = w - ctlw - S(44);
+    static const char *labels[] = {"Name", "Icon", "Command", "Runs", "Shows for", "File types", "Common types", "Needs programs", "Group", "Run in terminal"};
+    static const char *descs[] = {"Its label in the menu", "Next to it in the menu", "%F files \xC2\xB7 %f name \xC2\xB7 %P folder", "",
+                                  "How many items selected", "png; jpg \xC2\xB7 dir \xC2\xB7 nodirs", "Add to File types",
+                                  "Hidden while one is missing", "Same group, same submenu", "For commands that print or ask"};
+    static const char *ph[] = {"Copy image", NULL, "sh -c \"wl-copy < %F\"", NULL, NULL, "Any", NULL, "None", "None: in the menu itself", NULL};
+    static const int field[] = {0, -1, 1, -1, -1, 2, -1, 3, 4, -1};
+    enum { R_ICON = 1, R_RUNS = 3, R_SEL = 4, R_TYPES = 6, R_GROUP = 8, R_TERM = 9 };
+    char pv[1200], prog[256];
+    bool for_sel, warn = opt_act_preview(pv, sizeof pv, prog, sizeof prog, &for_sel);
+    y = props_heading(x, y, g_opt.act_new ? "New action" : "Edit action");
+    int nrows = (int)ARRAY_COUNT(labels);
+    props_card(x, y, w, nrows, rh, 0);
+    for (int r = 0; r < nrows; r++, y += rh) {
+        if (g_opt.act_reveal && field[r] == g_opt.act_focus) { // (applied on the next frame)
+            if (y < list.y) g_opt.scroll -= list.y - y;
+            else if (y + rh > list.y + list.h) g_opt.scroll += y + rh - list.y - list.h;
+            g_opt.act_reveal = false;
+            A.redraw = true;
+        }
+        if (y + rh <= list.y || y >= list.y + list.h) continue;
+        const char *desc = r != R_RUNS ? descs[r] : !g_opt.act_te[1].buf[0] ? "What the command will do"
+                         : warn ? "Check the command" : for_sel ? "For the selected files" : "For an example file";
+        opt_row_text(x, y, rh, r == R_TYPES ? roundf(S(110)) : lw, labels[r], desc, false);
+        f32 cx = x + w - ctlw - S(14), cy = y + rh * 0.5f, fy = roundf(cy - ch * 0.5f);
+        if (r == R_GROUP) { // the field, and a button listing the groups there are
+            Rect br = {cx + ctlw - ch, fy, ch, ch}, fr = {cx, fy, ctlw - ch - S(6), ch};
+            sheet_field(fr, &g_opt.act_te[4], g_opt.act_focus == 4 && g_opt.drop_opt < 0, ph[r]);
+            opt_hit(fr, HP_ACT_FIELD, -1, 4);
+            sheet_button(br, "", false, g_nuag > 0);
+            draw_chevron(br.x + ch * 0.5f, cy, S(6), 3, MAX(1.f, S(1.4f)), C(g_nuag ? COL_TEXT : COL_TEXT_FAINT));
+            g_opt.act_group_r = (Rect){cx, fy, ctlw, ch};
+            if (g_nuag) opt_hit(br, HP_ACT_GROUPS, -1, 0);
+        } else if (r == R_RUNS) { // the preview, or a warning (a missing program: a button adds it to Needs programs)
+            Font *fs = &A.font_small;
+            f32 tx = cx, tw = ctlw;
+            bool listed = false;
+            if (prog[0]) {
+                char deps[512], *save = NULL;
+                snprintf(deps, sizeof deps, "%s", g_opt.act_te[3].buf);
+                for (char *t = strtok_r(deps, "; ", &save); t && !listed; t = strtok_r(NULL, "; ", &save)) listed = !strcmp(t, prog);
+            }
+            if (prog[0] && !listed) {
+                const char *bl = "Add to Needs programs";
+                f32 bw = text_width(f, bl, (int)strlen(bl)) + S(24);
+                Rect br = {cx + ctlw - bw, fy, bw, ch};
+                sheet_button(br, bl, false, true);
+                opt_hit(br, HP_ACT_NEEDS, -1, 0);
+                tw -= bw + S(10);
+            }
+            if (prog[0] && listed) snprintf(pv + strlen(pv), sizeof pv - strlen(pv), " (hidden until it is)");
+            if (pv[0]) draw_text_fit(fs, tx, text_y(fs, fy, ch), tw, pv, (int)strlen(pv), C(warn ? COL_WARN : COL_TEXT_DIM), 0);
+        } else if (r == R_TYPES) { // presets, right-aligned
+            f32 bx = x + w - S(14);
+            for (int k = (int)ARRAY_COUNT(g_act_types) - 1; k >= 0; k--) {
+                f32 bw = text_width(f, g_act_types[k].label, (int)strlen(g_act_types[k].label)) + S(18);
+                bx -= bw;
+                Rect br = {bx, fy, bw, ch};
+                sheet_button(br, g_act_types[k].label, false, true);
+                opt_hit(br, HP_ACT_TYPE, -1, k);
+                bx -= S(6);
+            }
+        } else if (field[r] >= 0) {
+            Rect fr = {cx, fy, ctlw, ch};
+            sheet_field(fr, &g_opt.act_te[field[r]], g_opt.act_focus == field[r] && g_opt.drop_opt < 0, ph[r]);
+            opt_hit(fr, HP_ACT_FIELD, -1, field[r]);
+        } else if (r == R_ICON) opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_ICON, "", ""}, cx, cy, ctlw);
+        else if (r == R_SEL) opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_SEL, "", ""}, cx, cy, ctlw);
+        else if (r == R_TERM) opt_draw_control(&(OptDef){OC_ACTIONS, OK_BOOL, OPT_ACT_TERM, "", ""}, cx, cy, ctlw);
+    }
+    // buttons: Edit as text (and Delete) on the left, Cancel + Save on the right
+    y += roundf(S(14));
+    if (y + ch > list.y && y < list.y + list.h) {
+        f32 bw = roundf(S(96)), tw = text_width(f, "Edit as text", 12) + S(28);
+        Rect rtext = {x, y, tw, ch}, rsave = {x + w - bw, y, bw, ch}, rcancel = {rsave.x - S(8) - bw, y, bw, ch};
+        bool ok = g_opt.act_te[0].buf[0] && g_opt.act_te[1].buf[0];
+        sheet_button(rtext, "Edit as text", false, ok);
+        if (ok) opt_hit(rtext, HP_ACT_TEXT, -1, 0);
+        if (!g_opt.act_new) {
+            Rect rdel = {rtext.x + rtext.w + S(8), y, bw, ch};
+            sheet_button(rdel, "Delete", false, true);
+            opt_hit(rdel, HP_ACT_DELETE, -1, g_opt.act_edit);
+        }
+        sheet_button(rcancel, "Cancel", false, true);
+        opt_hit(rcancel, HP_ACT_CANCEL, -1, 0);
+        sheet_button(rsave, "Save", true, ok);
+        if (ok) opt_hit(rsave, HP_ACT_SAVE, -1, 0);
+    }
+    return y + ch;
+}
+
+// Options > Actions: adding, then the actions (search: the matching ones), or the editor.
+static f32 opt_draw_actions(f32 x, f32 y, f32 w, Rect list, const char *q) {
+    if (!q[0] && g_opt.act_edit >= 0) return opt_draw_act_editor(x, y, w, list);
+    f32 rh = roundf(S(58)), ch = roundf(S(30)), gap = roundf(S(18)), bw = roundf(S(80)), aw = roundf(S(34));
+    if (!q[0]) {
+        y = props_heading(x, y, "Add");
+        props_card(x, y, w, 3, rh, 0);
+        static const char *l[] = {"New action", "From a template", "Actions folder"};
+        const char *d[] = {"Your own command in the right-click menu", "Ready-made actions to start from", g_ua_dir};
+        for (int r = 0; r < 3; r++, y += rh) {
+            if (y + rh <= list.y || y >= list.y + list.h) continue;
+            opt_row_text(x, y, rh, w - roundf(S(300)), l[r], d[r], false);
+            Rect br = {x + w - S(14) - bw, roundf(y + (rh - ch) * 0.5f), bw, ch};
+            if (r == 1) opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_TEMPLATE, "", ""}, x + w - S(14) - roundf(S(260)), y + rh * 0.5f, roundf(S(260)));
+            else {
+                sheet_button(br, r ? "Open" : "New", !r, true);
+                opt_hit(br, r ? HP_ACT_FOLDER : HP_ACT_NEW, -1, 0);
+            }
+        }
+        y += gap;
+    }
+    int nm = 0;
+    for (int i = 0; i < g_nua; i++) nm += !q[0] || strcasestr(g_ua[i].name, q) || strcasestr("actions", q);
+    if (!q[0] && nm) y = props_heading(x, y, "Your actions");
+    if (nm) props_card(x, y, w, nm, rh, 0);
+    for (int i = 0; i < g_nua; i++) {
+        const UserAction *a = &g_ua[i];
+        if (q[0] && !strcasestr(a->name, q) && !strcasestr("actions", q)) continue;
+        if (y + rh > list.y && y < list.y + list.h) {
+            f32 by = roundf(y + (rh - ch) * 0.5f), bx = x + w - S(12) - bw;
+            Rect rdel = {bx, by, bw, ch}, rdown = {rdel.x - S(8) - aw, by, aw, ch}, rup = {rdown.x - S(4) - aw, by, aw, ch};
+            Rect redit = {rup.x - S(8) - bw, by, bw, ch}, rtog = {redit.x - S(14) - roundf(S(40)), roundf(y + rh * 0.5f - S(10)), roundf(S(40)), roundf(S(20))};
+            draw_ui_icon(ua_icon_ui(a->icon, false), x + S(16), roundf(y + (rh - S(18)) * 0.5f), roundf(S(18)), C(ua_usable(a) ? COL_TEXT : COL_TEXT_DIM));
+            opt_row_text(x + S(30), y, rh, rtog.x - x - S(54), a->name[0] ? a->name : a->file, opt_act_summary(a), !ua_usable(a));
+            opt_toggle_draw(rtog, a->active, opt_hover(rtog));
+            opt_hit(rtog, HP_ACT_TOGGLE, -1, i);
+            sheet_button(redit, "Edit", false, true);
+            opt_hit(redit, HP_ACT_EDIT, -1, i);
+            sheet_button(rup, "", false, i > 0);
+            draw_chevron(rup.x + aw * 0.5f, rup.y + ch * 0.5f, S(9), 2, MAX(1.f, S(1.5f)), C(i > 0 ? COL_TEXT : COL_TEXT_FAINT));
+            if (i > 0) opt_hit(rup, HP_ACT_UP, -1, i);
+            sheet_button(rdown, "", false, i < g_nua - 1);
+            draw_chevron(rdown.x + aw * 0.5f, rdown.y + ch * 0.5f, S(9), 3, MAX(1.f, S(1.5f)), C(i < g_nua - 1 ? COL_TEXT : COL_TEXT_FAINT));
+            if (i < g_nua - 1) opt_hit(rdown, HP_ACT_DOWN, -1, i);
+            sheet_button(rdel, "Delete", false, true);
+            opt_hit(rdel, HP_ACT_DELETE, -1, i);
+        }
+        y += rh;
+    }
+    if (!q[0] && !g_nua) draw_text(&A.font_small, x + S(14), y + S(10), "No actions yet", 14, C(COL_TEXT_FAINT));
+    if (!q[0] && g_nuag) { // the groups (Group= in the editor): their icons
+        y = props_heading(x, y + gap, "Groups");
+        props_card(x, y, w, g_nuag, rh, 0);
+        for (int g = 0; g < g_nuag; g++, y += rh) {
+            if (y + rh <= list.y || y >= list.y + list.h) continue;
+            int na = 0;
+            for (int i = 0; i < g_nua; i++) na += !strcmp(g_ua[i].group, g_uag[g].name);
+            char d[64];
+            snprintf(d, sizeof d, "%d action%s \xC2\xB7 a submenu", na, na == 1 ? "" : "s");
+            draw_ui_icon(ua_icon_ui(g_uag[g].icon, true), x + S(16), roundf(y + (rh - S(18)) * 0.5f), roundf(S(18)), C(COL_TEXT));
+            opt_row_text(x + S(30), y, rh, w - roundf(S(320)), g_uag[g].name, d, false);
+            opt_draw_control(&(OptDef){OC_ACTIONS, OK_CHOICE, OPT_ACT_GICON + g, "", ""}, x + w - S(14) - roundf(S(260)), y + rh * 0.5f, roundf(S(260)));
+        }
+    }
+    return y;
+}
+
 static void options_draw(void) {
     Sheet *s = &g_sheet;
     g_opt.nhits = 0;
@@ -1131,7 +1625,7 @@ static void options_draw(void) {
     // search field
     f32 sw = MIN(roundf(S(300)), w * 0.45f), sh = roundf(S(30));
     Rect sr = {cr.x - S(10) - sw, r.y + pad - S(6), sw, sh};
-    bool sfocus = g_opt.search_focus && g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus;
+    bool sfocus = g_opt.search_focus && g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus && g_opt.act_focus < 0;
     sheet_field(sr, &g_opt.search, sfocus, "Search settings");
     opt_hit(sr, HP_SEARCH, -1, 0);
     // nav (same active style as the sidebar: accent-tinted row with a full-height accent edge)
@@ -1213,6 +1707,18 @@ static void options_draw(void) {
             shown++;
         }
     }
+    if (!q[0] && g_opt.cat == OC_ACTIONS) {
+        y = opt_draw_actions(cx, y, cwid, list, q) + gap;
+        shown++;
+    } else if (q[0]) { // matching actions in search results
+        int nm = 0;
+        for (int i = 0; i < g_nua; i++) nm += strcasestr(g_ua[i].name, q) || strcasestr("actions", q);
+        if (nm) {
+            y = props_heading(cx, y, "Actions");
+            y = opt_draw_actions(cx, y, cwid, list, q) + gap;
+            shown++;
+        }
+    }
     if (q[0] || g_opt.cat == OC_KEYBOARD) {
         int nk = 0;
         for (int i = 0; i < KEYDEF_COUNT; i++) nk += keydef_matches(&g_keys[i], q);
@@ -1268,11 +1774,16 @@ static void options_draw(void) {
 static bool options_text_focus(TextEdit *edit, bool focused) {
     if (g_opt.rec_def >= 0) return false; // the click ends recording a shortcut first (options_click)
     if (g_opt.drop_opt >= 0) return edit == &g_opt.drop_filter;
-    if (edit == &g_opt.search) { g_opt.search_focus = true; g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
-    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.search_focus = g_opt.brand_focus = g_opt.scroll_focus = false; return true; }
-    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.scroll_focus = false; return true; }
-    if (edit == &g_opt.scroll_color) { g_opt.scroll_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = false; return true; }
-    return focused;
+    int act = -1;
+    for (int k = 0; k < 5; k++)
+        if (edit == &g_opt.act_te[k]) act = k;
+    if (edit != &g_opt.search && edit != &g_opt.lname && edit != &g_opt.brand && edit != &g_opt.scroll_color && act < 0) return focused;
+    g_opt.search_focus = edit == &g_opt.search;
+    g_opt.lname_focus = edit == &g_opt.lname;
+    g_opt.brand_focus = edit == &g_opt.brand;
+    g_opt.scroll_focus = edit == &g_opt.scroll_color;
+    g_opt.act_focus = act;
+    return true;
 }
 
 static void options_click(f32 x, f32 y, int clicks) {
@@ -1300,6 +1811,7 @@ static void options_click(f32 x, f32 y, int clicks) {
     }
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
     if (sheet_scrollbar_press(x, y)) return;
+    g_opt.act_focus = -1;
     g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; // a click elsewhere drops the keyboard (typing a letter still searches)
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];
@@ -1311,6 +1823,7 @@ static void options_click(f32 x, f32 y, int clicks) {
             g_opt.cat = hp->arg;
             g_opt.lname_focus = hp->arg == OC_LAYOUTS;
             g_opt.scroll = 0;
+            opt_act_close();
             te_set(&g_opt.search, "", 0, 0);
             return;
         case HP_TOGGLE: opt_bool_toggle(hp->opt); return;
@@ -1343,6 +1856,32 @@ static void options_click(f32 x, f32 y, int clicks) {
             dialog_open("Delete layout?", msg, btn, 2, 1, 0, NULL, layout_delete_cb, (void *)(intptr_t)hp->arg);
             return;
         }
+        case HP_ACT_NEW: opt_act_edit(-1); return;
+        case HP_ACT_FOLDER:
+            mkdir_p(g_ua_dir, 0755);
+            open_path(g_ua_dir);
+            return;
+        case HP_ACT_TOGGLE: opt_act_toggle(hp->arg); return;
+        case HP_ACT_EDIT: opt_act_edit(hp->arg); return;
+        case HP_ACT_UP: ua_move(hp->arg, -1); return;
+        case HP_ACT_DOWN: ua_move(hp->arg, +1); return;
+        case HP_ACT_DELETE: opt_act_delete(hp->arg); return;
+        case HP_ACT_FIELD: g_opt.act_focus = hp->arg; return;
+        case HP_ACT_TEXT: opt_act_edit_text(); return;
+        case HP_ACT_TYPE: opt_act_add_types(hp->arg); return;
+        case HP_ACT_GROUPS: opt_drop_open(OPT_ACT_GROUP, g_opt.act_group_r); return;
+        case HP_ACT_NEEDS: { // the missing program into Needs programs
+            char pv[1200], prog[256], v[1024];
+            bool fs;
+            opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fs);
+            if (!prog[0]) return;
+            const char *cur = g_opt.act_te[3].buf;
+            snprintf(v, sizeof v, "%s%s%s", cur, cur[0] ? "; " : "", prog); // (a path stays one: Dependencies checks it)
+            te_set(&g_opt.act_te[3], v, (int)strlen(v), (int)strlen(v));
+            return;
+        }
+        case HP_ACT_CANCEL: opt_act_close(); return;
+        case HP_ACT_SAVE: opt_act_save(); return;
         case HP_KEYCHIP: opt_rec_start(hp->opt, hp->arg); return;
         case HP_KEYADD: opt_rec_start(hp->opt, -1); return;
         case HP_KEYDEL:
@@ -1378,6 +1917,13 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
         else te_key(&g_opt.scroll_color, k, mod);
         return;
     }
+    if (g_opt.act_focus >= 0 && g_opt.drop_opt < 0) { // the action editor: Tab between its fields, Enter saves
+        if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_act_save();
+        else if (k == SDLK_ESCAPE) g_opt.act_focus = -1;
+        else if (k == SDLK_TAB) g_opt.act_focus = (g_opt.act_focus + (mod & SDL_KMOD_SHIFT ? 4 : 1)) % 5, g_opt.act_reveal = true;
+        else te_key(&g_opt.act_te[g_opt.act_focus], k, mod);
+        return;
+    }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) {
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_layout_save();
         else if (k == SDLK_ESCAPE) g_opt.lname_focus = false;
@@ -1402,10 +1948,11 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
     case SDLK_ESCAPE:
         if (g_opt.search.buf[0]) { te_set(&g_opt.search, "", 0, 0); g_opt.scroll = 0; g_opt.search_focus = false; }
         else if (g_opt.search_focus) g_opt.search_focus = false;
+        else if (g_opt.act_edit >= 0) opt_act_close(); // (Esc leaves the action editor first, unsaved)
         else sheet_close();
         return;
     case SDLK_TAB:
-        if (!g_opt.search.buf[0]) { g_opt.cat = (g_opt.cat + (mod & SDL_KMOD_SHIFT ? OC_COUNT - 1 : 1)) % OC_COUNT; g_opt.scroll = 0; g_opt.lname_focus = g_opt.cat == OC_LAYOUTS; }
+        if (!g_opt.search.buf[0]) { g_opt.cat = (g_opt.cat + (mod & SDL_KMOD_SHIFT ? OC_COUNT - 1 : 1)) % OC_COUNT; g_opt.scroll = 0; g_opt.lname_focus = g_opt.cat == OC_LAYOUTS; opt_act_close(); }
         return;
     case SDLK_PAGEDOWN: glide_by(&g_opt.scroll, S(300), g_opt.max_scroll); return;
     case SDLK_PAGEUP: glide_by(&g_opt.scroll, -S(300), g_opt.max_scroll); return;
@@ -1418,6 +1965,7 @@ static void options_text(const char *text) {
     if (g_opt.rec_def >= 0) return;
     if (g_opt.brand_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.brand, text); opt_brand_sync(); return; }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.lname, text); return; }
+    if (g_opt.act_focus >= 0 && g_opt.drop_opt < 0) { te_insert(&g_opt.act_te[g_opt.act_focus], text); return; }
     if (g_opt.scroll_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.scroll_color, text); return; }
     if (g_opt.drop_opt >= 0) {
         te_insert(&g_opt.drop_filter, text);

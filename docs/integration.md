@@ -60,9 +60,14 @@ the settings file as `borg=` lines. A Borg 1 repository in an SFTP folder is rea
 connection the folder uses, or your ssh keys / agent); without borg there it is read through the folder, slower.
 
 ## Custom actions
-Your own commands in the right-click menu, as in Nemo: put `*.action` files (Nemo's `*.nemo_action` files work as
-they are) in `~/.local/share/file-explorer/actions/`. They are read each time a menu opens, listed by file name just
-above **Properties**.
+Your own commands in the right-click menu, as in Nemo. **Options > Actions** lists them: add one (from scratch or from a
+template), edit it in a form or as text, switch it off, change the order or delete it. Each action is a `*.action` file
+in `~/.local/share/file-explorer/actions/` (Nemo's `*.nemo_action` files work as they are), read each time a menu opens
+and listed by file name just above **Properties**. The page numbers the files (`010-`, `020-`...) to keep the order you
+set, and saving changes only the keys the form shows: comments, translations and other keys stay. While you type, the
+form shows what the command will run (for the selected files, or an example) or what's wrong with it: a quote left
+open, an unknown code, a program that isn't installed (one click adds it to Needs programs). An action that fails
+says so in a message with its exit code and the first line of its error output.
 
 ```ini
 [Action]
@@ -81,10 +86,15 @@ Extensions=jpg;jpeg;png;webp;
 | `Mimetypes` | `;`-separated types, `image/*` style patterns allowed. With neither list, everything matches. |
 | `Dependencies` | Programs (or absolute paths) that must exist; `!prog` must not. Otherwise the action is hidden. |
 | `Terminal` | `true`: run it in the terminal app. |
+| `Group` | Actions with the same group are a submenu of that name (where its first action would be). |
+| `Icon` | Its icon in the menu: `zap` (the default), `folder`, `image`, `video`, `audio`, `text`, `archive`, `code`, `terminal`, `copy`, `clipboard`, `hash`, `lock`, `key`, `link`, `globe`, `download`, `upload`, `share`, `play`, `camera`, `edit`, `scissors`, `search`, `eye`, `star`, `wand`, `settings`, `git`, `refresh`, `external`, `trash`. Nemo's `Icon-Name` picks the closest of these. |
 | `Active` | `false` hides it. |
 
 Codes in `Exec` and `Name`: `%F` the selected paths, `%U` the same as `file://` URIs, `%f` the first one's name,
 `%e` that name without its extension, `%P` the current folder, `%p` its name, `%%` a percent sign.
+
+A group's icon is set in Options > Actions (Groups), kept in `groups.conf` in the same folder: a `[Group name]`
+section with `Icon=` (a folder by default). The actions sit between separators in the menu, above Properties.
 
 `Exec` runs without a shell, so a file name is only ever an argument: a word that is just `%F` becomes one argument
 per file. For pipes and the like use `sh -c "..."`: the names are quoted for the script, whatever they contain.

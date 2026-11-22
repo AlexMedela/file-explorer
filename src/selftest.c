@@ -3553,6 +3553,9 @@ static int run_selftest_m8(void) {
         UA_FILE("j-subst.action", "[Action]\nName=Words\nExec=sh -c \"echo \\\"$(wc -w < %F) in %f\\\"\"\nSelection=s\nExtensions=png;\n");
         UA_FILE("i-pct.action", "[Action]\nName=Pct %%\nExec=printf \"%%s 100%%\" %f\nSelection=s\nExtensions=txt;\n");
         UA_FILE("notes.txt", "[Action]\nName=Not an action file\nExec=true\n");
+        UA_FILE("k-tool1.action", "[Action]\nName=Tool one\nExec=t1 %F\nSelection=s\nExtensions=txt;\nGroup=Tools\nIcon=terminal\n");
+        UA_FILE("k-tool2.action", "[Action]\nName=Tool two\nExec=t2 %F\nSelection=s\nExtensions=txt;\nGroup=Tools\n");
+        UA_FILE("groups.conf", "[Tools]\nIcon=wand\n");
 #undef UA_FILE
         pane_navigate(p, M8_BASE "/ua", true);
         st_wait();
@@ -3598,6 +3601,40 @@ static int run_selftest_m8(void) {
         menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
         menu_activate(st_menu_find("Pct %"));
         ST_CHECK(!strcmp(A.last_opened, "action:[printf][%s 100%][notes.txt]"));
+        { // a group: one submenu item (with the group's icon) where its first action would be; actions' own icons; a separator
+          // before Properties
+            menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+            int gi = st_menu_find("Tools"), pi = st_menu_find("Properties"), ti = st_menu_find("Text");
+            ST_CHECK(gi >= 0 && A.menu.items[gi].sub && st_menu_find("Tool one") < 0 && st_menu_find("Tool two") < 0);
+            ST_CHECK(menu_action_icon(&A.menu.items[gi]) == UI_WAND_SPARKLES && ti >= 0 && menu_action_icon(&A.menu.items[ti]) == UI_ZAP);
+            ST_CHECK(pi > gi && A.menu.items[pi - 1].sep && A.menu.items[ti - 1].sep);
+            menu_sub_open(gi, true);
+            ST_CHECK(menu_sub_shown() && g_menu_sub.n == 2 && !strcmp(g_menu_sub.items[0].label, "Tool one") && !strcmp(g_menu_sub.items[1].label, "Tool two"));
+            ST_CHECK(menu_action_icon(&g_menu_sub.items[0]) == UI_TERMINAL && menu_action_icon(&g_menu_sub.items[1]) == UI_ZAP);
+            st_frames(2);
+            st_shot("custom-actions-group");
+            menu_sub_activate(1);
+            ST_CHECK(!strcmp(A.last_opened, "action:[t2][" M8_BASE "/ua/notes.txt]"));
+        }
+        { // a failing action says why: the start of its stderr and its exit code (read from the pipe the sh around it writes)
+            char msg[400];
+            ST_CHECK(!ua_failure_text("X", "noise\n" UA_RC_MARK "0\n", 0, msg, sizeof msg));
+            ST_CHECK(ua_failure_text("Word count", "sh: 1: notify-send: not found\n" UA_RC_MARK "127\n", 127, msg, sizeof msg));
+            ST_CHECK(!strcmp(msg, "\xE2\x80\x9CWord count\xE2\x80\x9D failed (command not found): sh: 1: notify-send: not found"));
+            ST_CHECK(ua_failure_text("X", UA_RC_MARK "2\n", 2, msg, sizeof msg) && !strcmp(msg, "\xE2\x80\x9CX\xE2\x80\x9D failed (exit 2)"));
+            int pfd[2];
+            ST_CHECK(pipe(pfd) == 0);
+            static const char out[] = "convert: no such file\nmore\n" UA_RC_MARK "1\n";
+            ST_CHECK(write(pfd[1], out, sizeof out - 1) == (ssize_t)(sizeof out - 1));
+            close(pfd[1]);
+            UaWatch *w = xcalloc(1, sizeof *w);
+            w->fd = pfd[0];
+            snprintf(w->name, sizeof w->name, "Convert");
+            A.toast[0] = 0;
+            ua_watch_thread(w); // (here, not on its thread: it posts the toast to the main loop)
+            st_frames(2);
+            ST_CHECK(!strcmp(A.toast, "\xE2\x80\x9C" "Convert\xE2\x80\x9D failed (exit 1): convert: no such file"));
+        }
 
         menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), false); // the folder's own menu: Selection=none ones
         ST_CHECK(st_menu_find("Here") >= 0 && st_menu_find("Copy it's.png") < 0 && st_menu_find("Text") < 0);
@@ -4837,6 +4874,203 @@ static int run_selftest_m9(void) {
         A.title_bar = TITLEBAR_AUTO;
         titlebar_apply();
         ST_CHECK(!A.csd && A.r_wctl.w == 0 && A.r_wstrip.w == 0);
+    }
+
+    { // Options > Actions: the list, the editor (only what changed is written, the rest of the file stays), a new one,
+      // templates, on / off, order (the files get numbered), Edit as text, delete, search
+        char *old_dh = getenv("XDG_DATA_HOME") ? strdup(getenv("XDG_DATA_HOME")) : NULL;
+        setenv("XDG_DATA_HOME", M9_BASE "/xdg", 1); // (never the user's actions)
+        mkdir(M9_BASE "/xdg", 0755);
+        mkdir(M9_BASE "/xdg/file-explorer", 0755);
+        mkdir(M9_BASE "/xdg/file-explorer/actions", 0755);
+#define M9_ACT M9_BASE "/xdg/file-explorer/actions/"
+        static const char nemo_before[] = "# from Nemo\n[Nemo Action]\nActive=true\nName=Shrink\nName[de]=Verkleinern\nExec=mogrify -resize 50%% %F\n"
+                                          "Selection=m\nMimetypes=image/*;\nExtensions=png;\n\n[Other]\nName=Kept\n";
+        st_write_text(M9_ACT "nemo.nemo_action", nemo_before);
+        st_write_text(M9_ACT "off.action", "[Action]\nActive=false\nName=Off one\nExec=true\n");
+        options_open_page(OC_ACTIONS);
+        st_frames(2);
+        ST_CHECK(g_opt.cat == OC_ACTIONS && g_nua == 2 && !strcmp(g_ua[0].file, "nemo.nemo_action") && !g_ua[1].active);
+        st_shot("options-actions");
+        char buf[1024];
+
+        st_opt_click(st_opt_hit(HP_ACT_EDIT, -1, 0)); // a new name: only Name= changes
+        ST_CHECK(g_opt.act_edit == 0 && g_opt.act_focus == 0 && !strcmp(g_opt.act_te[0].buf, "Shrink") && g_opt.act_sel == 2);
+        st_frames(2);
+        st_shot("options-actions-edit");
+        te_set(&g_opt.act_te[0], "Shrink", 0, 6);
+        st_type("Half size");
+        st_key(SDLK_RETURN, SDL_KMOD_NONE); // Enter saves
+        st_read_text(M9_ACT "nemo.nemo_action", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "# from Nemo\n[Nemo Action]\nActive=true\nName=Half size\nName[de]=Verkleinern\nExec=mogrify -resize 50%% %F\n"
+                              "Selection=m\nMimetypes=image/*;\nExtensions=png;\n\n[Other]\nName=Kept\n"));
+        ST_CHECK(g_opt.act_edit < 0 && !strcmp(g_ua[0].name, "Half size"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_TOGGLE, -1, 1)); // on / off: Active=
+        st_read_text(M9_ACT "off.action", buf, sizeof buf);
+        ST_CHECK(g_ua[1].active && !strcmp(buf, "[Action]\nActive=true\nName=Off one\nExec=true\n"));
+
+        st_opt_click(st_opt_hit(HP_ACT_NEW, -1, 0)); // a new one: Tab between the fields, Shows for
+        ST_CHECK(g_opt.act_new && g_opt.act_focus == 0);
+        st_type("Open in Gimp");
+        st_key(SDLK_TAB, SDL_KMOD_NONE);
+        ST_CHECK(g_opt.act_focus == 1);
+        st_type("gimp %F");
+        ST_CHECK(!strcmp(g_opt.act_te[1].buf, "gimp %F"));
+        st_opt_click(st_opt_hit(HP_DROP, OPT_ACT_SEL, 0));
+        ST_CHECK(g_opt.drop_opt == OPT_ACT_SEL);
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_SEL, 1)); // One item
+        ST_CHECK(g_opt.act_sel == 1 && g_opt.drop_opt < 0);
+        g_opt.scroll = 1e6f; // (the editor is taller than the window: its buttons are at the bottom)
+        st_frames(2);
+        st_opt_click(st_opt_hit(HP_ACT_SAVE, -1, 0)); // last in the menu: the files get numbered
+        ST_CHECK(g_nua == 3 && !strcmp(g_ua[0].file, "010-nemo.nemo_action") && !strcmp(g_ua[1].file, "020-off.action"));
+        ST_CHECK(!strcmp(g_ua[2].file, "030-open-in-gimp.action") && g_opt.act_edit < 0);
+        st_read_text(M9_ACT "030-open-in-gimp.action", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "[Action]\nName=Open in Gimp\nExec=gimp %F\nExtensions=any;\nSelection=s\n"));
+        st_read_text(M9_ACT "010-nemo.nemo_action", buf, sizeof buf);
+        ST_CHECK(strstr(buf, "Name=Half size\n") && strstr(buf, "[Other]\n"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_UP, -1, 2)); // order
+        ST_CHECK(g_nua == 3 && !strcmp(g_ua[1].file, "020-open-in-gimp.action") && !strcmp(g_ua[2].file, "030-off.action"));
+        ST_CHECK(st_exists(M9_ACT "020-open-in-gimp.action") && !st_exists(M9_ACT "030-open-in-gimp.action"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_DROP, OPT_ACT_TEMPLATE, 0)); // a template fills the editor
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_TEMPLATE, 1));
+        ST_CHECK(g_opt.act_new && !strcmp(g_opt.act_te[0].buf, "Copy image to clipboard") && g_opt.act_sel == 1);
+        ST_CHECK(!strcmp(g_opt.act_te[3].buf, "wl-copy"));
+        st_frames(1);
+        A.last_opened[0] = 0;
+        g_opt.scroll = 1e6f; // (the editor is taller than the window: its buttons are at the bottom)
+        st_frames(2);
+        st_opt_click(st_opt_hit(HP_ACT_TEXT, -1, 0)); // Edit as text: saved first, then the file in the editor
+        ST_CHECK(g_nua == 4 && !strcmp(A.last_opened, "edit:" M9_ACT "040-copy-image-to-clipboard.action"));
+        st_read_text(M9_ACT "040-copy-image-to-clipboard.action", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "[Action]\nName=Copy image to clipboard\nExec=sh -c \"wl-copy < %F\"\nExtensions=png; jpg; jpeg; webp; gif; svg\n"
+                              "Dependencies=wl-copy\nSelection=s\nIcon=copy\n"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_EDIT, -1, 1)); // a group and an icon: Group= and Icon=; the group gets its row
+        st_opt_click(st_opt_hit(HP_DROP, OPT_ACT_ICON, 0));
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_ICON, 1 + ua_icon_find("image", false)));
+        ST_CHECK(g_opt.act_icon == ua_icon_find("image", false));
+        g_opt.scroll = 0;
+        st_frames(2);
+        st_text_click(&g_opt.act_te[0], 0, 1, 0);
+        for (int k = 0; k < 4; k++) st_key(SDLK_TAB, SDL_KMOD_NONE); // Tab down to Group
+        ST_CHECK(g_opt.act_focus == 4);
+        g_opt.scroll = 1e6f;
+        st_frames(2);
+        f32 bottom = g_opt.scroll;
+        st_key(SDLK_TAB, SDL_KMOD_NONE); // round to Name (out of view at the top when the editor scrolls): shown
+        st_frames(3);
+        OptHit *nh = st_opt_hit(HP_ACT_FIELD, -1, 0);
+        ST_CHECK(g_opt.act_focus == 0 && g_opt.scroll <= bottom && nh && nh->r.h >= roundf(S(30)) - 1); // (all of it)
+        st_key(SDLK_TAB, SDL_KMOD_SHIFT); // back to Group
+        st_frames(2);
+        ST_CHECK(g_opt.act_focus == 4 && st_opt_hit(HP_ACT_FIELD, -1, 4));
+        st_type("Images");
+        st_frames(1);
+        st_shot("options-actions-edit-group");
+        st_key(SDLK_RETURN, SDL_KMOD_NONE);
+        st_read_text(M9_ACT "020-open-in-gimp.action", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "[Action]\nName=Open in Gimp\nExec=gimp %F\nExtensions=any;\nSelection=s\nGroup=Images\nIcon=image\n"));
+        ST_CHECK(g_nuag == 1 && !strcmp(g_uag[0].name, "Images") && g_uag[0].icon < 0 && g_ua[1].icon == ua_icon_find("image", false));
+        g_opt.scroll = 1e6f; // (the groups are at the bottom)
+        st_frames(2);
+        st_opt_click(st_opt_hit(HP_DROP, OPT_ACT_GICON, 0)); // the group's icon: groups.conf; typing filters the list
+        st_type("camera");
+        st_frames(1);
+        ST_CHECK(g_opt.drop_n == 1);
+        st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_GICON, 0));
+        st_read_text(M9_ACT "groups.conf", buf, sizeof buf);
+        ST_CHECK(!strcmp(buf, "[Images]\nIcon=camera\n") && g_uag[0].icon == ua_icon_find("camera", false));
+        ua_load(); // (read back)
+        ST_CHECK(g_nuag == 1 && g_uag[0].icon == ua_icon_find("camera", false));
+        g_opt.scroll = 0;
+        st_frames(2);
+        st_shot("options-actions-groups");
+
+        { // the editor checks the command as it's typed: a preview, or what's wrong (a missing program goes into Needs
+          // programs with a click); Common types add to File types; the Group button lists the groups
+            st_opt_click(st_opt_hit(HP_ACT_NEW, -1, 0));
+            char pv[1200], prog[256];
+            bool fsel;
+            te_set(&g_opt.act_te[1], "fe-no-such-program %F", 0, 0);
+            ST_CHECK(opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !strcmp(prog, "fe-no-such-program"));
+            ST_CHECK(!strcmp(pv, "\xE2\x80\x9C" "fe-no-such-program\xE2\x80\x9D isn't installed"));
+            st_frames(2);
+            st_shot("options-actions-warning");
+            st_opt_click(st_opt_hit(HP_ACT_NEEDS, -1, 0));
+            ST_CHECK(!strcmp(g_opt.act_te[3].buf, "fe-no-such-program"));
+            st_frames(1);
+            ST_CHECK(!st_opt_hit(HP_ACT_NEEDS, -1, 0)); // (listed now: hidden until it's installed)
+            te_set(&g_opt.act_te[1], "echo \"open", 0, 0);
+            ST_CHECK(opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !strcmp(pv, "A double quote isn't closed"));
+            te_set(&g_opt.act_te[1], "echo %x", 0, 0);
+            ST_CHECK(opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !strncmp(pv, "%x isn't a code", 15));
+            te_set(&g_opt.act_te[1], "echo 100%% %f", 0, 0);
+            ST_CHECK(!opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !prog[0] && !strncmp(pv, "echo 100% ", 10));
+            Pane *ap = active_pane(); // nothing selected, no cursor: an example of the file types
+            i64 cur = ap->cursor;
+            sel_clear(ap);
+            ap->cursor = -1;
+            te_set(&g_opt.act_te[2], "png; jpg", 0, 0);
+            te_set(&g_opt.act_te[1], "sh -c \"cat %F | wl-copy\"", 0, 0);
+            ST_CHECK(!opt_act_preview(pv, sizeof pv, prog, sizeof prog, &fsel) && !fsel);
+            char want[PATH_MAX + 64];
+            snprintf(want, sizeof want, "sh -c 'cat '\\''%s/example.png'\\'' | wl-copy'", getenv("HOME"));
+            ST_CHECK(!strcmp(pv, want));
+            ap->cursor = cur;
+            te_set(&g_opt.act_te[2], "", 0, 0);
+            st_frames(1);
+            st_opt_click(st_opt_hit(HP_ACT_TYPE, -1, 0)); // Images
+            ST_CHECK(!strncmp(g_opt.act_te[2].buf, "png; jpg; jpeg; gif", 19));
+            size_t l1 = strlen(g_opt.act_te[2].buf);
+            st_opt_click(st_opt_hit(HP_ACT_TYPE, -1, 0)); // (again: nothing twice)
+            st_opt_click(st_opt_hit(HP_ACT_TYPE, -1, 5)); // Folders
+            ST_CHECK(strlen(g_opt.act_te[2].buf) == l1 + 5 && !strcmp(g_opt.act_te[2].buf + l1, "; dir"));
+            g_opt.scroll = 1e6f;
+            st_frames(2);
+            st_opt_click(st_opt_hit(HP_ACT_GROUPS, -1, 0));
+            ST_CHECK(g_opt.drop_opt == OPT_ACT_GROUP && g_opt.drop_n == 2);
+            st_frames(1);
+            st_opt_click(st_opt_hit(HP_DROPITEM, OPT_ACT_GROUP, 1));
+            ST_CHECK(!strcmp(g_opt.act_te[4].buf, "Images"));
+            st_key(SDLK_ESCAPE, SDL_KMOD_NONE); // (unsaved)
+            ST_CHECK(g_opt.act_edit < 0 && g_nua == 4);
+            g_opt.scroll = 0;
+        }
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_EDIT, -1, 0)); // Esc: the field lets go, then the editor closes unsaved
+        st_type("x");
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        ST_CHECK(g_sheet.kind == SHEET_OPTIONS && g_opt.act_edit < 0 && !strcmp(g_ua[0].name, "Half size"));
+
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_ACT_DELETE, -1, 2)); // delete asks, then the file goes to the trash
+        ST_CHECK(A.dlg.open);
+        dialog_choose(1);
+        st_wait_ops();
+        ST_CHECK(g_nua == 3 && !st_exists(M9_ACT "030-off.action") && st_exists(M9_BASE "/xdg/Trash/files/030-off.action"));
+
+        st_type("gimp"); // search finds actions by name
+        st_frames(2);
+        ST_CHECK(st_opt_hit(HP_ACT_EDIT, -1, 1) && !st_opt_hit(HP_ACT_EDIT, -1, 0) && !st_opt_hit(HP_ACT_NEW, -1, 0));
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        sheet_close();
+#undef M9_ACT
+        if (old_dh) setenv("XDG_DATA_HOME", old_dh, 1);
+        else unsetenv("XDG_DATA_HOME");
+        free(old_dh);
     }
 
     g_theme_cur = 0;
