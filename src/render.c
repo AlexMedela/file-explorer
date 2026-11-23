@@ -3582,22 +3582,30 @@ static void draw_toast(void) {
     int len = (int)strlen(A.toast);
     u64 life = 3000000000ull + (u64)MIN(len, 200) * 30000000ull; // long messages stay longer (up to ~9 s)
     u64 age = now_ns() - A.toast_t;
-    if (age > life) { A.toast[0] = 0; return; }
+    if (age > life) { A.toast[0] = 0; A.toast_ok = false; return; }
     f32 a = age > life - 400000000ull ? (f32)(life - age) / 400000000.f : 1.f;
     Font *f = &A.font;
     f32 maxw = MIN(S(560), A.r_content.w - S(40)), padx = roundf(S(16)), lh = roundf(f->line_h * 1.25f);
+    f32 icon = A.toast_ok ? roundf(S(16)) : 0, igap = A.toast_ok ? roundf(S(8)) : 0;
     int st[4], ln[4];
-    int nl = wrap_text(f, A.toast, maxw - padx * 2, st, ln, 4); // long errors wrap instead of running off
+    int nl = wrap_text(f, A.toast, maxw - padx * 2 - icon - igap, st, ln, 4); // long messages wrap instead of running off
     f32 tw = 0;
     for (int i = 0; i < nl; i++) tw = MAX(tw, text_width(f, A.toast + st[i], ln[i]));
-    f32 w = roundf(MIN(maxw, tw + padx * 2)), h = roundf(MAX(S(34), nl * lh + S(16)));
+    f32 w = roundf(MIN(maxw, tw + padx * 2 + icon + igap)), h = roundf(MAX(S(34), nl * lh + S(16)));
     f32 x = roundf(A.r_content.x + (A.r_content.w - w) * 0.5f), y = roundf(A.r_status.y - h - S(16));
     g_alpha = a;
     draw_rrect(x, y, w, h, S(9), C(COL_POPUP));
     draw_rrect_outline(x, y, w, h, S(9), 1, C(COL_POPUP_BORDER));
     f32 ty = roundf(y + (h - nl * lh) * 0.5f + (lh - f->line_h) * 0.5f);
+    f32 tx = x + padx + icon + igap;
+    if (A.toast_ok) {
+        f32 iy = roundf(y + (h - icon) * 0.5f), t = MAX(1.f, S(1.8f));
+        Color ok = C(COL_ACCENT);
+        draw_line(x + padx + icon * 0.18f, iy + icon * 0.54f, x + padx + icon * 0.42f, iy + icon * 0.74f, t, ok);
+        draw_line(x + padx + icon * 0.42f, iy + icon * 0.74f, x + padx + icon * 0.82f, iy + icon * 0.30f, t, ok);
+    }
     for (int i = 0; i < nl; i++)
-        draw_text_fit(f, x + padx, ty + i * lh, w - padx * 2, A.toast + st[i], ln[i], C(COL_TEXT), 0);
+        draw_text_fit(f, tx, ty + i * lh, x + w - padx - tx, A.toast + st[i], ln[i], C(COL_TEXT), 0);
     g_alpha = 1.f;
     if (A.selftest) {
         f32 ms = MAX(1.f, S(4));

@@ -583,8 +583,8 @@ static void opt_scroll_color_apply(void) {
 }
 
 // App icon: an absolute .svg/.png keeps its own colours; empty leaves the built-in logo in effect.
-static void opt_app_icon_chosen(const char *path) {
-    if (!app_icon_path_ok(path)) { toast("App icon: an absolute .svg or .png path"); return; }
+static bool opt_app_icon_chosen(const char *path) {
+    if (!app_icon_path_ok(path)) { toast("Didn't apply, fallback to previous option"); return false; }
     snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", path ? path : "");
     g_app_icon_mode = APP_ICON_CUSTOM;
     g_logo_changed = true;
@@ -593,6 +593,8 @@ static void opt_app_icon_chosen(const char *path) {
     A.settings_dirty = true;
     te_set(&g_opt.app_icon, g_app_icon_path, (int)strlen(g_app_icon_path), (int)strlen(g_app_icon_path));
     g_opt.app_icon_focus = false;
+    toast_success("App icon applied");
+    return true;
 }
 
 static void opt_app_icon_apply(void) {
@@ -601,13 +603,15 @@ static void opt_app_icon_apply(void) {
 }
 
 // Title bar icon: an absolute .svg/.png replaces the header logo; empty restores it.
-static void opt_title_icon_chosen(const char *path) {
-    if (!app_icon_path_ok(path)) { toast("Title bar icon: an absolute .svg or .png path"); return; }
+static bool opt_title_icon_chosen(const char *path) {
+    if (!app_icon_path_ok(path)) { toast("Didn't apply, fallback to previous option"); return false; }
     snprintf(g_title_icon_path, sizeof g_title_icon_path, "%s", path ? path : "");
     A.settings_dirty = true;
     A.redraw = true;
     te_set(&g_opt.title_icon, g_title_icon_path, (int)strlen(g_title_icon_path), (int)strlen(g_title_icon_path));
     g_opt.title_icon_focus = false;
+    toast_success("Title bar icon applied");
+    return true;
 }
 
 static void opt_title_icon_apply(void) { opt_title_icon_chosen(g_opt.title_icon.buf); }
@@ -627,6 +631,7 @@ static void opt_app_icon_default(void) {
     A.redraw = true;
     te_set(&g_opt.app_icon, "", 0, 0);
     g_opt.app_icon_focus = false;
+    toast_success("App icon set to Default");
 }
 
 static void opt_title_icon_default(void) {
@@ -635,12 +640,13 @@ static void opt_title_icon_default(void) {
     A.redraw = true;
     te_set(&g_opt.title_icon, "", 0, 0);
     g_opt.title_icon_focus = false;
+    toast_success("Title bar icon set to Default");
 }
 
 static void opt_icon_button(int opt, int arg) {
     if (opt == OPT_APP_ICON) {
         if (arg == 0) opt_app_icon_apply();
-        else if (arg == 1) opt_app_icon_set_mode(APP_ICON_FILE_ICON);
+        else if (arg == 1) { opt_app_icon_set_mode(APP_ICON_FILE_ICON); toast_success("App icon following File icons"); }
         else if (arg == 2) opt_app_icon_default();
     } else if (opt == OPT_TITLE_ICON) {
         if (arg == 0) opt_title_icon_apply();
@@ -841,7 +847,6 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
     draw_rrect(kx - kr, t.y + t.h * 0.5f - kr, kr * 2, kr * 2, kr, C(on ? COL_ON_ACCENT : COL_KNOB_OFF));
 }
 
-// Apply/reset actions use a visible accent hover, independent of the subtle control shades.
 // Apply/reset actions use a visible accent hover/active state, independent of the subtle control shades.
 static u32 g_opt_action_bg, g_opt_action_fg; // selftest probe: last colours drawn
 
@@ -1058,7 +1063,8 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             for (int k = 0; k < nb; k++) {
                 const char *l = opt_icon_button_label(o->id, k);
                 bool enabled = !(k == 0 && !field->buf[0]); // Apply needs a typed path; Default/File-Icon do not
-                sheet_button(b[k], l, opt_icon_button_active(o->id, k), enabled);
+                bool active = opt_icon_button_active(o->id, k);
+                opt_action_button(b[k], l, enabled, active);
                 if (enabled) opt_hit(b[k], HP_BUTTON, o->id, k);
             }
             break;
