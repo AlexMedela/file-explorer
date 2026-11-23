@@ -10,12 +10,42 @@ extern char **environ;
 typedef struct { f32 x, y, w, h; } Rect;
 static inline bool in_rect(Rect r, f32 x, f32 y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }
 
+// Time-based caret motion and blink; independent of rendering and input APIs. Lives here because the unity build
+// compiles only main.c, and a separate file would have to be included before TextEdit anyway.
+typedef struct {
+    u64 moved, seen, input;
+    f32 from, target;
+    int caret, anchor;
+    bool valid;
+} TextCaret;
+
+static f32 text_caret_position(const TextCaret *s, u64 now) {
+    f32 t = CLAMP((f32)((now - s->moved) / 1000000.0) / 90.f, 0.f, 1.f);
+    t = 1.f - (1.f - t) * (1.f - t) * (1.f - t);
+    return s->from + (s->target - s->from) * t;
+}
+
+static f32 text_caret_animate(TextCaret *s, f32 target, int caret, int anchor, u64 now, bool snap, f32 *alpha) {
+    bool fresh = !s->valid || now - s->seen > 250000000ull;
+    if (fresh || caret != s->caret || anchor != s->anchor || fabsf(target - s->target) > 0.1f) {
+        s->from = fresh || snap ? target : text_caret_position(s, now);
+        s->target = target; s->caret = caret; s->anchor = anchor;
+        s->moved = now; s->valid = true;
+    }
+    s->seen = now;
+    // Stay solid while typing; at rest breathe through a slow, soft blink.
+    f32 elapsed = (f32)((now - MAX(s->moved, s->input)) / 1000000.0);
+    *alpha = elapsed < 650.f || snap ? 1.f : 0.525f + 0.475f * cosf((elapsed - 650.f) * (2.f * (f32)M_PI / 1900.f));
+    return snap ? target : text_caret_position(s, now);
+}
+
 // --- single-line text editing (path bar, inline rename) --------------------
 
 typedef struct {
     char buf[PATH_MAX];
     int caret, anchor; // selection is [min, max) of the two
     f32 scroll;
+    TextCaret animation;
 } TextEdit;
 
 static void te_set(TextEdit *t, const char *s, int anchor, int caret) {
@@ -24,6 +54,7 @@ static void te_set(TextEdit *t, const char *s, int anchor, int caret) {
     t->anchor = CLAMP(anchor, 0, n);
     t->caret = CLAMP(caret, 0, n);
     t->scroll = 0;
+    memset(&t->animation, 0, sizeof t->animation);
 }
 
 static int te_prev(const TextEdit *t, int i) {
@@ -64,6 +95,7 @@ static void te_delete_sel(TextEdit *t) {
 }
 
 static void te_insert(TextEdit *t, const char *s) {
+    t->animation.input = now_ns();
     te_delete_sel(t);
     size_t n = strlen(t->buf), k = strlen(s);
     if (n + k + 1 > sizeof t->buf) return;
@@ -74,6 +106,7 @@ static void te_insert(TextEdit *t, const char *s) {
 }
 
 static bool te_key(TextEdit *t, SDL_Keycode key, SDL_Keymod mod) {
+    t->animation.input = now_ns();
     bool ctrl = mod & SDL_KMOD_CTRL, shift = mod & SDL_KMOD_SHIFT;
     int n = (int)strlen(t->buf), lo = MIN(t->anchor, t->caret), hi = MAX(t->anchor, t->caret);
     switch (key) {
@@ -12712,6 +12745,8 @@ static void preview_update(void) {
     }
 }
 
+static bool g_caret_anim; // set by text-field drawing when caret blink/slide needs repaint
+
 #include "text_pointer.c"
 #include "input.c"
 
@@ -12865,7 +12900,7 @@ static bool menu_autoscrolling(void) {
 }
 
 static bool animating(void) {
-    if (band_autoscrolling() || menu_autoscrolling()) return true;
+    if (g_caret_anim || band_autoscrolling() || menu_autoscrolling()) return true;
     if (fabsf(A.side_scroll_target - A.side_scroll) > 0.5f || glide_on() || wheel_busy()) return true;
     for (int i = 0; i < A.npanels; i++) {
         Pane *p = A.panels[i]->cur ? &A.panels[i]->cur->pane[0] : NULL;
@@ -12876,6 +12911,7 @@ static bool animating(void) {
 
 static void frame_draw(void) {
     g_text_field_count = 0; // (each te_draw records its field again)
+    g_caret_anim = false;
     draw_clip(NULL);
     fit_tip_begin(A.mx, A.my);
     g_alpha = 1.f;
