@@ -3497,8 +3497,8 @@ static void drag_card_build(DragCard *c) {
     c->strong = c->act[0] != 0;
     Font *f = &A.font_small;
     f32 is = S(16);
-    if (p) is = p->view == VIEW_GRID ? S(p->icon_px) * 0.55f : S(pane_rows_px(p));
-    is = roundf(CLAMP(is, S(14), S(64)));
+    if (p) is = p->view == VIEW_GRID ? S(p->icon_px) * 0.72f : S(pane_rows_px(p));
+    is = roundf(CLAMP(is, p && p->view == VIEW_GRID ? S(28) : S(14), p && p->view == VIEW_GRID ? S(80) : S(32)));
     c->row_h = roundf(MAX(S(24), is + S(8)));
     c->pad = roundf(S(6));
     f32 tw = 0;
@@ -3522,8 +3522,8 @@ static void drag_card_paint(const DragCard *c, f32 x, f32 y, bool square) {
     draw_rrect_outline(x, y, c->w, c->h, r, 1, C(outline));
     f32 is = S(16);
     Pane *p = A.drag_pane;
-    if (p) is = p->view == VIEW_GRID ? S(p->icon_px) * 0.55f : S(pane_rows_px(p));
-    is = roundf(CLAMP(is, S(14), S(64)));
+    if (p) is = p->view == VIEW_GRID ? S(p->icon_px) * 0.72f : S(pane_rows_px(p));
+    is = roundf(CLAMP(is, p && p->view == VIEW_GRID ? S(28) : S(14), p && p->view == VIEW_GRID ? S(80) : S(32)));
     f32 lx = x + roundf(S(10)), ty = y + c->pad;
     for (int i = 0; i < c->n; i++, ty += c->row_h) {
         Entry *e = c->e[i];
