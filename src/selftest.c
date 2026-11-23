@@ -4739,8 +4739,14 @@ static int run_selftest_m9(void) {
         }
         ST_CHECK(!app_icon_write_ex(dh, 0x123456, svg, false)); // already installed: nothing changed
         g_app_icon_mode = APP_ICON_FILE_ICON;
-        ST_CHECK(app_icon_write_ex(dh, 0x123456, NULL, false)); // File-Icon removes the installed override
+        ST_CHECK(app_icon_write_ex(dh, 0x123456, NULL, false)); // File-Icon installs the active folder icon
         ST_CHECK(access(dest, F_OK) != 0);
+        char png_dest[PATH_MAX];
+        snprintf(png_dest, sizeof png_dest, "%s/icons/hicolor/256x256/apps/dev.fileexplorer.png", dh);
+        ST_CHECK(access(png_dest, F_OK) == 0);
+        u8 *file_icon = file_icon_app_raster(256);
+        ST_CHECK(file_icon != NULL);
+        free(file_icon);
         g_app_icon_mode = APP_ICON_DEFAULT;
         opt_app_icon_chosen("");
         ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));

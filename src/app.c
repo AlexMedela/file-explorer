@@ -13117,6 +13117,18 @@ static bool app_icon_remove_override(const char *dh) {
     return true;
 }
 
+static bool app_icon_write_png(const char *dst, const u8 *rgba, int px) {
+    SDL_Surface *s = SDL_CreateSurfaceFrom(px, px, SDL_PIXELFORMAT_RGBA32, (void *)rgba, px * 4);
+    if (!s) return false;
+    char tmp[PATH_MAX + 80];
+    snprintf(tmp, sizeof tmp, "%s.tmp", dst);
+    bool ok = SDL_SavePNG(s, tmp);
+    SDL_DestroySurface(s);
+    if (!ok) { unlink(tmp); return false; }
+    if (rename(tmp, dst) != 0) { unlink(tmp); return false; }
+    return true;
+}
+
 static bool app_icon_write_ex(const char *dh, u32 accent, const char *custom, bool write_builtin) {
     char dir[PATH_MAX], svg[PATH_MAX + 48], png[PATH_MAX + 48];
     snprintf(dir, sizeof dir, "%s/icons/hicolor", dh);
@@ -13133,9 +13145,35 @@ static bool app_icon_write_ex(const char *dh, u32 accent, const char *custom, bo
             if (changed) unlink(is_svg ? png : svg); // a stale icon in the other format would win over this one
         }
     } else if (!write_builtin) {
-        return app_icon_remove_override(dh);
+        // File-Icon mode: install the folder icon of the current File icons set as the launcher icon, so desktops
+        // show it instead of the packaged default. Rasterized as PNG because the source may be a system icon.
+        u8 *icon = file_icon_app_raster(256);
+        if (!icon) return app_icon_remove_override(dh);
+        char apps[PATH_MAX + 48];
+        snprintf(apps, sizeof apps, "%s/256x256/apps", dir);
+        mkdir_p(apps, 0755);
+        size_t on = 0;
+        u8 *old = app_icon_read(png, &on);
+        (void)on;
+        if (app_icon_write_png(png, icon, 256)) {
+            size_t nn = 0;
+            u8 *now = app_icon_read(png, &nn);
+            changed = !old || on != nn || memcmp(old, now, nn) != 0;
+            free(now);
+            if (changed) { unlink(svg); g_app_icon_installed[0] = 0; }
+        }
+        free(old);
+        free(icon);
     } else {
-        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(svg, F_OK)) return changed;
+        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && !access(svg, F_OK) && access(png, F_OK)) {
+            // Default blue with the packaged/default SVG already in effect and no stale File-Icon PNG override.
+            return changed;
+        }
+        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(svg, F_OK)) {
+            bool png_exists = access(png, F_OK) == 0;
+            if (png_exists) { unlink(png); changed = true; }
+            return changed;
+        }
         static const char from[] = "width=\"624\" height=\"456\" viewBox=\"0 0 624 456\"";
         const char *at = strstr(g_logo_svg, from);
         if (!at) return changed;
@@ -13149,6 +13187,7 @@ static bool app_icon_write_ex(const char *dh, u32 accent, const char *custom, bo
             mkdir_p(apps, 0755);
             if (write_file_atomic(svg, src)) changed = true;
         }
+        if (changed || !access(png, F_OK)) { unlink(png); changed = true; }
         free(src);
     }
     if (changed) utimensat(AT_FDCWD, dir, NULL, 0); // icon caches watch the theme folder's time
@@ -13163,9 +13202,11 @@ static void app_icon_sync(void) {
     static u64 since;
     static char applied[PATH_MAX];
     static AppIconMode applied_mode = APP_ICON_DEFAULT;
+    static int applied_icon_theme = -1;
     static bool first = true;
     if (A.selftest || A.screenshot) return;
-    bool path_changed = strcmp(g_app_icon_path, applied) != 0 || first || applied_mode != g_app_icon_mode;
+    bool theme_changed = g_app_icon_mode == APP_ICON_FILE_ICON && g_icon_theme != applied_icon_theme;
+    bool path_changed = strcmp(g_app_icon_path, applied) != 0 || first || applied_mode != g_app_icon_mode || theme_changed;
     if (!path_changed && COL_ACCENT == done) return;
     if (!path_changed) {
         if (COL_ACCENT != seen) { seen = COL_ACCENT; since = now_ns(); return; }
@@ -13174,6 +13215,7 @@ static void app_icon_sync(void) {
     done = COL_ACCENT;
     first = false;
     applied_mode = g_app_icon_mode;
+    applied_icon_theme = g_icon_theme;
     snprintf(applied, sizeof applied, "%s", g_app_icon_path);
     char dh[PATH_MAX];
     data_home(dh, sizeof dh);
