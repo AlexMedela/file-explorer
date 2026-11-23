@@ -534,6 +534,7 @@ static struct {
     Menu menu;
     char toast[300];
     u64 toast_t;
+    bool toast_ok;
     // drag & drop
     char drop_dir[PATH_MAX];
     Pane *drop_pane;
@@ -4663,13 +4664,25 @@ static void preview_toggle(void);
 
 // --- toast -----------------------------------------------------------------
 
+static void toastv(bool ok, const char *fmt, va_list ap) {
+    vsnprintf(A.toast, sizeof A.toast, fmt, ap);
+    A.toast_t = now_ns();
+    A.toast_ok = ok;
+    A.redraw = true;
+}
+
 static void toast(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(A.toast, sizeof A.toast, fmt, ap);
+    toastv(false, fmt, ap);
     va_end(ap);
-    A.toast_t = now_ns();
-    A.redraw = true;
+}
+
+static void toast_success(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    toastv(true, fmt, ap);
+    va_end(ap);
 }
 
 // --- clipboard (interoperable with GNOME/KDE file managers) ----------------
