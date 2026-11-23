@@ -36,6 +36,13 @@ search field stay filled. These keys were added after `settings_version` and def
 config files: no migration runs, so existing appearances are unchanged.
 `tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a
 box on the tab strip, instead of the open tab as a card joining the folder below it.
+`tab_style=cards|pills` (Options -> Appearance -> Tab style, `cards` by default) picks one of two tab modes: Classic tabs
+(`cards`) put the open tab as a card joining the folder below it, above the navigation bar; Pills (`pills`) draw rounded
+tabs centred in a box on a strip below the navigation bar. The placement is part of the mode. The pills row uses the
+file-area background and a higher-contrast enclosure, with extra padding and a slightly taller centred row.
+`hide_single_tab=1` (Options -> Behaviour -> Hide tab bar with one tab, off by default) hides the tab band while only one
+tab is open, giving that row back to the folder; open another tab and the band returns, and new tabs still fit.
+
 `title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling
 compositors included, so it looks the same everywhere: minimise / maximise / close at the end of the tab strip; drag
 the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.

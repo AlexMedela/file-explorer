@@ -394,15 +394,16 @@ static void draw_split_icon(Rect sr, bool down, Color ic) {
 }
 
 static void draw_panel_bar(Panel *pn) {
+    Rect tb = pn->bar;
+    if (tb.h <= 0) return; // the single-tab setting gave this row back to the folder
     u32 saved_bg = g_icon_surface_bg;
     g_icon_surface_bg = COL_TABBAR;
-    Rect tb = pn->bar;
     bool active_panel = pn == A.ap, multi = A.npanels > 1;
-    draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TABBAR));
+    bool pills = A.tab_style == TABS_PILLS;
+    draw_rect(tb.x, tb.y, tb.w, tb.h, C(pills ? COL_BG : COL_TABBAR));
     Font *f = &A.font;
     ClipSave cs = draw_clip_push((SDL_Rect){(int)tb.x, (int)tb.y, (int)tb.w, (int)tb.h});
     Rect pr = pn->plus;
-    bool pills = A.tab_style == TABS_PILLS;
     if (pills) { // Tab style Pills: enclosure only; pills have fill only on hover/focus
         Tab *first = panel_tab(pn, 0), *last = panel_tab(pn, -1);
         f32 padx = roundf(S(10)), pady = roundf(S(5));
@@ -540,7 +541,7 @@ static void draw_node_dividers(Node *n) {
 
 // Where a dropped tab / folder would go in panel pn: the half on side zone, or all of it (ZONE_CENTER).
 static void draw_split_zone(Panel *pn, int zone) {
-    Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
+    Rect a = panel_content_rect(pn);
     Rect z = a;
     if (zone == ZONE_LEFT) z.w = roundf(a.w * 0.5f);
     else if (zone == ZONE_RIGHT) { z.w = roundf(a.w * 0.5f); z.x = a.x + a.w - z.w; }

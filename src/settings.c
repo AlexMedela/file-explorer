@@ -50,6 +50,7 @@ static void settings_defaults(void) {
     A.brand_name = BRAND_APP;
     A.brand_text[0] = 0;
     A.tab_style = TABS_CARDS;
+    g_hide_single_tab = false;
     A.ig_prev_fm[0] = 0;
     A.ig_fm1 = A.ig_asked = false;
     A.ig_check_updates = true;
@@ -321,6 +322,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "brand_name")) A.brand_name = !strcmp(v, "host") ? BRAND_HOST : !strcmp(v, "custom") ? BRAND_CUSTOM : !strcmp(v, "hidden") ? BRAND_HIDDEN : BRAND_APP;
         else if (!strcmp(k, "brand_text")) snprintf(A.brand_text, sizeof A.brand_text, "%s", v);
         else if (!strcmp(k, "tab_style")) A.tab_style = !strcmp(v, "pills") ? TABS_PILLS : TABS_CARDS;
+        else if (!strcmp(k, "hide_single_tab")) g_hide_single_tab = atoi(v) != 0;
         else if (!strcmp(k, "alt_rows")) A.alt_rows = atoi(v);
         else if (!strcmp(k, "load_times")) A.load_times = atoi(v);
         else if (!strcmp(k, "verify_copies")) A.verify_copies = atoi(v);
@@ -344,6 +346,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "header_brightness")) g_surface_bright[SURF_HEADER] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "main_brightness")) g_surface_bright[SURF_FILES] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "preview_brightness")) g_surface_bright[SURF_PREVIEW] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "popup_brightness")) g_surface_bright[SURF_POPUP] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "status_brightness")) g_surface_bright[SURF_STATUS] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "pathbar_brightness")) g_surface_bright[SURF_PATHBAR] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "searchbar_brightness")) g_surface_bright[SURF_SEARCHBAR] = CLAMP(atoi(v), -30, 30);
@@ -578,8 +581,8 @@ static void settings_write(FILE *f) {
     fprintf(f, "theme_light=%s\ntheme_dark=%s\n", g_theme_pick[0], g_theme_pick[1]);
     if (g_scroll_custom) fprintf(f, "scrollbar_color=#%06X\n", g_scroll_custom & 0xFFFFFF);
     else fprintf(f, "scrollbar_color=auto\n");
-    fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\npathbar_brightness=%d\nsearchbar_brightness=%d\ntransparent_pathbar=%d\n",
-            g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_STATUS],
+    fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\npopup_brightness=%d\nstatus_brightness=%d\npathbar_brightness=%d\nsearchbar_brightness=%d\ntransparent_pathbar=%d\n",
+            g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_POPUP], g_surface_bright[SURF_STATUS],
             g_surface_bright[SURF_PATHBAR], g_surface_bright[SURF_SEARCHBAR], g_transparent_pathbar);
     fprintf(f, "navigation_selection_opacity=%d\nnavigation_selector_mark=%d\n", g_navigation_selection_opacity, g_nav_selector_mark);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
@@ -599,6 +602,7 @@ static void settings_write(FILE *f) {
     static const char *brand_names[] = {"app", "host", "custom", "hidden"}; // BRAND_*
     fprintf(f, "brand_name=%s\nbrand_text=%s\n", brand_names[CLAMP(A.brand_name, 0, BRAND_HIDDEN)], A.brand_text);
     fprintf(f, "tab_style=%s\n", A.tab_style == TABS_PILLS ? "pills" : "cards");
+    fprintf(f, "hide_single_tab=%d\n", g_hide_single_tab);
     fprintf(f, "dim_inactive=%d\nalt_rows=%d\nsize_bars=%d\nload_times=%d\ncolumns=", A.dim_inactive, A.alt_rows, A.size_bars, A.load_times);
     for (int i = 0; i < A.ncols; i++) {
         int c = A.cols[i];

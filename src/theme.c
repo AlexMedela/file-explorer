@@ -101,7 +101,7 @@ static bool g_accent_desktop; // Options: the desktop's accent with every theme,
 static bool g_unified_surfaces; // Options: sidebar, header, preview and status bar take the file area's background
 static char g_theme_pick[2][64] = {"Light", "Dark"}; // Theme > System: the theme while the desktop is light / dark (by name)
 // Options > Surfaces brightness: -30..+30 % per part (darker / lighter), 0 = the theme's own colour.
-enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_STATUS, SURF_PATHBAR, SURF_SEARCHBAR, SURF_COUNT };
+enum { SURF_SIDEBAR, SURF_HEADER, SURF_FILES, SURF_PREVIEW, SURF_POPUP, SURF_STATUS, SURF_PATHBAR, SURF_SEARCHBAR, SURF_COUNT };
 static int g_surface_bright[SURF_COUNT];
 static bool g_transparent_pathbar; // Options: remove only the path field's fill (pills and search stay filled)
 static u32 g_scroll_custom; // Options: scrollbar colour; 0 = Auto, else 0x01000000 | rgb
@@ -267,6 +267,45 @@ static Theme theme_system(void) {
     t.alt_row = rgb_mix(bg, text, 0.025f);
     t.scroll = rgb_mix(bg, text, 0.30f);
     t.scroll_hover = rgb_mix(bg, text, 0.45f);
+    if (!g_unified_surfaces) {
+        const Theme *ref = g_desktop.light ? &g_theme_light : &g_theme_dark;
+        #define SYS_LUMA(dst, src, refv) do { \
+            u32 _base = (src); \
+            f32 _cl = fmaxf(rgb_luma(_base), 0.001f); \
+            f32 _tl = CLAMP(rgb_luma(refv), 0.001f, 0.999f); \
+            if (fabsf(_cl - _tl) < 0.005f) (dst) = _base; \
+            else if (_cl < _tl) (dst) = rgb_mix(_base, 0xFFFFFF, CLAMP((_tl - _cl) / fmaxf(1.f - _cl, 0.001f), 0.f, 1.f)); \
+            else (dst) = rgb_mix(_base, 0x000000, CLAMP((_cl - _tl) / _cl, 0.f, 1.f)); \
+        } while (0)
+        SYS_LUMA(t.bg, bg, ref->bg);
+        SYS_LUMA(t.sidebar, win, ref->sidebar);
+        SYS_LUMA(t.toolbar, win, ref->toolbar);
+        SYS_LUMA(t.preview_bg, win, ref->preview_bg);
+        SYS_LUMA(t.popup, win, ref->popup);
+        SYS_LUMA(t.tabbar, win, ref->tabbar);
+        SYS_LUMA(t.alt_row, bg, ref->alt_row);
+        SYS_LUMA(t.sunken, bg, ref->sunken);
+        SYS_LUMA(t.field, win, ref->field);
+        SYS_LUMA(t.field_hover, win, ref->field_hover);
+        SYS_LUMA(t.hover, win, ref->hover);
+        SYS_LUMA(t.control, win, ref->control);
+        SYS_LUMA(t.control_hover, win, ref->control_hover);
+        SYS_LUMA(t.control_off, win, ref->control_off);
+        SYS_LUMA(t.chip, win, ref->chip);
+        SYS_LUMA(t.tab_hover, win, ref->tab_hover);
+        SYS_LUMA(t.border, win, ref->border);
+        SYS_LUMA(t.divider, win, ref->divider);
+        SYS_LUMA(t.popup_border, win, ref->popup_border);
+        SYS_LUMA(t.track, bg, ref->track);
+        SYS_LUMA(t.scroll, bg, ref->scroll);
+        SYS_LUMA(t.scroll_hover, bg, ref->scroll_hover);
+        SYS_LUMA(t.sel_idle, bg, ref->sel_idle);
+        SYS_LUMA(t.text2, text, ref->text2);
+        SYS_LUMA(t.text_dim, text, ref->text_dim);
+        SYS_LUMA(t.text_faint, text, ref->text_faint);
+        SYS_LUMA(t.text_hidden, text, ref->text_hidden);
+        #undef SYS_LUMA
+    }
     return t;
 }
 
@@ -282,6 +321,8 @@ static void theme_apply(void) {
     T.bg = surface_adjust(T.bg, SURF_FILES);
     T.alt_row = surface_adjust(T.alt_row, SURF_FILES);
     T.preview_bg = surface_adjust(T.preview_bg, SURF_PREVIEW);
+    T.popup = surface_adjust(T.popup, SURF_POPUP);
+    T.popup_border = surface_adjust(T.popup_border, SURF_POPUP);
     u32 accent = g_accent_desktop && g_desktop.accent ? g_desktop.accent : g_accent_custom ? g_accent_custom : theme_is_system() ? g_desktop.accent : 0;
     if (accent) {
         u32 a = accent & 0xFFFFFF;
