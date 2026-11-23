@@ -3008,7 +3008,6 @@ static void draw_ops(void) {
         f32 h = roundf(S(retry ? 110 : 74));
         y -= h;
         A.op_card[i] = (Rect){x, y, w, h};
-        draw_rrect(x + S(2), y + S(4), w, h, S(10), CA(0x000000, 0.35f));
         draw_rrect(x, y, w, h, S(10), C(COL_POPUP));
         draw_rrect_outline(x, y, w, h, S(10), 1, C(COL_CONTROL));
         char title[400];
