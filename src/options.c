@@ -675,10 +675,10 @@ static void opt_terminal_path_apply(void) {
     while (*s == ' ' || *s == '\t') s++;
     size_t n = strlen(s);
     while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t')) s[--n] = 0;
-    if (!opt_terminal_path_valid(s)) { toast("Didn't apply, fallback to Default"); return; }
+    if (!opt_terminal_path_valid(s)) { toast("Didn't apply, fallback to previous option"); return; }
     char *base = opt_terminal_basename(s);
     if (s[0] == '/' || strchr(s, '/')) {
-        if (!*base) { toast("Didn't apply, fallback to Default"); return; }
+        if (!*base) { toast("Didn't apply, fallback to previous option"); return; }
         memmove(s, base, strlen(base) + 1);
     }
     char old[PATH_MAX];
@@ -688,7 +688,7 @@ static void opt_terminal_path_apply(void) {
     const char *name = NULL;
     if (*s && !find_terminal(exe, sizeof exe, &name)) {
         snprintf(g_external_terminal, sizeof g_external_terminal, "%s", old);
-        toast("Didn't apply, fallback to Default");
+        toast("Didn't apply, fallback to previous option");
         te_set(&g_opt.terminal_path, g_external_terminal, (int)strlen(g_external_terminal), (int)strlen(g_external_terminal));
         return;
     }

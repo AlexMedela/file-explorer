@@ -5018,7 +5018,7 @@ static int run_selftest_m9(void) {
         te_set(&g_opt.terminal_path, "no-such-terminal-xyz", 20, 20);
         A.toast[0] = 0;
         st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0));
-        ST_CHECK(!g_external_terminal[0] && strstr(A.toast, "not found"));
+        ST_CHECK(!g_external_terminal[0] && strstr(A.toast, "Didn't apply"));
         sheet_close();
         if (tpath1) setenv("PATH", tpath1, 1);
         else unsetenv("PATH");
