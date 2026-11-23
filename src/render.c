@@ -3496,15 +3496,18 @@ static void drag_card_build(DragCard *c) {
     }
     c->strong = c->act[0] != 0;
     Font *f = &A.font_small;
-    c->row_h = roundf(S(24));
+    f32 is = S(16);
+    if (p) is = p->view == VIEW_GRID ? S(p->icon_px) * 0.55f : S(pane_rows_px(p));
+    is = roundf(CLAMP(is, S(14), S(64)));
+    c->row_h = roundf(MAX(S(24), is + S(8)));
     c->pad = roundf(S(6));
     f32 tw = 0;
     for (int i = 0; i < c->n; i++) {
         const char *nm = rel_base(c->e[i]->name);
-        tw = MAX(tw, text_width(f, nm, (int)strlen(nm)) + S(24));
+        tw = MAX(tw, text_width(f, nm, (int)strlen(nm)) + is + S(8));
     }
     if (c->act[0]) tw = MAX(tw, text_width(f, c->act, (int)strlen(c->act)));
-    c->w = roundf(CLAMP(tw + S(20), S(120), S(320)));
+    c->w = roundf(CLAMP(tw + S(20), S(120), S(420)));
     int rows = c->n + (c->more ? 1 : 0) + (c->act[0] ? 1 : 0);
     c->h = roundf(c->pad * 2 + c->row_h * MAX(rows, 1) + (c->act[0] ? S(5) : 0));
 }
@@ -3517,8 +3520,11 @@ static void drag_card_paint(const DragCard *c, f32 x, f32 y, bool square) {
     u32 outline = drag_card_outline(c->strong);
     draw_rrect(x, y, c->w, c->h, r, C(COL_POPUP));
     draw_rrect_outline(x, y, c->w, c->h, r, 1, C(outline));
-    f32 is = roundf(S(16)), lx = x + roundf(S(10)), ty = y + c->pad;
-    if (A.drag_pane) is = roundf(CLAMP(S(pane_rows_px(A.drag_pane)), S(14), S(22)));
+    f32 is = S(16);
+    Pane *p = A.drag_pane;
+    if (p) is = p->view == VIEW_GRID ? S(p->icon_px) * 0.55f : S(pane_rows_px(p));
+    is = roundf(CLAMP(is, S(14), S(64)));
+    f32 lx = x + roundf(S(10)), ty = y + c->pad;
     for (int i = 0; i < c->n; i++, ty += c->row_h) {
         Entry *e = c->e[i];
         const char *nm = rel_base(e->name);
