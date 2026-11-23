@@ -408,11 +408,15 @@ static NSVGimage *icon_image(int id) {
 
 // Preserve icon hue and internal shading while improving pale artwork on light navigation surfaces. Raw icon pixels
 // and caches stay theme-independent: the tint is applied only at draw time, from the surface being drawn over.
+// Only grey pixels count as light: white / light-grey artwork vanishes on a light surface, but coloured artwork (a
+// yellow folder) stays visible by its colour and darkening it would only muddy it, so chroma counts as dark ink.
 static f32 icon_pixel_lightness(const u8 *pixels, size_t count) {
     double light = 0, weight = 0;
     for (size_t i = 0; i < count; i++) {
         const u8 *p = pixels + i * 4;
-        light += (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) * p[3];
+        int mx = MAX(p[0], MAX(p[1], p[2])), mn = MIN(p[0], MIN(p[1], p[2]));
+        f32 grey = CLAMP(1.f - (f32)(mx - mn) / (255.f * 0.25f), 0.f, 1.f);
+        light += (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) * grey * p[3];
         weight += p[3];
     }
     return weight ? (f32)(light / (255.0 * weight)) : 0;

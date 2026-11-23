@@ -2223,6 +2223,9 @@ static int run_selftest_m7(void) {
         for (int i = 0; i < 4; i++) { white[i * 4] = white[i * 4 + 1] = white[i * 4 + 2] = 255; white[i * 4 + 3] = 255; }
         ST_CHECK(fabsf(icon_pixel_lightness(white, 4) - 1.f) < 0.001f);
         ST_CHECK(icon_pixel_lightness(clear, 4) == 0.f);
+        u8 yellow[16]; // Monokai's folder yellow: bright but coloured, so it is not pale and keeps its colour
+        for (int i = 0; i < 4; i++) { yellow[i * 4] = 0xE6; yellow[i * 4 + 1] = 0xDB; yellow[i * 4 + 2] = 0x74; yellow[i * 4 + 3] = 255; }
+        ST_CHECK(icon_pixel_lightness(yellow, 4) < 0.01f && icon_contrast_scale(icon_pixel_lightness(yellow, 4), 1.f) == 1.f);
         int fo = icon_find("folder"), th = g_theme_cur;
         ST_CHECK(icon_glyph(fo, 16) != NULL && big_icon_tex(fo, 96) != NULL);
         f32 gl = -1.f, bl = -1.f;
@@ -2245,13 +2248,16 @@ static int run_selftest_m7(void) {
         ST_CHECK(icon_glyph_tint(fo, 16) == 1.f);
         g_icon_surface_bg = 0x202124; // dark surface
         ST_CHECK(icon_glyph_tint(fo, 16) == 1.f);
-        g_icon_surface_bg = 0xFFFFFF; // light navigation surface
-        f32 tint = icon_glyph_tint(fo, 16);
+        g_icon_surface_bg = 0xFFFFFF; // light navigation surface: white artwork darkens, the coloured folder doesn't
+        int ui = ICON_UI_BASE + UI_TRASH;
+        ST_CHECK(icon_glyph(ui, 16) != NULL);
+        f32 tint = icon_glyph_tint(ui, 16);
         ST_CHECK(tint > 0.f && tint < 1.f);
+        ST_CHECK(icon_glyph_tint(fo, 16) == 1.f);
         SDL_Texture *bt = big_icon_tex(fo, 96);
-        ST_CHECK(bt != NULL && icon_texture_tint(bt) > 0.f && icon_texture_tint(bt) < 1.f);
+        ST_CHECK(bt != NULL && icon_texture_tint(bt) == 1.f);
         g_icon_surface_bg = saved_bg;
-        ST_CHECK(icon_glyph_tint(fo, 16) == 1.f && (!bt || icon_texture_tint(bt) == 1.f));
+        ST_CHECK(icon_glyph_tint(ui, 16) == 1.f && (!bt || icon_texture_tint(bt) == 1.f));
     }
     { // the trash bin's main colour follows the UI theme (re-rasterized on a theme change)
         int tr = icon_find("trash"), saved = g_theme_cur;
