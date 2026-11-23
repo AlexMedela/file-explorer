@@ -4959,67 +4959,58 @@ static int run_selftest_m9(void) {
     st_wait();
     ST_CHECK(!strcmp(active_pane()->path, M9_BASE));
 
-    // --- the external terminal (Options > Integration): Automatic = found as before, or one of those installed ---
+    // --- the external terminal (Options > Integration): one executable field with Apply/Default ---
     ST_CHECK(!g_external_terminal[0]);
     A.menu.n = 0;
     menu_terminal_items(p);
     ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in external terminal"));
     do_action(p, ACT_TERMINAL_EXTERNAL); // (recorded, not started)
     ST_CHECK(!strncmp(A.last_opened, "terminal:", 9) && !options_is_open());
-    // the dropdown lists the terminals installed: by name on $PATH, or a terminal app's .desktop entry (TerminalEmulator)
     st_write_text(M9_BASE "-bin/foot", "#!/bin/sh\n");
     chmod(M9_BASE "-bin/foot", 0755);
-    st_write_text(M9_BASE "-term/myterm", "#!/bin/sh\n");
-    chmod(M9_BASE "-term/myterm", 0755);
-    st_write_text(M9_BASE "-data/applications/myterm.desktop",
-                  "[Desktop Entry]\nType=Application\nName=My Term\nExec=\"" M9_BASE "-term/myterm\" --new\nCategories=System;TerminalEmulator;\n");
-    st_write_text(M9_BASE "-data/applications/editor.desktop", "[Desktop Entry]\nType=Application\nName=Editor\nExec=/bin/sh\nCategories=Utility;\n");
-    char *tpath0 = getenv("PATH") ? strdup(getenv("PATH")) : NULL, *tdata0 = getenv("XDG_DATA_HOME") ? strdup(getenv("XDG_DATA_HOME")) : NULL;
+    char *tpath0 = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
     setenv("PATH", M9_BASE "-bin", 1); // (only the stand-ins)
-    setenv("XDG_DATA_HOME", M9_BASE "-data", 1);
     options_open_page(OC_INTEGRATION);
-    for (int k = 0; k < 400 && g_termlist.scanning; k++) { st_frames(1); SDL_Delay(2); }
-    if (tpath0) setenv("PATH", tpath0, 1);
-    if (tdata0) setenv("XDG_DATA_HOME", tdata0, 1);
-    else unsetenv("XDG_DATA_HOME");
-    free(tpath0);
-    free(tdata0);
-    ST_CHECK(!g_termlist.scanning && opt_choice_count(OPT_TERMINAL) >= 3 && opt_choice_get(OPT_TERMINAL) == 0);
-    int tfoot = -1, tmy = -1;
-    for (int k = 1; k < opt_choice_count(OPT_TERMINAL); k++) {
-        if (!strcmp(opt_choice_label(OPT_TERMINAL, k), "foot")) tfoot = k;
-        if (!strcmp(opt_choice_label(OPT_TERMINAL, k), "myterm")) tmy = k;
-        ST_CHECK(strcmp(opt_choice_label(OPT_TERMINAL, k), "sh")); // not a terminal app
-    }
-    ST_CHECK(tfoot > 0 && tmy > 0 && !strcmp(opt_choice_label(OPT_TERMINAL, 0), "Automatic"));
     st_frames(1);
-    Rect tdrop = {0};
-    for (int k = 0; k < g_opt.nhits; k++)
-        if (g_opt.hits[k].part == HP_DROP && g_opt.hits[k].opt == OPT_TERMINAL) tdrop = g_opt.hits[k].r;
-    ST_CHECK(tdrop.w > 0); // a dropdown, not segments
-    opt_drop_open(OPT_TERMINAL, tdrop);
-    for (int k = 0; k < g_opt.drop_n; k++)
-        if (g_opt.drop_map[k] == tfoot) opt_drop_pick(k);
-    ST_CHECK(!strcmp(g_external_terminal, "foot") && g_opt.drop_opt < 0 && opt_choice_get(OPT_TERMINAL) == tfoot);
-    st_shot("m9-terminal-option");
-    settings_save();
-    settings_load();
+    g_opt.scroll = g_opt.max_scroll;
+    st_frames(1);
+    ST_CHECK(st_opt_hit(HP_TEXT, OPT_TERMINAL_PATH, 0));
+    ST_CHECK(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0) && st_opt_hit(HP_EDIT_RESET, OPT_TERMINAL_PATH, 0));
+    te_set(&g_opt.terminal_path, "foot", 4, 4);
+    st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0));
     ST_CHECK(!strcmp(g_external_terminal, "foot"));
+    te_set(&g_opt.terminal_path, "/usr/bin/foot", 13, 13);
+    st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_TERMINAL_PATH, 0));
+    ST_CHECK(!g_external_terminal[0]);
     A.menu.n = 0;
     menu_terminal_items(p);
-    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in foot"));
-    A.menu.n = 0;
-    opt_choice_set(OPT_TERMINAL, tmy); // one only its .desktop entry knows: kept by its path
-    char texe[PATH_MAX];
-    const char *tname = NULL;
-    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-term/myterm") && find_terminal(texe, sizeof texe, &tname) && !strcmp(tname, "myterm"));
-    snprintf(g_external_terminal, sizeof g_external_terminal, "gone-terminal"); // uninstalled since: shown, marked
-    ST_CHECK(opt_choice_get(OPT_TERMINAL) == opt_choice_count(OPT_TERMINAL) - 1 &&
-             !strcmp(opt_choice_label(OPT_TERMINAL, opt_choice_get(OPT_TERMINAL)), "gone-terminal (not found)"));
-    opt_choice_set(OPT_TERMINAL, 0);
-    ST_CHECK(!g_external_terminal[0] && opt_choice_get(OPT_TERMINAL) == 0);
+    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in external terminal"));
     sheet_close();
-    g_opt.cat = OC_APPEARANCE;
+    if (tpath0) setenv("PATH", tpath0, 1);
+    free(tpath0);
+
+    // --- terminal executable validation ---
+    {
+        char too_long[sizeof g_external_terminal + 1];
+        memset(too_long, 'a', sizeof too_long - 1);
+        too_long[sizeof too_long - 1] = 0;
+        ST_CHECK(opt_terminal_path_valid("foot") && !opt_terminal_path_valid("foot\n") &&
+                 !opt_terminal_path_valid("foot\r") && !opt_terminal_path_valid(too_long));
+        char *tpath1 = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
+        setenv("PATH", M9_BASE "-bin", 1);
+        options_open_page(OC_INTEGRATION);
+        st_frames(1);
+        g_opt.scroll = g_opt.max_scroll;
+        st_frames(1);
+        te_set(&g_opt.terminal_path, "no-such-terminal-xyz", 20, 20);
+        A.toast[0] = 0;
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0));
+        ST_CHECK(!g_external_terminal[0] && strstr(A.toast, "not found"));
+        sheet_close();
+        if (tpath1) setenv("PATH", tpath1, 1);
+        else unsetenv("PATH");
+        free(tpath1);
+    }
 
     // --- named layouts ---
     st_wait();

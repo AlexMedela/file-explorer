@@ -10,7 +10,7 @@ enum {
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_POPUP, OPT_BRIGHT_STATUS, OPT_BRIGHT_PATHBAR, OPT_BRIGHT_SEARCHBAR, OPT_TRANSPARENT_PATHBAR, OPT_SEPARATORS, OPT_NAV_SELECTION_OPACITY, OPT_NAV_SELECTOR_MARK, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY, OPT_HIDE_SINGLE_TAB,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_FOLDERS_FIRST, OPT_DEF_GROUP,
-    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL,
+    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL_PATH,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
 };
 
@@ -88,7 +88,7 @@ static const OptDef g_opts[] = {
     {OC_INTEGRATION, OK_BOOL, OPT_IG_DEFAULT_FM, "Default file manager", "Folders from other apps open here"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_FM1, "\"Show in folder\" opens here", "From browsers and other apps"},
     {OC_INTEGRATION, OK_BOOL, OPT_IG_PICKER, "File chooser for other apps", "Their Open and Save dialogs open here"},
-    {OC_INTEGRATION, OK_CHOICE, OPT_TERMINAL, "Terminal app", "For right-click > Open in; Automatic: $TERMINAL, else the desktop's own"},
+    {OC_INTEGRATION, OK_TEXT, OPT_TERMINAL_PATH, "Terminal Executable", "Executable name or absolute path (no arguments). Apply saves it; Default uses $TERMINAL or the desktop default. The name appears in the Open in menu."},
     {OC_UPDATES, OK_BUTTON, OPT_UPD_NOW, APP_LABEL " " APP_VERSION, "How this copy updates"},
     {OC_UPDATES, OK_BUTTON, OPT_UPD_HOW, "How it updates", "Where new versions come from"},
     {OC_UPDATES, OK_BUTTON, OPT_UPD_NOTES, "What's new", "Release notes of every version, on GitHub"},
@@ -105,7 +105,7 @@ static const struct { int id; const char *title; } g_opt_sections[] = {
     {OPT_THEME, "Theme"}, {OPT_FONT, "Text"}, {OPT_DIM_INACTIVE, "Display"}, {OPT_UNIFIED, "Surfaces"}, {OPT_TERM_LOOK, "Terminal"}, {OPT_THEME_NEW, "Custom themes"},
     {OPT_HIDDEN, "Files and folders"}, {OPT_RESTORE, "Startup"}, {OPT_SINGLE_CLICK, "Mouse"}, {OPT_TRANSFERS, "Copying and moving"}, {OPT_EXEC_OPEN, "Programs"},
     {OPT_KEYS_RESET, "Shortcuts"}, {OPT_DEF_VIEW, "New folders"}, {OPT_RENDERER, "Rendering"}, {OPT_SETTINGS_FILE, "Maintenance"},
-    {OPT_IG_DEFAULT_FM, "Desktop roles (yours to give: installing never takes them)"}, {OPT_TERMINAL, "External terminal"},
+    {OPT_IG_DEFAULT_FM, "Desktop roles (yours to give: installing never takes them)"}, {OPT_TERMINAL_PATH, "External terminal"},
     {OPT_UPD_NOW, "Version"}, {OPT_IG_UPDATES, "Automatic updates"},
 };
 
@@ -205,121 +205,10 @@ static struct {
     bool app_icon_focus;
     TextEdit title_icon;
     bool title_icon_focus;
+    // the external terminal executable (OK_TEXT, applied with Apply or cleared with Default)
+    TextEdit terminal_path;
+    bool terminal_path_focus;
 } g_opt;
-
-// Options > Integration > Terminal app: the terminals installed (programs on $PATH), found on a worker each time
-// Options opens: the ones we know by name and those of terminal apps' .desktop entries (TerminalEmulator)
-static struct { char **v; int n; bool scanning; } g_termlist;
-
-typedef struct { char **v; int n; } TermScan;
-
-static void term_scan_add(TermScan *ts, const char *prog) {
-    struct stat st;
-    char p[PATH_MAX];
-    const char *name = path_basename(prog);
-    if (!strcmp(name, "flatpak") || !strcmp(name, "env") || !strcmp(name, "sh")) return; // (not the terminal itself)
-    if (prog[0] == '/') {
-        if (stat(prog, &st) || !S_ISREG(st.st_mode) || access(prog, X_OK)) return;
-        snprintf(p, sizeof p, "%s", prog);
-    } else {
-        const char *path = getenv("PATH");
-        char dirs[8192], *save = NULL;
-        bool found = false;
-        snprintf(dirs, sizeof dirs, "%s", path ? path : "");
-        for (char *d = strtok_r(dirs, ":", &save); d && !found; d = strtok_r(NULL, ":", &save)) {
-            snprintf(p, sizeof p, "%s/%s", d, prog);
-            found = !stat(p, &st) && S_ISREG(st.st_mode) && access(p, X_OK) == 0;
-        }
-        if (!found) return;
-        snprintf(p, sizeof p, "%s", prog);
-    }
-    for (int i = 0; i < ts->n; i++) // once each, by name (an absolute path that is the same program too)
-        if (!strcmp(path_basename(ts->v[i]), name)) return;
-    ts->v = xrealloc(ts->v, (size_t)(ts->n + 1) * sizeof *ts->v);
-    ts->v[ts->n++] = strdup(p);
-}
-
-static void term_scan_desktop_dir(TermScan *ts, const char *dir) {
-    DIR *d = opendir(dir);
-    if (!d) return;
-    struct dirent *e;
-    while ((e = readdir(d))) {
-        size_t l = strlen(e->d_name);
-        if (l < 9 || strcmp(e->d_name + l - 8, ".desktop")) continue;
-        char path[PATH_MAX], line[2048], exec[2048] = "";
-        snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
-        FILE *f = fopen(path, "r");
-        if (!f) continue;
-        bool in_main = false, term = false, hidden = false;
-        while (fgets(line, sizeof line, f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            if (line[0] == '[') { in_main = !strcmp(line, "[Desktop Entry]"); continue; }
-            if (!in_main) continue;
-            if (!strncmp(line, "Exec=", 5)) snprintf(exec, sizeof exec, "%s", line + 5);
-            else if (!strncmp(line, "Categories=", 11)) term = strstr(line, "TerminalEmulator") != NULL;
-            else if (!strncmp(line, "Hidden=", 7)) hidden = !strcmp(line + 7, "true");
-        }
-        fclose(f);
-        if (!term || hidden || !exec[0]) continue;
-        const char *x = exec;
-        while (*x == ' ' || *x == '"') x++;
-        char prog[PATH_MAX];
-        snprintf(prog, sizeof prog, "%.*s", (int)strcspn(x, " \""), x);
-        if (prog[0]) term_scan_add(ts, prog);
-    }
-    closedir(d);
-}
-
-static int term_name_cmp(const void *a, const void *b) {
-    return strcasecmp(path_basename(*(char *const *)a), path_basename(*(char *const *)b));
-}
-
-static void term_scan_done(void *arg) {
-    TermScan *ts = arg;
-    for (int i = 0; i < g_termlist.n; i++) free(g_termlist.v[i]);
-    free(g_termlist.v);
-    g_termlist.v = ts->v;
-    g_termlist.n = ts->n;
-    g_termlist.scanning = false;
-    free(ts);
-    A.redraw = true;
-}
-
-static void term_scan_job(void *arg) {
-    (void)arg;
-    TermScan *ts = xcalloc(1, sizeof *ts);
-    for (size_t i = 0; i < ARRAY_COUNT(g_terminals); i++) term_scan_add(ts, g_terminals[i]);
-    const char *home = getenv("HOME") ? getenv("HOME") : "/", *xd = getenv("XDG_DATA_HOME"), *dd = getenv("XDG_DATA_DIRS");
-    char p[PATH_MAX], dirs[4096], *save = NULL;
-    if (xd && xd[0] == '/') snprintf(p, sizeof p, "%s/applications", xd);
-    else snprintf(p, sizeof p, "%s/.local/share/applications", home);
-    term_scan_desktop_dir(ts, p);
-    snprintf(dirs, sizeof dirs, "%s", dd && dd[0] ? dd : "/usr/local/share:/usr/share");
-    for (char *s = strtok_r(dirs, ":", &save); s; s = strtok_r(NULL, ":", &save)) {
-        snprintf(p, sizeof p, "%s/applications", s);
-        term_scan_desktop_dir(ts, p);
-    }
-    if (ts->n > 1) qsort(ts->v, (size_t)ts->n, sizeof *ts->v, term_name_cmp);
-    main_post(term_scan_done, ts);
-}
-
-static void term_scan_start(void) {
-    if (g_termlist.scanning) return;
-    g_termlist.scanning = true;
-    pool_submit(term_scan_job, NULL);
-}
-
-// The dropdown: Automatic, the terminals found, then the one set if it isn't among them (not installed any more).
-static bool term_choice_listed(void) {
-    for (int i = 0; i < g_termlist.n; i++)
-        if (!strcmp(g_termlist.v[i], g_external_terminal)) return true;
-    return !g_external_terminal[0];
-}
-
-static const char *term_choice(int i) {
-    if (i == 0) return "";
-    return i - 1 < g_termlist.n ? g_termlist.v[i - 1] : g_external_terminal;
-}
 
 // The description, with live state for the integration switches.
 static const char *opt_desc(const OptDef *o) {
@@ -373,7 +262,6 @@ static int opt_choice_count(int id) {
     case OPT_THEME_LIGHT: case OPT_THEME_DARK: return g_nthemes - (opt_pick_sys() < g_nthemes);
     case OPT_ICON_THEME: return icon_theme_count();
     case OPT_TERM_LOOK: return 2;
-    case OPT_TERMINAL: return 1 + g_termlist.n + !term_choice_listed();
     case OPT_TITLE_BAR: return (int)ARRAY_COUNT(g_title_bar_labels);
     case OPT_BRAND_NAME: return (int)ARRAY_COUNT(g_brand_labels);
     case OPT_TAB_STYLE: return (int)ARRAY_COUNT(g_tab_style_labels);
@@ -409,14 +297,6 @@ static const char *opt_choice_label(int id, int i) {
         return lab;
     }
     case OPT_FONT: return i == 0 ? "Automatic" : g_opt.families[i - 1];
-    case OPT_TERMINAL: {
-        if (i == 0) return "Automatic";
-        static char lab[NAME_MAX + 32];
-        const char *c = term_choice(i);
-        if (i - 1 < g_termlist.n) return path_basename(c);
-        snprintf(lab, sizeof lab, "%s (not found)", path_basename(c));
-        return lab;
-    }
     case OPT_ROW_SPACING: return g_spacing_labels[i];
     case OPT_DEF_VIEW: return g_zoom[i].label;
     case OPT_DEF_SORT: return g_sort_labels[i];
@@ -443,11 +323,6 @@ static int opt_choice_get(int id) {
     case OPT_THEME_DARK: return opt_pick_choice(1);
     case OPT_ICON_THEME: return g_icon_theme;
     case OPT_TERM_LOOK: return g_term_look_setting;
-    case OPT_TERMINAL:
-        if (!g_external_terminal[0]) return 0;
-        for (int i = 0; i < g_termlist.n; i++)
-            if (!strcmp(g_termlist.v[i], g_external_terminal)) return i + 1;
-        return 1 + g_termlist.n;
     case OPT_TITLE_BAR: return A.title_bar;
     case OPT_BRAND_NAME: return A.brand_name;
     case OPT_TAB_STYLE: return A.tab_style;
@@ -520,12 +395,6 @@ static void opt_choice_set(int id, int i) {
         if (g_app_icon_mode == APP_ICON_FILE_ICON) window_icon_update();
         break;
     case OPT_TERM_LOOK: g_term_look_setting = i; tc_reload_all(); break;
-    case OPT_TERMINAL: {
-        char pick[PATH_MAX];
-        snprintf(pick, sizeof pick, "%s", term_choice(i));
-        snprintf(g_external_terminal, sizeof g_external_terminal, "%s", pick);
-        break;
-    }
     case OPT_TITLE_BAR: A.title_bar = i; titlebar_apply(); break;
     case OPT_TAB_STYLE: A.tab_style = i; layout(); break;
     case OPT_BRAND_NAME:
@@ -783,6 +652,46 @@ static bool opt_scroll_color_auto(void) {
     return g_scroll_custom == 0;
 }
 
+static bool opt_terminal_path_valid(const char *s) {
+    return strlen(s) < sizeof g_external_terminal && !strpbrk(s, "\n\r");
+}
+
+static char *opt_terminal_basename(char *s) {
+    char *base = s;
+    for (char *p = s; *p; p++) if (*p == '/') base = p + 1;
+    return base;
+}
+
+static void opt_terminal_path_apply(void) {
+    char raw[PATH_MAX];
+    snprintf(raw, sizeof raw, "%s", g_opt.terminal_path.buf);
+    char *s = raw;
+    while (*s == ' ' || *s == '\t') s++;
+    size_t n = strlen(s);
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t')) s[--n] = 0;
+    if (!opt_terminal_path_valid(s)) { toast("Enter a single executable name or absolute path"); return; }
+    char *base = opt_terminal_basename(s);
+    if (s[0] == '/' || strchr(s, '/')) {
+        if (!*base) { toast("Enter an executable path, not a directory"); return; }
+        memmove(s, base, strlen(base) + 1);
+    }
+    char old[PATH_MAX];
+    snprintf(old, sizeof old, "%s", g_external_terminal);
+    snprintf(g_external_terminal, sizeof g_external_terminal, "%s", s);
+    char exe[PATH_MAX];
+    const char *name = NULL;
+    if (*s && !find_terminal(exe, sizeof exe, &name)) {
+        snprintf(g_external_terminal, sizeof g_external_terminal, "%s", old);
+        toast("Terminal executable not found (name or path only, no arguments)");
+        return;
+    }
+    te_set(&g_opt.terminal_path, g_external_terminal, (int)strlen(g_external_terminal), (int)strlen(g_external_terminal));
+    g_opt.terminal_path_focus = false;
+    A.settings_dirty = true;
+    if (*s) toast("Terminal applied: Open in %s", path_basename(g_external_terminal));
+    else toast("Terminal set to Default");
+}
+
 static void opt_button(int id) {
     char dir[PATH_MAX];
     switch (id) {
@@ -892,7 +801,7 @@ static void options_open(void) {
     te_set(&g_opt.scroll_color, sc, (int)strlen(sc), (int)strlen(sc));
     te_set(&g_opt.app_icon, g_app_icon_path, (int)strlen(g_app_icon_path), (int)strlen(g_app_icon_path));
     te_set(&g_opt.title_icon, g_title_icon_path, (int)strlen(g_title_icon_path), (int)strlen(g_title_icon_path));
-    term_scan_start();
+    te_set(&g_opt.terminal_path, g_external_terminal, (int)strlen(g_external_terminal), (int)strlen(g_external_terminal));
     themes_scan(); // pick up new/edited theme files
     theme_apply();
     A.redraw = true;
@@ -933,6 +842,7 @@ static void opt_toggle_draw(Rect t, bool on, bool hv) {
 }
 
 // Apply/reset actions use a visible accent hover, independent of the subtle control shades.
+// Apply/reset actions use a visible accent hover/active state, independent of the subtle control shades.
 static u32 g_opt_action_bg, g_opt_action_fg; // selftest probe: last colours drawn
 
 static void opt_action_button(Rect r, const char *label, bool enabled, bool active) {
@@ -1051,7 +961,7 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     }
     case OK_CHOICE: {
         int n = opt_choice_count(o->id), cur = opt_choice_get(o->id);
-        if (n <= 3 && o->id != OPT_THEME && o->id != OPT_FONT && o->id != OPT_TERMINAL) { // segmented
+        if (n <= 3 && o->id != OPT_THEME && o->id != OPT_FONT) { // segmented
             f32 sw = roundf(S(96)), x0 = x + w - sw * (f32)n;
             draw_rrect(x0, y, sw * (f32)n, ch, S(7), C(COL_FIELD));
             for (int i = 0; i < n; i++) {
@@ -1163,6 +1073,21 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             opt_action_button(apply, "Apply", true, !is_auto);
             opt_action_button(reset, "Auto", true, is_auto);
             opt_hit(apply, HP_EDIT_APPLY, o->id, 0);
+            opt_hit(reset, HP_EDIT_RESET, o->id, 0);
+            break;
+        }
+        if (o->id == OPT_TERMINAL_PATH) {
+            f32 gap = roundf(S(6));
+            f32 bw = MAX(roundf(S(80)), MAX(text_width(f, "Apply", 5), text_width(f, "Default", 7)) + S(28));
+            Rect reset = {x + w - bw, y, bw, ch}, apply = {reset.x - gap - bw, y, bw, ch};
+            Rect r = {x, y, MAX(0.f, apply.x - gap - x), ch};
+            sheet_field(r, &g_opt.terminal_path, g_opt.terminal_path_focus, "Name or path (no arguments)");
+            opt_hit(r, HP_TEXT, o->id, 0);
+            bool valid = opt_terminal_path_valid(g_opt.terminal_path.buf);
+            bool is_default = g_external_terminal[0] == 0;
+            opt_action_button(apply, "Apply", valid, !is_default);
+            opt_action_button(reset, "Default", true, is_default);
+            if (valid) opt_hit(apply, HP_EDIT_APPLY, o->id, 0);
             opt_hit(reset, HP_EDIT_RESET, o->id, 0);
             break;
         }
@@ -1838,7 +1763,7 @@ static void options_draw(void) {
     // search field
     f32 sw = MIN(roundf(S(300)), w * 0.45f), sh = roundf(S(30));
     Rect sr = {cr.x - S(10) - sw, r.y + pad - S(6), sw, sh};
-    bool sfocus = g_opt.search_focus && g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus && g_opt.act_focus < 0 && !g_opt.app_icon_focus && !g_opt.title_icon_focus;
+    bool sfocus = g_opt.search_focus && g_opt.drop_opt < 0 && !g_opt.lname_focus && !g_opt.brand_focus && !g_opt.scroll_focus && g_opt.act_focus < 0 && !g_opt.app_icon_focus && !g_opt.title_icon_focus && !g_opt.terminal_path_focus;
     sheet_field(sr, &g_opt.search, sfocus, "Search settings");
     opt_hit(sr, HP_SEARCH, -1, 0);
     // nav (same active style as the sidebar: accent-tinted row with a full-height accent edge)
@@ -1995,20 +1920,18 @@ static bool options_text_focus(TextEdit *edit, bool focused) {
     int act = -1;
     for (int k = 0; k < 5; k++)
         if (edit == &g_opt.act_te[k]) act = k;
-    if (edit != &g_opt.search && edit != &g_opt.lname && edit != &g_opt.brand && edit != &g_opt.scroll_color && act < 0) return focused;
+    if (edit != &g_opt.search && edit != &g_opt.lname && edit != &g_opt.brand && edit != &g_opt.scroll_color && edit != &g_opt.app_icon &&
+        edit != &g_opt.title_icon && edit != &g_opt.terminal_path && act < 0)
+        return focused;
     g_opt.search_focus = edit == &g_opt.search;
     g_opt.lname_focus = edit == &g_opt.lname;
     g_opt.brand_focus = edit == &g_opt.brand;
     g_opt.scroll_focus = edit == &g_opt.scroll_color;
+    g_opt.app_icon_focus = edit == &g_opt.app_icon;
+    g_opt.title_icon_focus = edit == &g_opt.title_icon;
+    g_opt.terminal_path_focus = edit == &g_opt.terminal_path;
     g_opt.act_focus = act;
     return true;
-    if (edit == &g_opt.search) { g_opt.search_focus = true; g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; return true; }
-    if (edit == &g_opt.lname) { g_opt.lname_focus = true; g_opt.search_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; return true; }
-    if (edit == &g_opt.brand) { g_opt.brand_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.scroll_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; return true; }
-    if (edit == &g_opt.scroll_color) { g_opt.scroll_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; return true; }
-    if (edit == &g_opt.app_icon) { g_opt.app_icon_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.title_icon_focus = false; return true; }
-    if (edit == &g_opt.title_icon) { g_opt.title_icon_focus = true; g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = false; return true; }
-    return focused;
 }
 
 static void options_click(f32 x, f32 y, int clicks) {
@@ -2037,8 +1960,7 @@ static void options_click(f32 x, f32 y, int clicks) {
     if (!in_rect(g_sheet.r, x, y)) { sheet_close(); return; }
     if (sheet_scrollbar_press(x, y)) return;
     g_opt.act_focus = -1;
-    g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = false; // a click elsewhere drops the keyboard (typing a letter still searches)
-    g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = false; // a click elsewhere drops the keyboard
+    g_opt.search_focus = g_opt.lname_focus = g_opt.brand_focus = g_opt.scroll_focus = g_opt.app_icon_focus = g_opt.title_icon_focus = g_opt.terminal_path_focus = false; // a click elsewhere drops the keyboard (typing a letter still searches)
     for (int k = g_opt.nhits - 1; k >= 0; k--) {
         OptHit *hp = &g_opt.hits[k];
         if (hp->r.w <= 0 || !in_rect(hp->r, x, y)) continue;
@@ -2068,15 +1990,24 @@ static void options_click(f32 x, f32 y, int clicks) {
             return;
         case HP_LNAME: g_opt.lname_focus = true; return;
         case HP_TEXT:
-            if (hp->arg == 3) g_opt.title_icon_focus = true;
+            if (hp->opt == OPT_TERMINAL_PATH) g_opt.terminal_path_focus = true;
+            else if (hp->arg == 3) g_opt.title_icon_focus = true;
             else if (hp->arg == 2) g_opt.app_icon_focus = true;
             else if (hp->arg) g_opt.scroll_focus = true;
             else g_opt.brand_focus = true;
             return;
-        case HP_EDIT_APPLY: opt_scroll_color_apply(); return;
+        case HP_EDIT_APPLY:
+            if (hp->opt == OPT_TERMINAL_PATH) opt_terminal_path_apply();
+            else opt_scroll_color_apply();
+            return;
         case HP_EDIT_RESET:
-            te_set(&g_opt.scroll_color, "", 0, 0); // empty is Auto: the theme's own colour
-            opt_scroll_color_apply();
+            if (hp->opt == OPT_TERMINAL_PATH) {
+                te_set(&g_opt.terminal_path, "", 0, 0); // Default: $TERMINAL / the desktop's own
+                opt_terminal_path_apply();
+            } else {
+                te_set(&g_opt.scroll_color, "", 0, 0); // empty is Auto: the theme's own colour
+                opt_scroll_color_apply();
+            }
             return;
         case HP_LSAVE: opt_layout_save(); return;
         case HP_LOPEN: {
@@ -2175,6 +2106,12 @@ static void options_key(SDL_Keycode k, SDL_Keymod mod) {
         else te_key(&g_opt.title_icon, k, mod);
         return;
     }
+    if (g_opt.terminal_path_focus && g_opt.drop_opt < 0) {
+        if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_terminal_path_apply();
+        else if (k == SDLK_ESCAPE) g_opt.terminal_path_focus = false;
+        else te_key(&g_opt.terminal_path, k, mod);
+        return;
+    }
     if (g_opt.lname_focus && g_opt.drop_opt < 0) {
         if (k == SDLK_RETURN || k == SDLK_KP_ENTER) opt_layout_save();
         else if (k == SDLK_ESCAPE) g_opt.lname_focus = false;
@@ -2220,6 +2157,7 @@ static void options_text(const char *text) {
     if (g_opt.scroll_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.scroll_color, text); return; }
     if (g_opt.app_icon_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.app_icon, text); return; }
     if (g_opt.title_icon_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.title_icon, text); return; }
+    if (g_opt.terminal_path_focus && g_opt.drop_opt < 0) { te_insert(&g_opt.terminal_path, text); return; }
     if (g_opt.drop_opt >= 0) {
         te_insert(&g_opt.drop_filter, text);
         opt_drop_filter();

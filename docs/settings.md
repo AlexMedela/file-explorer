@@ -163,8 +163,9 @@ just updates and what you typed stays. Other shells, or one whose startup files 
 a new shell; `terminal_panel_height` is its height. Terminal tabs: Shift+F4 opens a terminal tab in the current
 folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. The external
 terminal is `$TERMINAL`, else xdg-terminal-exec, else the desktop's own; Options > Integration > Terminal app picks one of
-the terminals installed instead (`external_terminal=`; listed are the usual ones on `$PATH` and those of terminal apps'
-`.desktop` entries), and the menu then says "Open in" its name. Terminal tabs run your shell and look like your default
+the terminals installed instead, or type an executable name or absolute path (no arguments) in Terminal executable and
+press Apply; Default clears it back to Automatic (`external_terminal=`; the list holds the usual ones on `$PATH` and
+those of terminal apps' `.desktop` entries). Either way the menu says "Open in" its name. Terminal tabs run your shell and look like your default
 terminal (xdg-terminal-exec's choice, else $TERMINAL): font, colours, padding, cursor and scrollback are read from
 foot, kitty, Alacritty or Ghostty config (the status bar names it: "colours and font from foot") and followed live (Options > Appearance > Terminal appearance); a font with
 programming ligatures (Fira Code, JetBrains Mono...) shows them, kept to the cell grid. Ctrl+Shift+C/V
