@@ -12957,6 +12957,7 @@ static void frame_draw(void) {
     draw_preview();
     draw_sidebar();
     draw_brand();
+    draw_sidebar_edge();
     draw_window_controls();
     draw_status();
     draw_ops();
