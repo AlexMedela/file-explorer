@@ -13117,13 +13117,76 @@ static bool app_icon_remove_override(const char *dh) {
     return true;
 }
 
+// CRC32 (the IEEE one PNG needs): tiny local helper so the override needs no new dependency.
+static u32 png_crc_table[256];
+
+static u32 png_crc32(u32 crc, const u8 *p, size_t n) {
+    if (!png_crc_table[1])
+        for (u32 i = 0; i < 256; i++) {
+            u32 c = i;
+            for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            png_crc_table[i] = c;
+        }
+    for (crc ^= 0xFFFFFFFFu; n--; p++) crc = png_crc_table[(crc ^ *p) & 0xFF] ^ (crc >> 8);
+    return crc ^ 0xFFFFFFFFu;
+}
+
+static bool png_chunk(FILE *f, const char *type, const u8 *data, u32 n) {
+    u8 len[4] = {(u8)(n >> 24), (u8)(n >> 16), (u8)(n >> 8), (u8)n};
+    if (fwrite(len, 1, 4, f) != 4 || fwrite(type, 1, 4, f) != 4) return false;
+    if (n && fwrite(data, 1, n, f) != n) return false;
+    u32 c = png_crc32(png_crc32(0, (const u8 *)type, 4), data, n);
+    u8 b[4] = {(u8)(c >> 24), (u8)(c >> 16), (u8)(c >> 8), (u8)c};
+    return fwrite(b, 1, 4, f) == 4;
+}
+
+// The launcher override for File-Icon mode must be a PNG (its source may be a system icon), but SDL's PNG writer is
+// newer than the oldest SDL we support. Emit the file directly: RGBA8, one IDAT of stored (uncompressed) deflate
+// blocks. Deterministic bytes, so callers detect changes by comparing files.
 static bool app_icon_write_png(const char *dst, const u8 *rgba, int px) {
-    SDL_Surface *s = SDL_CreateSurfaceFrom(px, px, SDL_PIXELFORMAT_RGBA32, (void *)rgba, px * 4);
-    if (!s) return false;
+    size_t stride = (size_t)px * 4 + 1, raw_n = (size_t)px * stride;
+    u8 *raw = xmalloc(raw_n); // per row a filter byte (0: none) followed by the RGBA pixels
+    for (int y = 0; y < px; y++) {
+        raw[(size_t)y * stride] = 0;
+        memcpy(raw + (size_t)y * stride + 1, rgba + (size_t)y * px * 4, (size_t)px * 4);
+    }
+    size_t nblocks = (raw_n + 65534) / 65535;
+    u8 *idat = xmalloc(raw_n + nblocks * 5 + 8);
+    size_t off = 0;
+    idat[off++] = 0x78; // zlib header: deflate, 32K window
+    idat[off++] = 0x01;
+    for (size_t left = raw_n; left; ) {
+        u32 blk = (u32)MIN(left, 65535);
+        idat[off] = blk == left; // BFINAL on the last block, BTYPE=00 (stored)
+        idat[off + 1] = blk & 0xFF;
+        idat[off + 2] = (u8)(blk >> 8);
+        idat[off + 3] = ~idat[off + 1];
+        idat[off + 4] = ~idat[off + 2];
+        off += 5;
+        memcpy(idat + off, raw + raw_n - left, blk);
+        off += blk;
+        left -= blk;
+    }
+    u32 a = 1, b = 0; // adler32 of the uncompressed bytes
+    for (size_t i = 0; i < raw_n; i++) {
+        a = (a + raw[i]) % 65521;
+        b = (b + a) % 65521;
+    }
+    idat[off++] = (u8)(b >> 8);
+    idat[off++] = (u8)b;
+    idat[off++] = (u8)(a >> 8);
+    idat[off++] = (u8)a;
+    u8 ihdr[13] = {(u8)(px >> 24), (u8)(px >> 16), (u8)(px >> 8), (u8)px,
+                   (u8)(px >> 24), (u8)(px >> 16), (u8)(px >> 8), (u8)px, 8, 6, 0, 0, 0};
+    static const u8 sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
     char tmp[PATH_MAX + 80];
     snprintf(tmp, sizeof tmp, "%s.tmp", dst);
-    bool ok = SDL_SavePNG(s, tmp);
-    SDL_DestroySurface(s);
+    FILE *f = fopen(tmp, "wb");
+    bool ok = f && fwrite(sig, 1, 8, f) == 8 && png_chunk(f, "IHDR", ihdr, 13) && png_chunk(f, "IDAT", idat, (u32)off)
+              && png_chunk(f, "IEND", NULL, 0);
+    if (f) ok = fclose(f) == 0 && ok;
+    free(raw);
+    free(idat);
     if (!ok) { unlink(tmp); return false; }
     if (rename(tmp, dst) != 0) { unlink(tmp); return false; }
     return true;
@@ -13165,15 +13228,9 @@ static bool app_icon_write_ex(const char *dh, u32 accent, const char *custom, bo
         free(old);
         free(icon);
     } else {
-        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && !access(svg, F_OK) && access(png, F_OK)) {
-            // Default blue with the packaged/default SVG already in effect and no stale File-Icon PNG override.
-            return changed;
-        }
-        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(svg, F_OK)) {
-            bool png_exists = access(png, F_OK) == 0;
-            if (png_exists) { unlink(png); changed = true; }
-            return changed;
-        }
+        bool png_exists = access(png, F_OK) == 0;
+        if (png_exists) { unlink(png); changed = true; } // a stale File-Icon override would win over the built-in one
+        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(svg, F_OK)) return changed; // no copy yet: none made for Blue
         static const char from[] = "width=\"624\" height=\"456\" viewBox=\"0 0 624 456\"";
         const char *at = strstr(g_logo_svg, from);
         if (!at) return changed;
@@ -13187,7 +13244,6 @@ static bool app_icon_write_ex(const char *dh, u32 accent, const char *custom, bo
             mkdir_p(apps, 0755);
             if (write_file_atomic(svg, src)) changed = true;
         }
-        if (changed || !access(png, F_OK)) { unlink(png); changed = true; }
         free(src);
     }
     if (changed) utimensat(AT_FDCWD, dir, NULL, 0); // icon caches watch the theme folder's time
