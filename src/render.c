@@ -88,7 +88,7 @@ static void cursor_apply(void) {
     // dragging items, a tab or a sidebar place: the grabbing hand from the start (not only once it leaves the window)
     bool grab = A.cur_grab && (A.drag == DRAG_ITEMS || A.drag == DRAG_TAB || A.drag == DRAG_PLACE);
     int edge = cursor_edge();
-    int want = edge ? edge : A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_hand ? 3 : A.ptr_text ? 4 : 0;
+    int want = edge ? edge : A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_text ? 4 : A.ptr_hand ? 3 : 0;
     if (want == A.cursor_shown) return;
     A.cursor_shown = want;
     SDL_Cursor *c[] = {A.cur_default, A.cur_ew, A.cur_ns, A.cur_hand, A.cur_text, A.cur_grab, A.cur_nwse, A.cur_nesw};
@@ -387,17 +387,19 @@ static void draw_panel_bar(Panel *pn) {
     ClipSave cs = draw_clip_push((SDL_Rect){(int)tb.x, (int)tb.y, (int)tb.w, (int)tb.h});
     Rect pr = pn->plus;
     bool pills = A.tab_style == TABS_PILLS;
-    if (pills) { // Tab style Pills: a field-coloured box round the tabs, the open one tinted with the accent
+    if (pills) { // Tab style Pills: enclosure only; pills have fill only on hover/focus
         Tab *first = panel_tab(pn, 0), *last = panel_tab(pn, -1);
-        f32 pad = roundf(S(3));
-        if (first && last)
-            draw_rrect(first->r.x - pad, first->r.y - pad, last->r.x + last->r.w - first->r.x + pad * 2, first->r.h + pad * 2, S(9), C(COL_FIELD));
+        f32 padx = roundf(S(10)), pady = roundf(S(5));
+        if (first && last) {
+            Rect box = {first->r.x - padx, first->r.y - pady, last->r.x + last->r.w - first->r.x + padx * 2, first->r.h + pady * 2};
+            draw_rrect(box.x, box.y, box.w, box.h, S(10), C(tab_container_color()));
+        }
         for (int i = 0; i < A.ntabs; i++) {
             Tab *t = A.tabs[i];
             if (t->panel != pn) continue;
             bool cur = pn->cur == t, hover = A.mouse_in && A.drag == DRAG_NONE && in_rect(t->r, A.mx, A.my);
             if (cur || hover)
-                draw_rrect(t->r.x, t->r.y, t->r.w, t->r.h, S(7), C(rgb_mix(COL_FIELD, COL_ACCENT, !cur ? 0.08f : active_panel || !multi ? 0.40f : 0.24f)));
+                draw_rrect(t->r.x, t->r.y, t->r.w, t->r.h, S(7), C(tab_surface_color(cur, active_panel || !multi)));
         }
     }
     // Backgrounds first, so the active card (and its flares) sits on top of a hovered neighbour:
@@ -446,7 +448,7 @@ static void draw_panel_bar(Panel *pn) {
         bool cur = pn->cur == t;
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(r, A.mx, A.my));
         bool dragging = A.drag == DRAG_TAB && A.drag_tab == t;
-        if (!pills && prev && !cur && pn->cur != prev && !hover) draw_rect(r.x - 1, r.y + S(9), 1, r.h - S(18), C(COL_FIELD));
+        if (!pills && prev && !cur && pn->cur != prev && !hover) draw_rect(r.x - 1, r.y + S(9), 1, r.h - S(18), C(pathbar_field_color()));
         prev = t;
         if (A.drop_tab == t) draw_rrect_outline(r.x + S(1), r.y + S(1), r.w - S(2), r.h - S(4), S(6), MAX(1.f, S(1.3f)), C(COL_ACCENT));
         if (dragging) g_alpha = 0.45f;
@@ -469,15 +471,19 @@ static void draw_panel_bar(Panel *pn) {
         bool show_close = A.ntabs > 1 && (cur || hover) && r.w > S(90);
         f32 tx = ix + is + roundf(S(8));
         f32 maxw = r.x + r.w - tx - (show_close ? csz + S(12) : S(10));
-        Color tc = cur ? (active_panel || !multi ? C(COL_TEXT) : C(COL_TEXT2)) : C(COL_TEXT_DIM);
-        if (on_term) tc = C(active_panel || !multi ? tfg : rgb_mix(tfg, tbg, 0.25f));
+        u32 tab_bg = pills ? (cur || hover ? tab_surface_color(cur, active_panel || !multi) : tab_container_color()) : (cur ? (t->term ? term_bg_color() : COL_TOOLBAR) : COL_TABBAR);
+        u32 tc_u = cur ? (active_panel || !multi ? COL_TEXT : COL_TEXT2) : COL_TEXT_FAINT;
+        if (on_term) tc_u = active_panel || !multi ? tfg : rgb_mix(tfg, tbg, 0.25f);
+        else if (cur) tc_u = surface_foreground_color(tc_u, tab_bg);
+        Color tc = C(tc_u);
         draw_text_fit(f, tx, text_y(f, r.y, r.h), maxw, label, (int)strlen(label), tc, 0);
         if (show_close) {
             Rect c = {r.x + r.w - csz - roundf(S(8)), r.y + (r.h - csz) * 0.5f, csz, csz};
             bool ch = A.mouse_in && in_rect(c, A.mx, A.my);
             if (ch) draw_rrect(c.x, c.y, c.w, c.h, S(4), on_term ? C(rgb_mix(tbg, tfg, 0.14f)) : C(COL_CHIP));
-            Color xc = on_term ? C(ch ? tfg : rgb_mix(tfg, tbg, 0.35f)) : C(ch ? COL_TEXT : COL_TEXT_DIM);
-            draw_cross(c.x + c.w * 0.5f, c.y + c.h * 0.5f, S(7), MAX(1.f, S(1.3f)), xc);
+            u32 xc_u = on_term ? (ch ? tfg : rgb_mix(tfg, tbg, 0.35f)) : (ch ? COL_TEXT : COL_TEXT_DIM);
+            if (!on_term) xc_u = surface_foreground_color(xc_u, tab_bg);
+            draw_cross(c.x + c.w * 0.5f, c.y + c.h * 0.5f, S(7), MAX(1.f, S(1.3f)), C(xc_u));
         }
         g_alpha = 1.f;
     }
@@ -606,7 +612,9 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);
     if (hover) A.ptr_text = true; // a click outside the crumbs edits the path
-    draw_rrect(pb.x, pb.y, pb.w, pb.h, S(7), C(editing ? COL_FIELD_HOVER : COL_FIELD));
+    draw_rrect(pb.x, pb.y, pb.w, pb.h, S(7), CA(editing ? COL_FIELD_HOVER : pathbar_field_color(), editing || !g_transparent_pathbar ? 1.f : 0.f));
+    if (g_transparent_pathbar && !editing)
+        draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(7), MAX(1.f, S(1.f)), CA(COL_BORDER, 0.7f));
     if (editing) draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
 
     Font *f = &A.font;
@@ -2503,7 +2511,7 @@ static void draw_searchbar(Pane *p) {
     Rect field, toggle, close, cont, opt[3];
     search_bar_layout(p, &field, &toggle, &close, &cont, opt);
     bool focused = A.search_pane == p;
-    draw_rrect(field.x, field.y, field.w, field.h, S(7), C(focused ? COL_FIELD_HOVER : COL_FIELD));
+    draw_rrect(field.x, field.y, field.w, field.h, S(7), C(focused ? COL_FIELD_HOVER : searchbar_field_color()));
     if (focused) draw_rrect_outline(field.x, field.y, field.w, field.h, S(7), MAX(1.f, S(1.2f)), C(COL_ACCENT));
     // magnifier
     f32 r = roundf(S(5)), cx = field.x + S(15), cy = field.y + field.h * 0.5f - S(1);

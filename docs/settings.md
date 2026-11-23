@@ -24,6 +24,11 @@ header, column headings, preview, terminal panel and status bar; an edge you can
 `sidebar_brightness`, `header_brightness`, `main_brightness` (the file area), `preview_brightness` and
 `status_brightness` (Options -> Appearance -> Surfaces, 0 by default) make that part darker (down to -30) or lighter
 (up to 30, in percent) than the theme's own colour.
+`pathbar_brightness` and `searchbar_brightness` (0 by default, -30..30) move only the path field/pill enclosure and
+the folder search field respectively, independently of the header strip. `transparent_pathbar=1` (off by default)
+removes only the path field's fill, leaving a faint outline and the accent focus outline while editing; pills and the
+search field stay filled. These keys were added after `settings_version` and default to the theme colour on older
+config files: no migration runs, so existing appearances are unchanged.
 `tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a
 box on the tab strip, instead of the open tab as a card joining the folder below it.
 `title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling
