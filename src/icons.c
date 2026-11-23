@@ -406,6 +406,27 @@ static NSVGimage *icon_image(int id) {
 
 #include "system_icons.c"
 
+// Preserve icon hue and internal shading while improving pale artwork on light navigation surfaces. Raw icon pixels
+// and caches stay theme-independent: the tint is applied only at draw time, from the surface being drawn over.
+static f32 icon_pixel_lightness(const u8 *pixels, size_t count) {
+    double light = 0, weight = 0;
+    for (size_t i = 0; i < count; i++) {
+        const u8 *p = pixels + i * 4;
+        light += (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) * p[3];
+        weight += p[3];
+    }
+    return weight ? (f32)(light / (255.0 * weight)) : 0;
+}
+
+static f32 icon_contrast_scale(f32 ink, f32 background) {
+    if (background < 0.65f || ink <= 0.01f) return 1.f;
+    f32 s = (background - 0.55f) / ink;
+    return CLAMP(s, 0.28f, 1.f);
+}
+
+// Set only while drawing navigation/sidebar/toolbar/tab icons; 0 = an ordinary surface, no contrast change.
+static u32 g_icon_surface_bg;
+
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
     const u8 *sys = icon_system_selected() && w == h ? sysi_pixels(id, w) : NULL;
@@ -423,7 +444,7 @@ static u8 *icon_raster(int id, int w, int h) {
     return buf;
 }
 
-typedef struct { int id, px; Glyph g; } IconSlot;
+typedef struct { int id, px; Glyph g; f32 lightness; } IconSlot;
 static IconSlot g_icon_cache[512];
 // g_icon_cache_n lives in font.c (reset together with the atlas)
 
@@ -434,6 +455,7 @@ static Glyph *icon_glyph(int id, int px) {
     if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0; // crude eviction (atlas keeps the pixels)
     u8 *buf = icon_raster(id, px, px);
     if (!buf) return NULL;
+    f32 lightness = icon_pixel_lightness(buf, (size_t)px * px);
     int ax, ay;
     if (!atlas_pack(px, px, &ax, &ay)) { free(buf); return NULL; }
     for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
@@ -441,6 +463,7 @@ static Glyph *icon_glyph(int id, int px) {
     IconSlot *s = &g_icon_cache[g_icon_cache_n++];
     s->id = id;
     s->px = px;
+    s->lightness = lightness;
     memset(&s->g, 0, sizeof s->g);
     s->g.x = (u16)ax;
     s->g.y = (u16)ay;
@@ -449,30 +472,44 @@ static Glyph *icon_glyph(int id, int px) {
     return &s->g;
 }
 
+static f32 icon_glyph_tint(int id, int px) {
+    if (!g_icon_surface_bg) return 1.f;
+    for (int i = 0; i < g_icon_cache_n; i++)
+        if (g_icon_cache[i].id == id && g_icon_cache[i].px == px)
+            return icon_contrast_scale(g_icon_cache[i].lightness, rgb_luma(g_icon_surface_bg));
+    return 1.f;
+}
+
 // Draw the icon for a file name at (x, y), s pixels. Returns false if it couldn't (caller falls back).
 static bool draw_icon_for_name(f32 x, f32 y, f32 s, const char *name, bool exec) {
-    Glyph *g = icon_glyph(icon_for_name(name, exec), (int)roundf(s));
+    int id = icon_for_name(name, exec);
+    Glyph *g = icon_glyph(id, (int)roundf(s));
     if (!g) return false;
-    draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
+    f32 t = icon_glyph_tint(id, (int)roundf(s));
+    draw_glyph(g, roundf(x), roundf(y), (Color){t, t, t, 1});
     return true;
 }
 
 // A network location's icon (key as stored with the server); alpha < 1 for saved servers that aren't connected.
 static bool draw_net_icon(f32 x, f32 y, f32 s, const char *key, f32 alpha) {
-    Glyph *g = icon_glyph(ICON_NET_BASE + net_icon_find(key), (int)roundf(s));
+    int id = ICON_NET_BASE + net_icon_find(key);
+    Glyph *g = icon_glyph(id, (int)roundf(s));
     if (!g) return false;
-    draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, alpha});
+    f32 t = icon_glyph_tint(id, (int)roundf(s));
+    draw_glyph(g, roundf(x), roundf(y), (Color){t, t, t, alpha});
     return true;
 }
 
 // An interface icon (UI_*) s pixels big at (x, y), tinted c.
 static void draw_ui_icon(int ui, f32 x, f32 y, f32 s, Color c) {
     Glyph *g = ui >= 0 ? icon_glyph(ICON_UI_BASE + ui, (int)roundf(s)) : NULL;
-    if (g) draw_glyph(g, roundf(x), roundf(y), c);
+    if (!g) return;
+    f32 t = icon_glyph_tint(ICON_UI_BASE + ui, (int)roundf(s));
+    draw_glyph(g, roundf(x), roundf(y), (Color){c.r * t, c.g * t, c.b * t, c.a});
 }
 
 // Large icons (grid view) get their own textures so they don't flood the glyph atlas.
-typedef struct { int id, px; SDL_Texture *tex; u64 used; } BigIcon;
+typedef struct { int id, px; SDL_Texture *tex; u64 used; f32 lightness; } BigIcon;
 static BigIcon g_big_icons[96];
 static int g_nbig;
 static u64 g_big_clock;
@@ -493,6 +530,7 @@ static SDL_Texture *big_icon_tex(int id, int px) {
         SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
     }
+    f32 lightness = icon_pixel_lightness(buf, (size_t)px * px);
     free(buf);
     if (!tex) return NULL;
     int k = g_nbig;
@@ -504,8 +542,16 @@ static SDL_Texture *big_icon_tex(int id, int px) {
     } else {
         g_nbig++;
     }
-    g_big_icons[k] = (BigIcon){id, px, tex, g_big_clock};
+    g_big_icons[k] = (BigIcon){id, px, tex, g_big_clock, lightness};
     return tex;
+}
+
+static f32 icon_texture_tint(SDL_Texture *tex) {
+    if (!g_icon_surface_bg) return 1.f;
+    for (int i = 0; i < g_nbig; i++)
+        if (g_big_icons[i].tex == tex)
+            return icon_contrast_scale(g_big_icons[i].lightness, rgb_luma(g_icon_surface_bg));
+    return 1.f;
 }
 
 // The desktop's icon (system_icons.c) arrived: over the bundled one drawn meanwhile, in place in the atlas; big copies
@@ -515,6 +561,7 @@ static void icons_replace(int id, int px, const u8 *rgba) {
         Glyph *g = &g_icon_cache[i].g;
         if (g_icon_cache[i].id != id || g_icon_cache[i].px != px) continue;
         for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(g->y + y) * ATLAS_SIZE + g->x) * 4], rgba + (size_t)y * px * 4, (size_t)px * 4);
+        g_icon_cache[i].lightness = icon_pixel_lightness(rgba, (size_t)px * px);
         g_dirty_x0 = MIN(g_dirty_x0, g->x);
         g_dirty_y0 = MIN(g_dirty_y0, g->y);
         g_dirty_x1 = MAX(g_dirty_x1, g->x + px);

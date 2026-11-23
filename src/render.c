@@ -116,7 +116,8 @@ static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
         if (g) {
             f32 a = g_alpha;
             if (hidden) g_alpha *= 0.55f;
-            draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
+            f32 tint = icon_glyph_tint(id, (int)roundf(s));
+            draw_glyph(g, roundf(x), roundf(y), (Color){tint, tint, tint, 1});
             g_alpha = a;
             return true;
         }
@@ -126,7 +127,10 @@ static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
     draw_flush();
     SDL_FRect dst = {roundf(x), roundf(y), roundf(s), roundf(s)};
     SDL_SetTextureAlphaMod(t, (u8)(255.f * g_alpha * (hidden ? 0.55f : 1.f)));
+    f32 tint = icon_texture_tint(t);
+    SDL_SetTextureColorMod(t, (u8)(255 * tint), (u8)(255 * tint), (u8)(255 * tint));
     SDL_RenderTexture(A.ren, t, NULL, &dst);
+    SDL_SetTextureColorMod(t, 255, 255, 255);
     SDL_SetTextureAlphaMod(t, 255);
     return true;
 }
@@ -380,6 +384,8 @@ static void draw_split_icon(Rect sr, bool down, Color ic) {
 }
 
 static void draw_panel_bar(Panel *pn) {
+    u32 saved_bg = g_icon_surface_bg;
+    g_icon_surface_bg = COL_TABBAR;
     Rect tb = pn->bar;
     bool active_panel = pn == A.ap, multi = A.npanels > 1;
     draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TABBAR));
@@ -509,6 +515,7 @@ static void draw_panel_bar(Panel *pn) {
         draw_rrect(x - S(1.5f), tb.y + S(7), S(3), tb.h - S(12), S(1.5f), C(COL_ACCENT));
     }
     draw_clip_pop(cs);
+    g_icon_surface_bg = saved_bg;
 }
 
 static void draw_node_dividers(Node *n) {
@@ -562,10 +569,11 @@ static void draw_branch_icon(f32 x, f32 cy, Color ic) {
     Glyph *g = icon_glyph(ICON_BRANCH, px);
     if (!g) return;
     f32 margin = floorf((f32)px * (1.f - 577.f / 677.f) * 0.5f); // the square raster is wider than the glyph
-    draw_glyph(g, roundf(x - margin), roundf(cy - (f32)px * 0.5f), ic);
+    f32 t = icon_glyph_tint(ICON_BRANCH, px);
+    draw_glyph(g, roundf(x - margin), roundf(cy - (f32)px * 0.5f), (Color){ic.r * t, ic.g * t, ic.b * t, ic.a});
 }
 
-static void draw_toolbar(Pane *p, bool active, bool split) {
+static void draw_toolbar_content(Pane *p, bool active, bool split) {
     PaneLayout *ly = &p->ly;
     Rect tb = ly->toolbar;
     draw_rect(tb.x, tb.y, tb.w, tb.h, C(COL_TOOLBAR));
@@ -682,6 +690,13 @@ static void draw_toolbar(Pane *p, bool active, bool split) {
     draw_clip(NULL);
 }
 
+static void draw_toolbar(Pane *p, bool active, bool split) {
+    u32 saved = g_icon_surface_bg;
+    g_icon_surface_bg = COL_TOOLBAR;
+    draw_toolbar_content(p, active, split);
+    g_icon_surface_bg = saved;
+}
+
 static bool sidebar_edge_hot(void) { return A.drag == DRAG_SIDEBAR || (A.drag == DRAG_NONE && A.mouse_in && in_rect(A.r_sdiv, A.mx, A.my)); }
 
 // The name above the sidebar: the app's, the computer's, or the user's own.
@@ -705,8 +720,15 @@ static void draw_brand(void) {
     f32 lh = roundf(S(17)), lw = roundf(lh * 624.f / 456.f), lx = roundf(r.x + S(18)), ly = roundf(r.y + (r.h - lh) * 0.5f);
     f32 tx = lx;
     if (A.brand_logo) {
-        Glyph *g = icon_glyph(lh < 48 ? ICON_LOGO_SMALL : ICON_LOGO, (int)lw); // square raster, logo centred in it
-        if (g) draw_glyph(g, lx, roundf(ly - (lw - lh) * 0.5f), (Color){1, 1, 1, 1});
+        int id = lh < 48 ? ICON_LOGO_SMALL : ICON_LOGO; // square raster, logo centred in it
+        Glyph *g = icon_glyph(id, (int)lw);
+        if (g) {
+            u32 saved_bg = g_icon_surface_bg;
+            g_icon_surface_bg = COL_SIDEBAR;
+            f32 t = icon_glyph_tint(id, (int)lw);
+            draw_glyph(g, lx, roundf(ly - (lw - lh) * 0.5f), (Color){t, t, t, 1});
+            g_icon_surface_bg = saved_bg;
+        }
         tx += lw + roundf(S(8));
     }
     Font *f = &A.font_brand;
@@ -784,6 +806,8 @@ static void draw_status_dot(f32 ix, f32 iy, f32 is, u32 dot, bool hover) {
 }
 
 static void draw_sidebar(void) {
+    u32 saved = g_icon_surface_bg;
+    g_icon_surface_bg = COL_SIDEBAR;
     Pane *p = active_pane();
     Rect sb = A.r_sidebar;
     draw_rect(sb.x, sb.y, sb.w, sb.h, C(COL_SIDEBAR));
@@ -986,6 +1010,7 @@ static void draw_sidebar(void) {
         }
     }
     draw_clip_pop(cs);
+    g_icon_surface_bg = saved;
 }
 
 static const char *owner_name(u32 uid) {
