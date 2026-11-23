@@ -355,6 +355,30 @@ static f32 st_row_y(Pane *p, const char *name) {
     return -1;
 }
 
+// Centre pixel of the brand icon slot: true when the pure-green test icon is being drawn there.
+static bool st_brand_icon_green(void) {
+    Rect r = A.r_brand;
+    if (r.h <= 0) return false;
+    f32 lh = roundf(S(17)), lw = roundf(lh * 624.f / 456.f);
+    f32 x = r.x + S(18) + lw * 0.5f;
+    f32 y = roundf(r.y + (r.h - lh) * 0.5f - (lw - lh) * 0.5f) + lw * 0.5f;
+    int sx = (int)roundf(x) + A.shadow_px, sy = (int)roundf(y) + A.shadow_px;
+    SDL_Texture *target = SDL_GetRenderTarget(A.ren);
+    SDL_SetRenderTarget(A.ren, NULL);
+    SDL_Surface *s = SDL_RenderReadPixels(A.ren, NULL);
+    SDL_SetRenderTarget(A.ren, target);
+    if (!s) return false;
+    SDL_Surface *c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_RGBA8888);
+    SDL_DestroySurface(s);
+    if (!c || sx < 0 || sy < 0 || sx >= c->w || sy >= c->h) { if (c) SDL_DestroySurface(c); return false; }
+    const u8 *px = (const u8 *)c->pixels + (size_t)sy * c->pitch + (size_t)sx * 4;
+    u8 rr, gg, bb, aa;
+    SDL_GetRGBA(*(const u32 *)px, SDL_GetPixelFormatDetails(c->format), SDL_GetSurfacePalette(c), &rr, &gg, &bb, &aa);
+    bool green = rr < 80 && gg > 180 && bb < 80 && aa > 0;
+    SDL_DestroySurface(c);
+    return green;
+}
+
 static void st_shot(const char *name) {
     const char *dir = getenv("FE_SHOTS");
     if (!dir) return;
@@ -2189,6 +2213,52 @@ static int run_selftest_m7(void) {
         icons_sync_theme();
         g_logo_changed = false;
     }
+    { // icon contrast: pale artwork is darkened only on light navigation surfaces, keeping its hue
+        ST_CHECK(icon_contrast_scale(0.8f, 0.64f) == 1.f);       // dark surface: no change
+        ST_CHECK(icon_contrast_scale(0.f, 0.8f) == 1.f);          // transparent ink: no change
+        ST_CHECK(fabsf(icon_contrast_scale(0.8f, 0.8f) - 0.3125f) < 0.001f); // (0.8 - 0.55) / 0.8
+        ST_CHECK(fabsf(icon_contrast_scale(0.5f, 0.7f) - 0.30f) < 0.001f);
+        ST_CHECK(fabsf(icon_contrast_scale(4.f, 0.8f) - 0.28f) < 0.001f); // clamped floor
+        u8 white[16], clear[16] = {0};
+        for (int i = 0; i < 4; i++) { white[i * 4] = white[i * 4 + 1] = white[i * 4 + 2] = 255; white[i * 4 + 3] = 255; }
+        ST_CHECK(fabsf(icon_pixel_lightness(white, 4) - 1.f) < 0.001f);
+        ST_CHECK(icon_pixel_lightness(clear, 4) == 0.f);
+        u8 yellow[16]; // Monokai's folder yellow: bright but coloured, so it is not pale and keeps its colour
+        for (int i = 0; i < 4; i++) { yellow[i * 4] = 0xE6; yellow[i * 4 + 1] = 0xDB; yellow[i * 4 + 2] = 0x74; yellow[i * 4 + 3] = 255; }
+        ST_CHECK(icon_pixel_lightness(yellow, 4) < 0.01f && icon_contrast_scale(icon_pixel_lightness(yellow, 4), 1.f) == 1.f);
+        int fo = icon_find("folder"), th = g_theme_cur;
+        ST_CHECK(icon_glyph(fo, 16) != NULL && big_icon_tex(fo, 96) != NULL);
+        f32 gl = -1.f, bl = -1.f;
+        for (int i = 0; i < g_icon_cache_n; i++) if (g_icon_cache[i].id == fo && g_icon_cache[i].px == 16) gl = g_icon_cache[i].lightness;
+        for (int i = 0; i < g_nbig; i++) if (g_big_icons[i].id == fo && g_big_icons[i].px == 96) bl = g_big_icons[i].lightness;
+        ST_CHECK(gl > 0.f && gl <= 1.f && fabsf(bl - gl) < 0.001f);
+        g_theme_cur = theme_find("Light");
+        theme_apply();
+        icons_sync_theme();
+        ST_CHECK(icon_glyph(fo, 16) != NULL);
+        f32 gl2 = -1.f;
+        for (int i = 0; i < g_icon_cache_n; i++) if (g_icon_cache[i].id == fo && g_icon_cache[i].px == 16) gl2 = g_icon_cache[i].lightness;
+        ST_CHECK(fabsf(gl2 - gl) < 0.0001f); // cached lightness is theme-independent
+        g_theme_cur = th;
+        theme_apply();
+        icons_sync_theme();
+        // draw-time tint: only light navigation surfaces darken pale artwork; the pixel caches never change
+        u32 saved_bg = g_icon_surface_bg;
+        g_icon_surface_bg = 0;
+        ST_CHECK(icon_glyph_tint(fo, 16) == 1.f);
+        g_icon_surface_bg = 0x202124; // dark surface
+        ST_CHECK(icon_glyph_tint(fo, 16) == 1.f);
+        g_icon_surface_bg = 0xFFFFFF; // light navigation surface: white artwork darkens, the coloured folder doesn't
+        int ui = ICON_UI_BASE + UI_TRASH;
+        ST_CHECK(icon_glyph(ui, 16) != NULL);
+        f32 tint = icon_glyph_tint(ui, 16);
+        ST_CHECK(tint > 0.f && tint < 1.f);
+        ST_CHECK(icon_glyph_tint(fo, 16) == 1.f);
+        SDL_Texture *bt = big_icon_tex(fo, 96);
+        ST_CHECK(bt != NULL && icon_texture_tint(bt) == 1.f);
+        g_icon_surface_bg = saved_bg;
+        ST_CHECK(icon_glyph_tint(ui, 16) == 1.f && (!bt || icon_texture_tint(bt) == 1.f));
+    }
     { // the trash bin's main colour follows the UI theme (re-rasterized on a theme change)
         int tr = icon_find("trash"), saved = g_theme_cur;
         ST_CHECK(tr >= 0 && strstr(g_icon_svg[0][tr], ICON_THEME_MARK) && icon_glyph(tr, 16));
@@ -2510,6 +2580,31 @@ static int run_selftest_m8(void) {
     st_wait();
     Pane *p = active_pane();
 
+    { // feedback is drawn above an open sheet, not hidden behind it
+        options_open();
+        ST_CHECK(sheet_open());
+        toast("Saved");
+        st_frames(1);
+        ST_CHECK(A.toast[0] && g_toast_seq > g_sheet_seq && g_sheet_seq > 0);
+        SDL_Surface *surf = SDL_RenderReadPixels(A.ren, NULL);
+        ST_CHECK(surf != NULL && g_toast_probe.w > 0);
+        if (surf && g_toast_probe.w > 0) {
+            int px = (int)(g_toast_probe.x + g_toast_probe.w * 0.5f), py = (int)(g_toast_probe.y + g_toast_probe.h * 0.5f);
+            ST_CHECK(px >= 0 && py >= 0 && px < surf->w && py < surf->h);
+            if (px >= 0 && py >= 0 && px < surf->w && py < surf->h) {
+                Uint32 v = *(Uint32 *)((Uint8 *)surf->pixels + py * surf->pitch + px * SDL_BYTESPERPIXEL(surf->format));
+                Uint8 r, g, b, a;
+                SDL_GetRGBA(v, SDL_GetPixelFormatDetails(surf->format), SDL_GetSurfacePalette(surf), &r, &g, &b, &a);
+                ST_CHECK(r == 0x00 && g == 0xFF && b == 0x00); // the toast's selftest marker survived the sheet
+            }
+            SDL_DestroySurface(surf);
+        }
+        st_shot("toast-above-sheet");
+        A.toast[0] = 0;
+        sheet_close();
+        st_frames(1);
+    }
+
     // MIME + apps
     ST_CHECK(!strcmp(mime_for_file("Photo.PNG", false), "image/png"));
     ST_CHECK(!strcmp(mime_for_file("a.tar.gz", false), "application/x-compressed-tar"));
@@ -2537,6 +2632,21 @@ static int run_selftest_m8(void) {
     st_select(p, "abc.txt");
     do_action(p, ACT_OPEN_WITH);
     ST_CHECK(g_sheet.kind == SHEET_OPENWITH && !strcmp(g_sheet.mime, "text/plain") && g_sheet.napps >= 1);
+    { // the "default" label keeps contrast on the dark inset well; selected rows keep their own colour
+        int saved = g_theme_cur;
+        u32 dark_well = rgb_mix(COL_POPUP, 0x000000, 0.22f);
+        g_theme_cur = theme_find("Dark");
+        theme_apply();
+        ST_CHECK(rgb_luma(dark_well) < 0.5f);
+        ST_CHECK(ow_default_label_color(dark_well, false) == rgb_mix(COL_ACCENT, 0xFFFFFF, 0.15f));
+        ST_CHECK(ow_default_label_color(dark_well, true) == COL_SEL_DIM);
+        g_theme_cur = theme_find("Light");
+        theme_apply();
+        ST_CHECK(ow_default_label_color(rgb_mix(COL_POPUP, 0x000000, 0.04f), false) == rgb_mix(COL_ACCENT, 0x000000, 0.35f));
+        ST_CHECK(ow_default_label_color(rgb_mix(COL_POPUP, 0x000000, 0.04f), true) == COL_SEL_DIM);
+        g_theme_cur = saved;
+        theme_apply();
+    }
     st_frames(2);
     st_shot("openwith");
     { // all apps: the list scrolls inside its container; wheel scrolling sticks; clicks hit the right row
@@ -3780,6 +3890,33 @@ static int run_selftest_m9(void) {
     st_wait();
     Pane *p = active_pane();
 
+    { // caret animation: a short ease-in to the new position, then a slow breathing pulse at rest
+        TextCaret s;
+        memset(&s, 0, sizeof s);
+        f32 a = 0;
+        u64 t = 1000000000ull;
+        ST_CHECK(text_caret_animate(&s, 20.f, 1, 1, t, false, &a) == 20.f && a == 1.f && s.valid); // first target is immediate
+        ST_CHECK(text_caret_animate(&s, 40.f, 1, 1, t + 45000000ull, false, &a) == 20.f); // next one starts where it was
+        f32 mid = text_caret_animate(&s, 40.f, 1, 1, t + 90000000ull, false, &a);
+        ST_CHECK(mid > 20.f && mid < 40.f);
+        f32 pos = mid;
+        for (u64 dt = 200000000ull; dt <= 1000000000ull; dt += 200000000ull) // frames, not one long gap (that resets)
+            pos = text_caret_animate(&s, 40.f, 1, 1, t + dt, false, &a);
+        ST_CHECK(pos == 40.f && a < 1.f && a > 0.f); // breathing once settled
+        f32 from = text_caret_position(&s, t + 1000000000ull);
+        text_caret_animate(&s, 60.f, 2, 2, t + 1000000000ull, false, &a);
+        ST_CHECK(fabsf(s.from - from) < 0.0001f && s.target == 60.f); // a new caret eases from where it was
+        ST_CHECK(text_caret_animate(&s, 60.f, 2, 2, t + 1000000000ull, true, &a) == 60.f && a == 1.f); // snap
+        TextEdit e;
+        te_set(&e, "hello", 3, 3);
+        ST_CHECK(!e.animation.valid && !e.animation.moved && !e.animation.seen && !e.animation.input);
+        e.animation.input = 1;
+        te_insert(&e, "XY");
+        ST_CHECK(e.animation.input > 1 && e.caret == 5 && !strcmp(e.buf, "helXYlo"));
+        e.animation.input = 1;
+        ST_CHECK(te_key(&e, SDLK_LEFT, SDL_KMOD_NONE) && e.animation.input > 1);
+    }
+
     // --- the toolbar's sort button: the same keys as the folder menu's Sort by, the direction, Folders first ---
     st_frames(1);
     Rect sb = p->ly.sortbtn;
@@ -3988,8 +4125,11 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.show_hidden == !hid);
     st_opt_click(st_opt_hit(HP_TOGGLE, OPT_HIDDEN, 0));
     ST_CHECK(A.show_hidden == hid);
-    // appearance: font size, row spacing
+    // appearance: font size, row spacing (the icon rows pushed these below the fold)
     st_opt_click(st_opt_hit(HP_NAV, -1, OC_APPEARANCE));
+    st_frames(1);
+    g_opt.scroll = S(140);
+    st_frames(1);
     int px0 = A.font.px;
     st_opt_click(st_opt_hit(HP_PLUS, OPT_FONT_SIZE, 0));
     ST_CHECK(A.font_size == 14 && A.font.px == (int)roundf(14.f * A.scale) && A.font.px > px0);
@@ -3997,6 +4137,8 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.font_size == 13);
     st_opt_click(st_opt_hit(HP_SEG, OPT_ROW_SPACING, 0));
     ST_CHECK(A.row_spacing == 0);
+    g_opt.scroll = 0;
+    st_frames(1);
     { // the scrollbar's thumb can be dragged (not only the wheel); a press on its track pages
         st_frames(1);
         SheetBar *sb = NULL;
@@ -4102,7 +4244,11 @@ static int run_selftest_m9(void) {
         *d = (DesktopLook){.light = true, .accent = 0x01000000u | 0x3DAEE9, .icons = "breeze",
                            .kde = {0x01000000u | 0xFCFCFC, 0x01000000u | 0xEFF0F1, 0x01000000u | 0x232627, 0x01000000u | 0x3DAEE9}};
         dlook_apply(d);
-        ST_CHECK(T.bg == 0xFCFCFC && T.sidebar == 0xEFF0F1 && T.toolbar == 0xEFF0F1 && T.text == 0x232627 && T.accent == 0x3DAEE9);
+        ST_CHECK(T.accent == 0x3DAEE9);
+        ST_CHECK(fabsf(rgb_luma(T.bg) - rgb_luma(g_theme_light.bg)) < 0.02f);
+        ST_CHECK(fabsf(rgb_luma(T.sidebar) - rgb_luma(g_theme_light.sidebar)) < 0.02f);
+        ST_CHECK(fabsf(rgb_luma(T.toolbar) - rgb_luma(g_theme_light.toolbar)) < 0.02f);
+        ST_CHECK(T.text == 0x232627);
         ST_CHECK(T.tabbar != T.toolbar && COL_STATUS == T.toolbar);
         st_frames(2);
         st_shot("m9-system-kde");
@@ -4218,6 +4364,403 @@ static int run_selftest_m9(void) {
         g_theme_cur = saved;
         theme_apply();
     }
+    { // path field / pill enclosure and folder search brightness are independent of the header
+        ST_CHECK(!g_surface_bright[SURF_PATHBAR] && !g_surface_bright[SURF_SEARCHBAR] && !g_transparent_pathbar);
+        opt_int_step(OPT_BRIGHT_PATHBAR, +1);
+        opt_int_step(OPT_BRIGHT_PATHBAR, +1);
+        opt_int_step(OPT_BRIGHT_SEARCHBAR, -1);
+        opt_int_step(OPT_BRIGHT_SEARCHBAR, -1);
+        ST_CHECK(g_surface_bright[SURF_PATHBAR] == 10 && g_surface_bright[SURF_SEARCHBAR] == -10);
+        char fbuf[16];
+        opt_int_fmt(OPT_BRIGHT_PATHBAR, fbuf, sizeof fbuf);
+        ST_CHECK(!strcmp(fbuf, "+10%"));
+        g_theme_cur = theme_find("Dark");
+        theme_apply();
+        ST_CHECK(pathbar_field_color() == rgb_mix(g_theme_dark.field, 0xFFFFFF, 0.10f));
+        ST_CHECK(searchbar_field_color() == rgb_mix(g_theme_dark.field, 0x000000, 0.10f));
+        opt_bool_toggle(OPT_TRANSPARENT_PATHBAR);
+        ST_CHECK(g_transparent_pathbar);
+        st_frames(2);
+        st_shot("m9-transparent-pathbar");
+        settings_save();
+        settings_load();
+        init_places();
+        theme_apply();
+        ST_CHECK(g_surface_bright[SURF_PATHBAR] == 10 && g_surface_bright[SURF_SEARCHBAR] == -10 && g_transparent_pathbar);
+        char cfgp[PATH_MAX];
+        settings_file(cfgp, sizeof cfgp, false);
+        FILE *cf = fopen(cfgp, "w");
+        ST_CHECK(cf != NULL);
+        if (cf) {
+            fputs("pathbar_brightness=99\nsearchbar_brightness=-99\ntransparent_pathbar=1\n", cf);
+            fclose(cf);
+        }
+        settings_load();
+        init_places();
+        ST_CHECK(g_surface_bright[SURF_PATHBAR] == 30 && g_surface_bright[SURF_SEARCHBAR] == -30 && g_transparent_pathbar);
+        // No settings_version bump: an older config must leave the new keys at their defaults.
+        cf = fopen(cfgp, "w");
+        ST_CHECK(cf != NULL);
+        if (cf) {
+            fputs("header_brightness=-30\n", cf);
+            fclose(cf);
+        }
+        settings_load();
+        init_places();
+        ST_CHECK(!g_surface_bright[SURF_PATHBAR] && !g_surface_bright[SURF_SEARCHBAR] && !g_transparent_pathbar);
+        memset(g_surface_bright, 0, sizeof g_surface_bright);
+        g_transparent_pathbar = false;
+        theme_apply();
+    }
+    { // two tab modes: Classic above the navigation bar, Pill below it; one tab can give its row back (Behavior setting)
+        ST_CHECK(opt_choice_count(OPT_TAB_STYLE) == 2);
+        ST_CHECK(!strcmp(opt_choice_label(OPT_TAB_STYLE, 0), "Classic") &&
+                 !strcmp(opt_choice_label(OPT_TAB_STYLE, 1), "Pills"));
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        TabBands b = tab_bands(100.f, 1.f, 2);
+        ST_CHECK(b.tabs_y == 100.f && b.tabs_h == 38.f);
+        ST_CHECK(b.navigation_y == 138.f && b.nav_h == 46.f);
+        ST_CHECK(b.content_y == b.navigation_y + b.nav_h);
+        opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
+        b = tab_bands(100.f, 1.f, 2);
+        ST_CHECK(b.navigation_y == 100.f && b.nav_h == 46.f);
+        ST_CHECK(b.tabs_y == 146.f && b.tabs_h == 44.f);
+        ST_CHECK(b.content_y == b.tabs_y + b.tabs_h);
+        ST_CHECK(tab_bands(100.f, 1.f, 1).tabs_h == 44.f); // default: the strip stays
+        ST_CHECK(!g_hide_single_tab);
+        opt_bool_toggle(OPT_HIDE_SINGLE_TAB);
+        ST_CHECK(g_hide_single_tab);
+        b = tab_bands(100.f, 1.f, 1);
+        ST_CHECK(b.tabs_h == 0.f && b.content_y == b.navigation_y + b.nav_h);
+        ST_CHECK(tab_bands(100.f, 1.f, 2).tabs_h == 44.f);
+        opt_bool_toggle(OPT_HIDE_SINGLE_TAB);
+        ST_CHECK(!g_hide_single_tab);
+        Panel *pn = A.ap;
+        opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
+        layout();
+        ST_CHECK(pn->bar.y == pn->area.y + 46.f);
+        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn)).content_y);
+        {
+            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn));
+            PaneLayout *pnly = &pn->cur->pane[0].ly;
+            ST_CHECK(pnly->toolbar.y == pnb.navigation_y);
+            ST_CHECK(pnly->header.y == pnb.content_y && pnly->list.y == pnb.content_y + pnly->header.h);
+        }
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        layout();
+        ST_CHECK(pn->bar.y == pn->area.y);
+        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn)).content_y);
+        {
+            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn));
+            PaneLayout *pnly = &pn->cur->pane[0].ly;
+            ST_CHECK(pnly->toolbar.y == pnb.navigation_y);
+            ST_CHECK(pnly->header.y == pnb.content_y && pnly->list.y == pnb.content_y + pnly->header.h);
+        }
+        opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
+        g_hide_single_tab = true;
+        layout();
+        ST_CHECK(pn->bar.h == 0.f && pn->splitbtn.w == 0.f);
+        { // a hidden band must not make the panel look full: a new tab still fits
+            ST_CHECK(pn->tabs_w >= TAB_MIN_W && tab_target_panel(pn) == pn);
+            int nt0 = A.ntabs;
+            Tab *nt = tab_new_fit(pn, M9_BASE, panel_end_index(pn), false);
+            ST_CHECK(nt && A.ntabs == nt0 + 1);
+            if (nt) tab_close(tab_index(nt));
+            ST_CHECK(A.ntabs == nt0);
+        }
+        settings_save();
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        g_hide_single_tab = false;
+        settings_load();
+        init_places();
+        ST_CHECK(A.tab_style == TABS_PILLS && g_hide_single_tab);
+        st_frames(2);
+        st_shot("m9-tab-pill-below-nav");
+        g_hide_single_tab = false;
+        opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
+        layout();
+    }
+    { // application icon: an absolute SVG/PNG overrides the built-in logo; clearing it restores the default
+        int ii = -1, ia = -1, it = -1, il = -1;
+        for (int k = 0; k < OPT_COUNT; k++) {
+            if (g_opts[k].id == OPT_ICON_THEME) ii = k;
+            if (g_opts[k].id == OPT_APP_ICON) ia = k;
+            if (g_opts[k].id == OPT_TITLE_ICON) it = k;
+            if (g_opts[k].id == OPT_BRAND_LOGO) il = k;
+        }
+        ST_CHECK(ii >= 0 && ia == ii + 1 && it == ia + 1 && il >= 0);
+        options_open();
+        g_opt.cat = OC_APPEARANCE;
+        g_opt.scroll = 0;
+        st_frames(2);
+        st_shot("options-app-icon");
+        { // both icon rows: every button shares the field height and stays inside a narrow control strip
+            OptHit *af = st_opt_hit(HP_TEXT, OPT_APP_ICON, 2), *tf = st_opt_hit(HP_TEXT, OPT_TITLE_ICON, 3);
+            OptHit *as = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1), *ad = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 2);
+            OptHit *td = st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1);
+            ST_CHECK(af && tf && as && ad && td); // Apply has no hit when its field is empty
+            ST_CHECK(af && as && fabsf(as->r.y - af->r.y) < 0.5f && fabsf(ad->r.y - af->r.y) < 0.5f);
+            ST_CHECK(tf && td && fabsf(td->r.y - tf->r.y) < 0.5f);
+            ST_CHECK(!strcmp(g_opts[ia].label, "App icon"));
+            ST_CHECK(strstr(g_opts[ia].desc, "Apply") && strstr(g_opts[ia].desc, "File-Icon") && strstr(g_opts[ia].desc, "Default"));
+            ST_CHECK(!strstr(g_opts[ia].desc, "System"));
+            ST_CHECK(!strcmp(opt_icon_button_label(OPT_APP_ICON, 1), "File-Icon"));
+            ST_CHECK(strstr(g_opts[it].desc, "Apply") && strstr(g_opts[it].desc, "Default"));
+            Rect pv, fld, bb[3];
+            opt_icon_row_layout(S(186), S(30), 3, &pv, &fld, bb);
+            ST_CHECK(fld.w > 0 && pv.x <= fld.x && fld.x + fld.w <= bb[0].x - 0.5f);
+            for (int k = 0; k < 3; k++) {
+                ST_CHECK(bb[k].x >= fld.x + fld.w - 0.5f && bb[k].x + bb[k].w <= S(186) + 0.5f);
+                if (k) ST_CHECK(bb[k].x >= bb[k - 1].x + bb[k - 1].w - 0.5f);
+            }
+            Rect pv2, fld2, bb2[2];
+            opt_icon_row_layout(S(186), S(30), 2, &pv2, &fld2, bb2);
+            ST_CHECK(fld2.w > 0 && bb2[0].x + bb2[0].w <= bb2[1].x + 0.5f && bb2[1].x + bb2[1].w <= S(186) + 0.5f);
+            ST_CHECK(opt_icon_row_ctlw(S(760), 3) > 0 && opt_icon_row_ctlw(S(760), 2) > 0);
+            st_shot("options-icon-modes");
+        }
+        char svg[PATH_MAX], dh[PATH_MAX], dest[PATH_MAX + 64];
+        snprintf(svg, sizeof svg, M9_BASE "/app-icon.svg");
+        st_write_text(svg, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#ff0000\"/></svg>");
+        ST_CHECK(g_app_icon_mode == APP_ICON_DEFAULT);
+        ST_CHECK(app_icon_mode_parse("custom") == APP_ICON_CUSTOM);
+        ST_CHECK(app_icon_mode_parse("file_icon") == APP_ICON_FILE_ICON);
+        ST_CHECK(app_icon_mode_parse("system") == APP_ICON_FILE_ICON); // legacy local config
+        ST_CHECK(app_icon_mode_parse("default") == APP_ICON_DEFAULT);
+        ST_CHECK(app_icon_mode_parse("nonsense") == APP_ICON_DEFAULT);
+        ST_CHECK(!strcmp(app_icon_mode_name(APP_ICON_CUSTOM), "custom"));
+        ST_CHECK(!strcmp(app_icon_mode_name(APP_ICON_FILE_ICON), "file_icon"));
+        ST_CHECK(!strcmp(app_icon_mode_name(APP_ICON_DEFAULT), "default"));
+        ST_CHECK(app_icon_path_ok(NULL) && app_icon_path_ok(""));
+        ST_CHECK(app_icon_path_ok(svg) && !app_icon_path_ok("relative.svg"));
+        ST_CHECK(!app_icon_path_ok(M9_BASE "/app-icon.txt"));
+        ST_CHECK(!app_icon_path_ok(M9_BASE "/app\n-icon.svg"));
+        ST_CHECK(!app_icon_raster(16)); // no custom artwork selected yet
+        u8 *def_prev = app_icon_preview_raster(16); // the row previews the icon in effect: the built-in default
+        ST_CHECK(def_prev != NULL);
+        u8 *def_win = app_icon_window_raster(16);
+        ST_CHECK(def_win && !memcmp(def_win, def_prev, 16 * 16 * 4));
+        free(def_win);
+        opt_app_icon_chosen(svg);
+        ST_CHECK(!strcmp(g_app_icon_path, svg));
+        u8 *px = app_icon_raster(16);
+        ST_CHECK(px != NULL);
+        u8 *custom_prev = app_icon_preview_raster(16);
+        ST_CHECK(custom_prev != NULL && memcmp(def_prev, custom_prev, 16 * 16 * 4) != 0);
+        u8 *custom_win = app_icon_window_raster(16);
+        ST_CHECK(custom_win && !memcmp(custom_win, custom_prev, 16 * 16 * 4));
+        free(custom_win);
+        free(px);
+        { // File-Icon mode previews the folder icon of the current File icons set, never the app logo
+            u8 *folder = icon_raster(icon_find("folder"), 16, 16), *direct = file_icon_app_raster(16);
+            AppIconMode saved_mode = g_app_icon_mode;
+            g_app_icon_mode = APP_ICON_FILE_ICON;
+            u8 *fi_prev = app_icon_preview_raster(16), *fi_win = app_icon_window_raster(16);
+            g_app_icon_mode = saved_mode;
+            ST_CHECK(icon_find("folder") >= 0 && folder && direct && fi_prev && fi_win);
+            ST_CHECK(direct && folder && !memcmp(direct, folder, 16 * 16 * 4));
+            ST_CHECK(fi_prev && folder && !memcmp(fi_prev, folder, 16 * 16 * 4));
+            ST_CHECK(fi_win && folder && !memcmp(fi_win, folder, 16 * 16 * 4));
+            ST_CHECK(fi_prev && def_prev && memcmp(fi_prev, def_prev, 16 * 16 * 4));
+            ST_CHECK(fi_prev && custom_prev && memcmp(fi_prev, custom_prev, 16 * 16 * 4));
+            free(folder);
+            free(direct);
+            free(fi_prev);
+            free(fi_win);
+        }
+        { // the real buttons switch modes; Default erases the path and clears the field to its placeholder
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1));
+            ST_CHECK(g_app_icon_mode == APP_ICON_FILE_ICON && !strcmp(g_app_icon_path, svg));
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 2));
+            ST_CHECK(g_app_icon_mode == APP_ICON_DEFAULT && !g_app_icon_path[0] && !g_opt.app_icon.buf[0]);
+            u8 *after = app_icon_preview_raster(16), *logo = icon_raster(ICON_LOGO, 16, 16);
+            ST_CHECK(after && logo && !memcmp(after, logo, 16 * 16 * 4));
+            free(after);
+            free(logo);
+            te_set(&g_opt.app_icon, "", 0, 0);
+            ST_CHECK(!st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0)); // Apply is disabled until a path is typed
+            te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
+            st_frames(1);
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
+            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
+        }
+        { // File-Icon mode follows the active File icons theme; the app logo is never a fallback
+            char themes[PATH_MAX], p[PATH_MAX];
+            icon_themes_dir(themes, sizeof themes);
+            snprintf(p, sizeof p, "%s/M9FileIcons", themes);
+            mkdir_p(p, 0755);
+            snprintf(p, sizeof p, "%s/M9FileIcons/theme.conf", themes);
+            st_write_text(p, "base=Symbols\n");
+            snprintf(p, sizeof p, "%s/M9FileIcons/folder.svg", themes);
+            st_write_text(p, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><rect width=\"16\" height=\"16\" fill=\"#ff00ff\"/></svg>");
+            icon_themes_reload();
+            int t = icon_theme_find("M9FileIcons");
+            ST_CHECK(t >= ICON_THEMES);
+            int saved_theme = g_icon_theme;
+            AppIconMode saved_mode = g_app_icon_mode;
+            g_app_icon_mode = APP_ICON_FILE_ICON;
+            u8 *before = app_icon_preview_raster(16);
+            opt_choice_set(OPT_ICON_THEME, t);
+            ST_CHECK(g_icon_theme == t);
+            u8 *folder = icon_raster(icon_find("folder"), 16, 16);
+            u8 *after = app_icon_preview_raster(16), *after_win = app_icon_window_raster(16), *direct = file_icon_app_raster(16);
+            ST_CHECK(folder && after && after_win && direct);
+            ST_CHECK(before && memcmp(before, after, 16 * 16 * 4));
+            ST_CHECK(folder && after && !memcmp(after, folder, 16 * 16 * 4));
+            ST_CHECK(folder && after_win && !memcmp(after_win, folder, 16 * 16 * 4));
+            ST_CHECK(folder && direct && !memcmp(direct, folder, 16 * 16 * 4));
+            opt_choice_set(OPT_ICON_THEME, saved_theme);
+            g_app_icon_mode = saved_mode;
+            free(before);
+            free(folder);
+            free(after);
+            free(after_win);
+            free(direct);
+        }
+        free(custom_prev);
+        free(def_prev);
+        { // Apply from the path field: invalid paths are rejected; an empty field leaves the current choice alone
+            te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
+            opt_app_icon_apply();
+            ST_CHECK(!strcmp(g_app_icon_path, svg));
+            te_set(&g_opt.app_icon, "relative.svg", 12, 12);
+            opt_app_icon_apply();
+            ST_CHECK(!strcmp(g_app_icon_path, svg));
+            te_set(&g_opt.app_icon, "", 0, 0);
+            opt_app_icon_apply();
+            ST_CHECK(!strcmp(g_app_icon_path, svg) && g_app_icon_mode == APP_ICON_CUSTOM);
+        }
+        { // the mode persists, the typed path survives it, and a legacy path-only config means custom
+            opt_app_icon_chosen(svg);
+            g_app_icon_mode = APP_ICON_FILE_ICON;
+            settings_save();
+            g_app_icon_mode = APP_ICON_DEFAULT;
+            settings_load();
+            ST_CHECK(g_app_icon_mode == APP_ICON_FILE_ICON && !strcmp(g_app_icon_path, svg));
+            char cfg[PATH_MAX], backup[262144] = "", legacy[PATH_MAX + 32];
+            settings_file(cfg, sizeof cfg, false);
+            FILE *f = fopen(cfg, "rb");
+            ST_CHECK(f != NULL);
+            if (f) {
+                size_t n = fread(backup, 1, sizeof backup - 1, f);
+                backup[n] = 0;
+                fclose(f);
+            }
+            snprintf(legacy, sizeof legacy, "app_icon=%s\n", svg);
+            st_write_text(cfg, legacy);
+            g_app_icon_path[0] = 0;
+            g_app_icon_mode = APP_ICON_DEFAULT;
+            settings_load();
+            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
+            snprintf(legacy, sizeof legacy, "app_icon_mode=system\napp_icon=%s\n", svg);
+            st_write_text(cfg, legacy);
+            g_app_icon_path[0] = 0;
+            g_app_icon_mode = APP_ICON_DEFAULT;
+            settings_load();
+            ST_CHECK(g_app_icon_mode == APP_ICON_FILE_ICON && !strcmp(g_app_icon_path, svg));
+            st_write_text(cfg, backup);
+            settings_load();
+            g_app_icon_mode = APP_ICON_DEFAULT;
+        }
+        { // title bar icon: its own path setting, preview and Apply, independent of the app icon
+            char ti[PATH_MAX];
+            snprintf(ti, sizeof ti, M9_BASE "/title-icon.svg");
+            st_write_text(ti, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#00ff00\"/></svg>");
+            u8 *def_title = title_icon_preview_raster(16), *small_title = icon_raster(ICON_LOGO_SMALL, 16, 16);
+            ST_CHECK(def_title && small_title && !g_title_icon_path[0]);
+            ST_CHECK(!memcmp(def_title, small_title, 16 * 16 * 4));
+            free(small_title);
+            te_set(&g_opt.title_icon, ti, (int)strlen(ti), (int)strlen(ti));
+            opt_title_icon_apply();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            Glyph *h1 = title_icon_header_glyph(23), *p1 = title_icon_preview_glyph(30);
+            Glyph *h2 = title_icon_header_glyph(23), *p2 = title_icon_preview_glyph(30);
+            ST_CHECK(h1 && p1 && h1 == h2 && p1 == p2 && h1 != p1);
+            u8 *custom_title = title_icon_preview_raster(16);
+            ST_CHECK(custom_title && memcmp(def_title, custom_title, 16 * 16 * 4) != 0);
+            free(custom_title);
+            free(def_title);
+            te_set(&g_opt.title_icon, "relative.svg", 12, 12);
+            opt_title_icon_apply();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1));
+            ST_CHECK(!g_title_icon_path[0] && !g_opt.title_icon.buf[0]);
+            te_set(&g_opt.title_icon, ti, (int)strlen(ti), (int)strlen(ti));
+            opt_title_icon_apply();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            settings_save();
+            settings_load();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            options_open();
+            g_opt.cat = OC_APPEARANCE;
+            g_opt.scroll = 0;
+            st_frames(2);
+            ST_CHECK(st_opt_hit(HP_TEXT, OPT_TITLE_ICON, 3) != NULL);
+            ST_CHECK(title_icon_header_glyph(24) && title_icon_preview_glyph(30));
+            sheet_close();
+            st_frames(5);
+            ST_CHECK(st_brand_icon_green()); // the custom artwork is drawn in the header, not just previewed
+            bool logo = A.brand_logo;
+            if (logo) opt_bool_toggle(OPT_BRAND_LOGO);
+            st_frames(5);
+            ST_CHECK(!A.brand_logo && !st_brand_icon_green()); // Logo off hides the custom icon too
+            st_shot("options-title-icon-off");
+            if (logo) opt_bool_toggle(OPT_BRAND_LOGO);
+            st_frames(5);
+            ST_CHECK(A.brand_logo && st_brand_icon_green());
+            { // title Default clears the path, restores the small logo and removes the custom header pixels
+                options_open();
+                g_opt.cat = OC_APPEARANCE;
+                g_opt.scroll = 0;
+                st_frames(2);
+                st_opt_click(st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1));
+                ST_CHECK(!g_title_icon_path[0] && !g_opt.title_icon.buf[0]);
+                u8 *after = title_icon_preview_raster(16), *small = icon_raster(ICON_LOGO_SMALL, 16, 16);
+                ST_CHECK(after && small && !memcmp(after, small, 16 * 16 * 4));
+                free(after);
+                free(small);
+                sheet_close();
+                st_frames(5);
+                ST_CHECK(A.brand_logo && !st_brand_icon_green());
+            }
+        }
+        data_home(dh, sizeof dh);
+        snprintf(dest, sizeof dest, "%s/icons/hicolor/scalable/apps/dev.fileexplorer.svg", dh);
+        ST_CHECK(app_icon_write_ex(dh, 0x123456, svg, false));
+        FILE *df = fopen(dest, "rb");
+        ST_CHECK(df != NULL);
+        if (df) {
+            char body[8192] = {0};
+            size_t n = fread(body, 1, sizeof body - 1, df);
+            fclose(df);
+            ST_CHECK(n && strstr(body, "#ff0000"));
+        }
+        ST_CHECK(!app_icon_write_ex(dh, 0x123456, svg, false)); // already installed: nothing changed
+        g_app_icon_mode = APP_ICON_FILE_ICON;
+        ST_CHECK(app_icon_write_ex(dh, 0x123456, NULL, false)); // File-Icon removes the installed override
+        ST_CHECK(access(dest, F_OK) != 0);
+        g_app_icon_mode = APP_ICON_DEFAULT;
+        opt_app_icon_chosen("");
+        ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
+        ST_CHECK(app_icon_write(dh, 0x123456)); // Default restores the recoloured built-in artwork
+        df = fopen(dest, "rb");
+        ST_CHECK(df != NULL);
+        if (df) {
+            char body[8192] = {0};
+            size_t n = fread(body, 1, sizeof body - 1, df);
+            fclose(df);
+            ST_CHECK(n && strstr(body, "<svg"));
+        }
+        settings_save();
+        opt_app_icon_chosen(svg);
+        settings_save();
+        opt_app_icon_chosen("");
+        settings_load();
+        init_places();
+        ST_CHECK(!strcmp(g_app_icon_path, svg));
+        opt_app_icon_chosen("");
+        settings_save();
+    }
     { // scrollbar colour: Auto (the theme's own; System: the desktop's accent), or #RRGGBB / #RGB typed and applied
         int saved = g_theme_cur;
         g_theme_cur = theme_find("Dark");
@@ -4235,8 +4778,15 @@ static int run_selftest_m9(void) {
         st_type("#f80");
         st_frames(1);
         st_shot("m9-scrollbar-field");
-        st_opt_click(st_opt_hit(HP_BUTTON, OPT_SCROLL_COLOR, 0)); // Apply
+        ST_CHECK(st_opt_hit(HP_EDIT_APPLY, OPT_SCROLL_COLOR, 0) && st_opt_hit(HP_EDIT_RESET, OPT_SCROLL_COLOR, 0));
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_SCROLL_COLOR, 0)); // Apply
         ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800) && T.scroll == 0xFF8800 && !strcmp(g_opt.scroll_color.buf, "#FF8800"));
+        st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_SCROLL_COLOR, 0)); // Default: back to the theme's own colour
+        ST_CHECK(!g_scroll_custom && !g_opt.scroll_color.buf[0] && T.scroll == g_theme_dark.scroll);
+        te_set(&g_opt.scroll_color, "#f80", 3, 3);
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_SCROLL_COLOR, 0));
+        ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800));
         settings_save();
         settings_load();
         theme_apply();
@@ -4422,67 +4972,58 @@ static int run_selftest_m9(void) {
     st_wait();
     ST_CHECK(!strcmp(active_pane()->path, M9_BASE));
 
-    // --- the external terminal (Options > Integration): Automatic = found as before, or one of those installed ---
+    // --- the external terminal (Options > Integration): one executable field with Apply/Default ---
     ST_CHECK(!g_external_terminal[0]);
     A.menu.n = 0;
     menu_terminal_items(p);
     ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in external terminal"));
     do_action(p, ACT_TERMINAL_EXTERNAL); // (recorded, not started)
     ST_CHECK(!strncmp(A.last_opened, "terminal:", 9) && !options_is_open());
-    // the dropdown lists the terminals installed: by name on $PATH, or a terminal app's .desktop entry (TerminalEmulator)
     st_write_text(M9_BASE "-bin/foot", "#!/bin/sh\n");
     chmod(M9_BASE "-bin/foot", 0755);
-    st_write_text(M9_BASE "-term/myterm", "#!/bin/sh\n");
-    chmod(M9_BASE "-term/myterm", 0755);
-    st_write_text(M9_BASE "-data/applications/myterm.desktop",
-                  "[Desktop Entry]\nType=Application\nName=My Term\nExec=\"" M9_BASE "-term/myterm\" --new\nCategories=System;TerminalEmulator;\n");
-    st_write_text(M9_BASE "-data/applications/editor.desktop", "[Desktop Entry]\nType=Application\nName=Editor\nExec=/bin/sh\nCategories=Utility;\n");
-    char *tpath0 = getenv("PATH") ? strdup(getenv("PATH")) : NULL, *tdata0 = getenv("XDG_DATA_HOME") ? strdup(getenv("XDG_DATA_HOME")) : NULL;
+    char *tpath0 = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
     setenv("PATH", M9_BASE "-bin", 1); // (only the stand-ins)
-    setenv("XDG_DATA_HOME", M9_BASE "-data", 1);
     options_open_page(OC_INTEGRATION);
-    for (int k = 0; k < 400 && g_termlist.scanning; k++) { st_frames(1); SDL_Delay(2); }
-    if (tpath0) setenv("PATH", tpath0, 1);
-    if (tdata0) setenv("XDG_DATA_HOME", tdata0, 1);
-    else unsetenv("XDG_DATA_HOME");
-    free(tpath0);
-    free(tdata0);
-    ST_CHECK(!g_termlist.scanning && opt_choice_count(OPT_TERMINAL) >= 3 && opt_choice_get(OPT_TERMINAL) == 0);
-    int tfoot = -1, tmy = -1;
-    for (int k = 1; k < opt_choice_count(OPT_TERMINAL); k++) {
-        if (!strcmp(opt_choice_label(OPT_TERMINAL, k), "foot")) tfoot = k;
-        if (!strcmp(opt_choice_label(OPT_TERMINAL, k), "myterm")) tmy = k;
-        ST_CHECK(strcmp(opt_choice_label(OPT_TERMINAL, k), "sh")); // not a terminal app
-    }
-    ST_CHECK(tfoot > 0 && tmy > 0 && !strcmp(opt_choice_label(OPT_TERMINAL, 0), "Automatic"));
     st_frames(1);
-    Rect tdrop = {0};
-    for (int k = 0; k < g_opt.nhits; k++)
-        if (g_opt.hits[k].part == HP_DROP && g_opt.hits[k].opt == OPT_TERMINAL) tdrop = g_opt.hits[k].r;
-    ST_CHECK(tdrop.w > 0); // a dropdown, not segments
-    opt_drop_open(OPT_TERMINAL, tdrop);
-    for (int k = 0; k < g_opt.drop_n; k++)
-        if (g_opt.drop_map[k] == tfoot) opt_drop_pick(k);
-    ST_CHECK(!strcmp(g_external_terminal, "foot") && g_opt.drop_opt < 0 && opt_choice_get(OPT_TERMINAL) == tfoot);
-    st_shot("m9-terminal-option");
-    settings_save();
-    settings_load();
+    g_opt.scroll = g_opt.max_scroll;
+    st_frames(1);
+    ST_CHECK(st_opt_hit(HP_TEXT, OPT_TERMINAL_PATH, 0));
+    ST_CHECK(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0) && st_opt_hit(HP_EDIT_RESET, OPT_TERMINAL_PATH, 0));
+    te_set(&g_opt.terminal_path, "foot", 4, 4);
+    st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0));
     ST_CHECK(!strcmp(g_external_terminal, "foot"));
+    te_set(&g_opt.terminal_path, "/usr/bin/foot", 13, 13);
+    st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_TERMINAL_PATH, 0));
+    ST_CHECK(!g_external_terminal[0]);
     A.menu.n = 0;
     menu_terminal_items(p);
-    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in foot"));
-    A.menu.n = 0;
-    opt_choice_set(OPT_TERMINAL, tmy); // one only its .desktop entry knows: kept by its path
-    char texe[PATH_MAX];
-    const char *tname = NULL;
-    ST_CHECK(!strcmp(g_external_terminal, M9_BASE "-term/myterm") && find_terminal(texe, sizeof texe, &tname) && !strcmp(tname, "myterm"));
-    snprintf(g_external_terminal, sizeof g_external_terminal, "gone-terminal"); // uninstalled since: shown, marked
-    ST_CHECK(opt_choice_get(OPT_TERMINAL) == opt_choice_count(OPT_TERMINAL) - 1 &&
-             !strcmp(opt_choice_label(OPT_TERMINAL, opt_choice_get(OPT_TERMINAL)), "gone-terminal (not found)"));
-    opt_choice_set(OPT_TERMINAL, 0);
-    ST_CHECK(!g_external_terminal[0] && opt_choice_get(OPT_TERMINAL) == 0);
+    ST_CHECK(A.menu.n > 0 && !strcmp(A.menu.items[A.menu.n - 1].label, "Open in external terminal"));
     sheet_close();
-    g_opt.cat = OC_APPEARANCE;
+    if (tpath0) setenv("PATH", tpath0, 1);
+    free(tpath0);
+
+    // --- terminal executable validation ---
+    {
+        char too_long[sizeof g_external_terminal + 1];
+        memset(too_long, 'a', sizeof too_long - 1);
+        too_long[sizeof too_long - 1] = 0;
+        ST_CHECK(opt_terminal_path_valid("foot") && !opt_terminal_path_valid("foot\n") &&
+                 !opt_terminal_path_valid("foot\r") && !opt_terminal_path_valid(too_long));
+        char *tpath1 = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
+        setenv("PATH", M9_BASE "-bin", 1);
+        options_open_page(OC_INTEGRATION);
+        st_frames(1);
+        g_opt.scroll = g_opt.max_scroll;
+        st_frames(1);
+        te_set(&g_opt.terminal_path, "no-such-terminal-xyz", 20, 20);
+        A.toast[0] = 0;
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_TERMINAL_PATH, 0));
+        ST_CHECK(!g_external_terminal[0] && strstr(A.toast, "not found"));
+        sheet_close();
+        if (tpath1) setenv("PATH", tpath1, 1);
+        else unsetenv("PATH");
+        free(tpath1);
+    }
 
     // --- named layouts ---
     st_wait();
@@ -4884,7 +5425,7 @@ static int run_selftest_m9(void) {
         ST_CHECK(A.csd && A.r_wctl.w > 0 && fabsf(A.r_wctl.x + A.r_wctl.w - (f32)A.W) < 1);
         Panel *tr = NULL; // the panel at the top right
         for (int i = 0; i < A.npanels; i++)
-            if (A.panels[i]->bar.y < 1 && A.panels[i]->bar.x + A.panels[i]->bar.w >= A.r_content.x + A.r_content.w - 1) tr = A.panels[i];
+            if (A.panels[i]->area.y < 1 && A.panels[i]->area.x + A.panels[i]->area.w >= A.r_content.x + A.r_content.w - 1) tr = A.panels[i];
         ST_CHECK(tr && tr->splitbtn.x + tr->splitbtn.w <= A.r_wctl.x);
         f32 d = SDL_GetWindowPixelDensity(A.win);
         #define ST_HIT(px, py) window_hit_test(A.win, &(SDL_Point){(int)((px) / d), (int)((py) / d)}, NULL)
@@ -4915,6 +5456,7 @@ static int run_selftest_m9(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, A.W - S(20), S(15), SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
         ST_CHECK(strncmp(A.last_opened, "window:", 7) != 0);
+        A.menu.open = false; // the top row is the navigation band now: that click can open the folder menu
         st_frames(1);
         st_shot("m9-titlebar-nobuttons");
         opt_bool_toggle(OPT_WINDOW_BUTTONS);
@@ -4938,6 +5480,14 @@ static int run_selftest_m9(void) {
         te_set(&g_opt.search, "sidebar", 7, 7);
         st_frames(1);
         st_shot("m9-brand-custom");
+        { // a drawn, focused field drives the caret animation; pointer hit-testing still selects [lo, hi)
+            ST_CHECK(g_opt.brand_focus && g_opt.brand.animation.seen > 0 && g_opt.brand.animation.valid);
+            A.menu.open = false; // a menu left by an earlier click would swallow the first click here
+            st_text_click(&g_opt.search, 0, 1, 0);
+            ST_CHECK(g_opt.search.anchor == 0 && g_opt.search.caret == 0 && g_opt.search.animation.input > 0);
+            st_text_click(&g_opt.search, 7, 1, SDL_KMOD_SHIFT);
+            ST_CHECK(g_opt.search.anchor == 0 && g_opt.search.caret == 7);
+        }
         options_key(SDLK_RETURN, 0);
         ST_CHECK(!g_opt.brand_focus && options_is_open());
         sheet_close();
@@ -5592,6 +6142,21 @@ static int run_selftest_m11(void) {
         ST_CHECK(A.ntabs == nt + 1 && A.ap->cur->term);
         if (A.ap->cur->term) tab_close(A.cur);
         A.dock_h = 240;
+    }
+    { // the sidebar edge is one full-height line drawn once, not a brand piece plus a list piece
+        g_sidebar_edge_draws = 0;
+        st_frames(1);
+        ST_CHECK(g_sidebar_edge_draws == 1);
+        ST_CHECK(g_sidebar_edge_probe.x == A.r_content.x - 1 && g_sidebar_edge_probe.y == 0 &&
+                 fabsf(g_sidebar_edge_probe.h - (A.r_sidebar.y + A.r_sidebar.h)) < 0.5f);
+        ST_CHECK(g_sidebar_edge_probe.color == COL_BORDER);
+        int saved_drag = A.drag;
+        A.drag = DRAG_SIDEBAR;
+        g_sidebar_edge_draws = 0;
+        st_frames(1);
+        ST_CHECK(sidebar_edge_hot() && g_sidebar_edge_draws == 1 && g_sidebar_edge_probe.color == COL_ACCENT);
+        A.drag = saved_drag;
+        st_shot("sidebar-edge");
     }
     { // the sidebar is resizable: drag its edge (kept within limits), double-click resets, remembered
         f32 w0 = A.r_sidebar.w;

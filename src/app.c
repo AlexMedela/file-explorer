@@ -10,12 +10,42 @@ extern char **environ;
 typedef struct { f32 x, y, w, h; } Rect;
 static inline bool in_rect(Rect r, f32 x, f32 y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }
 
+// Time-based caret motion and blink; independent of rendering and input APIs. Lives here because the unity build
+// compiles only main.c, and a separate file would have to be included before TextEdit anyway.
+typedef struct {
+    u64 moved, seen, input;
+    f32 from, target;
+    int caret, anchor;
+    bool valid;
+} TextCaret;
+
+static f32 text_caret_position(const TextCaret *s, u64 now) {
+    f32 t = CLAMP((f32)((now - s->moved) / 1000000.0) / 90.f, 0.f, 1.f);
+    t = 1.f - (1.f - t) * (1.f - t) * (1.f - t);
+    return s->from + (s->target - s->from) * t;
+}
+
+static f32 text_caret_animate(TextCaret *s, f32 target, int caret, int anchor, u64 now, bool snap, f32 *alpha) {
+    bool fresh = !s->valid || now - s->seen > 250000000ull;
+    if (fresh || caret != s->caret || anchor != s->anchor || fabsf(target - s->target) > 0.1f) {
+        s->from = fresh || snap ? target : text_caret_position(s, now);
+        s->target = target; s->caret = caret; s->anchor = anchor;
+        s->moved = now; s->valid = true;
+    }
+    s->seen = now;
+    // Stay solid while typing; at rest breathe through a slow, soft blink.
+    f32 elapsed = (f32)((now - MAX(s->moved, s->input)) / 1000000.0);
+    *alpha = elapsed < 650.f || snap ? 1.f : 0.525f + 0.475f * cosf((elapsed - 650.f) * (2.f * (f32)M_PI / 1900.f));
+    return snap ? target : text_caret_position(s, now);
+}
+
 // --- single-line text editing (path bar, inline rename) --------------------
 
 typedef struct {
     char buf[PATH_MAX];
     int caret, anchor; // selection is [min, max) of the two
     f32 scroll;
+    TextCaret animation;
 } TextEdit;
 
 static void te_set(TextEdit *t, const char *s, int anchor, int caret) {
@@ -24,6 +54,7 @@ static void te_set(TextEdit *t, const char *s, int anchor, int caret) {
     t->anchor = CLAMP(anchor, 0, n);
     t->caret = CLAMP(caret, 0, n);
     t->scroll = 0;
+    memset(&t->animation, 0, sizeof t->animation);
 }
 
 static int te_prev(const TextEdit *t, int i) {
@@ -64,6 +95,7 @@ static void te_delete_sel(TextEdit *t) {
 }
 
 static void te_insert(TextEdit *t, const char *s) {
+    t->animation.input = now_ns();
     te_delete_sel(t);
     size_t n = strlen(t->buf), k = strlen(s);
     if (n + k + 1 > sizeof t->buf) return;
@@ -74,6 +106,7 @@ static void te_insert(TextEdit *t, const char *s) {
 }
 
 static bool te_key(TextEdit *t, SDL_Keycode key, SDL_Keymod mod) {
+    t->animation.input = now_ns();
     bool ctrl = mod & SDL_KMOD_CTRL, shift = mod & SDL_KMOD_SHIFT;
     int n = (int)strlen(t->buf), lo = MIN(t->anchor, t->caret), hi = MAX(t->anchor, t->caret);
     switch (key) {
@@ -138,7 +171,8 @@ enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
 enum { TITLEBAR_AUTO, TITLEBAR_SYSTEM, TITLEBAR_APP }; // A.title_bar
 enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
 enum { EXEC_ASK, EXEC_RUN, EXEC_TERMINAL, EXEC_OPEN }; // A.exec_open: opening an executable file asks, runs it (here / in a terminal), or opens it as a document
-enum { TABS_CARDS, TABS_PILLS }; // A.tab_style
+enum { TABS_CARDS, TABS_PILLS }; // A.tab_style: classic tabs above the navigation bar, pills below it
+static bool g_hide_single_tab = false; // Behavior: give the folder the tab row back when only one tab is open
 static const struct { int view, px; const char *label; } g_zoom[] = {
     {VIEW_DETAILS, 0, "Details"},       {VIEW_LIST, 0, "List"},          {VIEW_GRID, 48, "Small icons"},
     {VIEW_GRID, 72, "Small+ icons"},    {VIEW_GRID, 96, "Medium icons"}, {VIEW_GRID, 128, "Medium+ icons"},
@@ -313,7 +347,7 @@ static void term_send(Term *t, const char *s);
 // The window is a tree of panels (File Pilot style): every panel has its own tab bar.
 struct Panel {
     Tab *cur; // visible tab
-    Rect area, bar, plus, splitbtn;
+    Rect area, bar, plus, splitbtn, body; // body: below both bands (which one holds the tabs depends on the tab style)
     f32 tabs_w; // room for the tabs (bar minus + and split)
 };
 
@@ -907,38 +941,65 @@ static Rect item_rect(const Pane *p, i64 i) {
                   ly->cell_w, ly->cell_h};
 }
 
+typedef struct { f32 navigation_y, tabs_y, nav_h, tabs_h, content_y; } TabBands;
+
+// The navigation band is 46 high, the tab band 38. Classic tabs sit above the navigation bar, pills below it.
+static TabBands tab_bands(f32 y, f32 scale, int count) {
+    TabBands b;
+    b.nav_h = roundf(46.f * scale);
+    b.tabs_h = g_hide_single_tab && count <= 1 ? 0.f : roundf((A.tab_style == TABS_PILLS ? 44.f : 38.f) * scale);
+    if (A.tab_style == TABS_CARDS) {
+        b.tabs_y = y;
+        b.navigation_y = y + b.tabs_h;
+    } else {
+        b.navigation_y = y;
+        b.tabs_y = y + b.nav_h;
+    }
+    b.content_y = y + b.nav_h + b.tabs_h;
+    return b;
+}
+
+// Only the top row shares the window controls; a band below it keeps the full pane width.
+static f32 nav_available_width(f32 x, f32 y, f32 width) {
+    return A.csd && A.r_wctl.w > 0 && y < 0.5f ? MAX(0.f, MIN(width, A.r_wctl.x - x)) : width;
+}
+
+// area is the whole panel: the folder starts at content_y, but the navigation band stays inside the pane's hit rect.
 static void layout_pane(Pane *p, Rect area) {
     PaneLayout *ly = &p->ly;
     ly->area = area;
+    TabBands bands = tab_bands(area.y, S(1.f), panel_ntabs(tab_of(p)->panel));
+    f32 nav_y = bands.navigation_y;
     f32 tb = roundf(S(46));
-    ly->toolbar = (Rect){area.x, area.y, area.w, tb};
-    f32 bs = roundf(S(30)), by = area.y + roundf((tb - bs) * 0.5f), gap = roundf(S(2));
+    f32 width = nav_available_width(area.x, nav_y, area.w);
+    ly->toolbar = (Rect){area.x, nav_y, width, tb};
+    f32 bs = roundf(S(30)), by = nav_y + roundf((tb - bs) * 0.5f), gap = roundf(S(2));
     ly->back = (Rect){area.x + roundf(S(8)), by, bs, bs};
     ly->fwd = (Rect){ly->back.x + bs + gap, by, bs, bs};
     ly->up = (Rect){ly->fwd.x + bs + gap, by, bs, bs};
     f32 px = ly->up.x + bs + roundf(S(8));
-    ly->morebtn = (Rect){area.x + area.w - bs - roundf(S(8)), by, bs, bs};
+    ly->morebtn = (Rect){area.x + width - bs - roundf(S(8)), by, bs, bs};
     ly->filterbtn = (Rect){ly->morebtn.x - bs - gap, by, bs, bs};
     ly->sortbtn = (Rect){ly->filterbtn.x - bs - gap, by, bs, bs};
     // A narrow split keeps the path usable: back / forward / up go first (their keys and the mouse's side buttons
     // still work), then sort (it stays in the folder's menu), then filter and the menu (a right click on empty space).
     f32 path_right = ly->sortbtn.x - roundf(S(4));
-    if (area.w < S(240) || path_right - px < S(80)) {
+    if (width < S(240) || path_right - px < S(80)) {
         ly->back = ly->fwd = ly->up = (Rect){0};
         px = area.x + roundf(S(8));
     }
-    if (area.w < S(120) || path_right - px < S(80)) {
+    if (width < S(120) || path_right - px < S(80)) {
         ly->sortbtn = (Rect){0};
         path_right = ly->filterbtn.x - roundf(S(4));
     }
-    if (area.w < S(80)) {
+    if (width < S(80)) {
         ly->morebtn = ly->filterbtn = (Rect){0};
-        path_right = area.x + area.w - roundf(S(8));
+        path_right = area.x + width - roundf(S(8));
     }
     ly->pathbar = (Rect){px, by, MAX(0.f, path_right - px), bs};
     f32 hh = p->view == VIEW_DETAILS && !pane_du_on(p) && !pane_snap_on(p) ? roundf(S(32)) : 0; // list/grid sort from the menu, no header
-    ly->header = (Rect){area.x, area.y + tb, area.w, hh};
-    ly->list = (Rect){area.x, area.y + tb + hh, area.w, area.h - tb - hh};
+    ly->header = (Rect){area.x, bands.content_y, area.w, hh};
+    ly->list = (Rect){area.x, bands.content_y + hh, area.w, area.h - (bands.content_y - area.y) - hh};
     ly->has_trashbar = pane_is_trash(p);
     if (ly->has_trashbar) {
         f32 tbh = roundf(S(44));
@@ -1091,30 +1152,36 @@ static void col_toggle(int id) {
 
 static void layout_panel(Panel *pn, Rect r) {
     pn->area = r;
-    f32 tb = roundf(S(38));
-    pn->bar = (Rect){r.x, r.y, r.w, tb};
-    f32 bw = roundf(S(26)), by = r.y + roundf(S(6));
+    TabBands bands = tab_bands(r.y, S(1.f), panel_ntabs(pn));
+    f32 tb = bands.tabs_h;
+    pn->bar = (Rect){r.x, bands.tabs_y, r.w, tb};
+    f32 bw = roundf(S(26)), by = bands.tabs_y + roundf(S(6));
     f32 right = r.x + r.w; // a panel at the top right ends its tabs before the window buttons
     if (A.r_wctl.w > 0 && r.y < 1 && right > A.r_wctl.x) right = MAX(r.x + S(140), A.r_wctl.x);
-    pn->splitbtn = (Rect){right - bw - roundf(S(6)), by, bw, bw};
+    f32 split_x = right - bw - roundf(S(6));
+    pn->splitbtn = tb ? (Rect){split_x, by, bw, bw} : (Rect){0};
     int n = panel_ntabs(pn);
     bool pills = A.tab_style == TABS_PILLS;
     f32 gap = pills ? roundf(S(4)) : 0; // (cards touch: the open one's flares cover the seams)
     f32 x0 = r.x + roundf(S(6));
-    f32 avail = pn->splitbtn.x - roundf(S(6)) - (bw + roundf(S(4))) - x0;
+    // Measure against the would-be split button even when the band is hidden: tabs_w decides whether a new tab fits.
+    f32 avail = split_x - roundf(S(6)) - (bw + roundf(S(4))) - x0;
     pn->tabs_w = avail;
     f32 tw = n ? MAX(roundf(S(48)), MIN(roundf(S(200)), roundf((avail - gap * (f32)(n - 1)) / (f32)n))) : 0;
     f32 group = n ? tw * (f32)n + gap * (f32)(n - 1) : 0;
     if (pills) x0 = MAX(x0, MIN(roundf(r.x + (right - r.x - group) * 0.5f), x0 + avail - group)); // centred, clear of + and split
-    Rect body = {r.x, r.y + tb, r.w, r.h - tb};
+    Rect body = {r.x, bands.content_y, r.w, r.h - (bands.content_y - r.y)};
+    pn->body = body;
     int k = 0;
+    f32 pill_h = MIN(tb - roundf(S(18)), roundf(S(28)));
+    f32 pill_y = bands.tabs_y + roundf((tb - pill_h) * 0.5f);
     for (int i = 0; i < A.ntabs; i++) {
         Tab *t = A.tabs[i];
         if (t->panel != pn) continue;
-        t->r = pills ? (Rect){x0 + k * (tw + gap), r.y + roundf(S(5)), tw, tb - roundf(S(10))}
-                     : (Rect){x0 + k * tw, r.y + roundf(S(6)), tw, tb - roundf(S(6))};
+        t->r = pills ? (Rect){x0 + k * (tw + gap), pill_y, tw, pill_h}
+                     : (Rect){x0 + k * tw, bands.tabs_y + roundf(S(6)), tw, tb - roundf(S(6))};
         k++;
-        Rect pb = body;
+        Rect pb = r; // layout_pane needs the whole panel so the navigation band stays inside its hit rect
         t->dock_r = t->dock_div = t->dock_x = (Rect){0, 0, 0, 0};
         if (t->dock_on && !t->term) { // the terminal panel takes the bottom (the folder keeps at least a little)
             f32 dh = MIN(roundf(S(A.dock_h)), roundf(body.h * 0.8f));
@@ -1126,10 +1193,15 @@ static void layout_panel(Panel *pn, Rect r) {
             t->dock_x = (Rect){t->dock_r.x + t->dock_r.w - xs - roundf(S(8)), t->dock_r.y + roundf(S(8)), xs, xs};
         }
         layout_pane(&t->pane[0], pb);
+        if (t->term) { // terminal content starts below both bands, not under the tabs
+            PaneLayout *ly = &t->pane[0].ly;
+            ly->area.y = bands.content_y;
+            ly->area.h = MAX(0.f, pb.y + pb.h - bands.content_y);
+        }
     }
     // + : a round button after the last tab, centred on the tab labels (clear of the active tab's flare)
-    f32 ps = roundf(S(26)), pcy = pills ? r.y + tb * 0.5f : r.y + roundf(S(6)) + (tb - roundf(S(6))) * 0.5f;
-    pn->plus = (Rect){MIN(x0 + group + roundf(S(10)), pn->splitbtn.x - ps - roundf(S(4))), roundf(pcy - ps * 0.5f), ps, ps};
+    f32 ps = roundf(S(26)), pcy = pills ? bands.tabs_y + tb * 0.5f : bands.tabs_y + roundf(S(6)) + (tb - roundf(S(6))) * 0.5f;
+    pn->plus = tb ? (Rect){MIN(x0 + group + roundf(S(10)), pn->splitbtn.x - ps - roundf(S(4))), roundf(pcy - ps * 0.5f), ps, ps} : (Rect){0};
 }
 
 static void layout_node(Node *n, Rect r) {
@@ -1860,14 +1932,14 @@ static void shadow_draw(void) {
     SDL_SetRenderViewport(A.ren, &(SDL_Rect){m, m, A.W, A.H});
 }
 
-// The parts of the title bar that move the window: the logo, the strip above the preview, and the tab strips
-// along the top edge outside their tabs and buttons.
+// The parts of the title bar that move the window: the logo, the strip above the preview, and the empty part of
+// each tab band outside its tabs and buttons (the band follows the tab position setting).
 static bool titlebar_drag_at(f32 x, f32 y) {
     if (!A.csd || in_rect(A.r_wctl, x, y)) return false;
     if (in_rect(A.r_brand, x, y) || in_rect(A.r_wstrip, x, y)) return true;
     for (int i = 0; i < A.npanels; i++) {
         Panel *pn = A.panels[i];
-        if (pn->bar.y > 0.5f || !in_rect(pn->bar, x, y)) continue;
+        if (!in_rect(pn->bar, x, y)) continue;
         if (in_rect(pn->plus, x, y) || in_rect(pn->splitbtn, x, y)) return false;
         for (int k = 0; k < A.ntabs; k++)
             if (A.tabs[k]->panel == pn && in_rect(A.tabs[k]->r, x, y)) return false;
@@ -8664,10 +8736,13 @@ static bool drag_all_dirs(Pane *p) {
     return true;
 }
 
-// Thin strip along a panel's edges (below its tab bar) where dragged folders open in a new split; the rest of
+// The folder area of a panel: below both bands when tabs are above, or below the navigation band when they are not.
+static Rect panel_content_rect(Panel *pn) { return pn->body; }
+
+// Thin strip along a panel's edges (below its bands) where dragged folders open in a new split; the rest of
 // the panel stays a normal drop. ZONE_* or -1.
 static int panel_edge_zone(Panel *pn, f32 x, f32 y) {
-    Rect a = {pn->area.x, pn->bar.y + pn->bar.h, pn->area.w, pn->area.h - pn->bar.h};
+    Rect a = panel_content_rect(pn);
     if (!in_rect(a, x, y)) return -1;
     f32 bw = MIN(S(44), a.w * 0.15f), bh = MIN(S(44), a.h * 0.15f);
     f32 d[4] = {(x - a.x) / bw, (a.x + a.w - x) / bw, (y - a.y) / bh, (a.y + a.h - y) / bh};
@@ -12712,6 +12787,8 @@ static void preview_update(void) {
     }
 }
 
+static bool g_caret_anim; // set by text-field drawing when caret blink/slide needs repaint
+
 #include "text_pointer.c"
 #include "input.c"
 
@@ -12839,7 +12916,12 @@ static void window_close_requested(void) {
 }
 
 #include "term.c"
+// integration.c reacts to desktop icon-theme changes, and Options (ui_tools.c / options.c) applies the app icon before
+// these two are defined below.
+static void window_icon_update(void);
+static void app_icon_sync(void);
 #include "integration.c"
+
 #include "ui_tools.c"
 #include "picker.c"
 
@@ -12865,7 +12947,7 @@ static bool menu_autoscrolling(void) {
 }
 
 static bool animating(void) {
-    if (band_autoscrolling() || menu_autoscrolling()) return true;
+    if (g_caret_anim || band_autoscrolling() || menu_autoscrolling()) return true;
     if (fabsf(A.side_scroll_target - A.side_scroll) > 0.5f || glide_on() || wheel_busy()) return true;
     for (int i = 0; i < A.npanels; i++) {
         Pane *p = A.panels[i]->cur ? &A.panels[i]->cur->pane[0] : NULL;
@@ -12874,8 +12956,12 @@ static bool animating(void) {
     return false;
 }
 
+// Selftest-only draw order probe: a later sequence number means the call painted over the earlier one.
+static int g_draw_seq, g_sheet_seq, g_toast_seq;
+
 static void frame_draw(void) {
     g_text_field_count = 0; // (each te_draw records its field again)
+    g_caret_anim = false;
     draw_clip(NULL);
     fit_tip_begin(A.mx, A.my);
     g_alpha = 1.f;
@@ -12921,12 +13007,12 @@ static void frame_draw(void) {
     draw_preview();
     draw_sidebar();
     draw_brand();
+    draw_sidebar_edge();
     draw_window_controls();
     draw_status();
     draw_ops();
     draw_queue();
     upd_card_draw();
-    draw_toast();
     draw_drag_badge();
     draw_tab_drop();
     draw_quicklook();
@@ -12937,7 +13023,10 @@ static void frame_draw(void) {
     draw_palette();
     A.mouse_in = mouse_in && !A.dlg.open;
     fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
+    if (A.selftest) g_sheet_seq = ++g_draw_seq;
     sheet_draw();
+    if (A.selftest) g_toast_seq = ++g_draw_seq;
+    draw_toast(); // keep feedback visible above an open sheet
     A.mouse_in = mouse_in;
     fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     draw_dialog();
@@ -12952,8 +13041,8 @@ static void frame_draw(void) {
     cursor_apply();
 }
 
-static void window_icon_update(void) { // the logo in the accent colour (X11 / taskbars without the .desktop icon)
-    u8 *logo = icon_raster(ICON_LOGO, 128, 128);
+static void window_icon_update(void) { // the icon in effect (custom / File-Icon / Default) for X11 and taskbars
+    u8 *logo = app_icon_window_raster(128);
     if (!logo) return;
     SDL_Surface *ic = SDL_CreateSurfaceFrom(128, 128, SDL_PIXELFORMAT_RGBA32, logo, 128 * 4);
     if (ic) { SDL_SetWindowIcon(A.win, ic); SDL_DestroySurface(ic); }
@@ -12966,44 +13055,117 @@ static void window_icon_update(void) { // the logo in the accent colour (X11 / t
 // panels keep using a theme icon they once found (LXQt's taskbar), and without a package (AppImage) a deleted
 // one leaves them with none: the next icon-theme change turned the button into the app's name.
 // dh: the data folder ($XDG_DATA_HOME).
-static bool app_icon_write(const char *dh, u32 accent) {
-    char dir[PATH_MAX], path[PATH_MAX + 32];
+static u8 *app_icon_read(const char *path, size_t *len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    u8 *buf = xmalloc(4u * 1024 * 1024);
+    size_t n = fread(buf, 1, 4u * 1024 * 1024, f);
+    fclose(f);
+    if (!n) { free(buf); return NULL; }
+    *len = n;
+    return buf;
+}
+
+// Binary artwork can't go through write_file_atomic() (it stops at NUL), so copy it with an atomic rename.
+static bool app_icon_install(const char *src, const char *dst, bool *changed) {
+    size_t n = 0, on = 0;
+    u8 *data = app_icon_read(src, &n), *old = app_icon_read(dst, &on);
+    if (!data) { free(old); return false; }
+    *changed = !old || on != n || memcmp(old, data, n) != 0;
+    free(old);
+    bool ok = true;
+    if (*changed) {
+        char tmp[PATH_MAX + 80];
+        snprintf(tmp, sizeof tmp, "%s.tmp", dst);
+        FILE *f = fopen(tmp, "wb");
+        ok = f && fwrite(data, 1, n, f) == n;
+        if (f) ok = fclose(f) == 0 && ok;
+        if (ok) ok = rename(tmp, dst) == 0;
+    }
+    free(data);
+    return ok;
+}
+
+static char g_app_icon_installed[PATH_MAX]; // last custom artwork installed, so File-Icon can take it away again
+
+// File-Icon mode: remove both overrides. g_app_icon_installed is empty after a restart, so check the files themselves:
+// a recoloured built-in copy from an earlier Default session must go too. Callers want the theme folder timestamp bumped.
+static bool app_icon_remove_override(const char *dh) {
+    char dir[PATH_MAX], svg[PATH_MAX + 48], png[PATH_MAX + 48];
     snprintf(dir, sizeof dir, "%s/icons/hicolor", dh);
-    snprintf(path, sizeof path, "%s/scalable/apps/dev.fileexplorer.svg", dir);
-    bool changed;
-    if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(path, F_OK)) return false;
-    {
+    snprintf(svg, sizeof svg, "%s/scalable/apps/dev.fileexplorer.svg", dir);
+    snprintf(png, sizeof png, "%s/256x256/apps/dev.fileexplorer.png", dir);
+    bool svg_exists = access(svg, F_OK) == 0, png_exists = access(png, F_OK) == 0;
+    if (!svg_exists && !png_exists) return false;
+    if (svg_exists) unlink(svg);
+    if (png_exists) unlink(png);
+    g_app_icon_installed[0] = 0;
+    utimensat(AT_FDCWD, dir, NULL, 0);
+    return true;
+}
+
+static bool app_icon_write_ex(const char *dh, u32 accent, const char *custom, bool write_builtin) {
+    char dir[PATH_MAX], svg[PATH_MAX + 48], png[PATH_MAX + 48];
+    snprintf(dir, sizeof dir, "%s/icons/hicolor", dh);
+    snprintf(svg, sizeof svg, "%s/scalable/apps/dev.fileexplorer.svg", dir);
+    snprintf(png, sizeof png, "%s/256x256/apps/dev.fileexplorer.png", dir);
+    bool changed = false;
+    if (custom && *custom && app_icon_path_ok(custom)) {
+        bool is_svg = strcasecmp(strrchr(custom, '.'), ".svg") == 0;
+        char apps[PATH_MAX + 48];
+        snprintf(apps, sizeof apps, "%s/%s/apps", dir, is_svg ? "scalable" : "256x256");
+        mkdir_p(apps, 0755);
+        if (app_icon_install(custom, is_svg ? svg : png, &changed)) {
+            snprintf(g_app_icon_installed, sizeof g_app_icon_installed, "%s", custom);
+            if (changed) unlink(is_svg ? png : svg); // a stale icon in the other format would win over this one
+        }
+    } else if (!write_builtin) {
+        return app_icon_remove_override(dh);
+    } else {
+        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(svg, F_OK)) return changed;
         static const char from[] = "width=\"624\" height=\"456\" viewBox=\"0 0 624 456\"";
         const char *at = strstr(g_logo_svg, from);
-        if (!at) return false;
-        char *svg = xmalloc(sizeof g_logo_svg + 64);
-        snprintf(svg, sizeof g_logo_svg + 64, "%.*swidth=\"256\" height=\"256\" viewBox=\"0 -84 624 624\"%s\n",
+        if (!at) return changed;
+        char *src = xmalloc(sizeof g_logo_svg + 64);
+        snprintf(src, sizeof g_logo_svg + 64, "%.*swidth=\"256\" height=\"256\" viewBox=\"0 -84 624 624\"%s\n",
                  (int)(at - g_logo_svg), g_logo_svg, at + strlen(from)); // square, like packaging/dev.fileexplorer.svg
-        logo_recolor(svg, accent);
-        changed = !file_equals(path, svg);
-        if (changed) {
-            char apps[PATH_MAX + 32];
+        logo_recolor(src, accent);
+        if (!file_equals(svg, src)) {
+            char apps[PATH_MAX + 48];
             snprintf(apps, sizeof apps, "%s/scalable/apps", dir);
             mkdir_p(apps, 0755);
-            changed = write_file_atomic(path, svg);
+            if (write_file_atomic(svg, src)) changed = true;
         }
-        free(svg);
+        free(src);
     }
     if (changed) utimensat(AT_FDCWD, dir, NULL, 0); // icon caches watch the theme folder's time
     return changed;
 }
 
+static bool app_icon_write(const char *dh, u32 accent) { return app_icon_write_ex(dh, accent, NULL, true); }
+
 // Once the accent has settled (not on every step of trying colours in Settings), outside tests.
 static void app_icon_sync(void) {
     static u32 done = 0xFFFFFFFF, seen;
     static u64 since;
-    if (A.selftest || A.screenshot || COL_ACCENT == done) return;
-    if (COL_ACCENT != seen) { seen = COL_ACCENT; since = now_ns(); return; }
-    if (now_ns() - since < 1500000000ull) return;
+    static char applied[PATH_MAX];
+    static AppIconMode applied_mode = APP_ICON_DEFAULT;
+    static bool first = true;
+    if (A.selftest || A.screenshot) return;
+    bool path_changed = strcmp(g_app_icon_path, applied) != 0 || first || applied_mode != g_app_icon_mode;
+    if (!path_changed && COL_ACCENT == done) return;
+    if (!path_changed) {
+        if (COL_ACCENT != seen) { seen = COL_ACCENT; since = now_ns(); return; }
+        if (now_ns() - since < 1500000000ull) return;
+    }
     done = COL_ACCENT;
+    first = false;
+    applied_mode = g_app_icon_mode;
+    snprintf(applied, sizeof applied, "%s", g_app_icon_path);
     char dh[PATH_MAX];
     data_home(dh, sizeof dh);
-    app_icon_write(dh, done);
+    bool custom = g_app_icon_mode == APP_ICON_CUSTOM;
+    app_icon_write_ex(dh, done, custom ? g_app_icon_path : NULL, g_app_icon_mode == APP_ICON_DEFAULT);
 }
 
 #ifdef FE_DEMO
@@ -13016,6 +13178,7 @@ static void frame(void) {
     icons_sync_theme();
     if (g_logo_changed) { g_logo_changed = false; window_icon_update(); }
     app_icon_sync();
+    if (g_app_icon_preview_changed) { g_app_icon_preview_changed = false; A.redraw = true; }
     check_conflicts();
     ops_gc();
     ops_schedule();

@@ -21,11 +21,28 @@ on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
 strip and toolbar), the preview panel and the status bar the file area's background; the lines between them stay.
 `show_separators=0` (Options -> Appearance -> Separator lines, on by default) leaves out the lines between the sidebar,
 header, column headings, preview, terminal panel and status bar; an edge you can drag still lights up on hover.
+`navigation_selection_opacity` (Options -> Appearance -> Navigation selection opacity, 40 by default) sets the accent
+mix, from 0 to 100 in steps of 5, for selected sidebar rows, selected Options categories and the active pill tab.
+`navigation_selector_mark=1` (Options -> Appearance -> Toggle navigation selector mark, On by default) shows the small
+accent edge on selected sidebar and Options navigation rows; off keeps the selection fill without that mark. The file
+list's own selection colours and hover tints are unchanged.
 `sidebar_brightness`, `header_brightness`, `main_brightness` (the file area), `preview_brightness` and
 `status_brightness` (Options -> Appearance -> Surfaces, 0 by default) make that part darker (down to -30) or lighter
 (up to 30, in percent) than the theme's own colour.
+`pathbar_brightness` and `searchbar_brightness` (0 by default, -30..30) move only the path field/pill enclosure and
+the folder search field respectively, independently of the header strip. `transparent_pathbar=1` (off by default)
+removes only the path field's fill, leaving a faint outline and the accent focus outline while editing; pills and the
+search field stay filled. These keys were added after `settings_version` and default to the theme colour on older
+config files: no migration runs, so existing appearances are unchanged.
 `tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a
 box on the tab strip, instead of the open tab as a card joining the folder below it.
+`tab_style=cards|pills` (Options -> Appearance -> Tab style, `cards` by default) picks one of two tab modes: Classic tabs
+(`cards`) put the open tab as a card joining the folder below it, above the navigation bar; Pills (`pills`) draw rounded
+tabs centred in a box on a strip below the navigation bar. The placement is part of the mode. The pills row uses the
+file-area background and a higher-contrast enclosure, with extra padding and a slightly taller centred row.
+`hide_single_tab=1` (Options -> Behaviour -> Hide tab bar with one tab, off by default) hides the tab band while only one
+tab is open, giving that row back to the folder; open another tab and the band returns, and new tabs still fit.
+
 `title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling
 compositors included, so it looks the same everywhere: minimise / maximise / close at the end of the tab strip; drag
 the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.
@@ -146,8 +163,9 @@ just updates and what you typed stays. Other shells, or one whose startup files 
 a new shell; `terminal_panel_height` is its height. Terminal tabs: Shift+F4 opens a terminal tab in the current
 folder (an SSH session in the same remote folder for SFTP connections); right-click for a local or an external terminal. The external
 terminal is `$TERMINAL`, else xdg-terminal-exec, else the desktop's own; Options > Integration > Terminal app picks one of
-the terminals installed instead (`external_terminal=`; listed are the usual ones on `$PATH` and those of terminal apps'
-`.desktop` entries), and the menu then says "Open in" its name. Terminal tabs run your shell and look like your default
+the terminals installed instead, or type an executable name or absolute path (no arguments) in Terminal executable and
+press Apply; Default clears it back to Automatic (`external_terminal=`; the list holds the usual ones on `$PATH` and
+those of terminal apps' `.desktop` entries). Either way the menu says "Open in" its name. Terminal tabs run your shell and look like your default
 terminal (xdg-terminal-exec's choice, else $TERMINAL): font, colours, padding, cursor and scrollback are read from
 foot, kitty, Alacritty or Ghostty config (the status bar names it: "colours and font from foot") and followed live (Options > Appearance > Terminal appearance); a font with
 programming ligatures (Fira Code, JetBrains Mono...) shows them, kept to the cell grid. Ctrl+Shift+C/V
@@ -156,6 +174,21 @@ copy and paste, Shift+PageUp/PageDown scroll back, Ctrl+Shift+W closes, Ctrl+Tab
 File icons > **System** (`icon_theme=System`) uses the desktop's icon theme for files, folders and the Trash: the one
 the settings portal names (else KDE's or GTK's settings), followed when it changes. The bundled icon shows until the
 desktop's is there, and wherever its theme has none.
+
+`app_icon_mode=custom|file_icon|default` (Options -> Appearance -> App icon, directly under File icons) selects
+the window and launcher icon. `app_icon` (empty by default) remembers the absolute `.svg`/`.png` path typed in that
+row. The row previews the icon in effect with no background chip, and its active button is primary. **Apply** uses the
+typed path (SVG keeps its own colours) and selects Custom; **File-Icon** uses the folder icon of the currently selected
+File icons set and follows changes to that setting live; **Default** clears `app_icon`, shows the `Default` placeholder
+in the field, and restores the accent-coloured built-in logo. File-Icon installs no launcher override and removes one
+this app previously wrote; Default restores the recoloured built-in artwork. Older settings with a non-empty
+`app_icon` are treated as Custom, an empty one as Default, and a legacy `app_icon_mode=system` as File-Icon.
+
+`title_icon` (Options -> Appearance -> Title bar icon, directly below App icon, empty by default) is an
+absolute `.svg` or `.png` path that overrides the icon at the left of the title bar. Its row previews the icon in effect
+without a background chip and has **Apply** and **Default** buttons; Default clears the path and restores the small
+built-in logo, while the typed field keeps its path until you press Default. This override follows the **Logo** toggle
+below it: with Logo off, no icon is drawn in that slot.
 
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`

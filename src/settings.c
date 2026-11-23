@@ -50,6 +50,7 @@ static void settings_defaults(void) {
     A.brand_name = BRAND_APP;
     A.brand_text[0] = 0;
     A.tab_style = TABS_CARDS;
+    g_hide_single_tab = false;
     A.ig_prev_fm[0] = 0;
     A.ig_fm1 = A.ig_asked = false;
     A.ig_check_updates = true;
@@ -75,6 +76,7 @@ static void settings_defaults(void) {
     A.view_per_folder = false;
     A.def_group = GROUP_NONE;
     snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "Material");
+    g_app_icon_mode = APP_ICON_DEFAULT;
     A.alt_rows = false;
     A.size_bars = true;
     A.load_times = true;
@@ -91,6 +93,9 @@ static void settings_defaults(void) {
     g_folders_first = true;
     g_separators = true;
     g_scroll_custom = 0;
+    g_transparent_pathbar = false;
+    g_navigation_selection_opacity = 40;
+    g_nav_selector_mark = true;
     memset(g_surface_bright, 0, sizeof g_surface_bright);
     A.ui_font[0] = 0;
     A.font_size = 13;
@@ -193,6 +198,7 @@ static void settings_load(void) {
     FILE *f = fopen(path, "r");
     if (!f) { g_settings_file_version = SETTINGS_VERSION; return; }
     char line[PATH_MAX * 2 + 64];
+    bool saw_app_icon_mode = false;
     while (fgets(line, sizeof line, f)) {
         line[strcspn(line, "\r\n")] = 0;
         if (!line[0] || line[0] == '#') continue;
@@ -318,6 +324,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "brand_name")) A.brand_name = !strcmp(v, "host") ? BRAND_HOST : !strcmp(v, "custom") ? BRAND_CUSTOM : !strcmp(v, "hidden") ? BRAND_HIDDEN : BRAND_APP;
         else if (!strcmp(k, "brand_text")) snprintf(A.brand_text, sizeof A.brand_text, "%s", v);
         else if (!strcmp(k, "tab_style")) A.tab_style = !strcmp(v, "pills") ? TABS_PILLS : TABS_CARDS;
+        else if (!strcmp(k, "hide_single_tab")) g_hide_single_tab = atoi(v) != 0;
         else if (!strcmp(k, "alt_rows")) A.alt_rows = atoi(v);
         else if (!strcmp(k, "load_times")) A.load_times = atoi(v);
         else if (!strcmp(k, "verify_copies")) A.verify_copies = atoi(v);
@@ -329,17 +336,26 @@ static void settings_load(void) {
         else if (!strcmp(k, "view_per_folder")) A.view_per_folder = atoi(v);
         else if (!strcmp(k, "group")) A.def_group = CLAMP(atoi(v), 0, GROUP_COUNT - 1);
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
+        else if (!strcmp(k, "app_icon_mode")) { g_app_icon_mode = app_icon_mode_parse(v); saw_app_icon_mode = true; }
+        else if (!strcmp(k, "app_icon")) { if (app_icon_path_ok(v)) snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", v); }
+        else if (!strcmp(k, "title_icon")) { if (app_icon_path_ok(v)) snprintf(g_title_icon_path, sizeof g_title_icon_path, "%s", v); }
         else if (!strcmp(k, "size_bars")) A.size_bars = atoi(v);
         else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v);
         else if (!strcmp(k, "theme_light") || !strcmp(k, "theme_dark")) snprintf(g_theme_pick[k[6] == 'd'], sizeof g_theme_pick[0], "%s", v);
         else if (!strcmp(k, "show_separators")) g_separators = atoi(v);
+        else if (!strcmp(k, "navigation_selection_opacity")) g_navigation_selection_opacity = CLAMP(atoi(v), 0, 100);
+        else if (!strcmp(k, "navigation_selector_mark")) g_nav_selector_mark = atoi(v) != 0;
         else if (!strcmp(k, "system_accent")) g_accent_desktop = atoi(v);
         else if (!strcmp(k, "scrollbar_color")) { u32 c; if (scroll_color_parse(v, &c)) g_scroll_custom = c; }
         else if (!strcmp(k, "sidebar_brightness")) g_surface_bright[SURF_SIDEBAR] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "header_brightness")) g_surface_bright[SURF_HEADER] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "main_brightness")) g_surface_bright[SURF_FILES] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "preview_brightness")) g_surface_bright[SURF_PREVIEW] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "popup_brightness")) g_surface_bright[SURF_POPUP] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "status_brightness")) g_surface_bright[SURF_STATUS] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "pathbar_brightness")) g_surface_bright[SURF_PATHBAR] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "searchbar_brightness")) g_surface_bright[SURF_SEARCHBAR] = CLAMP(atoi(v), -30, 30);
+        else if (!strcmp(k, "transparent_pathbar")) g_transparent_pathbar = atoi(v) != 0;
         else if (!strcmp(k, "theme")) snprintf(A.theme_name, sizeof A.theme_name, "%s", v);
         else if (!strcmp(k, "accent")) {
             u32 c;
@@ -386,6 +402,7 @@ static void settings_load(void) {
         else settings_keep_other(k, v);
     }
     fclose(f);
+    if (!saw_app_icon_mode) g_app_icon_mode = g_app_icon_path[0] ? APP_ICON_CUSTOM : APP_ICON_DEFAULT;
     if (g_settings_file_version < SETTINGS_VERSION) {
         char bak[PATH_MAX + 8];
         snprintf(bak, sizeof bak, "%s.bak", path);
@@ -560,6 +577,9 @@ static void settings_write(FILE *f) {
     fprintf(f, "external_terminal=%s\n", g_external_terminal);
     for (int i = 0; i < A.nservers; i++) fprintf(f, "server=%s\t%s%s%s\n", A.servers[i].name, A.servers[i].uri, A.servers[i].icon[0] ? "\t" : "", A.servers[i].icon);
     fprintf(f, "icon_theme=%s\n", icon_theme_name(g_icon_theme));
+    fprintf(f, "app_icon_mode=%s\n", app_icon_mode_name(g_app_icon_mode));
+    fprintf(f, "app_icon=%s\n", g_app_icon_path);
+    fprintf(f, "title_icon=%s\n", g_title_icon_path);
     fprintf(f, "theme=%s\nfont=%s\nfont_size=%d\nrow_spacing=%d\nsmooth_scroll=%d\n",
             g_nthemes ? g_themes[g_theme_cur].name : A.theme_name, A.ui_font, A.font_size, A.row_spacing, A.smooth_scroll);
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
@@ -570,8 +590,10 @@ static void settings_write(FILE *f) {
     fprintf(f, "theme_light=%s\ntheme_dark=%s\n", g_theme_pick[0], g_theme_pick[1]);
     if (g_scroll_custom) fprintf(f, "scrollbar_color=#%06X\n", g_scroll_custom & 0xFFFFFF);
     else fprintf(f, "scrollbar_color=auto\n");
-    fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\n",
-            g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_STATUS]);
+    fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\npopup_brightness=%d\nstatus_brightness=%d\npathbar_brightness=%d\nsearchbar_brightness=%d\ntransparent_pathbar=%d\n",
+            g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_POPUP], g_surface_bright[SURF_STATUS],
+            g_surface_bright[SURF_PATHBAR], g_surface_bright[SURF_SEARCHBAR], g_transparent_pathbar);
+    fprintf(f, "navigation_selection_opacity=%d\nnavigation_selector_mark=%d\n", g_navigation_selection_opacity, g_nav_selector_mark);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
     fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",
@@ -589,6 +611,7 @@ static void settings_write(FILE *f) {
     static const char *brand_names[] = {"app", "host", "custom", "hidden"}; // BRAND_*
     fprintf(f, "brand_name=%s\nbrand_text=%s\n", brand_names[CLAMP(A.brand_name, 0, BRAND_HIDDEN)], A.brand_text);
     fprintf(f, "tab_style=%s\n", A.tab_style == TABS_PILLS ? "pills" : "cards");
+    fprintf(f, "hide_single_tab=%d\n", g_hide_single_tab);
     fprintf(f, "dim_inactive=%d\nalt_rows=%d\nsize_bars=%d\nload_times=%d\ncolumns=", A.dim_inactive, A.alt_rows, A.size_bars, A.load_times);
     for (int i = 0; i < A.ncols; i++) {
         int c = A.cols[i];
