@@ -12670,7 +12670,18 @@ static void pane_set_size(Pane *p, int px) {
 static void pane_size_step(Pane *p, int dir) {
     if (pane_du_on(p) || pane_snap_on(p)) return;
     if (p->view == VIEW_GRID && dir < 0 && pane_size(p) <= g_grid_px[0]) {
+        p->listv_px = A.def_listv_icon = g_list_px[(int)ARRAY_COUNT(g_list_px) - 1];
         set_zoom_level(p, 1); // smallest grid -> list view
+        return;
+    }
+    if (p->view == VIEW_LIST && dir < 0 && pane_size(p) <= g_list_px[0]) {
+        p->list_px = A.def_list_icon = g_list_px[0];
+        set_zoom_level(p, 0); // smallest list -> details view
+        return;
+    }
+    if (p->view == VIEW_DETAILS && dir > 0 && pane_size(p) >= g_list_px[(int)ARRAY_COUNT(g_list_px) - 1]) {
+        p->listv_px = A.def_listv_icon = g_list_px[0];
+        set_zoom_level(p, 1); // largest details -> list view
         return;
     }
     if (p->view == VIEW_LIST && dir > 0 && pane_size(p) >= g_list_px[(int)ARRAY_COUNT(g_list_px) - 1]) {
