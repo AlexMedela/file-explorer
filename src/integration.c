@@ -794,11 +794,12 @@ static void ig_first_run(void) {
                 b, 2, 0, 1, NULL, ig_ask_cb, NULL);
 }
 
-// --- updates (Options > Updates: the AppImage updates itself, packages come with the system's updates) -------------
+// --- updates (Options > Updates: only the AppImage updates itself, everything else is left to the package manager) --
 // At most once a day, in the background, asks GitHub for the latest release (curl or wget, whichever is there). A
 // newer one shows a card once (bottom right); "Update now" downloads the AppImage next to this one, checks it against
-// the release's SHA-256 and swaps it in, so the next start runs it ("Restart now" does that at once). Other installs
-// can check by hand and are told how they update. Never in self-tests.
+// the release's SHA-256 and swaps it in, so the next start runs it ("Restart now" does that at once). Any other copy
+// never asks GitHub (its package manager brings new versions and checks them); makepkg / source builds are told the
+// command to run. Never in self-tests.
 
 #define IG_RELEASES "https://github.com/AlexMedela/file-explorer/releases"
 #if defined(__x86_64__)
@@ -809,7 +810,7 @@ static void ig_first_run(void) {
 #define UPD_ARCH "unknown"
 #endif
 
-enum { UK_SOURCE, UK_APPIMAGE, UK_ARCH, UK_DEB, UK_RPM }; // how this copy was installed
+enum { UK_PACKAGE, UK_APPIMAGE, UK_ARCH, UK_SOURCE }; // how this copy was installed
 enum { UPD_IDLE, UPD_CHECKING, UPD_LATEST, UPD_AVAILABLE, UPD_DOWNLOADING, UPD_READY, UPD_FAILED };
 
 static struct {
@@ -890,24 +891,23 @@ static bool upd_sha256_file(const char *path, char out[65]) {
     return true;
 }
 
-// How this copy got here, so it can say how it updates. Packages are found by their database knowing about us.
+// How this copy got here, so it can say how it updates: the AppImage, a build in a checkout (build/ next to build.sh),
+// makepkg (pacman knows us: there's no Arch repository), else a package (apt, dnf, Portage, Nix... whichever).
 static int upd_kind(void) {
-    const char *k = getenv("FE_UPDATE_KIND"); // (tests, screenshots: appimage, arch, deb, rpm, source)
-    if (k) return !strcmp(k, "appimage") ? UK_APPIMAGE : !strcmp(k, "arch") ? UK_ARCH : !strcmp(k, "deb") ? UK_DEB
-                 : !strcmp(k, "rpm") ? UK_RPM : UK_SOURCE;
+    const char *k = getenv("FE_UPDATE_KIND"); // (tests, screenshots: appimage, arch, source, package)
+    if (k) return !strcmp(k, "appimage") ? UK_APPIMAGE : !strcmp(k, "arch") ? UK_ARCH : !strcmp(k, "source") ? UK_SOURCE : UK_PACKAGE;
     static int kind = -1;
     if (kind >= 0) return kind;
-    kind = UK_SOURCE;
-    char exe[PATH_MAX];
+    kind = UK_PACKAGE;
+    char exe[PATH_MAX], up[PATH_MAX + 32];
     ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
     exe[n > 0 ? n : 0] = 0;
+    char *slash = strrchr(exe, '/');
+    if (slash) *slash = 0;
+    snprintf(up, sizeof up, "%s/../build.sh", exe);
     if (appimage_path()) kind = UK_APPIMAGE;
-    else if (!strncmp(exe, "/usr/bin/", 9)) {
-        if (access("/var/lib/dpkg/info/file-explorer.list", F_OK) == 0 || access("/var/lib/dpkg/info/file-explorer:amd64.list", F_OK) == 0 ||
-            access("/var/lib/dpkg/info/file-explorer:arm64.list", F_OK) == 0) kind = UK_DEB;
-        else if (access("/var/lib/pacman/local", F_OK) == 0) kind = UK_ARCH; // (built with makepkg: no Arch repository)
-        else if (access("/var/lib/rpm", F_OK) == 0 || access("/usr/lib/sysimage/rpm", F_OK) == 0) kind = UK_RPM;
-    }
+    else if (n > 0 && access(up, F_OK) == 0) kind = UK_SOURCE;
+    else if (!strcmp(exe, "/usr/bin") && access("/var/lib/pacman/local", F_OK) == 0) kind = UK_ARCH;
     return kind;
 }
 
@@ -918,10 +918,9 @@ static const char *upd_how(void) {
     switch (upd_kind()) {
     case UK_APPIMAGE: return "AppImage: updates itself from GitHub";
     case UK_ARCH: return "makepkg: copy the command, run it in packaging/arch";
-    case UK_DEB: return "With your system updates (apt)";
-    case UK_RPM: return "With your system updates (dnf / zypper)";
+    case UK_SOURCE: return "Built from source: copy the command, run it in the checkout";
     }
-    return "Built from source: copy the command, run it in the checkout";
+    return "Updated by your package manager";
 }
 
 static const char *upd_how_cmd(void) {
@@ -979,9 +978,9 @@ static void *upd_check_thread(void *arg) {
     return NULL;
 }
 
-// Ask GitHub now. manual: from Options (shows the outcome there, not as a card).
+// Ask GitHub now (the AppImage only). manual: from Options (shows the outcome there, not as a card).
 static void upd_check_now(bool manual) {
-    if (A.selftest || A.screenshot || g_upd.state == UPD_CHECKING || g_upd.state == UPD_DOWNLOADING || g_upd.state == UPD_READY) return;
+    if (!upd_can_install() || A.selftest || A.screenshot || g_upd.state == UPD_CHECKING || g_upd.state == UPD_DOWNLOADING || g_upd.state == UPD_READY) return;
     g_upd.state = UPD_CHECKING;
     g_upd.manual = manual;
     pthread_t t;
@@ -991,7 +990,7 @@ static void upd_check_now(bool manual) {
 
 // At start: once a day, AppImage only (packages leave updating to the system).
 static void ig_update_check(void) {
-    if (!appimage_path() || !A.ig_check_updates || A.selftest || A.screenshot) return;
+    if (!upd_can_install() || !A.ig_check_updates || A.selftest || A.screenshot) return;
     if ((i64)time(NULL) - A.ig_update_checked < 24 * 3600) return;
     upd_check_now(false);
 }
@@ -1161,8 +1160,7 @@ static const char *upd_status(void) {
     case UPD_CHECKING: return "Asking GitHub for the newest version\xE2\x80\xA6";
     case UPD_LATEST: return "You have the newest version";
     case UPD_AVAILABLE:
-        if (upd_can_install()) snprintf(buf, sizeof buf, "%s is available%s%s%s", v, sz[0] ? " (" : "", sz, sz[0] ? ")" : "");
-        else snprintf(buf, sizeof buf, "%s is out: see How it updates", v);
+        snprintf(buf, sizeof buf, "%s is available%s%s%s", v, sz[0] ? " (" : "", sz, sz[0] ? ")" : "");
         return buf;
     case UPD_DOWNLOADING:
         if (g_upd.size > 0) snprintf(buf, sizeof buf, "Downloading %s\xE2\x80\xA6 %d%% of %s", v, (int)(g_upd.got * 100 / g_upd.size), sz);
@@ -1171,20 +1169,20 @@ static const char *upd_status(void) {
     case UPD_READY: snprintf(buf, sizeof buf, "%s is installed: restart to use it", v); return buf;
     case UPD_FAILED: return g_upd.err;
     }
-    if (!A.ig_update_checked) return upd_can_install() ? upd_how() : "Not checked yet";
+    if (!upd_can_install() || !A.ig_update_checked) return upd_how();
     upd_ago(A.ig_update_checked, ago, sizeof ago);
     snprintf(buf, sizeof buf, "Last checked %s", ago);
     return buf;
 }
 
-// The version row's button: label, and whether it's the main one / can be pressed.
+// The version row's button: label (NULL: none, outside the AppImage), and whether it's the main one / can be pressed.
 static const char *upd_button(bool *primary, bool *enabled) {
     *primary = false;
     *enabled = true;
+    if (!upd_can_install()) return NULL;
     switch (g_upd.state) {
     case UPD_CHECKING: *enabled = false; return "Checking\xE2\x80\xA6";
     case UPD_AVAILABLE:
-        if (!upd_can_install()) return "Check again";
         *primary = true;
         return "Update now";
     case UPD_DOWNLOADING: return "Cancel";
@@ -1194,11 +1192,9 @@ static const char *upd_button(bool *primary, bool *enabled) {
 }
 
 static void upd_button_press(void) {
+    if (!upd_can_install()) return;
     switch (g_upd.state) {
-    case UPD_AVAILABLE:
-        if (upd_can_install()) { g_upd.manual = true; upd_download(); }
-        else upd_check_now(true);
-        break;
+    case UPD_AVAILABLE: g_upd.manual = true; upd_download(); break;
     case UPD_DOWNLOADING: upd_cancel(); break;
     case UPD_READY: upd_restart(); break;
     case UPD_CHECKING: break;

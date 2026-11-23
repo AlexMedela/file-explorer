@@ -786,7 +786,7 @@ static void opt_brand_sync(void) {
 static bool opt_hidden(int id) {
     if (id == OPT_BRAND_TEXT) return A.brand_name != BRAND_CUSTOM;
     if (id == OPT_THEME_LIGHT || id == OPT_THEME_DARK) return !theme_is_system();
-    if (id == OPT_UPD_HOW) return upd_can_install(); // (the AppImage's own rows say it)
+    if (id == OPT_UPD_HOW) return !upd_how_cmd(); // (only a command to copy; the version row says how it updates)
     return (id == OPT_IG_UPDATES || id == OPT_UPD_AUTO) && !upd_can_install();
 }
 
