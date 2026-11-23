@@ -16,7 +16,7 @@ sudo apt update && sudo apt install file-explorer
 ```
 (Mint 23 / Pop!_OS 26.04: use `xUbuntu_26.04`.)
 
-## Fedora 43 / 44
+## Fedora 43 / 44 / 45
 ```sh
 sudo dnf config-manager addrepo --from-repofile="https://download.opensuse.org/repositories/home:AlexMedela/Fedora_$(rpm -E %fedora)/home:AlexMedela.repo"
 sudo dnf install file-explorer
