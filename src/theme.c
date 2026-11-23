@@ -106,6 +106,8 @@ static int g_surface_bright[SURF_COUNT];
 static bool g_transparent_pathbar; // Options: remove only the path field's fill (pills and search stay filled)
 static u32 g_scroll_custom; // Options: scrollbar colour; 0 = Auto, else 0x01000000 | rgb
 static bool g_separators = true; // Options: the lines between the window's parts (a hovered / dragged edge always shows)
+static int g_navigation_selection_opacity = 40; // Options: accent mix for sidebar / Options navigation / pill selections
+static bool g_nav_selector_mark = true;         // Options: show the small accent edge on navigation selections
 static u32 g_status_bg; // the status bar: the toolbar's colour, unless its brightness moves it
 // The desktop's look, read off the UI thread (integration.c, "desktop look") only while Theme or File icons is System.
 // accent and kde[]: 0 = none, else 0x01000000 | rgb; kde[]: KDE's colour scheme (all 0 elsewhere).
@@ -229,6 +231,11 @@ static u32 surface_foreground_color(u32 fg, u32 bg) {
     f32 fgl = rgb_luma(fg), bgl = rgb_luma(bg);
     if (fabsf(fgl - bgl) >= 0.45f) return fg;
     return bgl > 0.5f ? 0x111111u : 0xFFFFFFu;
+}
+
+// Navigation selections mix the surface with the accent; unselected/hover rows keep the faint 8% tint.
+static u32 navigation_surface_color(u32 bg, bool selected) {
+    return rgb_mix(bg, COL_ACCENT, selected ? (f32)g_navigation_selection_opacity / 100.f : 0.08f);
 }
 
 static int theme_find(const char *name);

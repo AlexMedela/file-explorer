@@ -92,6 +92,8 @@ static void settings_defaults(void) {
     g_separators = true;
     g_scroll_custom = 0;
     g_transparent_pathbar = false;
+    g_navigation_selection_opacity = 40;
+    g_nav_selector_mark = true;
     memset(g_surface_bright, 0, sizeof g_surface_bright);
     A.ui_font[0] = 0;
     A.font_size = 13;
@@ -334,6 +336,8 @@ static void settings_load(void) {
         else if (!strcmp(k, "unified_surfaces")) g_unified_surfaces = atoi(v);
         else if (!strcmp(k, "theme_light") || !strcmp(k, "theme_dark")) snprintf(g_theme_pick[k[6] == 'd'], sizeof g_theme_pick[0], "%s", v);
         else if (!strcmp(k, "show_separators")) g_separators = atoi(v);
+        else if (!strcmp(k, "navigation_selection_opacity")) g_navigation_selection_opacity = CLAMP(atoi(v), 0, 100);
+        else if (!strcmp(k, "navigation_selector_mark")) g_nav_selector_mark = atoi(v) != 0;
         else if (!strcmp(k, "system_accent")) g_accent_desktop = atoi(v);
         else if (!strcmp(k, "scrollbar_color")) { u32 c; if (scroll_color_parse(v, &c)) g_scroll_custom = c; }
         else if (!strcmp(k, "sidebar_brightness")) g_surface_bright[SURF_SIDEBAR] = CLAMP(atoi(v), -30, 30);
@@ -577,6 +581,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\nstatus_brightness=%d\npathbar_brightness=%d\nsearchbar_brightness=%d\ntransparent_pathbar=%d\n",
             g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_STATUS],
             g_surface_bright[SURF_PATHBAR], g_surface_bright[SURF_SEARCHBAR], g_transparent_pathbar);
+    fprintf(f, "navigation_selection_opacity=%d\nnavigation_selector_mark=%d\n", g_navigation_selection_opacity, g_nav_selector_mark);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
     fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",
