@@ -505,10 +505,10 @@ static void opt_terminal_path_apply(void) {
     while (*s == ' ' || *s == '\t') s++;
     size_t n = strlen(s);
     while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t')) s[--n] = 0;
-    if (!opt_terminal_path_valid(s)) { toast("Enter a single executable name or absolute path"); return; }
+    if (!opt_terminal_path_valid(s)) { toast("Didn't apply, fallback to Default"); return; }
     char *base = opt_terminal_basename(s);
     if (s[0] == '/' || strchr(s, '/')) {
-        if (!*base) { toast("Enter an executable path, not a directory"); return; }
+        if (!*base) { toast("Didn't apply, fallback to Default"); return; }
         memmove(s, base, strlen(base) + 1);
     }
     char old[PATH_MAX];
@@ -518,14 +518,15 @@ static void opt_terminal_path_apply(void) {
     const char *name = NULL;
     if (*s && !find_terminal(exe, sizeof exe, &name)) {
         snprintf(g_external_terminal, sizeof g_external_terminal, "%s", old);
-        toast("Terminal executable not found (name or path only, no arguments)");
+        toast("Didn't apply, fallback to Default");
+        te_set(&g_opt.terminal_path, g_external_terminal, (int)strlen(g_external_terminal), (int)strlen(g_external_terminal));
         return;
     }
     te_set(&g_opt.terminal_path, g_external_terminal, (int)strlen(g_external_terminal), (int)strlen(g_external_terminal));
     g_opt.terminal_path_focus = false;
     A.settings_dirty = true;
-    if (*s) toast("Terminal applied: Open in %s", path_basename(g_external_terminal));
-    else toast("Terminal set to Default");
+    if (*s) toast_success("Terminal applied: Open in %s", path_basename(g_external_terminal));
+    else toast_success("Terminal set to Default");
 }
 
 static void opt_button(int id) {
