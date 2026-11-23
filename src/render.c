@@ -3552,6 +3552,9 @@ static u32 *drag_badge_pixels(bool square, int *w, int *h) {
     return px;
 }
 
+// Selftest marker: toast and sheets share COL_POPUP, so a unique pixel is needed to prove the toast is on top.
+static Rect g_toast_probe;
+
 static void draw_toast(void) {
     if (!A.toast[0]) return;
     int len = (int)strlen(A.toast);
@@ -3574,6 +3577,11 @@ static void draw_toast(void) {
     for (int i = 0; i < nl; i++)
         draw_text_fit(f, x + padx, ty + i * lh, w - padx * 2, A.toast + st[i], ln[i], C(COL_TEXT), 0);
     g_alpha = 1.f;
+    if (A.selftest) {
+        f32 ms = MAX(1.f, S(4));
+        g_toast_probe = (Rect){x + S(3), y + S(3), ms, ms};
+        draw_rect(g_toast_probe.x, g_toast_probe.y, g_toast_probe.w, g_toast_probe.h, C(0x00FF00));
+    }
 }
 
 // The full text of the elided label under the resting mouse (draw.c), wrapped, next to the pointer.

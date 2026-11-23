@@ -2550,6 +2550,31 @@ static int run_selftest_m8(void) {
     st_wait();
     Pane *p = active_pane();
 
+    { // feedback is drawn above an open sheet, not hidden behind it
+        options_open();
+        ST_CHECK(sheet_open());
+        toast("Saved");
+        st_frames(1);
+        ST_CHECK(A.toast[0] && g_toast_seq > g_sheet_seq && g_sheet_seq > 0);
+        SDL_Surface *surf = SDL_RenderReadPixels(A.ren, NULL);
+        ST_CHECK(surf != NULL && g_toast_probe.w > 0);
+        if (surf && g_toast_probe.w > 0) {
+            int px = (int)(g_toast_probe.x + g_toast_probe.w * 0.5f), py = (int)(g_toast_probe.y + g_toast_probe.h * 0.5f);
+            ST_CHECK(px >= 0 && py >= 0 && px < surf->w && py < surf->h);
+            if (px >= 0 && py >= 0 && px < surf->w && py < surf->h) {
+                Uint32 v = *(Uint32 *)((Uint8 *)surf->pixels + py * surf->pitch + px * SDL_BYTESPERPIXEL(surf->format));
+                Uint8 r, g, b, a;
+                SDL_GetRGBA(v, SDL_GetPixelFormatDetails(surf->format), SDL_GetSurfacePalette(surf), &r, &g, &b, &a);
+                ST_CHECK(r == 0x00 && g == 0xFF && b == 0x00); // the toast's selftest marker survived the sheet
+            }
+            SDL_DestroySurface(surf);
+        }
+        st_shot("toast-above-sheet");
+        A.toast[0] = 0;
+        sheet_close();
+        st_frames(1);
+    }
+
     // MIME + apps
     ST_CHECK(!strcmp(mime_for_file("Photo.PNG", false), "image/png"));
     ST_CHECK(!strcmp(mime_for_file("a.tar.gz", false), "application/x-compressed-tar"));
