@@ -4772,8 +4772,15 @@ static int run_selftest_m9(void) {
         st_type("#f80");
         st_frames(1);
         st_shot("m9-scrollbar-field");
-        st_opt_click(st_opt_hit(HP_BUTTON, OPT_SCROLL_COLOR, 0)); // Apply
+        ST_CHECK(st_opt_hit(HP_EDIT_APPLY, OPT_SCROLL_COLOR, 0) && st_opt_hit(HP_EDIT_RESET, OPT_SCROLL_COLOR, 0));
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_SCROLL_COLOR, 0)); // Apply
         ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800) && T.scroll == 0xFF8800 && !strcmp(g_opt.scroll_color.buf, "#FF8800"));
+        st_opt_click(st_opt_hit(HP_EDIT_RESET, OPT_SCROLL_COLOR, 0)); // Default: back to the theme's own colour
+        ST_CHECK(!g_scroll_custom && !g_opt.scroll_color.buf[0] && T.scroll == g_theme_dark.scroll);
+        te_set(&g_opt.scroll_color, "#f80", 3, 3);
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_EDIT_APPLY, OPT_SCROLL_COLOR, 0));
+        ST_CHECK(g_scroll_custom == (0x01000000u | 0xFF8800));
         settings_save();
         settings_load();
         theme_apply();

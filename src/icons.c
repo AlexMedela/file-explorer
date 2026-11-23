@@ -515,7 +515,6 @@ static Glyph *icon_glyph(int id, int px) {
     s->id = id;
     s->px = px;
     s->lightness = lightness;
-    s->lightness = 0;
     memset(&s->g, 0, sizeof s->g);
     s->g.x = (u16)ax;
     s->g.y = (u16)ay;
