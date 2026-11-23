@@ -3196,7 +3196,7 @@ static void draw_dialog(void) {
     if (d->icon) { // badge: tinted circle with a symbol; deletions get the bin alone, no circle
         u32 col = d->icon == DI_DANGER ? COL_DANGER : d->icon == DI_WARN ? COL_WARN : COL_ACCENT;
         f32 bx = x + pad, by = y + pad;
-        if (d->icon == DI_DANGER && draw_icon_id(roundf(bx + bs * 0.1f), roundf(by + bs * 0.1f), roundf(bs * 0.8f), icon_find("trash"), false)) {
+        if (d->icon == DI_DANGER && draw_icon_id(roundf(bx + bs * 0.1f), roundf(by + bs * 0.1f), roundf(bs * 0.8f), trash_icon(A.trash_known && !A.trash_empty), false)) {
         } else {
             draw_rrect(bx, by, bs, bs, bs * 0.5f, C(rgb_mix(COL_POPUP, col, 0.18f)));
             const char *sym = d->icon == DI_QUESTION ? "?" : "!";
@@ -3226,7 +3226,7 @@ static void draw_dialog(void) {
                 if (!pth) continue;
                 f32 sx = side ? x0 + half + aw : x0;
                 bool trash = side && k == DK_TRASH;
-                if (trash) { if (!draw_icon_id(sx, iy, is, icon_find("trash"), false)) draw_file_icon(sx, iy, is, 0x8C8F99); }
+                if (trash) { if (!draw_icon_id(sx, iy, is, trash_icon(A.trash_known && !A.trash_empty), false)) draw_file_icon(sx, iy, is, 0x8C8F99); }
                 else if (d->item_dir[i]) draw_dir_icon(sx, iy, is, path_basename(pth), false);
                 else if (!draw_icon_for_name(sx, iy, is, path_basename(pth), false)) draw_file_icon(sx, iy, is, 0x8C8F99);
                 draw_path_fit(fs, sx + is + S(7), text_y(fs, ry, irh), half - is - S(10), pth, trash);
@@ -3241,7 +3241,7 @@ static void draw_dialog(void) {
             draw_line(tip, my, tip - hd, my + hd, lt, ac);
             f32 ox = x1 + (opw - is) * 0.5f + S(3); // the operation
             if (k == DK_TRASH) {
-                if (!draw_icon_id(ox, iy, is, icon_find("trash"), false)) draw_cross(ox + is * 0.5f, mid, S(8), lt, C(COL_DANGER));
+                if (!draw_icon_id(ox, iy, is, trash_icon(A.trash_known && !A.trash_empty), false)) draw_cross(ox + is * 0.5f, mid, S(8), lt, C(COL_DANGER));
             } else draw_copy_icon(ox, iy, is, C(k == DK_REPLACE ? COL_WARN : COL_OK), k == DK_REPLACE);
         }
         if (d->more > 0) {
