@@ -16,7 +16,8 @@ palette). Remembers zoom, hidden files, folder sizes, search scope, sort order
 pinned folders, columns, and your tabs/split panes (`restore_session=0` to start fresh). `transfers_at_once=1`
 (0 = all at once) and `verify_copies=0` are the transfer queue's settings. `renderer=auto` uses
 OpenGL (steadier, and SDL's Vulkan renderer drops frames while the window is resized; Vulkan can take less memory
-on Mesa drivers); `vulkan`/`opengl`/`software` force a backend.
+on Mesa drivers; Options -> Advanced shows the one Automatic picked, e.g. "Automatic (OpenGL)"); `vulkan`/`opengl`/`software`
+force a backend.
 `unified_surfaces=1` (Options -> Appearance -> Unified surfaces, off by default) gives the sidebar, the header (tab
 strip and toolbar), the preview panel and the status bar the file area's background; the lines between them stay.
 `show_separators=0` (Options -> Appearance -> Separator lines, on by default) leaves out the lines between the sidebar,

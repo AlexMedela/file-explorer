@@ -4115,6 +4115,8 @@ static int run_selftest_m9(void) {
     st_type("vulkan");
     st_frames(1);
     ST_CHECK(st_opt_hit(HP_DROP, OPT_RENDERER, 0) && !st_opt_hit(HP_TOGGLE, OPT_HIDDEN, 0));
+    // Automatic names the backend it runs on (self-tests: software)
+    ST_CHECK(!strcmp(opt_choice_label(OPT_RENDERER, 0), "Automatic (Software)") && !strcmp(opt_choice_label(OPT_RENDERER, 1), "Vulkan"));
     st_shot("options-search");
     st_key(SDLK_ESCAPE, SDL_KMOD_NONE); // clears the search
     ST_CHECK(g_sheet.kind == SHEET_OPTIONS && !g_opt.search.buf[0]);

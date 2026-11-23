@@ -122,6 +122,21 @@ static const char *g_spacing_labels[3] = {"Compact", "Normal", "Comfortable"};
 static const char *g_title_bar_labels[] = {"Automatic", "System", "Explorer's own"}; // TITLEBAR_*
 static const char *g_renderers[] = {"auto", "vulkan", "opengl", "software"};
 static const char *g_renderer_labels[] = {"Automatic", "Vulkan", "OpenGL", "Software"};
+static bool g_renderer_auto_run; // this run started on Automatic (set in main): its label names what it picked
+
+// "Automatic (OpenGL)": the backend Automatic runs on now (plain "Automatic" after starting on a forced one).
+static const char *renderer_auto_label(void) {
+    static char lab[48];
+    const char *rn = g_renderer_auto_run && A.ren ? SDL_GetRendererName(A.ren) : NULL;
+    if (!rn) return "Automatic";
+    static const char *names[][2] = {{"opengl", "OpenGL"}, {"opengles2", "OpenGL ES"}, {"vulkan", "Vulkan"}, {"gpu", "SDL GPU"},
+                                     {"software", "Software"}};
+    const char *nice = rn;
+    for (size_t k = 0; k < ARRAY_COUNT(names); k++)
+        if (!strcmp(rn, names[k][0])) nice = names[k][1];
+    snprintf(lab, sizeof lab, "Automatic (%s)", nice);
+    return lab;
+}
 static const int g_transfer_counts[] = {1, 2, 4, 0}; // A.transfers_at_once (0 = no limit)
 static const char *g_transfer_labels[] = {"One at a time", "Two at a time", "Four at a time", "All at once"};
 static const char *g_exec_labels[] = {"Ask", "Run", "Run in terminal", "Open as a document (programs still ask)"}; // EXEC_*
@@ -301,7 +316,7 @@ static const char *opt_choice_label(int id, int i) {
     case OPT_DEF_VIEW: return g_zoom[i].label;
     case OPT_DEF_SORT: return g_sort_labels[i];
     case OPT_DEF_GROUP: return g_group_labels[i];
-    case OPT_RENDERER: return g_renderer_labels[i];
+    case OPT_RENDERER: return i == 0 ? renderer_auto_label() : g_renderer_labels[i];
     case OPT_TITLE_BAR: return g_title_bar_labels[i];
     case OPT_BRAND_NAME: return g_brand_labels[i];
     case OPT_TAB_STYLE: return g_tab_style_labels[i];

@@ -13668,6 +13668,7 @@ int main(int argc, char **argv) {
     }
     if (!A.ren) A.ren = SDL_CreateRenderer(A.win, NULL);
     if (!A.ren) { fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError()); return 1; }
+    g_renderer_auto_run = !strcmp(A.renderer, "auto");
     // Self-tests and screenshots don't need vsync, and with it a window the compositor isn't showing
     // (another workspace on Wayland) blocks in present forever.
     SDL_SetRenderVSync(A.ren, any_selftest || A.screenshot ? 0 : 1);
