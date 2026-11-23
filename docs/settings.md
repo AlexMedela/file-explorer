@@ -77,8 +77,9 @@ are never run.
 newest release once a day (`check_updates=0` turns it off; nothing but that request is sent) and shows a card once per
 new version: "Update now" downloads it next to the AppImage, checks it against the release's SHA-256 and replaces the
 file, then "Restart now" switches to it (tabs come back; or it simply starts next time). `update_auto_install=1`
-downloads by itself, so the card only asks to restart. The AppImage's folder must be writable. Packages (apt, dnf,
-zypper) update with the system and makepkg / source builds are told the command to run; "Check now" works for all.
+downloads by itself, so the card only asks to restart. The AppImage's folder must be writable. Only the AppImage
+does this: installed through a package manager (apt, dnf, zypper, Portage...) it never asks GitHub for anything and the
+page only shows the version, and makepkg / source builds are told the command to run.
 
 Per-folder views live in `~/.config/file-explorer/folders.conf`, saved layouts in `layouts.conf`, the file chooser's last
 Save folder per file type in `picker.conf`.

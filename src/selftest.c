@@ -8613,14 +8613,22 @@ static int run_selftest_grep(void) {
         ST_CHECK(!strcmp(sha, "2fa9706cb1df08b00019d9b90d2d4688eb70063b505212abbd629b6113c03b48"));
         upd_sha_from_line("<html>Not Found</html>", sha);
         ST_CHECK(!sha[0]);
-        // how this copy updates: only the AppImage installs by itself; makepkg / source builds get a command to copy
+        // how this copy updates: only the AppImage asks GitHub and installs; makepkg / source builds get a command to
+        // copy; packages (any package manager) only show the version: no button, nothing to press, no request
+        bool pr, en;
         setenv("FE_UPDATE_KIND", "appimage", 1);
-        ST_CHECK(upd_can_install() && !upd_how_cmd());
+        ST_CHECK(upd_can_install() && !upd_how_cmd() && upd_button(&pr, &en) && opt_hidden(OPT_UPD_HOW) && !opt_hidden(OPT_IG_UPDATES));
         setenv("FE_UPDATE_KIND", "arch", 1);
-        ST_CHECK(!upd_can_install() && upd_how_cmd() && strstr(upd_how_cmd(), "makepkg"));
-        setenv("FE_UPDATE_KIND", "deb", 1);
-        ST_CHECK(!upd_can_install() && !upd_how_cmd());
+        ST_CHECK(!upd_can_install() && upd_how_cmd() && strstr(upd_how_cmd(), "makepkg") && !opt_hidden(OPT_UPD_HOW));
+        setenv("FE_UPDATE_KIND", "source", 1);
+        ST_CHECK(!upd_can_install() && upd_how_cmd() && strstr(upd_how_cmd(), "build.sh"));
+        setenv("FE_UPDATE_KIND", "package", 1);
+        ST_CHECK(!upd_can_install() && !upd_how_cmd() && !upd_button(&pr, &en) && opt_hidden(OPT_UPD_HOW) && opt_hidden(OPT_IG_UPDATES) &&
+                 opt_hidden(OPT_UPD_AUTO) && !strcmp(upd_status(), "Updated by your package manager"));
+        upd_button_press();
+        ST_CHECK(g_upd.state == UPD_IDLE);
         unsetenv("FE_UPDATE_KIND");
+        ST_CHECK(upd_kind() == UK_SOURCE); // (this test binary: build/ in the checkout)
         // "Show in folder": the activation file only while it's on; requests open folders / select items
         char svc[PATH_MAX + 64];
         ig_fm1_service_path(svc, sizeof svc);
