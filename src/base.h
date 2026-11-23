@@ -355,3 +355,6 @@ static bool admin_exe(char *exe, size_t cap, const char **extra) {
     exe[n] = 0;
     return true;
 }
+
+// Selftest probe: colours used for the sidebar's Trash amount (0) and drive free space (1).
+extern u32 g_sidebar_meta_drawn[2];
