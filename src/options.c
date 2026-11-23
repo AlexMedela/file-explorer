@@ -631,7 +631,7 @@ static void opt_scroll_color_apply(void) {
 
 // App icon: an absolute .svg/.png keeps its own colours; empty leaves the built-in logo in effect.
 static bool opt_app_icon_chosen(const char *path) {
-    if (!app_icon_path_ok(path)) { toast("Didn't apply, fallback to Default"); return false; }
+    if (!app_icon_path_ok(path)) { toast("Didn't apply, fallback to previous option"); return false; }
     snprintf(g_app_icon_path, sizeof g_app_icon_path, "%s", path ? path : "");
     g_app_icon_mode = APP_ICON_CUSTOM;
     g_logo_changed = true;
@@ -651,7 +651,7 @@ static void opt_app_icon_apply(void) {
 
 // Title bar icon: an absolute .svg/.png replaces the header logo; empty restores it.
 static bool opt_title_icon_chosen(const char *path) {
-    if (!app_icon_path_ok(path)) { toast("Didn't apply, fallback to Default"); return false; }
+    if (!app_icon_path_ok(path)) { toast("Didn't apply, fallback to previous option"); return false; }
     snprintf(g_title_icon_path, sizeof g_title_icon_path, "%s", path ? path : "");
     A.settings_dirty = true;
     A.redraw = true;
