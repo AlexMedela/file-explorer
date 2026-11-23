@@ -426,6 +426,35 @@ static f32 icon_contrast_scale(f32 ink, f32 background) {
 
 // Set only while drawing navigation/sidebar/toolbar/tab icons; 0 = an ordinary surface, no contrast change.
 static u32 g_icon_surface_bg;
+// Options > Appearance > App icon. Custom uses the typed artwork, File-Icon uses the folder icon of the active
+// File icons set, and Default uses the app's own accent-coloured logo. Kept here because rasterising reuses the
+// file-icon atlas.
+typedef enum { APP_ICON_CUSTOM, APP_ICON_FILE_ICON, APP_ICON_DEFAULT } AppIconMode;
+static AppIconMode g_app_icon_mode = APP_ICON_DEFAULT;
+static char g_app_icon_path[PATH_MAX];
+
+static AppIconMode app_icon_mode_parse(const char *v) {
+    if (v && !strcmp(v, "custom")) return APP_ICON_CUSTOM;
+    if (v && !strcmp(v, "file_icon")) return APP_ICON_FILE_ICON;
+    if (v && !strcmp(v, "system")) return APP_ICON_FILE_ICON; // a local config written before the button was renamed
+    return APP_ICON_DEFAULT;
+}
+
+static const char *app_icon_mode_name(AppIconMode m) {
+    return m == APP_ICON_CUSTOM ? "custom" : m == APP_ICON_FILE_ICON ? "file_icon" : "default";
+}
+
+static bool app_icon_path_ok(const char *p) {
+    if (!p || !*p) return true;
+    if (*p != '/' || strchr(p, '\n') || strchr(p, '\r')) return false;
+    const char *ext = strrchr(p, '.');
+    return ext && (!strcasecmp(ext, ".svg") || !strcasecmp(ext, ".png"));
+}
+
+// The typed custom artwork only; NULL when no custom path is set. Caller frees.
+static u8 *app_icon_raster(int px) {
+    return g_app_icon_path[0] ? sysi_raster(g_app_icon_path, px, COL_ACCENT) : NULL;
+}
 
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
@@ -443,6 +472,28 @@ static u8 *icon_raster(int id, int w, int h) {
     nsvgRasterize(g_rast, img, (w - img->width * sc) * 0.5f, (h - img->height * sc) * 0.5f, sc, buf, w, h, w * 4);
     return buf;
 }
+
+// File-Icon mode's artwork: the folder icon of whichever File icons set is active. No app-logo fallback: if the set
+// has no folder, icon_raster() applies its own normal fallback. Caller frees.
+static u8 *file_icon_app_raster(int px) {
+    int id = icon_find("folder");
+    return id >= 0 ? icon_raster(id, px, px) : NULL;
+}
+
+// RGBA of the icon currently in effect. Defined after icon_raster(), which supplies the Default artwork. Caller frees.
+static u8 *app_icon_mode_raster(int px) {
+    if (g_app_icon_mode == APP_ICON_CUSTOM) {
+        u8 *custom = app_icon_raster(px);
+        if (custom) return custom;
+    } else if (g_app_icon_mode == APP_ICON_FILE_ICON) {
+        return file_icon_app_raster(px);
+    }
+    return icon_raster(ICON_LOGO, px, px);
+}
+
+static u8 *app_icon_window_raster(int px) { return app_icon_mode_raster(px); }
+
+static u8 *app_icon_preview_raster(int px) { return app_icon_mode_raster(px); }
 
 typedef struct { int id, px; Glyph g; f32 lightness; } IconSlot;
 static IconSlot g_icon_cache[512];
@@ -464,6 +515,7 @@ static Glyph *icon_glyph(int id, int px) {
     s->id = id;
     s->px = px;
     s->lightness = lightness;
+    s->lightness = 0;
     memset(&s->g, 0, sizeof s->g);
     s->g.x = (u16)ax;
     s->g.y = (u16)ay;
@@ -478,6 +530,108 @@ static f32 icon_glyph_tint(int id, int px) {
         if (g_icon_cache[i].id == id && g_icon_cache[i].px == px)
             return icon_contrast_scale(g_icon_cache[i].lightness, rgb_luma(g_icon_surface_bg));
     return 1.f;
+}
+
+// Options-row preview of the icon in effect. One atlas slot, rebuilt when the applied path, accent, File icons
+// selection or size changes; a reset of g_icon_cache_n (atlas rebuild) also drops it. The synthetic id -1 cannot
+// collide with a file icon.
+static char g_app_icon_prev_path[PATH_MAX];
+static u32 g_app_icon_prev_accent;
+static AppIconMode g_app_icon_prev_mode;
+static int g_app_icon_prev_px, g_app_icon_prev_theme, g_app_icon_prev_slot = -1;
+static bool g_app_icon_preview_changed;
+
+static void app_icon_preview_invalidate(void) { g_app_icon_prev_slot = -1; g_app_icon_preview_changed = true; }
+
+static Glyph *app_icon_preview_glyph(int px) {
+    u32 accent = COL_ACCENT & 0xFFFFFF;
+    if (g_app_icon_prev_slot >= 0 && g_app_icon_prev_slot < g_icon_cache_n && g_app_icon_prev_px == px
+        && g_app_icon_prev_accent == accent && g_app_icon_prev_mode == g_app_icon_mode && g_app_icon_prev_theme == g_icon_theme
+        && g_icon_cache[g_app_icon_prev_slot].id == -1 && !strcmp(g_app_icon_prev_path, g_app_icon_path))
+        return &g_icon_cache[g_app_icon_prev_slot].g;
+    u8 *buf = app_icon_preview_raster(px);
+    if (!buf) return NULL;
+    int ax, ay;
+    if (!atlas_pack(px, px, &ax, &ay)) { free(buf); return NULL; }
+    for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
+    free(buf);
+    if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0;
+    g_app_icon_prev_slot = g_icon_cache_n;
+    IconSlot *s = &g_icon_cache[g_icon_cache_n++];
+    s->id = -1;
+    s->px = px;
+    s->lightness = 0;
+    memset(&s->g, 0, sizeof s->g);
+    s->g.x = (u16)ax;
+    s->g.y = (u16)ay;
+    s->g.w = (u16)px;
+    s->g.h = (u16)px;
+    snprintf(g_app_icon_prev_path, sizeof g_app_icon_prev_path, "%s", g_app_icon_path);
+    g_app_icon_prev_mode = g_app_icon_mode;
+    g_app_icon_prev_theme = g_icon_theme;
+    g_app_icon_prev_accent = accent;
+    g_app_icon_prev_px = px;
+    return &s->g;
+}
+
+static void draw_app_icon_preview(f32 x, f32 y, f32 s) {
+    Glyph *g = app_icon_preview_glyph((int)roundf(s));
+    if (g) draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
+}
+
+// Options > Appearance > Title bar icon: overrides the logo at the left of the brand header. Empty keeps the built-in
+// logo. Uses the same SVG/PNG rasterizer as the application icon.
+static char g_title_icon_path[PATH_MAX];
+
+static u8 *title_icon_raster(int px) {
+    return g_title_icon_path[0] ? sysi_raster(g_title_icon_path, px, COL_ACCENT) : NULL;
+}
+
+// RGBA of the title-bar icon currently in effect: chosen artwork, or the small built-in logo.
+static u8 *title_icon_preview_raster(int px) {
+    u8 *custom = title_icon_raster(px);
+    return custom ? custom : icon_raster(ICON_LOGO_SMALL, px, px);
+}
+
+// Separate atlas slots for the Options preview and the header: their sizes differ, and sharing one slot would rebuild
+// it on every frame while Options is open. Synthetic ids -2/-3 cannot collide with file icons or each other.
+static Glyph *title_icon_cached_glyph(int px, int which, int id) {
+    static char key_path[2][PATH_MAX];
+    static u32 key_accent[2];
+    static int key_px[2], slot[2] = {-1, -1};
+    u32 accent = COL_ACCENT & 0xFFFFFF;
+    if (slot[which] >= 0 && slot[which] < g_icon_cache_n && key_px[which] == px && key_accent[which] == accent
+        && g_icon_cache[slot[which]].id == id && !strcmp(key_path[which], g_title_icon_path))
+        return &g_icon_cache[slot[which]].g;
+    u8 *buf = title_icon_preview_raster(px);
+    if (!buf) return NULL;
+    int ax, ay;
+    if (!atlas_pack(px, px, &ax, &ay)) { free(buf); return NULL; }
+    for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
+    free(buf);
+    if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0;
+    slot[which] = g_icon_cache_n;
+    IconSlot *s = &g_icon_cache[g_icon_cache_n++];
+    s->id = id;
+    s->px = px;
+    s->lightness = 0;
+    memset(&s->g, 0, sizeof s->g);
+    s->g.x = (u16)ax;
+    s->g.y = (u16)ay;
+    s->g.w = (u16)px;
+    s->g.h = (u16)px;
+    snprintf(key_path[which], sizeof key_path[which], "%s", g_title_icon_path);
+    key_accent[which] = accent;
+    key_px[which] = px;
+    return &s->g;
+}
+
+static Glyph *title_icon_preview_glyph(int px) { return title_icon_cached_glyph(px, 0, -2); }
+static Glyph *title_icon_header_glyph(int px) { return title_icon_cached_glyph(px, 1, -3); }
+
+static void draw_title_icon_preview(f32 x, f32 y, f32 s) {
+    Glyph *g = title_icon_preview_glyph((int)roundf(s));
+    if (g) draw_glyph(g, roundf(x), roundf(y), (Color){1, 1, 1, 1});
 }
 
 // Draw the icon for a file name at (x, y), s pixels. Returns false if it couldn't (caller falls back).
@@ -553,6 +707,7 @@ static f32 icon_texture_tint(SDL_Texture *tex) {
             return icon_contrast_scale(g_big_icons[i].lightness, rgb_luma(g_icon_surface_bg));
     return 1.f;
 }
+static bool g_logo_changed; // the window icon should be rebuilt (app.c)
 
 // The desktop's icon (system_icons.c) arrived: over the bundled one drawn meanwhile, in place in the atlas; big copies
 // are made again.
@@ -572,10 +727,12 @@ static void icons_replace(int id, int px, const u8 *rgba) {
             SDL_DestroyTexture(g_big_icons[i].tex);
             g_big_icons[i--] = g_big_icons[--g_nbig];
         }
+    // A desktop icon can arrive after the glyph was cached in File-Icon mode, or while System file icons are selected.
+    if (g_app_icon_mode == APP_ICON_FILE_ICON || icon_system_selected()) app_icon_preview_invalidate();
+    if (g_app_icon_mode == APP_ICON_FILE_ICON && id == icon_find("folder")) g_logo_changed = true;
 }
 
 // Theme changed: icons using the theme colour mark are parsed and rasterized again.
-static bool g_logo_changed; // the window icon should be rebuilt (app.c)
 
 static void icons_sync_theme(void) {
     if ((g_logo_img || g_logo_small_img) && g_logo_accent != COL_ACCENT) { // accent changed: recolour the logo

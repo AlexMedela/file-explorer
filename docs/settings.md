@@ -174,6 +174,21 @@ File icons > **System** (`icon_theme=System`) uses the desktop's icon theme for 
 the settings portal names (else KDE's or GTK's settings), followed when it changes. The bundled icon shows until the
 desktop's is there, and wherever its theme has none.
 
+`app_icon_mode=custom|file_icon|default` (Options -> Appearance -> App icon, directly under File icons) selects
+the window and launcher icon. `app_icon` (empty by default) remembers the absolute `.svg`/`.png` path typed in that
+row. The row previews the icon in effect with no background chip, and its active button is primary. **Apply** uses the
+typed path (SVG keeps its own colours) and selects Custom; **File-Icon** uses the folder icon of the currently selected
+File icons set and follows changes to that setting live; **Default** clears `app_icon`, shows the `Default` placeholder
+in the field, and restores the accent-coloured built-in logo. File-Icon installs no launcher override and removes one
+this app previously wrote; Default restores the recoloured built-in artwork. Older settings with a non-empty
+`app_icon` are treated as Custom, an empty one as Default, and a legacy `app_icon_mode=system` as File-Icon.
+
+`title_icon` (Options -> Appearance -> Title bar icon, directly below App icon, empty by default) is an
+absolute `.svg` or `.png` path that overrides the icon at the left of the title bar. Its row previews the icon in effect
+without a background chip and has **Apply** and **Default** buttons; Default clears the path and restores the small
+built-in logo, while the typed field keeps its path until you press Default. This override follows the **Logo** toggle
+below it: with Logo off, no icon is drawn in that slot.
+
 Custom file icons: `~/.config/file-explorer/icons/<Name>/` (Options -> Appearance -> "Icon themes folder"). SVGs
 named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-src.svg`...), `ext-<extension>.svg`
 sets the icon for any extension, and `theme.conf` (`base=Catppuccin`) picks the set the missing icons come from.

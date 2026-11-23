@@ -12916,7 +12916,12 @@ static void window_close_requested(void) {
 }
 
 #include "term.c"
+// integration.c reacts to desktop icon-theme changes, and Options (ui_tools.c / options.c) applies the app icon before
+// these two are defined below.
+static void window_icon_update(void);
+static void app_icon_sync(void);
 #include "integration.c"
+
 #include "ui_tools.c"
 #include "picker.c"
 
@@ -13036,8 +13041,8 @@ static void frame_draw(void) {
     cursor_apply();
 }
 
-static void window_icon_update(void) { // the logo in the accent colour (X11 / taskbars without the .desktop icon)
-    u8 *logo = icon_raster(ICON_LOGO, 128, 128);
+static void window_icon_update(void) { // the icon in effect (custom / File-Icon / Default) for X11 and taskbars
+    u8 *logo = app_icon_window_raster(128);
     if (!logo) return;
     SDL_Surface *ic = SDL_CreateSurfaceFrom(128, 128, SDL_PIXELFORMAT_RGBA32, logo, 128 * 4);
     if (ic) { SDL_SetWindowIcon(A.win, ic); SDL_DestroySurface(ic); }
@@ -13050,44 +13055,117 @@ static void window_icon_update(void) { // the logo in the accent colour (X11 / t
 // panels keep using a theme icon they once found (LXQt's taskbar), and without a package (AppImage) a deleted
 // one leaves them with none: the next icon-theme change turned the button into the app's name.
 // dh: the data folder ($XDG_DATA_HOME).
-static bool app_icon_write(const char *dh, u32 accent) {
-    char dir[PATH_MAX], path[PATH_MAX + 32];
+static u8 *app_icon_read(const char *path, size_t *len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    u8 *buf = xmalloc(4u * 1024 * 1024);
+    size_t n = fread(buf, 1, 4u * 1024 * 1024, f);
+    fclose(f);
+    if (!n) { free(buf); return NULL; }
+    *len = n;
+    return buf;
+}
+
+// Binary artwork can't go through write_file_atomic() (it stops at NUL), so copy it with an atomic rename.
+static bool app_icon_install(const char *src, const char *dst, bool *changed) {
+    size_t n = 0, on = 0;
+    u8 *data = app_icon_read(src, &n), *old = app_icon_read(dst, &on);
+    if (!data) { free(old); return false; }
+    *changed = !old || on != n || memcmp(old, data, n) != 0;
+    free(old);
+    bool ok = true;
+    if (*changed) {
+        char tmp[PATH_MAX + 80];
+        snprintf(tmp, sizeof tmp, "%s.tmp", dst);
+        FILE *f = fopen(tmp, "wb");
+        ok = f && fwrite(data, 1, n, f) == n;
+        if (f) ok = fclose(f) == 0 && ok;
+        if (ok) ok = rename(tmp, dst) == 0;
+    }
+    free(data);
+    return ok;
+}
+
+static char g_app_icon_installed[PATH_MAX]; // last custom artwork installed, so File-Icon can take it away again
+
+// File-Icon mode: remove both overrides. g_app_icon_installed is empty after a restart, so check the files themselves:
+// a recoloured built-in copy from an earlier Default session must go too. Callers want the theme folder timestamp bumped.
+static bool app_icon_remove_override(const char *dh) {
+    char dir[PATH_MAX], svg[PATH_MAX + 48], png[PATH_MAX + 48];
     snprintf(dir, sizeof dir, "%s/icons/hicolor", dh);
-    snprintf(path, sizeof path, "%s/scalable/apps/dev.fileexplorer.svg", dir);
-    bool changed;
-    if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(path, F_OK)) return false;
-    {
+    snprintf(svg, sizeof svg, "%s/scalable/apps/dev.fileexplorer.svg", dir);
+    snprintf(png, sizeof png, "%s/256x256/apps/dev.fileexplorer.png", dir);
+    bool svg_exists = access(svg, F_OK) == 0, png_exists = access(png, F_OK) == 0;
+    if (!svg_exists && !png_exists) return false;
+    if (svg_exists) unlink(svg);
+    if (png_exists) unlink(png);
+    g_app_icon_installed[0] = 0;
+    utimensat(AT_FDCWD, dir, NULL, 0);
+    return true;
+}
+
+static bool app_icon_write_ex(const char *dh, u32 accent, const char *custom, bool write_builtin) {
+    char dir[PATH_MAX], svg[PATH_MAX + 48], png[PATH_MAX + 48];
+    snprintf(dir, sizeof dir, "%s/icons/hicolor", dh);
+    snprintf(svg, sizeof svg, "%s/scalable/apps/dev.fileexplorer.svg", dir);
+    snprintf(png, sizeof png, "%s/256x256/apps/dev.fileexplorer.png", dir);
+    bool changed = false;
+    if (custom && *custom && app_icon_path_ok(custom)) {
+        bool is_svg = strcasecmp(strrchr(custom, '.'), ".svg") == 0;
+        char apps[PATH_MAX + 48];
+        snprintf(apps, sizeof apps, "%s/%s/apps", dir, is_svg ? "scalable" : "256x256");
+        mkdir_p(apps, 0755);
+        if (app_icon_install(custom, is_svg ? svg : png, &changed)) {
+            snprintf(g_app_icon_installed, sizeof g_app_icon_installed, "%s", custom);
+            if (changed) unlink(is_svg ? png : svg); // a stale icon in the other format would win over this one
+        }
+    } else if (!write_builtin) {
+        return app_icon_remove_override(dh);
+    } else {
+        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(svg, F_OK)) return changed;
         static const char from[] = "width=\"624\" height=\"456\" viewBox=\"0 0 624 456\"";
         const char *at = strstr(g_logo_svg, from);
-        if (!at) return false;
-        char *svg = xmalloc(sizeof g_logo_svg + 64);
-        snprintf(svg, sizeof g_logo_svg + 64, "%.*swidth=\"256\" height=\"256\" viewBox=\"0 -84 624 624\"%s\n",
+        if (!at) return changed;
+        char *src = xmalloc(sizeof g_logo_svg + 64);
+        snprintf(src, sizeof g_logo_svg + 64, "%.*swidth=\"256\" height=\"256\" viewBox=\"0 -84 624 624\"%s\n",
                  (int)(at - g_logo_svg), g_logo_svg, at + strlen(from)); // square, like packaging/dev.fileexplorer.svg
-        logo_recolor(svg, accent);
-        changed = !file_equals(path, svg);
-        if (changed) {
-            char apps[PATH_MAX + 32];
+        logo_recolor(src, accent);
+        if (!file_equals(svg, src)) {
+            char apps[PATH_MAX + 48];
             snprintf(apps, sizeof apps, "%s/scalable/apps", dir);
             mkdir_p(apps, 0755);
-            changed = write_file_atomic(path, svg);
+            if (write_file_atomic(svg, src)) changed = true;
         }
-        free(svg);
+        free(src);
     }
     if (changed) utimensat(AT_FDCWD, dir, NULL, 0); // icon caches watch the theme folder's time
     return changed;
 }
 
+static bool app_icon_write(const char *dh, u32 accent) { return app_icon_write_ex(dh, accent, NULL, true); }
+
 // Once the accent has settled (not on every step of trying colours in Settings), outside tests.
 static void app_icon_sync(void) {
     static u32 done = 0xFFFFFFFF, seen;
     static u64 since;
-    if (A.selftest || A.screenshot || COL_ACCENT == done) return;
-    if (COL_ACCENT != seen) { seen = COL_ACCENT; since = now_ns(); return; }
-    if (now_ns() - since < 1500000000ull) return;
+    static char applied[PATH_MAX];
+    static AppIconMode applied_mode = APP_ICON_DEFAULT;
+    static bool first = true;
+    if (A.selftest || A.screenshot) return;
+    bool path_changed = strcmp(g_app_icon_path, applied) != 0 || first || applied_mode != g_app_icon_mode;
+    if (!path_changed && COL_ACCENT == done) return;
+    if (!path_changed) {
+        if (COL_ACCENT != seen) { seen = COL_ACCENT; since = now_ns(); return; }
+        if (now_ns() - since < 1500000000ull) return;
+    }
     done = COL_ACCENT;
+    first = false;
+    applied_mode = g_app_icon_mode;
+    snprintf(applied, sizeof applied, "%s", g_app_icon_path);
     char dh[PATH_MAX];
     data_home(dh, sizeof dh);
-    app_icon_write(dh, done);
+    bool custom = g_app_icon_mode == APP_ICON_CUSTOM;
+    app_icon_write_ex(dh, done, custom ? g_app_icon_path : NULL, g_app_icon_mode == APP_ICON_DEFAULT);
 }
 
 #ifdef FE_DEMO
@@ -13100,6 +13178,7 @@ static void frame(void) {
     icons_sync_theme();
     if (g_logo_changed) { g_logo_changed = false; window_icon_update(); }
     app_icon_sync();
+    if (g_app_icon_preview_changed) { g_app_icon_preview_changed = false; A.redraw = true; }
     check_conflicts();
     ops_gc();
     ops_schedule();

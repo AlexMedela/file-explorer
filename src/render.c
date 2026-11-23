@@ -735,14 +735,16 @@ static void draw_brand(void) {
     f32 tx = lx;
     if (A.brand_logo) {
         int id = lh < 48 ? ICON_LOGO_SMALL : ICON_LOGO; // square raster, logo centred in it
-        Glyph *g = icon_glyph(id, (int)lw);
-        if (g) {
+        Glyph *g = g_title_icon_path[0] ? title_icon_header_glyph((int)lw) : NULL; // custom artwork only
+        f32 t = 1.f;
+        if (!g) {
+            g = icon_glyph(id, (int)lw);
             u32 saved_bg = g_icon_surface_bg;
             g_icon_surface_bg = COL_SIDEBAR;
-            f32 t = icon_glyph_tint(id, (int)lw);
-            draw_glyph(g, lx, roundf(ly - (lw - lh) * 0.5f), (Color){t, t, t, 1});
+            t = icon_glyph_tint(id, (int)lw);
             g_icon_surface_bg = saved_bg;
         }
+        if (g) draw_glyph(g, lx, roundf(ly - (lw - lh) * 0.5f), (Color){t, t, t, 1});
         tx += lw + roundf(S(8));
     }
     Font *f = &A.font_brand;

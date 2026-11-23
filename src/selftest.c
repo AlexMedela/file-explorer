@@ -355,6 +355,30 @@ static f32 st_row_y(Pane *p, const char *name) {
     return -1;
 }
 
+// Centre pixel of the brand icon slot: true when the pure-green test icon is being drawn there.
+static bool st_brand_icon_green(void) {
+    Rect r = A.r_brand;
+    if (r.h <= 0) return false;
+    f32 lh = roundf(S(17)), lw = roundf(lh * 624.f / 456.f);
+    f32 x = r.x + S(18) + lw * 0.5f;
+    f32 y = roundf(r.y + (r.h - lh) * 0.5f - (lw - lh) * 0.5f) + lw * 0.5f;
+    int sx = (int)roundf(x) + A.shadow_px, sy = (int)roundf(y) + A.shadow_px;
+    SDL_Texture *target = SDL_GetRenderTarget(A.ren);
+    SDL_SetRenderTarget(A.ren, NULL);
+    SDL_Surface *s = SDL_RenderReadPixels(A.ren, NULL);
+    SDL_SetRenderTarget(A.ren, target);
+    if (!s) return false;
+    SDL_Surface *c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_RGBA8888);
+    SDL_DestroySurface(s);
+    if (!c || sx < 0 || sy < 0 || sx >= c->w || sy >= c->h) { if (c) SDL_DestroySurface(c); return false; }
+    const u8 *px = (const u8 *)c->pixels + (size_t)sy * c->pitch + (size_t)sx * 4;
+    u8 rr, gg, bb, aa;
+    SDL_GetRGBA(*(const u32 *)px, SDL_GetPixelFormatDetails(c->format), SDL_GetSurfacePalette(c), &rr, &gg, &bb, &aa);
+    bool green = rr < 80 && gg > 180 && bb < 80 && aa > 0;
+    SDL_DestroySurface(c);
+    return green;
+}
+
 static void st_shot(const char *name) {
     const char *dir = getenv("FE_SHOTS");
     if (!dir) return;
@@ -4095,8 +4119,11 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.show_hidden == !hid);
     st_opt_click(st_opt_hit(HP_TOGGLE, OPT_HIDDEN, 0));
     ST_CHECK(A.show_hidden == hid);
-    // appearance: font size, row spacing
+    // appearance: font size, row spacing (the icon rows pushed these below the fold)
     st_opt_click(st_opt_hit(HP_NAV, -1, OC_APPEARANCE));
+    st_frames(1);
+    g_opt.scroll = S(140);
+    st_frames(1);
     int px0 = A.font.px;
     st_opt_click(st_opt_hit(HP_PLUS, OPT_FONT_SIZE, 0));
     ST_CHECK(A.font_size == 14 && A.font.px == (int)roundf(14.f * A.scale) && A.font.px > px0);
@@ -4104,6 +4131,8 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.font_size == 13);
     st_opt_click(st_opt_hit(HP_SEG, OPT_ROW_SPACING, 0));
     ST_CHECK(A.row_spacing == 0);
+    g_opt.scroll = 0;
+    st_frames(1);
     { // the scrollbar's thumb can be dragged (not only the wheel); a press on its track pages
         st_frames(1);
         SheetBar *sb = NULL;
@@ -4444,6 +4473,287 @@ static int run_selftest_m9(void) {
         g_hide_single_tab = false;
         opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
         layout();
+    }
+    { // application icon: an absolute SVG/PNG overrides the built-in logo; clearing it restores the default
+        int ii = -1, ia = -1, it = -1, il = -1;
+        for (int k = 0; k < OPT_COUNT; k++) {
+            if (g_opts[k].id == OPT_ICON_THEME) ii = k;
+            if (g_opts[k].id == OPT_APP_ICON) ia = k;
+            if (g_opts[k].id == OPT_TITLE_ICON) it = k;
+            if (g_opts[k].id == OPT_BRAND_LOGO) il = k;
+        }
+        ST_CHECK(ii >= 0 && ia == ii + 1 && it == ia + 1 && il >= 0);
+        options_open();
+        g_opt.cat = OC_APPEARANCE;
+        g_opt.scroll = 0;
+        st_frames(2);
+        st_shot("options-app-icon");
+        { // both icon rows: every button shares the field height and stays inside a narrow control strip
+            OptHit *af = st_opt_hit(HP_TEXT, OPT_APP_ICON, 2), *tf = st_opt_hit(HP_TEXT, OPT_TITLE_ICON, 3);
+            OptHit *as = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1), *ad = st_opt_hit(HP_BUTTON, OPT_APP_ICON, 2);
+            OptHit *td = st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1);
+            ST_CHECK(af && tf && as && ad && td); // Apply has no hit when its field is empty
+            ST_CHECK(af && as && fabsf(as->r.y - af->r.y) < 0.5f && fabsf(ad->r.y - af->r.y) < 0.5f);
+            ST_CHECK(tf && td && fabsf(td->r.y - tf->r.y) < 0.5f);
+            ST_CHECK(!strcmp(g_opts[ia].label, "App icon"));
+            ST_CHECK(strstr(g_opts[ia].desc, "Apply") && strstr(g_opts[ia].desc, "File-Icon") && strstr(g_opts[ia].desc, "Default"));
+            ST_CHECK(!strstr(g_opts[ia].desc, "System"));
+            ST_CHECK(!strcmp(opt_icon_button_label(OPT_APP_ICON, 1), "File-Icon"));
+            ST_CHECK(strstr(g_opts[it].desc, "Apply") && strstr(g_opts[it].desc, "Default"));
+            Rect pv, fld, bb[3];
+            opt_icon_row_layout(S(186), S(30), 3, &pv, &fld, bb);
+            ST_CHECK(fld.w > 0 && pv.x <= fld.x && fld.x + fld.w <= bb[0].x - 0.5f);
+            for (int k = 0; k < 3; k++) {
+                ST_CHECK(bb[k].x >= fld.x + fld.w - 0.5f && bb[k].x + bb[k].w <= S(186) + 0.5f);
+                if (k) ST_CHECK(bb[k].x >= bb[k - 1].x + bb[k - 1].w - 0.5f);
+            }
+            Rect pv2, fld2, bb2[2];
+            opt_icon_row_layout(S(186), S(30), 2, &pv2, &fld2, bb2);
+            ST_CHECK(fld2.w > 0 && bb2[0].x + bb2[0].w <= bb2[1].x + 0.5f && bb2[1].x + bb2[1].w <= S(186) + 0.5f);
+            ST_CHECK(opt_icon_row_ctlw(S(760), 3) > 0 && opt_icon_row_ctlw(S(760), 2) > 0);
+            st_shot("options-icon-modes");
+        }
+        char svg[PATH_MAX], dh[PATH_MAX], dest[PATH_MAX + 64];
+        snprintf(svg, sizeof svg, M9_BASE "/app-icon.svg");
+        st_write_text(svg, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\"><rect width=\"32\" height=\"32\" fill=\"#ff0000\"/></svg>");
+        ST_CHECK(g_app_icon_mode == APP_ICON_DEFAULT);
+        ST_CHECK(app_icon_mode_parse("custom") == APP_ICON_CUSTOM);
+        ST_CHECK(app_icon_mode_parse("file_icon") == APP_ICON_FILE_ICON);
+        ST_CHECK(app_icon_mode_parse("system") == APP_ICON_FILE_ICON); // legacy local config
+        ST_CHECK(app_icon_mode_parse("default") == APP_ICON_DEFAULT);
+        ST_CHECK(app_icon_mode_parse("nonsense") == APP_ICON_DEFAULT);
+        ST_CHECK(!strcmp(app_icon_mode_name(APP_ICON_CUSTOM), "custom"));
+        ST_CHECK(!strcmp(app_icon_mode_name(APP_ICON_FILE_ICON), "file_icon"));
+        ST_CHECK(!strcmp(app_icon_mode_name(APP_ICON_DEFAULT), "default"));
+        ST_CHECK(app_icon_path_ok(NULL) && app_icon_path_ok(""));
+        ST_CHECK(app_icon_path_ok(svg) && !app_icon_path_ok("relative.svg"));
+        ST_CHECK(!app_icon_path_ok(M9_BASE "/app-icon.txt"));
+        ST_CHECK(!app_icon_path_ok(M9_BASE "/app\n-icon.svg"));
+        ST_CHECK(!app_icon_raster(16)); // no custom artwork selected yet
+        u8 *def_prev = app_icon_preview_raster(16); // the row previews the icon in effect: the built-in default
+        ST_CHECK(def_prev != NULL);
+        u8 *def_win = app_icon_window_raster(16);
+        ST_CHECK(def_win && !memcmp(def_win, def_prev, 16 * 16 * 4));
+        free(def_win);
+        opt_app_icon_chosen(svg);
+        ST_CHECK(!strcmp(g_app_icon_path, svg));
+        u8 *px = app_icon_raster(16);
+        ST_CHECK(px != NULL);
+        u8 *custom_prev = app_icon_preview_raster(16);
+        ST_CHECK(custom_prev != NULL && memcmp(def_prev, custom_prev, 16 * 16 * 4) != 0);
+        u8 *custom_win = app_icon_window_raster(16);
+        ST_CHECK(custom_win && !memcmp(custom_win, custom_prev, 16 * 16 * 4));
+        free(custom_win);
+        free(px);
+        { // File-Icon mode previews the folder icon of the current File icons set, never the app logo
+            u8 *folder = icon_raster(icon_find("folder"), 16, 16), *direct = file_icon_app_raster(16);
+            AppIconMode saved_mode = g_app_icon_mode;
+            g_app_icon_mode = APP_ICON_FILE_ICON;
+            u8 *fi_prev = app_icon_preview_raster(16), *fi_win = app_icon_window_raster(16);
+            g_app_icon_mode = saved_mode;
+            ST_CHECK(icon_find("folder") >= 0 && folder && direct && fi_prev && fi_win);
+            ST_CHECK(direct && folder && !memcmp(direct, folder, 16 * 16 * 4));
+            ST_CHECK(fi_prev && folder && !memcmp(fi_prev, folder, 16 * 16 * 4));
+            ST_CHECK(fi_win && folder && !memcmp(fi_win, folder, 16 * 16 * 4));
+            ST_CHECK(fi_prev && def_prev && memcmp(fi_prev, def_prev, 16 * 16 * 4));
+            ST_CHECK(fi_prev && custom_prev && memcmp(fi_prev, custom_prev, 16 * 16 * 4));
+            free(folder);
+            free(direct);
+            free(fi_prev);
+            free(fi_win);
+        }
+        { // the real buttons switch modes; Default erases the path and clears the field to its placeholder
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 1));
+            ST_CHECK(g_app_icon_mode == APP_ICON_FILE_ICON && !strcmp(g_app_icon_path, svg));
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 2));
+            ST_CHECK(g_app_icon_mode == APP_ICON_DEFAULT && !g_app_icon_path[0] && !g_opt.app_icon.buf[0]);
+            u8 *after = app_icon_preview_raster(16), *logo = icon_raster(ICON_LOGO, 16, 16);
+            ST_CHECK(after && logo && !memcmp(after, logo, 16 * 16 * 4));
+            free(after);
+            free(logo);
+            te_set(&g_opt.app_icon, "", 0, 0);
+            ST_CHECK(!st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0)); // Apply is disabled until a path is typed
+            te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
+            st_frames(1);
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_APP_ICON, 0));
+            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
+        }
+        { // File-Icon mode follows the active File icons theme; the app logo is never a fallback
+            char themes[PATH_MAX], p[PATH_MAX];
+            icon_themes_dir(themes, sizeof themes);
+            snprintf(p, sizeof p, "%s/M9FileIcons", themes);
+            mkdir_p(p, 0755);
+            snprintf(p, sizeof p, "%s/M9FileIcons/theme.conf", themes);
+            st_write_text(p, "base=Symbols\n");
+            snprintf(p, sizeof p, "%s/M9FileIcons/folder.svg", themes);
+            st_write_text(p, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><rect width=\"16\" height=\"16\" fill=\"#ff00ff\"/></svg>");
+            icon_themes_reload();
+            int t = icon_theme_find("M9FileIcons");
+            ST_CHECK(t >= ICON_THEMES);
+            int saved_theme = g_icon_theme;
+            AppIconMode saved_mode = g_app_icon_mode;
+            g_app_icon_mode = APP_ICON_FILE_ICON;
+            u8 *before = app_icon_preview_raster(16);
+            opt_choice_set(OPT_ICON_THEME, t);
+            ST_CHECK(g_icon_theme == t);
+            u8 *folder = icon_raster(icon_find("folder"), 16, 16);
+            u8 *after = app_icon_preview_raster(16), *after_win = app_icon_window_raster(16), *direct = file_icon_app_raster(16);
+            ST_CHECK(folder && after && after_win && direct);
+            ST_CHECK(before && memcmp(before, after, 16 * 16 * 4));
+            ST_CHECK(folder && after && !memcmp(after, folder, 16 * 16 * 4));
+            ST_CHECK(folder && after_win && !memcmp(after_win, folder, 16 * 16 * 4));
+            ST_CHECK(folder && direct && !memcmp(direct, folder, 16 * 16 * 4));
+            opt_choice_set(OPT_ICON_THEME, saved_theme);
+            g_app_icon_mode = saved_mode;
+            free(before);
+            free(folder);
+            free(after);
+            free(after_win);
+            free(direct);
+        }
+        free(custom_prev);
+        free(def_prev);
+        { // Apply from the path field: invalid paths are rejected; an empty field leaves the current choice alone
+            te_set(&g_opt.app_icon, svg, (int)strlen(svg), (int)strlen(svg));
+            opt_app_icon_apply();
+            ST_CHECK(!strcmp(g_app_icon_path, svg));
+            te_set(&g_opt.app_icon, "relative.svg", 12, 12);
+            opt_app_icon_apply();
+            ST_CHECK(!strcmp(g_app_icon_path, svg));
+            te_set(&g_opt.app_icon, "", 0, 0);
+            opt_app_icon_apply();
+            ST_CHECK(!strcmp(g_app_icon_path, svg) && g_app_icon_mode == APP_ICON_CUSTOM);
+        }
+        { // the mode persists, the typed path survives it, and a legacy path-only config means custom
+            opt_app_icon_chosen(svg);
+            g_app_icon_mode = APP_ICON_FILE_ICON;
+            settings_save();
+            g_app_icon_mode = APP_ICON_DEFAULT;
+            settings_load();
+            ST_CHECK(g_app_icon_mode == APP_ICON_FILE_ICON && !strcmp(g_app_icon_path, svg));
+            char cfg[PATH_MAX], backup[262144] = "", legacy[PATH_MAX + 32];
+            settings_file(cfg, sizeof cfg, false);
+            FILE *f = fopen(cfg, "rb");
+            ST_CHECK(f != NULL);
+            if (f) {
+                size_t n = fread(backup, 1, sizeof backup - 1, f);
+                backup[n] = 0;
+                fclose(f);
+            }
+            snprintf(legacy, sizeof legacy, "app_icon=%s\n", svg);
+            st_write_text(cfg, legacy);
+            g_app_icon_path[0] = 0;
+            g_app_icon_mode = APP_ICON_DEFAULT;
+            settings_load();
+            ST_CHECK(g_app_icon_mode == APP_ICON_CUSTOM && !strcmp(g_app_icon_path, svg));
+            snprintf(legacy, sizeof legacy, "app_icon_mode=system\napp_icon=%s\n", svg);
+            st_write_text(cfg, legacy);
+            g_app_icon_path[0] = 0;
+            g_app_icon_mode = APP_ICON_DEFAULT;
+            settings_load();
+            ST_CHECK(g_app_icon_mode == APP_ICON_FILE_ICON && !strcmp(g_app_icon_path, svg));
+            st_write_text(cfg, backup);
+            settings_load();
+            g_app_icon_mode = APP_ICON_DEFAULT;
+        }
+        { // title bar icon: its own path setting, preview and Apply, independent of the app icon
+            char ti[PATH_MAX];
+            snprintf(ti, sizeof ti, M9_BASE "/title-icon.svg");
+            st_write_text(ti, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"#00ff00\"/></svg>");
+            u8 *def_title = title_icon_preview_raster(16), *small_title = icon_raster(ICON_LOGO_SMALL, 16, 16);
+            ST_CHECK(def_title && small_title && !g_title_icon_path[0]);
+            ST_CHECK(!memcmp(def_title, small_title, 16 * 16 * 4));
+            free(small_title);
+            te_set(&g_opt.title_icon, ti, (int)strlen(ti), (int)strlen(ti));
+            opt_title_icon_apply();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            Glyph *h1 = title_icon_header_glyph(23), *p1 = title_icon_preview_glyph(30);
+            Glyph *h2 = title_icon_header_glyph(23), *p2 = title_icon_preview_glyph(30);
+            ST_CHECK(h1 && p1 && h1 == h2 && p1 == p2 && h1 != p1);
+            u8 *custom_title = title_icon_preview_raster(16);
+            ST_CHECK(custom_title && memcmp(def_title, custom_title, 16 * 16 * 4) != 0);
+            free(custom_title);
+            free(def_title);
+            te_set(&g_opt.title_icon, "relative.svg", 12, 12);
+            opt_title_icon_apply();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            st_opt_click(st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1));
+            ST_CHECK(!g_title_icon_path[0] && !g_opt.title_icon.buf[0]);
+            te_set(&g_opt.title_icon, ti, (int)strlen(ti), (int)strlen(ti));
+            opt_title_icon_apply();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            settings_save();
+            settings_load();
+            ST_CHECK(!strcmp(g_title_icon_path, ti));
+            options_open();
+            g_opt.cat = OC_APPEARANCE;
+            g_opt.scroll = 0;
+            st_frames(2);
+            ST_CHECK(st_opt_hit(HP_TEXT, OPT_TITLE_ICON, 3) != NULL);
+            ST_CHECK(title_icon_header_glyph(24) && title_icon_preview_glyph(30));
+            sheet_close();
+            st_frames(5);
+            ST_CHECK(st_brand_icon_green()); // the custom artwork is drawn in the header, not just previewed
+            bool logo = A.brand_logo;
+            if (logo) opt_bool_toggle(OPT_BRAND_LOGO);
+            st_frames(5);
+            ST_CHECK(!A.brand_logo && !st_brand_icon_green()); // Logo off hides the custom icon too
+            st_shot("options-title-icon-off");
+            if (logo) opt_bool_toggle(OPT_BRAND_LOGO);
+            st_frames(5);
+            ST_CHECK(A.brand_logo && st_brand_icon_green());
+            { // title Default clears the path, restores the small logo and removes the custom header pixels
+                options_open();
+                g_opt.cat = OC_APPEARANCE;
+                g_opt.scroll = 0;
+                st_frames(2);
+                st_opt_click(st_opt_hit(HP_BUTTON, OPT_TITLE_ICON, 1));
+                ST_CHECK(!g_title_icon_path[0] && !g_opt.title_icon.buf[0]);
+                u8 *after = title_icon_preview_raster(16), *small = icon_raster(ICON_LOGO_SMALL, 16, 16);
+                ST_CHECK(after && small && !memcmp(after, small, 16 * 16 * 4));
+                free(after);
+                free(small);
+                sheet_close();
+                st_frames(5);
+                ST_CHECK(A.brand_logo && !st_brand_icon_green());
+            }
+        }
+        data_home(dh, sizeof dh);
+        snprintf(dest, sizeof dest, "%s/icons/hicolor/scalable/apps/dev.fileexplorer.svg", dh);
+        ST_CHECK(app_icon_write_ex(dh, 0x123456, svg, false));
+        FILE *df = fopen(dest, "rb");
+        ST_CHECK(df != NULL);
+        if (df) {
+            char body[8192] = {0};
+            size_t n = fread(body, 1, sizeof body - 1, df);
+            fclose(df);
+            ST_CHECK(n && strstr(body, "#ff0000"));
+        }
+        ST_CHECK(!app_icon_write_ex(dh, 0x123456, svg, false)); // already installed: nothing changed
+        g_app_icon_mode = APP_ICON_FILE_ICON;
+        ST_CHECK(app_icon_write_ex(dh, 0x123456, NULL, false)); // File-Icon removes the installed override
+        ST_CHECK(access(dest, F_OK) != 0);
+        g_app_icon_mode = APP_ICON_DEFAULT;
+        opt_app_icon_chosen("");
+        ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
+        ST_CHECK(app_icon_write(dh, 0x123456)); // Default restores the recoloured built-in artwork
+        df = fopen(dest, "rb");
+        ST_CHECK(df != NULL);
+        if (df) {
+            char body[8192] = {0};
+            size_t n = fread(body, 1, sizeof body - 1, df);
+            fclose(df);
+            ST_CHECK(n && strstr(body, "<svg"));
+        }
+        settings_save();
+        opt_app_icon_chosen(svg);
+        settings_save();
+        opt_app_icon_chosen("");
+        settings_load();
+        init_places();
+        ST_CHECK(!strcmp(g_app_icon_path, svg));
+        opt_app_icon_chosen("");
+        settings_save();
     }
     { // scrollbar colour: Auto (the theme's own; System: the desktop's accent), or #RRGGBB / #RGB typed and applied
         int saved = g_theme_cur;
