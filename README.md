@@ -38,7 +38,7 @@ https://github.com/user-attachments/assets/fbfe88ff-015f-431b-87c6-2704839d9ee3
 | Distro | How | |
 |---|---|---|
 | Debian 13, Ubuntu 25.10+, Mint, Pop!_OS | add the repo once, then `sudo apt install file-explorer` ([commands](docs/install.md#debian-13-ubuntu-2510--2604--2610-mint-pop_os)) | ![ready](https://img.shields.io/badge/ready-apt%20repo-9ece6a?style=flat) |
-| Fedora 43 / 44 | add the repo once, then `sudo dnf install file-explorer` ([commands](docs/install.md#fedora-43--44)) | ![ready](https://img.shields.io/badge/ready-rpm%20repo-9ece6a?style=flat) |
+| Fedora 43 / 44 / 45 | add the repo once, then `sudo dnf install file-explorer` ([commands](docs/install.md#fedora-43--44--45)) | ![ready](https://img.shields.io/badge/ready-rpm%20repo-9ece6a?style=flat) |
 | openSUSE Tumbleweed / Leap 16 | add the repo once, then `sudo zypper install file-explorer` ([commands](docs/install.md#opensuse-tumbleweed--leap-160)) | ![ready](https://img.shields.io/badge/ready-rpm%20repo-9ece6a?style=flat) |
 | Arch, CachyOS, Manjaro, EndeavourOS | `makepkg -si` in `packaging/arch` of a clone ([commands](docs/install.md#arch-cachyos-manjaro-endeavouros)) | ![ready](https://img.shields.io/badge/ready-PKGBUILD-9ece6a?style=flat) |
 | Any distro (Ubuntu 22.04+, Debian 12+...) | AppImage from [Releases](https://github.com/AlexMedela/file-explorer/releases/latest) ([how](docs/install.md#any-other-distro-appimage)) | ![ready](https://img.shields.io/badge/ready-AppImage-9ece6a?style=flat) |

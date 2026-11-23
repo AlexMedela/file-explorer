@@ -1,5 +1,6 @@
 # File Explorer - RPM package for Fedora and openSUSE (built on OBS: home:AlexMedela/file-explorer, see _service).
 Name:           file-explorer
+# Version is a placeholder: OBS sets it from the latest release tag (_service: set_version), no bump needed.
 Version:        0.9.0
 Release:        0
 Summary:        Just another file explorer: fast, keyboard-first, GPU-rendered
