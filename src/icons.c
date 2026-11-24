@@ -711,6 +711,7 @@ static f32 icon_texture_tint(SDL_Texture *tex) {
     return 1.f;
 }
 static bool g_logo_changed; // the window icon should be rebuilt (app.c)
+static bool g_app_icon_theme_dirty; // the launcher override is stale (app.c): the File-Icon folder artwork changed
 
 // The desktop's icon (system_icons.c) arrived: over the bundled one drawn meanwhile, in place in the atlas; big copies
 // are made again.
@@ -732,7 +733,10 @@ static void icons_replace(int id, int px, const u8 *rgba) {
         }
     // A desktop icon can arrive after the glyph was cached in File-Icon mode, or while System file icons are selected.
     if (g_app_icon_mode == APP_ICON_FILE_ICON || icon_system_selected()) app_icon_preview_invalidate();
-    if (g_app_icon_mode == APP_ICON_FILE_ICON && id == icon_find("folder")) g_logo_changed = true;
+    if (g_app_icon_mode == APP_ICON_FILE_ICON && id == icon_find("folder")) {
+        g_logo_changed = true; // the window icon follows at once
+        g_app_icon_theme_dirty = true; // the launcher override is rewritten by app_icon_sync()
+    }
 }
 
 // Theme changed: icons using the theme colour mark are parsed and rasterized again.
@@ -796,6 +800,7 @@ static void icons_flush(void) {
     for (int i = 0; i < g_nbig; i++) SDL_DestroyTexture(g_big_icons[i].tex);
     g_nbig = 0;
     atlas_reset(); // glyph-atlas icons (and text, re-rasterized on demand)
+    if (g_app_icon_mode == APP_ICON_FILE_ICON) g_app_icon_theme_dirty = true; // switched/reloaded: the override is stale
 }
 
 static void icon_set_theme(int t) {

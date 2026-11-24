@@ -4836,6 +4836,13 @@ static int run_selftest_m9(void) {
             ST_CHECK(folder && direct && !memcmp(direct, folder, 16 * 16 * 4));
             opt_choice_set(OPT_ICON_THEME, saved_theme);
             g_app_icon_mode = saved_mode;
+            { // a late folder arrival (the desktop's icon, a reload) marks the launcher override stale
+                g_app_icon_theme_dirty = false;
+                g_app_icon_mode = APP_ICON_FILE_ICON;
+                icons_replace(icon_find("folder"), 16, after);
+                ST_CHECK(g_app_icon_theme_dirty);
+                g_app_icon_theme_dirty = false; // app_icon_sync() consumes it outside tests
+            }
             free(before);
             free(folder);
             free(after);
@@ -4962,8 +4969,14 @@ static int run_selftest_m9(void) {
         }
         ST_CHECK(!app_icon_write_ex(dh, 0x123456, svg, false)); // already installed: nothing changed
         g_app_icon_mode = APP_ICON_FILE_ICON;
-        ST_CHECK(app_icon_write_ex(dh, 0x123456, NULL, false)); // File-Icon removes the installed override
+        ST_CHECK(app_icon_write_ex(dh, 0x123456, NULL, false)); // File-Icon installs the active folder icon
         ST_CHECK(access(dest, F_OK) != 0);
+        char png_dest[PATH_MAX];
+        snprintf(png_dest, sizeof png_dest, "%s/icons/hicolor/256x256/apps/dev.fileexplorer.png", dh);
+        ST_CHECK(access(png_dest, F_OK) == 0);
+        u8 *file_icon = file_icon_app_raster(256);
+        ST_CHECK(file_icon != NULL);
+        free(file_icon);
         g_app_icon_mode = APP_ICON_DEFAULT;
         opt_app_icon_chosen("");
         ST_CHECK(!g_app_icon_path[0] && !app_icon_raster(16));
