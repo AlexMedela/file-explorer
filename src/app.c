@@ -1013,6 +1013,10 @@ static void layout_pane(Pane *p, Rect area) {
     f32 px = ly->up.x + bs + roundf(S(8));
     ly->morebtn = (Rect){area.x + width - bs - roundf(S(8)), by, bs, bs};
     ly->filterbtn = (Rect){ly->morebtn.x - bs - gap, by, bs, bs};
+    if (A.ribbon) { // (the ribbon has the folder's actions: no "..." menu button; the filter takes its place)
+        ly->filterbtn = ly->morebtn;
+        ly->morebtn = (Rect){0};
+    }
     ly->sortbtn = (Rect){ly->filterbtn.x - bs - gap, by, bs, bs};
     // A narrow split keeps the path usable: back / forward / up go first (their keys and the mouse's side buttons
     // still work), then sort (it stays in the folder's menu), then filter and the menu (a right click on empty space).

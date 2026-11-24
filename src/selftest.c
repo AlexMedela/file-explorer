@@ -4031,6 +4031,7 @@ static int run_selftest_m9(void) {
         PaneLayout *rl = &p->ly;
         ST_CHECK(rl->ribbon.h == roundf(S(36)) && rl->ribbon.y == rl->toolbar.y + rl->toolbar.h && rl->header.y == rl->ribbon.y + rl->ribbon.h &&
                  rl->header.y == hy0 + rl->ribbon.h);
+        ST_CHECK(rl->morebtn.w == 0 && rl->filterbtn.w > 0); // (the ribbon has the folder's actions: no "..." in the toolbar)
         st_shot("ribbon");
         int hi = -1, di = -1;
         for (int i = 0; i < RIBBON_N; i++) {
