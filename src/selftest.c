@@ -4031,6 +4031,21 @@ static int run_selftest_m9(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, hb.x + hb.w * 0.5f, hb.y + hb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
         ST_CHECK(A.show_hidden == !h0 && ribbon_item_on(&g_ribbon[hi], p) == A.show_hidden);
         do_action(p, ACT_HIDDEN);
+        // a dropdown: the right-click menu's submenu of the same name under the icon (Views: view modes, Tree view)
+        int vi = -1;
+        for (int i = 0; i < RIBBON_N; i++)
+            if (g_ribbon[i].sub == RS_VIEWS) vi = i;
+        Rect vb = vi >= 0 ? g_rb.r[vi] : (Rect){0};
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, vb.x + vb.w * 0.5f, vb.y + vb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, vb.x + vb.w * 0.5f, vb.y + vb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        bool tree_item = false;
+        for (int i = 0; A.menu.open && i < A.menu.n; i++) tree_item |= A.menu.items[i].act == ACT_TREE_VIEW;
+        ST_CHECK(vb.w > 0 && A.menu.open && tree_item && A.menu.r.y >= vb.y + vb.h);
+        st_shot("ribbon-views");
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        ST_CHECK(!A.menu.open);
+        // icons: the right-click menu's for the same action
+        ST_CHECK(ribbon_icon(&g_ribbon[hi]) == UI_EYE && ribbon_icon(&g_ribbon[0]) == UI_SCISSORS);
         // a narrow window: the last ones go into "...", which runs them like the icons
         int w0 = A.W;
         A.W = (int)roundf(S(640));
