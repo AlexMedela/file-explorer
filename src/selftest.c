@@ -6629,7 +6629,10 @@ static int run_selftest_m10(void) {
         // "Mount" on an image: a read-only loop device, its filesystem mounted and opened (the desktop's automounter got there
         // first: its mount); nothing to mount: the loop goes
         st_write(M10_BASE "/disc.iso", 10);
-        image_mount(M10_BASE "/disc.iso");
+        pane_navigate(active_pane(), M10_BASE, true);
+        st_wait();
+        st_select(active_pane(), "disc.iso");
+        open_entry(active_pane(), active_pane()->cursor, false); // (a double-click: mounted, not browsed or handed to an app)
         ST_CHECK(st_wait_cond(c_dev_idle, 5000));
         st_wait();
         ST_CHECK(st_log_has("loop-setup -r -f " M10_BASE "/disc.iso") && st_log_has("mount -b /dev/loop7") &&
