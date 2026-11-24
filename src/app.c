@@ -2038,6 +2038,8 @@ static SDL_HitTestResult window_hit_test(SDL_Window *w, const SDL_Point *pt, voi
 }
 
 // Switch between our title bar and the system's (startup, and when the setting changes).
+static void desktop_look_sync(void); // integration.c: also our own title bar's control glyphs (the desktop's icon theme)
+
 static void titlebar_apply(void) {
     bool csd = titlebar_wanted();
     if (A.win && !A.selftest) {
@@ -2045,6 +2047,7 @@ static void titlebar_apply(void) {
         SDL_SetWindowHitTest(A.win, csd ? window_hit_test : NULL, NULL);
     }
     A.csd = csd;
+    desktop_look_sync(); // (Default mode: the controls draw the desktop theme's artwork)
     layout();
     A.redraw = true;
 }

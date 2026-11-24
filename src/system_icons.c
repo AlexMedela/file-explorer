@@ -5,7 +5,7 @@
 // --- index of installed themes (workers, under g_sysi.mtx) ---------------------------------------------------------
 
 typedef struct { char *path; int size, scale, min, max, threshold, type; } SysIconDir; // path: full; type: SYSI_DIR_*
-typedef struct { char name[64]; char inherits[8][64]; int ninherits; SysIconDir *dirs; int ndirs; } SysIconTheme;
+typedef struct { char name[64], dir[64]; char inherits[8][64]; int ninherits; SysIconDir *dirs; int ndirs; } SysIconTheme;
 enum { SYSI_DIR_FIXED, SYSI_DIR_SCALABLE, SYSI_DIR_THRESHOLD };
 static char *icon_read_svg(const char *path); // icons.c
 #define SYSI_ROOTS 16
@@ -83,11 +83,23 @@ static SysIconTheme *sysi_theme(const char *name) {
     SysIconTheme *t = &g_sysi.themes[g_sysi.nthemes++];
     memset(t, 0, sizeof *t);
     snprintf(t->name, sizeof t->name, "%s", name);
+    snprintf(t->dir, sizeof t->dir, "%s", name);
     FILE *f = NULL;
     char path[PATH_MAX + 80];
     for (int r = 0; r < g_sysi.nroots && !f; r++) {
         snprintf(path, sizeof path, "%s/%s/index.theme", g_sysi.roots[r], name);
         f = fopen(path, "re");
+    }
+    for (int r = 0; !f && r < g_sysi.nroots; r++) { // the folder's spelling may differ from the theme's name (KDE: "Breeze" is in .../icons/breeze)
+        DIR *dh = opendir(g_sysi.roots[r]);
+        struct dirent *de;
+        while (dh && (de = readdir(dh))) {
+            if (de->d_name[0] == '.' || strcasecmp(de->d_name, name)) continue;
+            snprintf(path, sizeof path, "%s/%s/index.theme", g_sysi.roots[r], de->d_name);
+            f = fopen(path, "re");
+            if (f) { snprintf(t->dir, sizeof t->dir, "%s", de->d_name); break; }
+        }
+        if (dh) closedir(dh);
     }
     if (!f) return t;
     char *line = NULL, *list = NULL, *section = NULL;
@@ -106,7 +118,7 @@ static SysIconTheme *sysi_theme(const char *name) {
                     for (int r = 0; r < g_sysi.nroots; r++) { // (the theme may be spread over several roots)
                         char dir[PATH_MAX + 320];
                         struct stat st;
-                        snprintf(dir, sizeof dir, "%s/%s/%s", g_sysi.roots[r], name, section);
+                        snprintf(dir, sizeof dir, "%s/%s/%s", g_sysi.roots[r], t->dir, section);
                         if (stat(dir, &st) || !S_ISDIR(st.st_mode)) continue;
                         t->dirs = xrealloc(t->dirs, (size_t)(t->ndirs + 1) * sizeof *t->dirs);
                         t->dirs[t->ndirs] = d;
