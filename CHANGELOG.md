@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.13.0
+
+**New**
+- Custom actions in the right-click menu: `*.action` files (Nemo's `.nemo_action` files work too) add commands for the selected files, with groups, icons and conditions; Options > Actions creates and edits them in the app, shows the command that will run and says why one failed. File names are passed without a shell. See [Integration](docs/integration.md). Thanks to @ItsZariep.
+
+- More details everywhere: new columns Date accessed, Group, Link target, CRC32 and SHA-256 (hashes of visible local files up to 1 GB, computed in the background and cached); the details panel (Ctrl+I) shows what Properties does: created / accessed, owner, group, permissions, link target and media details, scrolling when long. Thanks to @F3llFr0mTh3Sky.
+
+- Optical drives and disc images: CDs, DVDs and Blu-rays show up under Devices (eject opens the tray); double-clicking an `.iso` / `.img` mounts it read-only, and an ISO can be browsed without mounting. Thanks to @F3llFr0mTh3Sky.
+
+- Disk temperature and health: Devices shows a dot when a drive is hot or SMART reports a warning or failure, with the facts in its tooltip and the details panel. Thanks to @F3llFr0mTh3Sky.
+
+- Android phones over ADB: with `adb` and `adbfs` installed, a phone with USB debugging on is listed as "‹model› (ADB)" and a click mounts its whole storage, also what MTP doesn't show. Not yet tested with many phones - reports welcome. Thanks to @F3llFr0mTh3Sky.
+
+- An optional ribbon (Options > Appearance > Ribbon): a row of icons for common actions, grouped with dropdowns, placed above / below the path bar, at the bottom or on a side (drag its grip), with what doesn't fit in a "…" menu, wrapped or scrolled. The path bar also gets a copy-path button. Thanks to @F3llFr0mTh3Sky.
+
+- Options > Appearance > Path as text shows the path bar as plain text; a click edits it. Thanks to @F3llFr0mTh3Sky.
+
+- Options > Advanced > Renderer says which backend Automatic picked, e.g. "Automatic (OpenGL)". Thanks to @F3llFr0mTh3Sky.
+
+- Only the AppImage checks for and installs updates; installs from a package manager just show the version and ask GitHub nothing. Thanks to @F3llFr0mTh3Sky.
+
+- Tabs show where they are: a pie for Disk usage, the snapshots clock for Snapshots, the share / cloud / phone / backup icon anywhere inside one, and the sidebar's name for a place ("OCI VM", not `sftp:host=…`).
+
+- More appearance options: the path and search fields' brightness and a transparent path bar, the navigation selection's strength and its marker, Classic or Pills tabs, a custom app icon and title bar icon (File-Icon mode uses the current file icons' folder, also for the launcher), an animated text caret, and Apply / Auto buttons that confirm with a toast. Thanks to @juangiler.
+
+- Zooming the files with Ctrl+wheel past the smallest or largest size steps between Grid, List and Details; the drag card and transfer cards have a flat look with icons matching the view. Thanks to @juangiler.
+
+- One Terminal executable field in Options instead of several. Thanks to @juangiler.
+
+- A Fedora 45 repository. Thanks to @juangiler.
+
+**Fixed**
+- The Trash lists, restores, counts and empties items deleted on other drives too, not only those in the home trash, and a name trashed again no longer shows the earlier one's origin and date.
+- The dot of the i in Properties and the bullets of lists were missing from interface icons.
+- Pale icons stay readable on light sidebars and headers (coloured icon sets keep their colours), labels like the Trash's and free space have more contrast, toasts show above open dialogs, the sidebar edge is one line, and dialogs and transfers use the full-trash icon when the trash has items. Thanks to @juangiler.
+
 ## 0.12.1
 
 **Fixed**

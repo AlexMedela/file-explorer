@@ -191,8 +191,8 @@ the window and launcher icon. `app_icon` (empty by default) remembers the absolu
 row. The row previews the icon in effect with no background chip, and its active button is primary. **Apply** uses the
 typed path (SVG keeps its own colours) and selects Custom; **File-Icon** uses the folder icon of the currently selected
 File icons set and follows changes to that setting live; **Default** clears `app_icon`, shows the `Default` placeholder
-in the field, and restores the accent-coloured built-in logo. File-Icon installs no launcher override and removes one
-this app previously wrote; Default restores the recoloured built-in artwork. Older settings with a non-empty
+in the field, and restores the accent-coloured built-in logo. File-Icon also installs that folder icon as the launcher
+override (`~/.local/share/icons/hicolor/256x256/apps/dev.fileexplorer.png`); Default removes it and restores the recoloured built-in artwork. Older settings with a non-empty
 `app_icon` are treated as Custom, an empty one as Default, and a legacy `app_icon_mode=system` as File-Icon.
 
 `title_icon` (Options -> Appearance -> Title bar icon, directly below App icon, empty by default) is an
