@@ -1458,11 +1458,38 @@ static int run_selftest_m5(void) {
     ST_CHECK(st_wait_cond(c_pv_ready, 3000));
     ST_CHECK(A.pv->kind == PV_IMAGE && A.pv->src_w == 640 && A.pv->src_h == 480 && A.pv_tex);
     st_shot("preview-image");
+    // ...with what Properties shows: dates, owner, group, permissions, and the media details read on a thread
+    for (int k = 0; k < 300 && !(A.pv_media && atomic_load(&A.pv_media->done)); k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(A.pv_media && !strcmp(A.pv_media->path, M5_BASE "/photo.bmp") && atomic_load(&A.pv_media->done) && A.pv_media->w == 640);
+    st_frames(1);
+    { // a short window: the rows don't fit, the wheel scrolls the panel (not the list); another item starts at the top
+        int h0 = A.H;
+        A.H = (int)roundf(S(380));
+        st_frames(2);
+        ST_CHECK(A.pv_content_h > A.r_preview.h && A.pv_scroll == 0);
+        i64 top0 = (i64)p->scroll;
+        SDL_MouseWheelEvent wv;
+        SDL_zero(wv);
+        wv.y = -3;
+        wv.mouse_x = A.r_preview.x + A.r_preview.w * 0.5f;
+        wv.mouse_y = A.r_preview.y + A.r_preview.h * 0.5f;
+        on_wheel(&wv);
+        st_settle();
+        ST_CHECK(A.pv_scroll > 0 && A.pv_scroll <= A.pv_content_h - A.r_preview.h + 1 && (i64)p->scroll == top0);
+        st_shot("preview-scrolled");
+        st_select(p, "notes.txt");
+        st_frames(2);
+        ST_CHECK(A.pv_scroll == 0);
+        st_select(p, "photo.bmp");
+        A.H = h0;
+        st_frames(2);
+    }
     // text
     st_select(p, "notes.txt");
     ST_CHECK(st_wait_cond(c_pv_ready, 3000));
     ST_CHECK(A.pv->kind == PV_TEXT && A.pv->text && !strncmp(A.pv->text, "line 1\t", 7));
     st_shot("preview-text");
+    ST_CHECK(!A.pv_media); // (no media details for text)
     // folder
     st_select(p, "sub");
     ST_CHECK(st_wait_cond(c_pv_ready, 3000));
@@ -1558,7 +1585,7 @@ static int run_selftest_m5(void) {
     st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
     ST_CHECK(!A.ql_on);
     st_key(SDLK_I, SDL_KMOD_CTRL);
-    ST_CHECK(!A.preview_on);
+    ST_CHECK(!A.preview_on && !A.pv_media);
 
     // zoom
     int px0 = A.font.px;

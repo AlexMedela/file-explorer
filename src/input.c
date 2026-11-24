@@ -1079,6 +1079,10 @@ static void wheel_route(SDL_MouseWheelEvent *w, f32 wy) {
         }
         return;
     }
+    if (A.preview_on && in_rect(A.r_preview, w->mouse_x, w->mouse_y)) { // the details panel, when its rows don't fit
+        glide_by(&A.pv_scroll, -wy * S(28) * 2, A.pv_content_h - A.r_preview.h);
+        return;
+    }
     {
         Panel *wp = panel_at(w->mouse_x, w->mouse_y);
         if (wp && wp->cur && wp->cur->term && in_rect(wp->cur->pane[0].ly.area, w->mouse_x, w->mouse_y)) {

@@ -3832,11 +3832,23 @@ static void type_label(const Entry *e, char *buf, size_t cap) {
     } else snprintf(buf, cap, "File");
 }
 
+static int props_media_rows(MediaJob *m, const char **lab, char (*val)[160], int cap); // ui_tools.c
+
 static f32 pv_row(Font *f, f32 x, f32 y, f32 w, const char *label, const char *value) {
     f32 lw = roundf(S(84)), h = roundf(f->line_h * 1.5f);
     draw_text(f, x, y, label, (int)strlen(label), C(COL_TEXT_FAINT));
     draw_text_fit(f, x + lw, y, w - lw, value, (int)strlen(value), C(COL_TEXT2), 0);
     return y + h;
+}
+
+// The details panel's scrolling: its content's height (from where it ended, y), the offset kept in range, a thin bar.
+static void pv_scroll_end(Rect r, f32 y, f32 pad) {
+    A.pv_content_h = y + A.pv_scroll + pad - r.y;
+    f32 hi = MAX(0.f, A.pv_content_h - r.h);
+    if (A.pv_scroll > hi) { A.pv_scroll = hi; A.redraw = true; }
+    if (hi <= 0) return;
+    f32 th = MAX(roundf(S(32)), r.h * r.h / A.pv_content_h), ty = r.y + (r.h - th) * (A.pv_scroll / hi), bw = roundf(S(4));
+    draw_rrect(r.x + r.w - bw - S(3), ty, bw, th, bw * 0.5f, C(COL_SCROLL));
 }
 
 static void draw_preview(void) {
@@ -3847,7 +3859,8 @@ static void draw_preview(void) {
     draw_rect(r.x, r.y, r.w, r.h, C(COL_PREVIEW_BG));
     bool dh = A.drag == DRAG_PREVIEW || (A.mouse_in && in_rect(A.r_pdiv, A.mx, A.my));
     if (g_separators || dh) draw_rect(r.x, r.y, 1, r.h, C(dh ? COL_ACCENT : COL_BORDER));
-    f32 pad = roundf(S(16)), x = r.x + pad, w = r.w - pad * 2, y = r.y + pad;
+    if (A.pv_scroll < 0) A.pv_scroll = 0;
+    f32 pad = roundf(S(16)), x = r.x + pad, w = r.w - pad * 2, y = roundf(r.y + pad - A.pv_scroll);
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x + 1, (int)r.y, (int)r.w - 1, (int)r.h});
     Listing *L = p->L;
 
@@ -3873,7 +3886,8 @@ static void draw_preview(void) {
         fmt_size(b, sizeof b, total);
         y = pv_row(fs, x, y, w, "Total size", b);
         snprintf(line, sizeof line, "%u folder%s, %u file%s", nd, nd == 1 ? "" : "s", p->sel_count - nd, p->sel_count - nd == 1 ? "" : "s");
-        pv_row(fs, x, y, w, "Contains", line);
+        y = pv_row(fs, x, y, w, "Contains", line);
+        pv_scroll_end(r, y, pad);
         draw_clip_pop(cs);
         return;
     }
@@ -3934,11 +3948,36 @@ static void draw_preview(void) {
             y = pv_row(fs, x, y, w, "Size", buf);
         }
         if (meta) {
-            time_t t = (time_t)e->mtime;
-            struct tm tm;
-            localtime_r(&t, &tm);
-            strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", &tm);
-            y = pv_row(fs, x, y, w, "Modified", buf);
+            static const char *const dl[3] = {"Modified", "Created", "Accessed"};
+            i64 dt[3] = {e->mtime, e->btime, e->atime};
+            for (int k = 0; k < 3; k++) {
+                if (!dt[k]) continue; // (no creation time on this filesystem)
+                time_t t = (time_t)dt[k];
+                struct tm tm;
+                localtime_r(&t, &tm);
+                strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", &tm);
+                y = pv_row(fs, x, y, w, dl[k], buf);
+            }
+            // the rest of what Properties shows (read-only here)
+            if (!L->is_archive) {
+                y = pv_row(fs, x, y, w, "Owner", owner_name(e->uid));
+                y = pv_row(fs, x, y, w, "Group", group_name(e->gid));
+                char pm[12];
+                fmt_perms(e, pm);
+                snprintf(buf, sizeof buf, "%s  (%03o)", pm + 1, e->mode & 07777);
+                y = pv_row(fs, x, y, w, "Permissions", buf);
+            }
+            u32 ei = (u32)(e - L->entries);
+            if (L->links && L->links[ei]) y = pv_row(fs, x, y, w, "Link to", L->links[ei]);
+        }
+    }
+    if (e && A.pv_media && !strcmp(A.pv_media->path, A.pv_want)) { // media details (dimensions, length, camera...)
+        const char *lab[24];
+        static char val[24][160];
+        int n = props_media_rows(A.pv_media, lab, val, (int)sizeof val[0]);
+        for (int i = 0; i < n; i++) {
+            if (!strcmp(lab[i], "Dimensions") && pv && pv->src_w) continue; // (already with the type)
+            y = pv_row(fs, x, y, w, !strcmp(lab[i], "Location") ? "GPS" : lab[i], val[i]); // (Location: the folder, below)
         }
     }
     if (pv && pv->kind == PV_DIR) {
@@ -3968,7 +4007,8 @@ static void draw_preview(void) {
     // text preview with line numbers
     if (pv && pv->kind == PV_TEXT && pv->text && A.mono_path) {
         y += roundf(S(10));
-        Rect box = {x - S(6), y, w + S(12), r.y + r.h - pad - y};
+        Rect box = {x - S(6), y, w + S(12), MAX(r.y + r.h - pad - y, roundf(S(220)))}; // (rows above it: still a few lines, scrolled to)
+        y = box.y + box.h;
         if (box.h > S(40)) {
             draw_rrect(box.x, box.y, box.w, box.h, S(8), C(COL_SUNKEN));
             ClipSave c2 = draw_clip_push((SDL_Rect){(int)box.x + 2, (int)box.y + 2, (int)box.w - 4, (int)box.h - 4});
@@ -4020,6 +4060,7 @@ static void draw_preview(void) {
             draw_clip_pop(c2);
         }
     }
+    pv_scroll_end(r, y, pad);
     draw_clip_pop(cs);
 }
 
