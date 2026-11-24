@@ -4017,6 +4017,9 @@ static int run_selftest_m9(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, cpb.x + cpb.w * 0.5f, cpb.y + cpb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, cpb.x + cpb.w * 0.5f, cpb.y + cpb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
         ST_CHECK(!A.edit_pane && strstr(A.toast, "Copied: ") && strstr(A.toast, p->path));
+        st_mouse(SDL_EVENT_MOUSE_MOTION, cpb.x + cpb.w * 0.5f, cpb.y + cpb.h * 0.5f, 0, 0, 0);
+        st_frames(1);
+        ST_CHECK(A.ptr_hand && !A.ptr_text); // a button: the hand, not the text pointer of the field around it
     }
 
     // --- the ribbon (off by default): icons under the navigation bar, for that panel; the rest in "..." ---

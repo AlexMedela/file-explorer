@@ -653,7 +653,8 @@ static void draw_toolbar_content(Pane *p, bool active, bool split) {
     if (pb.w <= 0) { ly->has_gitchip = false; return; }
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);
-    if (hover) A.ptr_text = true; // a click outside the crumbs (anywhere, with Path as text) edits the path
+    bool on_btn = in_rect(ly->copypath, A.mx, A.my) || (ly->has_gitchip && in_rect(ly->gitchip, A.mx, A.my)); // (buttons: a hand)
+    if (hover && !on_btn) A.ptr_text = true; // a click outside the crumbs (anywhere, with Path as text) edits the path
     draw_rrect(pb.x, pb.y, pb.w, pb.h, S(7), CA(editing ? COL_FIELD_HOVER : pathbar_field_color(), editing || !g_transparent_pathbar ? 1.f : 0.f));
     if (g_transparent_pathbar && !editing)
         draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(7), MAX(1.f, S(1.f)), CA(COL_BORDER, 0.7f));
