@@ -584,6 +584,29 @@ static void draw_branch_icon(f32 x, f32 cy, Color ic) {
     draw_glyph(g, roundf(x - margin), roundf(cy - (f32)px * 0.5f), (Color){ic.r * t, ic.g * t, ic.b * t, ic.a});
 }
 
+// Path as text (Options): the whole path, its start cut off ("\xE2\x80\xA6/deep/folder") when it doesn't fit; the
+// branch chip keeps the right end.
+static void draw_path_text(Pane *p, Font *f, f32 ty) {
+    Rect pb = p->ly.pathbar;
+    f32 x = pb.x + roundf(S(12)), avail = pb.w - roundf(S(24)), gcw = git_chip_width(p);
+    if (gcw > 0 && gcw < pb.w * 0.5f) avail -= gcw + roundf(S(6));
+    const char *s = p->path;
+    int len = (int)strlen(s);
+    if (avail <= 0) return;
+    if (text_width(f, s, len) <= avail) { draw_text(f, x, ty, s, len, C(COL_TEXT)); return; }
+    f32 ell = text_width(f, ELLIPSIS, 3);
+    int lo = 0, hi = len; // the smallest start (a character boundary) whose tail fits after the ellipsis; hi always fits
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        while (mid < hi && ((u8)s[mid] & 0xC0) == 0x80) mid++;
+        if (mid == hi) break;
+        if (text_width(f, s + mid, len - mid) + ell <= avail) hi = mid;
+        else lo = mid + 1;
+    }
+    draw_text(f, x, ty, ELLIPSIS, 3, C(COL_TEXT_DIM));
+    draw_text(f, x + ell, ty, s + hi, len - hi, C(COL_TEXT));
+}
+
 static void draw_toolbar_content(Pane *p, bool active, bool split) {
     PaneLayout *ly = &p->ly;
     Rect tb = ly->toolbar;
@@ -630,7 +653,7 @@ static void draw_toolbar_content(Pane *p, bool active, bool split) {
     if (pb.w <= 0) { ly->has_gitchip = false; return; }
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);
-    if (hover) A.ptr_text = true; // a click outside the crumbs edits the path
+    if (hover) A.ptr_text = true; // a click outside the crumbs (anywhere, with Path as text) edits the path
     draw_rrect(pb.x, pb.y, pb.w, pb.h, S(7), CA(editing ? COL_FIELD_HOVER : pathbar_field_color(), editing || !g_transparent_pathbar ? 1.f : 0.f));
     if (g_transparent_pathbar && !editing)
         draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(7), MAX(1.f, S(1.f)), CA(COL_BORDER, 0.7f));
@@ -644,9 +667,10 @@ static void draw_toolbar_content(Pane *p, bool active, bool split) {
     }
     SDL_Rect clip = {(int)pb.x, (int)pb.y, (int)pb.w, (int)pb.h};
     draw_clip(&clip);
-    layout_crumbs(p);
+    if (A.path_text) draw_path_text(p, f, ty);
+    else layout_crumbs(p);
     f32 sep_w = roundf(S(16));
-    for (int i = 0; i < ly->ncrumbs; i++) {
+    for (int i = 0; !A.path_text && i < ly->ncrumbs; i++) {
         Crumb *c = &ly->crumbs[i];
         bool last = i == ly->ncrumbs - 1;
         bool h = hand_if(hover && in_rect(c->r, A.mx, A.my));

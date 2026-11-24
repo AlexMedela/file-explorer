@@ -661,6 +661,7 @@ static struct {
     char cs_error[64];     // shown in the search bar (bad regex)
     bool cs_case, cs_word, cs_regex; // contents search options: match case (else smart case), whole word, regex
     bool folder_sizes;
+    bool path_text;  // the path bar shows the path as plain text (no breadcrumbs); a click edits it
     bool git_status; // git badges in the file list + branch in the status bar
     int du_style;    // disk usage view: 0 treemap, 1 sunburst
     bool du_list;    // ... with the list of the biggest items beside the map

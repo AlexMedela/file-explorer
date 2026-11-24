@@ -6941,6 +6941,19 @@ static int run_selftest_m10(void) {
         layout_crumbs(p);
         ST_CHECK(!strcmp(p->path, deep) && p->ly.ncrumbs >= 2 && p->ly.crumbs[p->ly.ncrumbs - 1].end == (int)strlen(deep) &&
                  p->ly.crumbs_elided);
+        // Path as text: no crumbs; a click on what was a crumb edits the path instead of going there
+        A.path_text = true;
+        st_frames(1);
+        Rect pb = p->ly.pathbar;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, pb.x + S(20), pb.y + pb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, pb.x + S(20), pb.y + pb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.edit_pane == p && !strcmp(p->path, deep) && !strcmp(A.edit.buf, deep));
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        ST_CHECK(!A.edit_pane && !strcmp(p->path, deep));
+        settings_save();
+        A.path_text = false;
+        settings_load();
+        ST_CHECK(A.path_text);
         char lp[PATH_MAX];
         snprintf(lp, sizeof lp, "%s", M10_BASE "/long");
         mkdir(lp, 0755);
