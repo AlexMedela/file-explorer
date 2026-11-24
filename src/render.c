@@ -2352,6 +2352,9 @@ static void draw_list(Pane *p, bool active) {
     u32 sel_col = active ? COL_SEL : COL_SEL_IDLE, sel_cur = active ? COL_SEL_FOCUS : COL_SEL_IDLE;
     GitView gv;
     git_view(p, &gv);
+    // hash columns: local files only (archive members aren't files; network folders and phones would be read in full)
+    bool hashes = (col_visible(COL_CRC32) || col_visible(COL_SHA256)) && !L->is_archive && !path_is_remote(p->path) &&
+                  !path_on_phone(p->path);
     u64 size_max = 0; // for size bars: largest item in the folder (visible rows only for huge folders)
     if (A.size_bars && col_visible(COL_SIZE)) {
         i64 from = p->count <= 200000 ? 0 : first, to = p->count <= 200000 ? (i64)p->count : MIN((i64)p->count, first + 200);
@@ -2526,6 +2529,18 @@ static void draw_list(Pane *p, bool active) {
             case COL_OWNER: if (meta) snprintf(buf, sizeof buf, "%s", owner_name(e->uid)); break;
             case COL_ACCESSED: if (meta) fmt_date(e->atime, buf, sizeof buf, &tm_now); break;
             case COL_GROUP: if (meta) snprintf(buf, sizeof buf, "%s", group_name(e->gid)); break;
+            case COL_CRC32:
+            case COL_SHA256: {
+                if (!hashes || !meta || !S_ISREG(e->mode)) break;
+                char full[PATH_MAX];
+                path_join(full, sizeof full, p->path, e->name);
+                const HashEnt *h = hash_get(full, e->mtime, e->size);
+                if (h->st == HC_PENDING) snprintf(buf, sizeof buf, "\xE2\x80\xA6");
+                else if (h->st == HC_TOO_BIG) snprintf(buf, sizeof buf, "over 1 GB");
+                else if (h->st == HC_DONE && c == COL_CRC32) snprintf(buf, sizeof buf, "%08x", h->crc);
+                else if (h->st == HC_DONE) draw_text_fit(f, x0, ty, cw, h->sha, 64, dim, 0); // (the whole of it in the tooltip)
+                break;
+            }
             case COL_LINK: // (the whole target, cut off at the column's edge)
                 if (meta && L->links && L->links[ei]) draw_text_fit(f, x0, ty, cw, L->links[ei], (int)strlen(L->links[ei]), dim, 0);
                 break;

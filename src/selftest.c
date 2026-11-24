@@ -3965,11 +3965,43 @@ static int run_selftest_m9(void) {
         do_action(p, ACT_SORT_BASE + SORT_LINK);
         st_wait();
         st_frames(1);
-        ST_CHECK(p->sort_key == SORT_LINK && p->count == 3 && !strcmp(L->entries[p->order[0]].name, "l2") &&
+        L = p->L; // (the watcher may have reloaded the folder meanwhile)
+        ST_CHECK(L && p->sort_key == SORT_LINK && p->count == 3 && !strcmp(L->entries[p->order[0]].name, "l2") &&
                  !strcmp(L->entries[p->order[1]].name, "l1") && !strcmp(L->entries[p->order[2]].name, "plain"));
         st_shot("columns-link");
         for (int c = COL_ACCESSED; c <= COL_LINK; c++) do_action(p, ACT_COL_BASE + c);
         do_action(p, ACT_SORT_BASE + SORT_NAME);
+        // CRC32 / SHA-256: read on their thread for the rows on screen, kept by path + size + mtime; a header click doesn't sort
+        FILE *hf = fopen(M9_BASE "/cols/plain", "w");
+        if (hf) { fputs("abc", hf); fclose(hf); }
+        mkfifo(M9_BASE "/cols/pipe", 0644); // (never opened: not a regular file)
+        pane_refresh(p);
+        st_wait();
+        do_action(p, ACT_COL_BASE + COL_CRC32);
+        do_action(p, ACT_COL_BASE + COL_SHA256);
+        const HashEnt *he = NULL;
+        struct stat hst; // (not the list's entry: the watcher may reload the folder meanwhile)
+        bool hok = stat(M9_BASE "/cols/plain", &hst) == 0;
+        for (int k = 0; k < 400 && hok; k++) {
+            st_frames(1);
+            he = hash_get(M9_BASE "/cols/plain", (i64)hst.st_mtime, (u64)hst.st_size);
+            if (he->st != HC_PENDING) break;
+            SDL_Delay(5);
+        }
+        ST_CHECK(hok && hst.st_size == 3 && he && he->st == HC_DONE && he->crc == 0x352441C2u &&
+                 !strcmp(he->sha, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+        int sk = p->sort_key;
+        st_frames(1);
+        st_shot("columns-hash");
+        for (int k = 0; k < p->ly.ncols; k++)
+            if (p->ly.cid[k] == COL_SHA256) {
+                f32 hx = (p->ly.cx0[k] + p->ly.cx1[k]) * 0.5f, hy = p->ly.header.y + p->ly.header.h * 0.5f;
+                st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, hx, hy, SDL_BUTTON_LEFT, 1, 0);
+                st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, hx, hy, SDL_BUTTON_LEFT, 1, 0);
+            }
+        ST_CHECK(p->sort_key == sk);
+        do_action(p, ACT_COL_BASE + COL_CRC32);
+        do_action(p, ACT_COL_BASE + COL_SHA256);
         pane_navigate(p, back, true);
         st_wait();
         st_rmrf(M9_BASE "/cols");

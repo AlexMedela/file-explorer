@@ -879,7 +879,7 @@ static void on_mouse_up(void) {
         Pane *sp = A.drag_pane;
         int key = g_coldef[A.drag_col].sort;
         drag_cancel();
-        pane_set_sort(sp, key);
+        if (key >= 0) pane_set_sort(sp, key); // (hashes don't sort)
         return;
     }
     if (A.drag == DRAG_COL && A.col_insert >= 0) { // move the column

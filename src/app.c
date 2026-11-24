@@ -181,12 +181,13 @@ static const struct { int view, px; const char *label; } g_zoom[] = {
 #define ZOOM_COUNT ((int)ARRAY_COUNT(g_zoom))
 
 // --- columns -----------------------------------------------------------------
-enum { COL_NAME, COL_DATE, COL_CREATED, COL_TYPE, COL_SIZE, COL_EXT, COL_PERMS, COL_OWNER, COL_ACCESSED, COL_GROUP, COL_LINK, COL_COUNT };
+enum { COL_NAME, COL_DATE, COL_CREATED, COL_TYPE, COL_SIZE, COL_EXT, COL_PERMS, COL_OWNER, COL_ACCESSED, COL_GROUP, COL_LINK, COL_CRC32,
+       COL_SHA256, COL_COUNT };
 static const struct {
     const char *label, *key;
     f32 defw; // logical px (Name is flexible)
     bool right;
-    int sort;
+    int sort; // -1: not sortable
 } g_coldef[COL_COUNT] = {
     {"Name", "name", 0, false, SORT_NAME},
     {"Date modified", "date", 140, false, SORT_DATE},
@@ -199,10 +200,12 @@ static const struct {
     {"Date accessed", "accessed", 140, false, SORT_ACCESSED},
     {"Group", "group", 90, false, SORT_GROUP},
     {"Link target", "link", 200, false, SORT_LINK},
+    {"CRC32", "crc32", 90, false, -1},
+    {"SHA-256", "sha256", 220, false, -1},
 };
 // The columns menu's order (new columns are added at the end of the enum: saved settings keep their ids)
 static const int g_col_menu[COL_COUNT] = {COL_NAME, COL_DATE, COL_CREATED, COL_ACCESSED, COL_TYPE, COL_SIZE, COL_EXT, COL_PERMS,
-                                          COL_OWNER, COL_GROUP, COL_LINK};
+                                          COL_OWNER, COL_GROUP, COL_LINK, COL_CRC32, COL_SHA256};
 
 typedef struct {
     Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, sortbtn, header, list, track, thumb, trashbar, rrestore, rempty;
@@ -13886,6 +13889,7 @@ int main(int argc, char **argv) {
         }
         if (A.quit) break;
         main_drain();
+        if (g_hash_redraw) { g_hash_redraw = false; A.redraw = true; }
         watch_sync();
         watch_process();
         if (A.search_due && now_ns() >= A.search_due && A.search_pane) search_apply(A.search_pane, false);
