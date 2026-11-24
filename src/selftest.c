@@ -6838,7 +6838,7 @@ static int run_selftest_m10(void) {
                  disk_health_level(s1, what, sizeof what) == 1 && !strcmp(what, "Running hot")); // (74.5 C: over 70 for NVMe)
         char line[256];
         disk_health_line(s1, line, sizeof line);
-        ST_CHECK(strstr(line, "Fast NVMe") && strstr(line, "75 \xC2\xB0" "C") && strstr(line, "1,234 h on"));
+        ST_CHECK(!strncmp(line, "Fast NVMe\nTemperature: 75 \xC2\xB0" "C\nHealth: Running hot\nPowered on: 1,234 hours", 200));
         // a sidebar drive on that disk: found by its mount, drawn with the dot
         int nd = A.devs.n;
         if (nd < MAX_BLOCKDEVS) {

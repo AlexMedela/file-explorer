@@ -1068,7 +1068,7 @@ static void draw_sidebar(void) {
             if (th) { // hover: its disk's model, temperature, health, hours (the name first: it may be cut off)
                 char line[256], tip[400];
                 disk_health_line(th, line, sizeof line);
-                int tl = snprintf(tip, sizeof tip, "%s  \xE2\x80\x94  %s", pl->label, line);
+                int tl = snprintf(tip, sizeof tip, "%s\n%s", pl->label, line); // (a fact per line)
                 fit_tip_offer_box(r.x, r.y, r.w, r.h, tip, MIN(tl, (int)sizeof tip - 1));
             }
         }

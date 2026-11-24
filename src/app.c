@@ -2433,17 +2433,17 @@ static const DiskHealth *disk_health_for_mount(const char *mount) {
     return NULL;
 }
 
-// "CT1000T705SSD3 - 31 C - Good - 3,622 h on" (what's known of it; the separators are middle dots).
+// What's known of it, a line each: the model, "Temperature: 31 C", "Health: Good", "Powered on: 3,622 hours".
 static void disk_health_line(const DiskHealth *h, char *out, size_t cap) {
     char what[128];
     disk_health_level(h, what, sizeof what);
     size_t o = (size_t)snprintf(out, cap, "%s", h->model[0] ? h->model : h->disk);
-    if (h->temp != DH_NO_TEMP && o < cap) o += (size_t)snprintf(out + o, cap - o, "  \xC2\xB7  %d \xC2\xB0" "C", (h->temp + 5) / 10);
-    if (what[0] && o < cap) o += (size_t)snprintf(out + o, cap - o, "  \xC2\xB7  %s", what);
+    if (h->temp != DH_NO_TEMP && o < cap) o += (size_t)snprintf(out + o, cap - o, "\nTemperature: %d \xC2\xB0" "C", (h->temp + 5) / 10);
+    if (what[0] && o < cap) o += (size_t)snprintf(out + o, cap - o, "\nHealth: %s", what);
     if (h->hours >= 0 && o < cap) {
         char c[32];
         fmt_count(c, (u64)h->hours);
-        snprintf(out + o, cap - o, "  \xC2\xB7  %s h on", c);
+        snprintf(out + o, cap - o, "\nPowered on: %s hours", c);
     }
 }
 
