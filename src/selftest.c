@@ -1458,11 +1458,16 @@ static int run_selftest_m5(void) {
     ST_CHECK(st_wait_cond(c_pv_ready, 3000));
     ST_CHECK(A.pv->kind == PV_IMAGE && A.pv->src_w == 640 && A.pv->src_h == 480 && A.pv_tex);
     st_shot("preview-image");
+    // ...with what Properties shows: dates, owner, group, permissions, and the media details read on a thread
+    for (int k = 0; k < 300 && !(A.pv_media && atomic_load(&A.pv_media->done)); k++) { st_frames(1); SDL_Delay(5); }
+    ST_CHECK(A.pv_media && !strcmp(A.pv_media->path, M5_BASE "/photo.bmp") && atomic_load(&A.pv_media->done) && A.pv_media->w == 640);
+    st_frames(1);
     // text
     st_select(p, "notes.txt");
     ST_CHECK(st_wait_cond(c_pv_ready, 3000));
     ST_CHECK(A.pv->kind == PV_TEXT && A.pv->text && !strncmp(A.pv->text, "line 1\t", 7));
     st_shot("preview-text");
+    ST_CHECK(!A.pv_media); // (no media details for text)
     // folder
     st_select(p, "sub");
     ST_CHECK(st_wait_cond(c_pv_ready, 3000));
@@ -1558,7 +1563,7 @@ static int run_selftest_m5(void) {
     st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
     ST_CHECK(!A.ql_on);
     st_key(SDLK_I, SDL_KMOD_CTRL);
-    ST_CHECK(!A.preview_on);
+    ST_CHECK(!A.preview_on && !A.pv_media);
 
     // zoom
     int px0 = A.font.px;

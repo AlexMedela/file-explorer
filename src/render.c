@@ -3832,6 +3832,8 @@ static void type_label(const Entry *e, char *buf, size_t cap) {
     } else snprintf(buf, cap, "File");
 }
 
+static int props_media_rows(MediaJob *m, const char **lab, char (*val)[160], int cap); // ui_tools.c
+
 static f32 pv_row(Font *f, f32 x, f32 y, f32 w, const char *label, const char *value) {
     f32 lw = roundf(S(84)), h = roundf(f->line_h * 1.5f);
     draw_text(f, x, y, label, (int)strlen(label), C(COL_TEXT_FAINT));
@@ -3934,11 +3936,36 @@ static void draw_preview(void) {
             y = pv_row(fs, x, y, w, "Size", buf);
         }
         if (meta) {
-            time_t t = (time_t)e->mtime;
-            struct tm tm;
-            localtime_r(&t, &tm);
-            strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", &tm);
-            y = pv_row(fs, x, y, w, "Modified", buf);
+            static const char *const dl[3] = {"Modified", "Created", "Accessed"};
+            i64 dt[3] = {e->mtime, e->btime, e->atime};
+            for (int k = 0; k < 3; k++) {
+                if (!dt[k]) continue; // (no creation time on this filesystem)
+                time_t t = (time_t)dt[k];
+                struct tm tm;
+                localtime_r(&t, &tm);
+                strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", &tm);
+                y = pv_row(fs, x, y, w, dl[k], buf);
+            }
+            // the rest of what Properties shows (read-only here)
+            if (!L->is_archive) {
+                y = pv_row(fs, x, y, w, "Owner", owner_name(e->uid));
+                y = pv_row(fs, x, y, w, "Group", group_name(e->gid));
+                char pm[12];
+                fmt_perms(e, pm);
+                snprintf(buf, sizeof buf, "%s  (%03o)", pm + 1, e->mode & 07777);
+                y = pv_row(fs, x, y, w, "Permissions", buf);
+            }
+            u32 ei = (u32)(e - L->entries);
+            if (L->links && L->links[ei]) y = pv_row(fs, x, y, w, "Link to", L->links[ei]);
+        }
+    }
+    if (e && A.pv_media && !strcmp(A.pv_media->path, A.pv_want)) { // media details (dimensions, length, camera...)
+        const char *lab[24];
+        static char val[24][160];
+        int n = props_media_rows(A.pv_media, lab, val, (int)sizeof val[0]);
+        for (int i = 0; i < n; i++) {
+            if (!strcmp(lab[i], "Dimensions") && pv && pv->src_w) continue; // (already with the type)
+            y = pv_row(fs, x, y, w, !strcmp(lab[i], "Location") ? "GPS" : lab[i], val[i]); // (Location: the folder, below)
         }
     }
     if (pv && pv->kind == PV_DIR) {

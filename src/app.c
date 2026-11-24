@@ -655,6 +655,7 @@ static struct {
     u64 pv_due;
     u32 pv_gen;
     PreviewResult *pv;
+    MediaJob *pv_media; // the details panel: the previewed file's media details (as in Properties), NULL: none
     SDL_Texture *pv_tex;
     Font font_mono;
     char *mono_path;
@@ -12736,8 +12737,27 @@ static void pane_target_folder(Pane *p, char *out, size_t cap) {
 
 // --- preview panel (main thread side) --------------------------------------
 
+static void preview_media_drop(void) {
+    if (A.pv_media) media_release(A.pv_media);
+    A.pv_media = NULL;
+}
+
+// The details panel's media rows for path (an image's size, a video's length...: what Properties shows), read on a
+// thread when the preview is asked for (so not for every row an arrow key passes); local files only.
+static void preview_media_start(const char *path) {
+    if (A.pv_media && !strcmp(A.pv_media->path, path)) return;
+    preview_media_drop();
+    struct stat st;
+    if (!A.preview_on || strstr(path, "::") || path_is_remote(path) || stat(path, &st) || !S_ISREG(st.st_mode)) return;
+    const char *mime = mime_for_file(path_basename(path), false);
+    bool pdf = !strcmp(mime, "application/pdf");
+    if (pdf || !strncmp(mime, "image/", 6) || !strncmp(mime, "video/", 6) || !strncmp(mime, "audio/", 6))
+        A.pv_media = media_start(path, pdf, A.selftest ? getenv("FE_FFPROBE") : "ffprobe", A.selftest ? getenv("FE_PDFINFO") : "pdfinfo");
+}
+
 static void preview_toggle(void) {
     A.preview_on = !A.preview_on;
+    if (!A.preview_on) preview_media_drop();
     A.pv_want[0] = 0;
     A.pv_path[0] = 0;
     A.settings_dirty = true;
@@ -12811,6 +12831,7 @@ static void preview_update(void) {
         snprintf(A.pv_path, sizeof A.pv_path, "%s", A.pv_want);
         int max_px = A.ql_on ? (int)CLAMP((f32)MAX(A.W, A.H), 256.f, 4096.f) : (int)CLAMP(A.r_preview.w * 1.25f, 256.f, 2048.f);
         preview_request(++A.pv_gen, A.pv_path, max_px, A.pv_line);
+        preview_media_start(A.pv_path);
     }
 }
 
