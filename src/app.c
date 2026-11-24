@@ -655,6 +655,7 @@ static struct {
     u64 pv_due;
     u32 pv_gen;
     PreviewResult *pv;
+    f32 pv_scroll, pv_content_h; // the details panel scrolled by (px), its content's height (last frame)
     MediaJob *pv_media; // the details panel: the previewed file's media details (as in Properties), NULL: none
     SDL_Texture *pv_tex;
     Font font_mono;
@@ -12825,6 +12826,7 @@ static void preview_update(void) {
         A.pv_due = now + (first ? 0 : 90000000ull); // don't decode every row while holding an arrow key
         A.pv_path[0] = 0;
         A.ql_scroll = 0;
+        A.pv_scroll = 0; // (another item: from its top)
     }
     if (A.pv_due && now >= A.pv_due) {
         A.pv_due = 0;

@@ -3841,6 +3841,16 @@ static f32 pv_row(Font *f, f32 x, f32 y, f32 w, const char *label, const char *v
     return y + h;
 }
 
+// The details panel's scrolling: its content's height (from where it ended, y), the offset kept in range, a thin bar.
+static void pv_scroll_end(Rect r, f32 y, f32 pad) {
+    A.pv_content_h = y + A.pv_scroll + pad - r.y;
+    f32 hi = MAX(0.f, A.pv_content_h - r.h);
+    if (A.pv_scroll > hi) { A.pv_scroll = hi; A.redraw = true; }
+    if (hi <= 0) return;
+    f32 th = MAX(roundf(S(32)), r.h * r.h / A.pv_content_h), ty = r.y + (r.h - th) * (A.pv_scroll / hi), bw = roundf(S(4));
+    draw_rrect(r.x + r.w - bw - S(3), ty, bw, th, bw * 0.5f, C(COL_SCROLL));
+}
+
 static void draw_preview(void) {
     if (!A.preview_on || !A.ntabs) return;
     Rect r = A.r_preview;
@@ -3849,7 +3859,8 @@ static void draw_preview(void) {
     draw_rect(r.x, r.y, r.w, r.h, C(COL_PREVIEW_BG));
     bool dh = A.drag == DRAG_PREVIEW || (A.mouse_in && in_rect(A.r_pdiv, A.mx, A.my));
     if (g_separators || dh) draw_rect(r.x, r.y, 1, r.h, C(dh ? COL_ACCENT : COL_BORDER));
-    f32 pad = roundf(S(16)), x = r.x + pad, w = r.w - pad * 2, y = r.y + pad;
+    if (A.pv_scroll < 0) A.pv_scroll = 0;
+    f32 pad = roundf(S(16)), x = r.x + pad, w = r.w - pad * 2, y = roundf(r.y + pad - A.pv_scroll);
     ClipSave cs = draw_clip_push((SDL_Rect){(int)r.x + 1, (int)r.y, (int)r.w - 1, (int)r.h});
     Listing *L = p->L;
 
@@ -3875,7 +3886,8 @@ static void draw_preview(void) {
         fmt_size(b, sizeof b, total);
         y = pv_row(fs, x, y, w, "Total size", b);
         snprintf(line, sizeof line, "%u folder%s, %u file%s", nd, nd == 1 ? "" : "s", p->sel_count - nd, p->sel_count - nd == 1 ? "" : "s");
-        pv_row(fs, x, y, w, "Contains", line);
+        y = pv_row(fs, x, y, w, "Contains", line);
+        pv_scroll_end(r, y, pad);
         draw_clip_pop(cs);
         return;
     }
@@ -3995,7 +4007,8 @@ static void draw_preview(void) {
     // text preview with line numbers
     if (pv && pv->kind == PV_TEXT && pv->text && A.mono_path) {
         y += roundf(S(10));
-        Rect box = {x - S(6), y, w + S(12), r.y + r.h - pad - y};
+        Rect box = {x - S(6), y, w + S(12), MAX(r.y + r.h - pad - y, roundf(S(220)))}; // (rows above it: still a few lines, scrolled to)
+        y = box.y + box.h;
         if (box.h > S(40)) {
             draw_rrect(box.x, box.y, box.w, box.h, S(8), C(COL_SUNKEN));
             ClipSave c2 = draw_clip_push((SDL_Rect){(int)box.x + 2, (int)box.y + 2, (int)box.w - 4, (int)box.h - 4});
@@ -4047,6 +4060,7 @@ static void draw_preview(void) {
             draw_clip_pop(c2);
         }
     }
+    pv_scroll_end(r, y, pad);
     draw_clip_pop(cs);
 }
 
