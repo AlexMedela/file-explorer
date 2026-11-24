@@ -86,7 +86,7 @@ static int cursor_edge(void) {
 
 static void cursor_apply(void) {
     // dragging items, a tab or a sidebar place: the grabbing hand from the start (not only once it leaves the window)
-    bool grab = A.cur_grab && (A.drag == DRAG_ITEMS || A.drag == DRAG_TAB || A.drag == DRAG_PLACE);
+    bool grab = A.cur_grab && (A.drag == DRAG_ITEMS || A.drag == DRAG_TAB || A.drag == DRAG_PLACE || A.drag == DRAG_RIBBON);
     int edge = cursor_edge();
     int want = edge ? edge : A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_text ? 4 : A.ptr_hand ? 3 : 0;
     if (want == A.cursor_shown) return;
@@ -588,7 +588,7 @@ static void draw_branch_icon(f32 x, f32 cy, Color ic) {
 // branch chip keeps the right end.
 static void draw_path_text(Pane *p, Font *f, f32 ty) {
     Rect pb = p->ly.pathbar;
-    f32 x = pb.x + roundf(S(12)), avail = pb.w - roundf(S(24)), gcw = git_chip_width(p);
+    f32 x = pb.x + roundf(S(12)), avail = pathbar_right(&p->ly) - pb.x - roundf(S(24)), gcw = git_chip_width(p);
     if (gcw > 0 && gcw < pb.w * 0.5f) avail -= gcw + roundf(S(6));
     const char *s = p->path;
     int len = (int)strlen(s);
@@ -653,7 +653,8 @@ static void draw_toolbar_content(Pane *p, bool active, bool split) {
     if (pb.w <= 0) { ly->has_gitchip = false; return; }
     bool editing = A.edit_pane == p;
     bool hover = A.mouse_in && in_rect(pb, A.mx, A.my);
-    if (hover) A.ptr_text = true; // a click outside the crumbs (anywhere, with Path as text) edits the path
+    bool on_btn = in_rect(ly->copypath, A.mx, A.my) || (ly->has_gitchip && in_rect(ly->gitchip, A.mx, A.my)); // (buttons: a hand)
+    if (hover && !on_btn) A.ptr_text = true; // a click outside the crumbs (anywhere, with Path as text) edits the path
     draw_rrect(pb.x, pb.y, pb.w, pb.h, S(7), CA(editing ? COL_FIELD_HOVER : pathbar_field_color(), editing || !g_transparent_pathbar ? 1.f : 0.f));
     if (g_transparent_pathbar && !editing)
         draw_rrect_outline(pb.x, pb.y, pb.w, pb.h, S(7), MAX(1.f, S(1.f)), CA(COL_BORDER, 0.7f));
@@ -707,7 +708,7 @@ static void draw_toolbar_content(Pane *p, bool active, bool split) {
     f32 cw = git_chip_width(p);
     if (cw > 0 && cw < pb.w * 0.5f && git_chip_text(p, gt, sizeof gt, &dirty)) { // branch chip at the right end
         Font *fs = &A.font_small;
-        Rect c = {pb.x + pb.w - cw - roundf(S(3)), pb.y + roundf(S(3)), cw, pb.h - roundf(S(6))};
+        Rect c = {pathbar_right(ly) - cw - roundf(S(3)), pb.y + roundf(S(3)), cw, pb.h - roundf(S(6))};
         ly->gitchip = c;
         ly->has_gitchip = true;
         bool hv = hand_if(hover && in_rect(c, A.mx, A.my)), on = A.menu.open && A.menu.pane == p && A.menu.n && A.menu.items[0].info;
@@ -721,6 +722,14 @@ static void draw_toolbar_content(Pane *p, bool active, bool split) {
         git_sync_draw(fs, tx + MIN(text_width(fs, gt, (int)strlen(gt)), bw), ty, ah, bh, C(COL_TEXT2), true);
         f32 dr = roundf(S(2.5f)); // dot: changes in the repository (orange) or clean (green)
         draw_rrect(c.x + c.w - S(8) - dr, c.y + c.h * 0.5f - dr, dr * 2, dr * 2, dr, C(dirty ? COL_WARN : COL_OK));
+    }
+    if (ly->copypath.w > 0) { // copy the folder's path (its name in a tooltip)
+        Rect cb = ly->copypath;
+        bool ch = hot(cb);
+        if (ch) draw_rrect(cb.x, cb.y, cb.w, cb.h, S(5), C(COL_CHIP));
+        f32 is = roundf(S(15));
+        draw_ui_icon(UI_COPY, roundf(cb.x + (cb.w - is) * 0.5f), roundf(cb.y + (cb.h - is) * 0.5f), is, C(ch ? COL_TEXT : COL_TEXT_FAINT));
+        fit_tip_offer_box(cb.x, cb.y, cb.w, cb.h, "Copy path", 9);
     }
     draw_clip(NULL);
 }
@@ -2756,6 +2765,8 @@ static void draw_cmpbar(Pane *p) {
     draw_cross(close.x + close.w * 0.5f, close.y + close.h * 0.5f, S(9), MAX(1.f, S(1.5f)), C(ch ? COL_TEXT : COL_TEXT_DIM));
 }
 
+static void draw_ribbon(Pane *p); // ribbon.c
+
 static void draw_pane(Pane *p, bool active, bool split) {
     draw_cmpbar(p);
     draw_snapbar(p);
@@ -2764,6 +2775,7 @@ static void draw_pane(Pane *p, bool active, bool split) {
     draw_list(p, active || !split);
     draw_header(p);
     draw_toolbar(p, active, split);
+    draw_ribbon(p);
 }
 
 // Gear: ring with 8 teeth and a hole (bg = colour behind it, used for the hole).

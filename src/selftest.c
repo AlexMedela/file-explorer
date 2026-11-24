@@ -1985,7 +1985,7 @@ static int run_selftest_m6(void) {
         PaneLayout *ly = &pn->cur->pane[0].ly;
         st_mouse(SDL_EVENT_MOUSE_MOTION, pn->plus.x + pn->plus.w * 0.5f, pn->plus.y + pn->plus.h * 0.5f, 0, 0, 0);
         ST_CHECK(A.cursor_shown == 3);
-        st_mouse(SDL_EVENT_MOUSE_MOTION, ly->pathbar.x + ly->pathbar.w - S(4), ly->pathbar.y + ly->pathbar.h * 0.5f, 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, pathbar_right(ly) - S(8), ly->pathbar.y + ly->pathbar.h * 0.5f, 0, 0, 0); // (not its copy button: a hand)
         ST_CHECK(A.cursor_shown == 4);
         st_mouse(SDL_EVENT_MOUSE_MOTION, ly->list.x + ly->list.w * 0.5f, ly->list.y + ly->list.h - S(4), 0, 0, 0);
         ST_CHECK(A.cursor_shown == 0);
@@ -4007,6 +4007,138 @@ static int run_selftest_m9(void) {
         st_rmrf(M9_BASE "/cols");
     }
 
+    // --- the path bar's copy button (always): the folder's path to the clipboard; the crumbs end before it ---
+    {
+        st_frames(1);
+        PaneLayout *cl = &p->ly;
+        layout_crumbs(p);
+        Rect cpb = cl->copypath, lc = cl->ncrumbs ? cl->crumbs[cl->ncrumbs - 1].r : (Rect){0};
+        ST_CHECK(cpb.w > 0 && cpb.x + cpb.w <= cl->pathbar.x + cl->pathbar.w && lc.x + lc.w <= cpb.x);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, cpb.x + cpb.w * 0.5f, cpb.y + cpb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, cpb.x + cpb.w * 0.5f, cpb.y + cpb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.edit_pane && strstr(A.toast, "Copied: ") && strstr(A.toast, p->path));
+        st_mouse(SDL_EVENT_MOUSE_MOTION, cpb.x + cpb.w * 0.5f, cpb.y + cpb.h * 0.5f, 0, 0, 0);
+        st_frames(1);
+        ST_CHECK(A.ptr_hand && !A.ptr_text); // a button: the hand, not the text pointer of the field around it
+    }
+
+    // --- the ribbon (off by default): icons under the navigation bar, for that panel; the rest in "..." ---
+    {
+        ST_CHECK(!A.ribbon && p->ly.ribbon.h == 0);
+        f32 hy0 = p->ly.header.y;
+        A.ribbon = true;
+        st_frames(2);
+        PaneLayout *rl = &p->ly;
+        ST_CHECK(rl->ribbon.h == roundf(S(36)) && rl->ribbon.y == rl->toolbar.y + rl->toolbar.h && rl->header.y == rl->ribbon.y + rl->ribbon.h &&
+                 rl->header.y == hy0 + rl->ribbon.h);
+        ST_CHECK(rl->morebtn.w == 0 && rl->filterbtn.w > 0); // (the ribbon has the folder's actions: no "..." in the toolbar)
+        st_shot("ribbon");
+        int hi = -1, di = -1;
+        for (int i = 0; i < RIBBON_N; i++) {
+            if (g_ribbon[i].act == ACT_HIDDEN) hi = i;
+            if (g_ribbon[i].act == ACT_PREVIEW) di = i;
+        }
+        // everything fits in a wide panel; a click on an icon runs it (here: hidden files, drawn as on)
+        ribbon_layout(p);
+        bool h0 = A.show_hidden;
+        ST_CHECK(g_rb.more.w == 0 && hi >= 0 && g_rb.r[hi].w > 0);
+        Rect hb = g_rb.r[hi];
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, hb.x + hb.w * 0.5f, hb.y + hb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, hb.x + hb.w * 0.5f, hb.y + hb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.show_hidden == !h0 && ribbon_item_on(&g_ribbon[hi], p) == A.show_hidden);
+        do_action(p, ACT_HIDDEN);
+        // a dropdown: the right-click menu's submenu of the same name under the icon (Views: view modes, Tree view)
+        int vi = -1;
+        for (int i = 0; i < RIBBON_N; i++)
+            if (g_ribbon[i].sub == RS_VIEWS) vi = i;
+        Rect vb = vi >= 0 ? g_rb.r[vi] : (Rect){0};
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, vb.x + vb.w * 0.5f, vb.y + vb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, vb.x + vb.w * 0.5f, vb.y + vb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        bool tree_item = false;
+        for (int i = 0; A.menu.open && i < A.menu.n; i++) tree_item |= A.menu.items[i].act == ACT_TREE_VIEW;
+        ST_CHECK(vb.w > 0 && A.menu.open && tree_item && A.menu.r.y >= vb.y + vb.h);
+        st_shot("ribbon-views");
+        st_key(SDLK_ESCAPE, SDL_KMOD_NONE);
+        ST_CHECK(!A.menu.open);
+        // icons: the right-click menu's for the same action
+        ST_CHECK(ribbon_icon(&g_ribbon[hi]) == UI_EYE && ribbon_icon(&g_ribbon[0]) == UI_SCISSORS);
+        // a narrow window: the last ones go into "...", which runs them like the icons
+        int w0 = A.W;
+        A.W = (int)roundf(S(640));
+        st_frames(1);
+        ribbon_layout(p);
+        ST_CHECK(g_rb.more.w > 0 && di >= 0 && g_rb.shown[di] && g_rb.r[di].w == 0 && g_rb.more.x + g_rb.more.w <= rl->ribbon.x + rl->ribbon.w);
+        bool p0 = A.preview_on;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_rb.more.x + 4, g_rb.more.y + 4, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, g_rb.more.x + 4, g_rb.more.y + 4, SDL_BUTTON_LEFT, 1, 0);
+        int mi = -1;
+        for (int i = 0; A.menu.open && i < A.menu.n; i++)
+            if (A.menu.items[i].act == ACT_PREVIEW) mi = i;
+        ST_CHECK(A.menu.open && mi >= 0);
+        st_shot("ribbon-more");
+        if (mi >= 0) menu_activate(mi);
+        ST_CHECK(A.preview_on == !p0 && !A.menu.open);
+        if (A.preview_on != p0) preview_toggle();
+        A.W = w0;
+        st_frames(1);
+        // positions: above the path bar, the list's bottom / left / right (the list gives up the room)
+        A.ribbon_pos = RP_ABOVE;
+        st_frames(1);
+        ST_CHECK(rl->ribbon.y + rl->ribbon.h == rl->toolbar.y && rl->header.y == rl->toolbar.y + rl->toolbar.h);
+        A.ribbon_pos = RP_BOTTOM;
+        st_frames(1);
+        ST_CHECK(rl->header.y == hy0 && rl->ribbon.y + rl->ribbon.h == rl->area.y + rl->area.h && rl->list.y + rl->list.h <= rl->ribbon.y);
+        A.ribbon_pos = RP_RIGHT;
+        st_frames(1);
+        ST_CHECK(rl->ribbon.w == roundf(S(40)) && rl->ribbon.x + rl->ribbon.w == rl->area.x + rl->area.w && rl->list.x + rl->list.w == rl->ribbon.x);
+        st_shot("ribbon-right");
+        // dragged by its grip to the pane's left edge: it goes there (shown while dragging)
+        ribbon_layout(p);
+        Rect gr = g_rb.grip;
+        ST_CHECK(gr.w > 0 && in_rect(rl->ribbon, gr.x + 2, gr.y + 2));
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, gr.x + gr.w * 0.5f, gr.y + gr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.drag == DRAG_RIBBON);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, rl->area.x + S(10), rl->list.y + S(100), 0, 0, 0);
+        ST_CHECK(A.ribbon_drop == RP_LEFT && A.ribbon_drop_pane == p);
+        st_frames(1);
+        st_shot("ribbon-drag");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, rl->area.x + S(10), rl->list.y + S(100), SDL_BUTTON_LEFT, 1, 0);
+        st_frames(1);
+        ST_CHECK(A.drag == DRAG_NONE && A.ribbon_pos == RP_LEFT && rl->ribbon.x == rl->area.x && rl->list.x == rl->ribbon.x + rl->ribbon.w);
+        // Wrap: a narrow window gets a second row instead of "..."
+        A.ribbon_pos = RP_BELOW;
+        A.ribbon_overflow = RO_WRAP;
+        A.W = (int)roundf(S(640));
+        st_frames(1);
+        ribbon_layout(p);
+        ST_CHECK(rl->ribbon.h == roundf(S(36)) * 2 && g_rb.more.w == 0 && di >= 0 && g_rb.r[di].w > 0 && g_rb.r[di].y > rl->ribbon.y + S(30));
+        st_shot("ribbon-wrap");
+        // Scroll: arrows at both ends; the next one (and the wheel) slide it along
+        A.ribbon_overflow = RO_SCROLL;
+        st_frames(1);
+        ribbon_layout(p);
+        ST_CHECK(rl->ribbon.h == roundf(S(36)) && g_rb.prev.w > 0 && g_rb.next.w > 0 && p->rb_scroll == 0 && g_rb.r[di].w == 0);
+        Rect nb = g_rb.next;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, nb.x + nb.w * 0.5f, nb.y + nb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, nb.x + nb.w * 0.5f, nb.y + nb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        f32 sc1 = p->rb_scroll;
+        ST_CHECK(sc1 > 0);
+        f32 rcx = rl->ribbon.x + rl->ribbon.w * 0.5f, rcy = rl->ribbon.y + rl->ribbon.h * 0.5f;
+        ST_CHECK(ribbon_wheel(rcx, rcy, 2)); // back a little
+        st_frames(1);
+        ST_CHECK(p->rb_scroll < sc1);
+        ribbon_wheel(rcx, rcy, -60); // forward past the end: kept at the end, the last icon shows
+        st_frames(1);
+        ribbon_layout(p);
+        ST_CHECK(fabsf(p->rb_scroll - (g_rb.total - g_rb.avail)) < 0.5f && g_rb.r[di].w > 0);
+        st_shot("ribbon-scroll");
+        A.ribbon_overflow = RO_MORE;
+        A.W = w0;
+        A.ribbon = false;
+        st_frames(2);
+        ST_CHECK(p->ly.ribbon.h == 0 && p->ly.header.y == hy0);
+    }
+
     // --- the toolbar's sort button: the same keys as the folder menu's Sort by, the direction, Folders first ---
     st_frames(1);
     Rect sb = p->ly.sortbtn;
@@ -4510,31 +4642,31 @@ static int run_selftest_m9(void) {
         ST_CHECK(!strcmp(opt_choice_label(OPT_TAB_STYLE, 0), "Classic") &&
                  !strcmp(opt_choice_label(OPT_TAB_STYLE, 1), "Pills"));
         opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
-        TabBands b = tab_bands(100.f, 1.f, 2);
+        TabBands b = tab_bands(100.f, 1.f, 2, 0);
         ST_CHECK(b.tabs_y == 100.f && b.tabs_h == 38.f);
         ST_CHECK(b.navigation_y == 138.f && b.nav_h == 46.f);
         ST_CHECK(b.content_y == b.navigation_y + b.nav_h);
         opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
-        b = tab_bands(100.f, 1.f, 2);
+        b = tab_bands(100.f, 1.f, 2, 0);
         ST_CHECK(b.navigation_y == 100.f && b.nav_h == 46.f);
         ST_CHECK(b.tabs_y == 146.f && b.tabs_h == 44.f);
         ST_CHECK(b.content_y == b.tabs_y + b.tabs_h);
-        ST_CHECK(tab_bands(100.f, 1.f, 1).tabs_h == 44.f); // default: the strip stays
+        ST_CHECK(tab_bands(100.f, 1.f, 1, 0).tabs_h == 44.f); // default: the strip stays
         ST_CHECK(!g_hide_single_tab);
         opt_bool_toggle(OPT_HIDE_SINGLE_TAB);
         ST_CHECK(g_hide_single_tab);
-        b = tab_bands(100.f, 1.f, 1);
+        b = tab_bands(100.f, 1.f, 1, 0);
         ST_CHECK(b.tabs_h == 0.f && b.content_y == b.navigation_y + b.nav_h);
-        ST_CHECK(tab_bands(100.f, 1.f, 2).tabs_h == 44.f);
+        ST_CHECK(tab_bands(100.f, 1.f, 2, 0).tabs_h == 44.f);
         opt_bool_toggle(OPT_HIDE_SINGLE_TAB);
         ST_CHECK(!g_hide_single_tab);
         Panel *pn = A.ap;
         opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
         layout();
         ST_CHECK(pn->bar.y == pn->area.y + 46.f);
-        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn)).content_y);
+        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn), 0).content_y);
         {
-            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn));
+            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn), 0);
             PaneLayout *pnly = &pn->cur->pane[0].ly;
             ST_CHECK(pnly->toolbar.y == pnb.navigation_y);
             ST_CHECK(pnly->header.y == pnb.content_y && pnly->list.y == pnb.content_y + pnly->header.h);
@@ -4542,9 +4674,9 @@ static int run_selftest_m9(void) {
         opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
         layout();
         ST_CHECK(pn->bar.y == pn->area.y);
-        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn)).content_y);
+        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn), 0).content_y);
         {
-            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn));
+            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn), 0);
             PaneLayout *pnly = &pn->cur->pane[0].ly;
             ST_CHECK(pnly->toolbar.y == pnb.navigation_y);
             ST_CHECK(pnly->header.y == pnb.content_y && pnly->list.y == pnb.content_y + pnly->header.h);

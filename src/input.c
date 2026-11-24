@@ -1,6 +1,10 @@
 // input.c - keyboard, text and mouse handlers, and SDL event dispatch (handle_event) (included from app.c)
 
 static bool upd_card_click(f32 x, f32 y); // (integration.c)
+static void ribbon_click(Pane *p, f32 x, f32 y); // (ribbon.c)
+static int ribbon_drop_at(f32 x, f32 y, Pane **pp);
+static void ribbon_drop(void);
+static bool ribbon_wheel(f32 x, f32 y, f32 wy);
 
 // --- input -----------------------------------------------------------------
 
@@ -463,6 +467,7 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
     }
     if (b->button != SDL_BUTTON_LEFT) return;
 
+    if (ly->ribbon.h > 0 && in_rect(ly->ribbon, x, y)) { ribbon_click(p, x, y); return; }
     if (in_rect(ly->back, x, y)) { pane_history(p, -1); return; }
     if (in_rect(ly->fwd, x, y)) { pane_history(p, +1); return; }
     if (in_rect(ly->up, x, y)) { pane_up(p); return; }
@@ -480,6 +485,11 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
     }
     if (in_rect(ly->pathbar, x, y)) {
         if (A.edit_pane == p) return;
+        if (ly->copypath.w > 0 && in_rect(ly->copypath, x, y)) { // the folder's path to the clipboard
+            SDL_SetClipboardText(p->path);
+            toast("Copied: %s", p->path);
+            return;
+        }
         if (ly->has_gitchip && in_rect(ly->gitchip, x, y)) { // branch chip: repository details
             menu_open_git(p, ly->gitchip.x, ly->gitchip.y + ly->gitchip.h + S(4));
             return;
@@ -866,6 +876,7 @@ static void on_mouse_up(void) {
     if (A.term_mouse) { term_mouse_up(A.term_mouse, A.term_mouse_btn); A.term_mouse = NULL; return; }
     if (sheet_scrollbar_release()) return;
     if (A.drag == DRAG_TAB) { tab_drop_apply(); return; }
+    if (A.drag == DRAG_RIBBON) { ribbon_drop(); return; }
     if (A.drag == DRAG_PLACE || A.drag == DRAG_PLACE_PENDING) {
         int r = A.qa_drag_row;
         bool moved = A.drag == DRAG_PLACE;
@@ -1008,6 +1019,11 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
     } else if (A.drag == DRAG_PLACE_PENDING || A.drag == DRAG_PLACE) {
         if (A.drag == DRAG_PLACE_PENDING && fabsf(m->y - A.band_my0) > S(6)) A.drag = DRAG_PLACE;
         if (A.drag == DRAG_PLACE) qa_drop_point(m->y, &A.qa_ins_g, &A.qa_ins_i);
+    } else if (A.drag == DRAG_RIBBON) { // where it would go: shown while dragging, taken on release
+        Pane *dp = NULL;
+        A.ribbon_drop = ribbon_drop_at(m->x, m->y, &dp);
+        A.ribbon_drop_pane = dp;
+        A.redraw = true;
     } else if (A.drag == DRAG_SIZE) {
         size_slider_at(m->x);
     } else if (A.drag == DRAG_SIDEBAR) {
@@ -1070,6 +1086,7 @@ static void on_mouse_motion(SDL_MouseMotionEvent *m) {
 // wy: w->y for what scrolls smoothly (sped up by a quick run of notches); the rest steps by w->y
 static void wheel_route(SDL_MouseWheelEvent *w, f32 wy) {
     if (sheet_open()) { sheet_wheel(wy); return; }
+    if (ribbon_wheel(w->mouse_x, w->mouse_y, wy)) return; // (a Scroll ribbon slides)
     if (A.ql_on) { glide_by_eps(&A.ql_scroll, -wy * 3, (f32)MAX(0, A.ql_total - A.ql_vis), 0.01f); return; } // (its text, in lines)
     if (A.menu.open) { // scroll a tall menu; don't scroll what's underneath
         if (menu_sub_shown() && in_rect(g_menu_sub.r, w->mouse_x, w->mouse_y)) glide_by(&g_menu_sub.scroll, -wy * S(28) * 2, g_menu_sub.content_h - g_menu_sub.r.h);

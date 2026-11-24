@@ -96,6 +96,10 @@ static void settings_defaults(void) {
     g_scroll_custom = 0;
     g_transparent_pathbar = false;
     A.path_text = false;
+    A.ribbon = false;
+    A.ribbon_pos = RP_BELOW;
+    A.ribbon_overflow = RO_MORE;
+    A.ribbon_drop = -1;
     g_navigation_selection_opacity = 40;
     g_nav_selector_mark = true;
     memset(g_surface_bright, 0, sizeof g_surface_bright);
@@ -359,6 +363,11 @@ static void settings_load(void) {
         else if (!strcmp(k, "searchbar_brightness")) g_surface_bright[SURF_SEARCHBAR] = CLAMP(atoi(v), -30, 30);
         else if (!strcmp(k, "transparent_pathbar")) g_transparent_pathbar = atoi(v) != 0;
         else if (!strcmp(k, "path_bar_text")) A.path_text = atoi(v) != 0;
+        else if (!strcmp(k, "ribbon")) A.ribbon = atoi(v) != 0;
+        else if (!strcmp(k, "ribbon_position"))
+            A.ribbon_pos = !strcmp(v, "above") ? RP_ABOVE : !strcmp(v, "bottom") ? RP_BOTTOM : !strcmp(v, "left") ? RP_LEFT
+                         : !strcmp(v, "right") ? RP_RIGHT : RP_BELOW;
+        else if (!strcmp(k, "ribbon_overflow")) A.ribbon_overflow = !strcmp(v, "wrap") ? RO_WRAP : !strcmp(v, "scroll") ? RO_SCROLL : RO_MORE;
         else if (!strcmp(k, "theme")) snprintf(A.theme_name, sizeof A.theme_name, "%s", v);
         else if (!strcmp(k, "accent")) {
             u32 c;
@@ -596,7 +605,9 @@ static void settings_write(FILE *f) {
     fprintf(f, "sidebar_brightness=%d\nheader_brightness=%d\nmain_brightness=%d\npreview_brightness=%d\npopup_brightness=%d\nstatus_brightness=%d\npathbar_brightness=%d\nsearchbar_brightness=%d\ntransparent_pathbar=%d\n",
             g_surface_bright[SURF_SIDEBAR], g_surface_bright[SURF_HEADER], g_surface_bright[SURF_FILES], g_surface_bright[SURF_PREVIEW], g_surface_bright[SURF_POPUP], g_surface_bright[SURF_STATUS],
             g_surface_bright[SURF_PATHBAR], g_surface_bright[SURF_SEARCHBAR], g_transparent_pathbar);
-    fprintf(f, "path_bar_text=%d\n", A.path_text);
+    static const char *const rpos[] = {"below", "above", "bottom", "left", "right"}, *const rovf[] = {"more", "wrap", "scroll"};
+    fprintf(f, "path_bar_text=%d\nribbon=%d\nribbon_position=%s\nribbon_overflow=%s\n", A.path_text, A.ribbon,
+            rpos[CLAMP(A.ribbon_pos, 0, 4)], rovf[CLAMP(A.ribbon_overflow, 0, 2)]);
     fprintf(f, "navigation_selection_opacity=%d\nnavigation_selector_mark=%d\n", g_navigation_selection_opacity, g_nav_selector_mark);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
