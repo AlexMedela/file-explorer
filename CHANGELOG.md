@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.13.0
+## 0.13.1
+
+0.13.0 was withdrawn: its AppImage and packages closed at start. This release has everything 0.13.0 brought, and the fix.
 
 **New**
 - Custom actions in the right-click menu: `*.action` files (Nemo's `.nemo_action` files work too) add commands for the selected files, with groups, icons and conditions; Options > Actions creates and edits them in the app, shows the command that will run and says why one failed. File names are passed without a shell. See [Integration](docs/integration.md). Thanks to @ItsZariep.
@@ -32,6 +34,7 @@
 - A Fedora 45 repository. Thanks to @juangiler.
 
 **Fixed**
+- 0.13.0 closed right after starting ("buffer overflow detected") in the AppImage and distro packages.
 - The Trash lists, restores, counts and empties items deleted on other drives too, not only those in the home trash, and a name trashed again no longer shows the earlier one's origin and date.
 - The dot of the i in Properties and the bullets of lists were missing from interface icons.
 - Pale icons stay readable on light sidebars and headers (coloured icon sets keep their colours), labels like the Trash's and free space have more contrast, toasts show above open dialogs, the sidebar edge is one line, and dialogs and transfers use the full-trash icon when the trash has items. Thanks to @juangiler.
