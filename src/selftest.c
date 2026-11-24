@@ -3965,7 +3965,8 @@ static int run_selftest_m9(void) {
         do_action(p, ACT_SORT_BASE + SORT_LINK);
         st_wait();
         st_frames(1);
-        ST_CHECK(p->sort_key == SORT_LINK && p->count == 3 && !strcmp(L->entries[p->order[0]].name, "l2") &&
+        L = p->L; // (the watcher may have reloaded the folder meanwhile)
+        ST_CHECK(L && p->sort_key == SORT_LINK && p->count == 3 && !strcmp(L->entries[p->order[0]].name, "l2") &&
                  !strcmp(L->entries[p->order[1]].name, "l1") && !strcmp(L->entries[p->order[2]].name, "plain"));
         st_shot("columns-link");
         for (int c = COL_ACCESSED; c <= COL_LINK; c++) do_action(p, ACT_COL_BASE + c);
@@ -3979,16 +3980,15 @@ static int run_selftest_m9(void) {
         do_action(p, ACT_COL_BASE + COL_CRC32);
         do_action(p, ACT_COL_BASE + COL_SHA256);
         const HashEnt *he = NULL;
-        Entry *pe = NULL;
-        for (u32 i = 0; p->L && i < p->L->count; i++)
-            if (!strcmp(p->L->entries[i].name, "plain")) pe = &p->L->entries[i];
-        for (int k = 0; k < 400 && pe; k++) {
+        struct stat hst; // (not the list's entry: the watcher may reload the folder meanwhile)
+        bool hok = stat(M9_BASE "/cols/plain", &hst) == 0;
+        for (int k = 0; k < 400 && hok; k++) {
             st_frames(1);
-            he = hash_get(M9_BASE "/cols/plain", pe->mtime, pe->size);
+            he = hash_get(M9_BASE "/cols/plain", (i64)hst.st_mtime, (u64)hst.st_size);
             if (he->st != HC_PENDING) break;
             SDL_Delay(5);
         }
-        ST_CHECK(pe && pe->size == 3 && he && he->st == HC_DONE && he->crc == 0x352441C2u &&
+        ST_CHECK(hok && hst.st_size == 3 && he && he->st == HC_DONE && he->crc == 0x352441C2u &&
                  !strcmp(he->sha, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
         int sk = p->sort_key;
         st_frames(1);
