@@ -11,6 +11,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Backspace, Alt+↑ | Parent folder |
 | Alt+← / Alt+→, mouse back/forward | History |
 | Ctrl+L, F6, or type `/` `~` | Edit path (Ctrl+Backspace removes a component) |
+| Copy button at the end of the path bar | Copies the folder's path |
 | Typing | Jump to file by name |
 | Ctrl+A / Ctrl+Space / Esc | Select all / toggle / clear |
 | Ctrl+H | Show hidden files |

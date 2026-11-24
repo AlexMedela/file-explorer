@@ -4007,6 +4007,18 @@ static int run_selftest_m9(void) {
         st_rmrf(M9_BASE "/cols");
     }
 
+    // --- the path bar's copy button (always): the folder's path to the clipboard; the crumbs end before it ---
+    {
+        st_frames(1);
+        PaneLayout *cl = &p->ly;
+        layout_crumbs(p);
+        Rect cpb = cl->copypath, lc = cl->ncrumbs ? cl->crumbs[cl->ncrumbs - 1].r : (Rect){0};
+        ST_CHECK(cpb.w > 0 && cpb.x + cpb.w <= cl->pathbar.x + cl->pathbar.w && lc.x + lc.w <= cpb.x);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, cpb.x + cpb.w * 0.5f, cpb.y + cpb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, cpb.x + cpb.w * 0.5f, cpb.y + cpb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(!A.edit_pane && strstr(A.toast, "Copied: ") && strstr(A.toast, p->path));
+    }
+
     // --- the ribbon (off by default): icons under the navigation bar, for that panel; the rest in "..." ---
     {
         ST_CHECK(!A.ribbon && p->ly.ribbon.h == 0);

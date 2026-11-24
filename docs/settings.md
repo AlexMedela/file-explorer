@@ -36,7 +36,7 @@ removes only the path field's fill, leaving a faint outline and the accent focus
 search field stay filled. `path_bar_text=1` (Options -> Appearance -> Path as text, off by default) shows the path as
 plain text instead of clickable parts (its start cut off when it doesn't fit); a click anywhere on it edits it.
 `ribbon=1` (Options -> Appearance -> Ribbon, off by default) adds a row of icons for common file actions under each
-panel's navigation bar (cut, copy, paste, copy path, rename, move to Trash, compress to, new folder / file, open,
+panel's navigation bar (cut, copy, paste, rename, move to Trash, compress to, new folder / file, open,
 open with, terminal, properties, select all, views, group by, hidden files, details panel; Extract here / Mount when
 they apply), with the right-click menu's icons and their names in a tooltip. Compress to, Open with, Views and Group by
 open the right-click menu's submenu as a dropdown. They act on that panel; greyed when they don't apply; what doesn't

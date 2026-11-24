@@ -588,7 +588,7 @@ static void draw_branch_icon(f32 x, f32 cy, Color ic) {
 // branch chip keeps the right end.
 static void draw_path_text(Pane *p, Font *f, f32 ty) {
     Rect pb = p->ly.pathbar;
-    f32 x = pb.x + roundf(S(12)), avail = pb.w - roundf(S(24)), gcw = git_chip_width(p);
+    f32 x = pb.x + roundf(S(12)), avail = pathbar_right(&p->ly) - pb.x - roundf(S(24)), gcw = git_chip_width(p);
     if (gcw > 0 && gcw < pb.w * 0.5f) avail -= gcw + roundf(S(6));
     const char *s = p->path;
     int len = (int)strlen(s);
@@ -707,7 +707,7 @@ static void draw_toolbar_content(Pane *p, bool active, bool split) {
     f32 cw = git_chip_width(p);
     if (cw > 0 && cw < pb.w * 0.5f && git_chip_text(p, gt, sizeof gt, &dirty)) { // branch chip at the right end
         Font *fs = &A.font_small;
-        Rect c = {pb.x + pb.w - cw - roundf(S(3)), pb.y + roundf(S(3)), cw, pb.h - roundf(S(6))};
+        Rect c = {pathbar_right(ly) - cw - roundf(S(3)), pb.y + roundf(S(3)), cw, pb.h - roundf(S(6))};
         ly->gitchip = c;
         ly->has_gitchip = true;
         bool hv = hand_if(hover && in_rect(c, A.mx, A.my)), on = A.menu.open && A.menu.pane == p && A.menu.n && A.menu.items[0].info;
@@ -721,6 +721,14 @@ static void draw_toolbar_content(Pane *p, bool active, bool split) {
         git_sync_draw(fs, tx + MIN(text_width(fs, gt, (int)strlen(gt)), bw), ty, ah, bh, C(COL_TEXT2), true);
         f32 dr = roundf(S(2.5f)); // dot: changes in the repository (orange) or clean (green)
         draw_rrect(c.x + c.w - S(8) - dr, c.y + c.h * 0.5f - dr, dr * 2, dr * 2, dr, C(dirty ? COL_WARN : COL_OK));
+    }
+    if (ly->copypath.w > 0) { // copy the folder's path (its name in a tooltip)
+        Rect cb = ly->copypath;
+        bool ch = hot(cb);
+        if (ch) draw_rrect(cb.x, cb.y, cb.w, cb.h, S(5), C(COL_CHIP));
+        f32 is = roundf(S(15));
+        draw_ui_icon(UI_COPY, roundf(cb.x + (cb.w - is) * 0.5f), roundf(cb.y + (cb.h - is) * 0.5f), is, C(ch ? COL_TEXT : COL_TEXT_FAINT));
+        fit_tip_offer_box(cb.x, cb.y, cb.w, cb.h, "Copy path", 9);
     }
     draw_clip(NULL);
 }

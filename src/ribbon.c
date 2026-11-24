@@ -18,7 +18,6 @@ static const RibbonItem g_ribbon[] = {
     {"Cut", ACT_CUT, 0, RN_TARGET, 0},
     {"Copy", ACT_COPY, 0, RN_TARGET, 0},
     {"Paste", ACT_PASTE, 0, RN_PASTE, 0},
-    {"Copy path", ACT_COPY_PATH, 0, RN_ALWAYS, 0},
     {"Rename", ACT_RENAME, 1, RN_TARGET, 0},
     {"Move to Trash", ACT_TRASH, 1, RN_TARGET, 0},
     {"Compress to", ACT_COMPRESS_MENU, 1, RN_TARGET, RS_COMPRESS},
@@ -83,7 +82,7 @@ static bool ribbon_item_on(const RibbonItem *it, Pane *p) {
     return (it->act == ACT_HIDDEN && A.show_hidden) || (it->act == ACT_PREVIEW && A.preview_on);
 }
 
-static f32 ribbon_item_w(const RibbonItem *it) { return roundf(S(30)) + (it->sub ? roundf(S(10)) : 0); } // (room for the dropdown's chevron)
+static f32 ribbon_item_w(const RibbonItem *it) { return roundf(S(30)) + (it->sub ? roundf(S(14)) : 0); } // (room for the dropdown's chevron)
 
 // Place the icons in the pane's ribbon band, from the left under the back button; the ones that don't fit (from the
 // end) go into the "..." menu at its right end.
@@ -130,10 +129,10 @@ static void draw_ribbon(Pane *p) {
         last_group = it->group;
         bool en = ribbon_item_enabled(it, p), on = ribbon_item_on(it, p), hv = en && hot(b);
         if (on || hv) draw_rrect(b.x, b.y, b.w, b.h, S(6), on ? CA(COL_ACCENT, hv ? 0.30f : 0.22f) : C(COL_FIELD_HOVER));
-        f32 is = roundf(S(18)), iw = it->sub ? b.w - roundf(S(10)) : b.w;
+        f32 is = roundf(S(18)), ix = roundf(b.x + (roundf(S(30)) - is) * 0.5f); // (a dropdown: the icon where a plain one has it)
         Color ic = !en ? C(COL_TEXT_FAINT) : on ? C(COL_ACCENT) : C(COL_TEXT_DIM);
-        draw_ui_icon(ribbon_icon(it), roundf(b.x + (iw - is) * 0.5f + (it->sub ? roundf(S(2)) : 0)), roundf(b.y + (b.h - is) * 0.5f), is, ic);
-        if (it->sub) draw_chevron(b.x + b.w - roundf(S(9)), b.y + b.h * 0.5f, S(6), 3, MAX(1.f, S(1.2f)), ic); // a dropdown
+        draw_ui_icon(ribbon_icon(it), ix, roundf(b.y + (b.h - is) * 0.5f), is, ic);
+        if (it->sub) draw_chevron(b.x + b.w - roundf(S(9)), b.y + b.h * 0.5f, S(6), 3, MAX(1.f, S(1.2f)), ic); // its chevron, clear of it
         fit_tip_offer_box(b.x, b.y, b.w, b.h, it->label, (int)strlen(it->label)); // (its name, after a moment)
     }
     if (g_rb.more.w > 0) {

@@ -208,7 +208,7 @@ static const int g_col_menu[COL_COUNT] = {COL_NAME, COL_DATE, COL_CREATED, COL_A
                                           COL_OWNER, COL_GROUP, COL_LINK, COL_CRC32, COL_SHA256};
 
 typedef struct {
-    Rect area, toolbar, ribbon, back, fwd, up, pathbar, filterbtn, morebtn, sortbtn, header, list, track, thumb, trashbar, rrestore, rempty;
+    Rect area, toolbar, ribbon, back, fwd, up, pathbar, copypath, filterbtn, morebtn, sortbtn, header, list, track, thumb, trashbar, rrestore, rempty;
     bool has_trashbar;
     f32 col_name;              // x of the icon inside the Name column
     f32 name_end;              // right edge of the Name column
@@ -1018,6 +1018,8 @@ static void layout_pane(Pane *p, Rect area) {
         path_right = area.x + width - roundf(S(8));
     }
     ly->pathbar = (Rect){px, by, MAX(0.f, path_right - px), bs};
+    f32 cps = roundf(S(26)); // copy the folder's path: a button at the path bar's right end (not in a narrow one)
+    ly->copypath = ly->pathbar.w >= S(200) ? (Rect){px + ly->pathbar.w - cps - roundf(S(2)), by + roundf((bs - cps) * 0.5f), cps, cps} : (Rect){0};
     f32 hh = p->view == VIEW_DETAILS && !pane_du_on(p) && !pane_snap_on(p) ? roundf(S(32)) : 0; // list/grid sort from the menu, no header
     ly->header = (Rect){area.x, bands.content_y, area.w, hh};
     ly->list = (Rect){area.x, bands.content_y + hh, area.w, area.h - (bands.content_y - area.y) - hh};
@@ -2045,12 +2047,17 @@ static bool titlebar_mouse_down(SDL_MouseButtonEvent *b, f32 x, f32 y) {
 }
 
 // Breadcrumbs: root drive icon + one crumb per path component, elided from the left.
+// Where the path bar's content ends: before its copy-path button.
+static f32 pathbar_right(const PaneLayout *ly) {
+    return ly->copypath.w > 0 ? ly->copypath.x - roundf(S(2)) : ly->pathbar.x + ly->pathbar.w;
+}
+
 static void layout_crumbs(Pane *p) {
     PaneLayout *ly = &p->ly;
     const char *path = p->path;
     Font *f = &A.font;
     f32 pad = roundf(S(8)), sep = roundf(S(16)), x0 = ly->pathbar.x + roundf(S(4));
-    f32 avail = ly->pathbar.w - roundf(S(8));
+    f32 avail = pathbar_right(ly) - ly->pathbar.x - roundf(S(8));
     f32 gcw = git_chip_width(p); // the branch chip takes the right end
     if (gcw > 0 && gcw < ly->pathbar.w * 0.5f) avail -= gcw + roundf(S(6));
     enum { MAXC = 128 };

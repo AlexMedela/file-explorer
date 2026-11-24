@@ -482,6 +482,11 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
     }
     if (in_rect(ly->pathbar, x, y)) {
         if (A.edit_pane == p) return;
+        if (ly->copypath.w > 0 && in_rect(ly->copypath, x, y)) { // the folder's path to the clipboard
+            SDL_SetClipboardText(p->path);
+            toast("Copied: %s", p->path);
+            return;
+        }
         if (ly->has_gitchip && in_rect(ly->gitchip, x, y)) { // branch chip: repository details
             menu_open_git(p, ly->gitchip.x, ly->gitchip.y + ly->gitchip.h + S(4));
             return;
