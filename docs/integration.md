@@ -40,6 +40,11 @@ iPhones / iPads and Android phones / cameras on a cable use the built-in connect
 installs a udev rule (`70-file-explorer-phones.rules`) that gives the user at the seat access to them; built from
 source, `install.sh` puts it in place. GVfs (`gvfs-mtp`, `gvfs-gphoto2`) is used as a fallback when installed.
 
+**Android over ADB**: with `adb` and [`adbfs`](https://github.com/spion/adbfs-rootless) installed, a phone with USB
+debugging on is also listed as "‹model› (ADB)": a click mounts its whole storage (also what MTP doesn't show) with
+adbfs in a folder of ours (`$XDG_RUNTIME_DIR/file-explorer-adb/<serial>`, FUSE, no root) and opens it; ⏏ unmounts it.
+If the phone hasn't allowed this computer yet, tap Allow on it and click again. Without both tools nothing runs adb.
+
 ## Borg backups
 Folders that are [BorgBackup](https://www.borgbackup.org/) repositories get a **Borg backup** (or **Borg 2 backup**)
 pill, also with Git status off. Opening one shows its backups, one dated folder each, read-only: it runs `borg mount`

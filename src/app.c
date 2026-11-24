@@ -2167,7 +2167,7 @@ static void remote_mounts_load(void) {
     FILE *f = fopen("/proc/self/mounts", "r");
     if (!f) return;
     char line[PATH_MAX * 2], src[PATH_MAX], mp[PATH_MAX], type[64];
-    static const char *types[] = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "fuse.sshfs", "fuse.rclone", "fuse.gvfsd-fuse", "fuse.fe-device",
+    static const char *types[] = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "fuse.sshfs", "fuse.rclone", "fuse.gvfsd-fuse", "fuse.fe-device", "fuse.adbfs",
                                   "9p", "davfs", "fuse.s3fs", "afs", "ceph", "glusterfs", "fuse.glusterfs"};
     while (fgets(line, sizeof line, f)) {
         if (sscanf(line, "%4095s %4095s %63s", src, mp, type) != 3) continue;
@@ -2482,6 +2482,16 @@ static void dev_start_phone_uri(char kind, const char *uri) {
 }
 
 static void dev_start_phone(const PhoneDev *ph) {
+    if (ph->kind == 'd') { // over ADB: adbfs on a folder of ours
+        DevJob *j = xcalloc(1, sizeof *j);
+        j->kind = DEV_ADB_MOUNT;
+        j->phone = 'd';
+        snprintf(j->target, sizeof j->target, "%s", ph->serial);
+        j->open_after = true;
+        A.dev_busy++;
+        pool_submit(dev_job, j);
+        return;
+    }
     if (!ph->own) { dev_start_phone_uri(ph->kind, ph->uri); return; }
     if (A.dev_connecting[0] && !strcmp(A.dev_connecting, ph->sys)) { toast("Still connecting to \xE2\x80\x9C%s\xE2\x80\x9D\xE2\x80\xA6", ph->name); return; }
     DevJob *j = xcalloc(1, sizeof *j);
@@ -2531,6 +2541,8 @@ static void place_dev_action(int row, int act) {
     case ACT_DEV_MOUNT:
     case ACT_DEV_OPEN_TAB:
         if (ph && !ph->mount[0]) {
+            if (ph->kind == 'd' && !strcmp(ph->need, "allow")) { toast("Allow USB debugging on the phone (tap Allow when it asks), then try again"); break; }
+            if (ph->kind == 'd' && ph->need[0]) { toast("No permission to use the phone over ADB: add its udev rule (android-udev), then plug it in again"); break; }
             if (ph->need[0]) { toast("To open an iPhone, install %s, then unplug it and plug it back in", ph->need); break; }
             toast("Connecting to \xE2\x80\x9C%s\xE2\x80\x9D\xE2\x80\xA6", pl->label);
             dev_start_phone(ph);
@@ -2658,6 +2670,13 @@ static void dev_job_done(void *arg) {
             toast("Couldn't open the %s: unlock it, then try again", what);
         else toast("Couldn't open the %s: %s", what, msg[0] ? msg : "unknown error");
         if (j->rc != 0) { A.dev_open_tab = false; A.dev_back.reconnecting = false; }
+    } else if (j->kind == DEV_ADB_MOUNT) {
+        if (j->rc == 0 && j->mount[0]) {
+            if (A.dev_open_tab) tab_new(j->mount, A.cur + 1, true);
+            else open_folder(j->mount);
+        } else toast("Couldn't open the phone over ADB: %s", first[0] ? first : "adbfs failed");
+        A.dev_open_tab = false;
+        devices_refresh(); // (its row shows it connected)
     } else if (j->rc != 0 && j->phone && j->kind == DEV_NET_MOUNT) {
         char hint[600];
         phone_error_hint(j->phone, first, hint, sizeof hint);

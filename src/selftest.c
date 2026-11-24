@@ -6855,6 +6855,46 @@ static int run_selftest_m10(void) {
         }
         g_dh.n = g_dh.nmap = 0;
     }
+    // Android over ADB (only with adb + adbfs): phones from `adb devices -l`, connecting runs adbfs on our folder
+    // (ANDROID_SERIAL picks the phone), a mount whose phone went away is let go
+    {
+        const char *mf = M10_BASE "/tools/adb-mounts";
+        st_write_text(mf, "");
+        st_write_text(M10_BASE "/tools/adb", "#!/bin/sh\necho \"adb $*\" >> " M10_BASE "/tools/log\n"
+                      "printf 'List of devices attached\\nR58M123  device usb:1-2 product:p model:Pixel_7 device:panther transport_id:1\\n"
+                      "ZX9  unauthorized usb:1-3 transport_id:2\\nemulator-5554  offline\\n'\n");
+        st_write_text(M10_BASE "/tools/adbfs", "#!/bin/sh\necho \"adbfs $ANDROID_SERIAL $*\" >> " M10_BASE "/tools/log\n"
+                      "echo \"adbfs $1 fuse.adbfs rw 0 0\" >> " M10_BASE "/tools/adb-mounts\n");
+        st_write_text(M10_BASE "/tools/fusermount3", "#!/bin/sh\necho \"fusermount3 $*\" >> " M10_BASE "/tools/log\n");
+        chmod(M10_BASE "/tools/adb", 0755);
+        chmod(M10_BASE "/tools/adbfs", 0755);
+        chmod(M10_BASE "/tools/fusermount3", 0755);
+        setenv("FE_ADB", M10_BASE "/tools/adb", 1);
+        setenv("FE_ADBFS", M10_BASE "/tools/adbfs", 1);
+        setenv("FE_ADB_DIR", M10_BASE "/adb", 1);
+        setenv("FE_ADB_MOUNTS", mf, 1);
+        setenv("FE_FUSERMOUNT", M10_BASE "/tools/fusermount3", 1);
+        mkdir(M10_BASE "/adb", 0755);
+        mkdir(M10_BASE "/adb/GONE1", 0755); // a phone that was unplugged while connected
+        st_write_text(mf, "adbfs " M10_BASE "/adb/GONE1 fuse.adbfs rw 0 0\n");
+        DevList *dl = xcalloc(1, sizeof *dl);
+        phones_scan_adb(dl);
+        ST_CHECK(dl->nph == 2 && dl->ph[0].kind == 'd' && !strcmp(dl->ph[0].serial, "R58M123") && !strcmp(dl->ph[0].name, "Pixel 7 (ADB)") &&
+                 !dl->ph[0].need[0] && !dl->ph[0].mount[0] && !strcmp(dl->ph[1].need, "allow") && !strcmp(dl->ph[1].name, "Android (ADB)"));
+        ST_CHECK(st_log_has("adb devices -l") && st_log_has("fusermount3 -u -z " M10_BASE "/adb/GONE1"));
+        // connecting: adbfs for that phone on its folder, which then opens
+        dev_start_phone(&dl->ph[0]);
+        ST_CHECK(st_wait_cond(c_dev_idle, 5000));
+        st_wait();
+        ST_CHECK(st_log_has("adbfs R58M123 " M10_BASE "/adb/R58M123") && !strcmp(active_pane()->path, M10_BASE "/adb/R58M123"));
+        dl->nph = 0;
+        phones_scan_adb(dl);
+        ST_CHECK(dl->nph == 2 && !strcmp(dl->ph[0].mount, M10_BASE "/adb/R58M123")); // now connected
+        free(dl);
+        pane_navigate(active_pane(), M10_BASE, true);
+        st_wait();
+        unsetenv("FE_ADB"); unsetenv("FE_ADBFS"); unsetenv("FE_ADB_DIR"); unsetenv("FE_ADB_MOUNTS"); unsetenv("FE_FUSERMOUNT");
+    }
     // errors are shown
     dev_start(DEV_MOUNT, "/dev/fail", NULL, true);
     ST_CHECK(st_wait_cond(c_dev_idle, 5000));
