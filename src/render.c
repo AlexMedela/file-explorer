@@ -3093,7 +3093,6 @@ static void draw_ops(void) {
         f32 h = roundf(S(retry ? 110 : 74));
         y -= h;
         A.op_card[i] = (Rect){x, y, w, h};
-        draw_rrect(x + S(2), y + S(4), w, h, S(10), CA(0x000000, 0.35f));
         draw_rrect(x, y, w, h, S(10), C(COL_POPUP));
         draw_rrect_outline(x, y, w, h, S(10), 1, C(COL_CONTROL));
         char title[400];
@@ -3123,6 +3122,11 @@ static void draw_ops(void) {
     }
 }
 
+static u32 drag_card_outline(bool strong) {
+    u32 a = strong ? COL_ACCENT : COL_BORDER;
+    return rgb_mix(COL_POPUP, a, strong ? 0.45f : 0.55f);
+}
+
 // The transfer queue (Ctrl+J): every operation in queue order, above the status bar. Per row: what it is, the bar,
 // progress / speed / time left (or its place in line), and buttons to move it up / down, pause / resume, cancel.
 static int g_q_top; // first row shown when they don't all fit
@@ -3142,9 +3146,8 @@ static void draw_queue(void) {
     f32 h = headh + nshow * rowh + pad * 0.5f;
     f32 x = A.W - w - roundf(S(16)), y = roundf(A.r_status.y - S(10) - h);
     A.q_r = (Rect){x, y, w, h};
-    draw_rrect(x + S(2), y + S(4), w, h, S(12), CA(0x000000, 0.35f));
     draw_rrect(x, y, w, h, S(12), C(COL_POPUP));
-    draw_rrect_outline(x, y, w, h, S(12), 1, C(COL_POPUP_BORDER));
+    draw_rrect_outline(x, y, w, h, S(12), 1, C(drag_card_outline(false)));
     // header: title, how many run / wait, the verify switch, how many at once
     int nrun = 0, nwait = 0;
     for (int i = 0; i < A.nops; i++) {
@@ -3577,27 +3580,35 @@ static void drag_card_build(DragCard *c) {
     }
     c->strong = c->act[0] != 0;
     Font *f = &A.font_small;
-    c->row_h = roundf(S(24));
+    f32 is = S(16);
+    if (p) is = p->view == VIEW_GRID ? S(p->icon_px) : S(pane_rows_px(p));
+    is = roundf(CLAMP(is, S(14), p && p->view == VIEW_GRID ? S(96) : S(32)));
+    c->row_h = roundf(MAX(S(24), is + S(8)));
     c->pad = roundf(S(6));
     f32 tw = 0;
     for (int i = 0; i < c->n; i++) {
         const char *nm = rel_base(c->e[i]->name);
-        tw = MAX(tw, text_width(f, nm, (int)strlen(nm)) + S(24));
+        tw = MAX(tw, text_width(f, nm, (int)strlen(nm)) + is + S(8));
     }
     if (c->act[0]) tw = MAX(tw, text_width(f, c->act, (int)strlen(c->act)));
-    c->w = roundf(CLAMP(tw + S(20), S(120), S(320)));
+    c->w = roundf(CLAMP(tw + S(20), S(120), S(420)));
     int rows = c->n + (c->more ? 1 : 0) + (c->act[0] ? 1 : 0);
     c->h = roundf(c->pad * 2 + c->row_h * MAX(rows, 1) + (c->act[0] ? S(5) : 0));
 }
 
 // square: no rounded corners or shadow (X11's card outside the window is a plain window: no transparency)
+
 static void drag_card_paint(const DragCard *c, f32 x, f32 y, bool square) {
     Font *f = &A.font_small;
     f32 r = square ? 0 : S(8);
-    if (!square) draw_rrect(x + S(1), y + S(3), c->w, c->h, r, CA(0x000000, 0.35f));
-    draw_rrect(x, y, c->w, c->h, r, C(c->strong ? COL_SEL_FOCUS : COL_BORDER));
-    draw_rrect(x + 1, y + 1, c->w - 2, c->h - 2, MAX(0.f, r - 1), C(COL_POPUP));
-    f32 is = roundf(S(16)), lx = x + roundf(S(10)), ty = y + c->pad;
+    u32 outline = drag_card_outline(c->strong);
+    draw_rrect(x, y, c->w, c->h, r, C(COL_POPUP));
+    draw_rrect_outline(x, y, c->w, c->h, r, 1, C(outline));
+    f32 is = S(16);
+    Pane *p = A.drag_pane;
+    if (p) is = p->view == VIEW_GRID ? S(p->icon_px) : S(pane_rows_px(p));
+    is = roundf(CLAMP(is, S(14), p && p->view == VIEW_GRID ? S(96) : S(32)));
+    f32 lx = x + roundf(S(10)), ty = y + c->pad;
     for (int i = 0; i < c->n; i++, ty += c->row_h) {
         Entry *e = c->e[i];
         const char *nm = rel_base(e->name);
@@ -3617,7 +3628,7 @@ static void drag_card_paint(const DragCard *c, f32 x, f32 y, bool square) {
         ty += S(2);
         draw_rect(x + S(8), ty, c->w - S(16), 1, C(COL_BORDER));
         ty += S(3);
-        draw_text_fit(f, lx, text_y(f, ty, c->row_h), c->w - S(20), c->act, (int)strlen(c->act), C(COL_ACCENT), 0);
+        draw_text_fit(f, lx, text_y(f, ty, c->row_h), c->w - S(20), c->act, (int)strlen(c->act), C(COL_TEXT), 0);
     }
 }
 
