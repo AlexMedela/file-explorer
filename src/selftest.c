@@ -3923,8 +3923,7 @@ static int run_selftest_m9(void) {
         snprintf(back, sizeof back, "%s", p->path);
         mkdir(M9_BASE "/cols", 0755);
         st_write(M9_BASE "/cols/plain", 3);
-        symlink("zz-target", M9_BASE "/cols/l1");
-        symlink("aa-target", M9_BASE "/cols/l2");
+        ST_CHECK(symlink("zz-target", M9_BASE "/cols/l1") == 0 && symlink("aa-target", M9_BASE "/cols/l2") == 0);
         pane_navigate(p, M9_BASE "/cols", true);
         st_wait();
         Listing *L = p->L;
