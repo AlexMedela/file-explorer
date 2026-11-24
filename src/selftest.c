@@ -3970,6 +3970,38 @@ static int run_selftest_m9(void) {
         st_shot("columns-link");
         for (int c = COL_ACCESSED; c <= COL_LINK; c++) do_action(p, ACT_COL_BASE + c);
         do_action(p, ACT_SORT_BASE + SORT_NAME);
+        // CRC32 / SHA-256: read on their thread for the rows on screen, kept by path + size + mtime; a header click doesn't sort
+        FILE *hf = fopen(M9_BASE "/cols/plain", "w");
+        if (hf) { fputs("abc", hf); fclose(hf); }
+        mkfifo(M9_BASE "/cols/pipe", 0644); // (never opened: not a regular file)
+        pane_refresh(p);
+        st_wait();
+        do_action(p, ACT_COL_BASE + COL_CRC32);
+        do_action(p, ACT_COL_BASE + COL_SHA256);
+        const HashEnt *he = NULL;
+        Entry *pe = NULL;
+        for (u32 i = 0; p->L && i < p->L->count; i++)
+            if (!strcmp(p->L->entries[i].name, "plain")) pe = &p->L->entries[i];
+        for (int k = 0; k < 400 && pe; k++) {
+            st_frames(1);
+            he = hash_get(M9_BASE "/cols/plain", pe->mtime, pe->size);
+            if (he->st != HC_PENDING) break;
+            SDL_Delay(5);
+        }
+        ST_CHECK(pe && pe->size == 3 && he && he->st == HC_DONE && he->crc == 0x352441C2u &&
+                 !strcmp(he->sha, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+        int sk = p->sort_key;
+        st_frames(1);
+        st_shot("columns-hash");
+        for (int k = 0; k < p->ly.ncols; k++)
+            if (p->ly.cid[k] == COL_SHA256) {
+                f32 hx = (p->ly.cx0[k] + p->ly.cx1[k]) * 0.5f, hy = p->ly.header.y + p->ly.header.h * 0.5f;
+                st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, hx, hy, SDL_BUTTON_LEFT, 1, 0);
+                st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, hx, hy, SDL_BUTTON_LEFT, 1, 0);
+            }
+        ST_CHECK(p->sort_key == sk);
+        do_action(p, ACT_COL_BASE + COL_CRC32);
+        do_action(p, ACT_COL_BASE + COL_SHA256);
         pane_navigate(p, back, true);
         st_wait();
         st_rmrf(M9_BASE "/cols");

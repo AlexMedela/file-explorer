@@ -1113,3 +1113,140 @@ static SumJob *sum_start(const char *path) {
     pthread_detach(t);
     return j;
 }
+
+// --- hash columns (CRC32 / SHA-256 of the files on screen) ------------------
+// Asked for by the list's drawing, row by row, for regular local files; one thread reads them (newest request first,
+// so what's on screen now goes before what was scrolled past) and posts the result back. Results are kept by path,
+// size and modification time (a set-associative cache), so scrolling back or returning to a folder costs nothing.
+
+#define HC_SETS 2048
+#define HC_WAYS 4
+#define HC_MAX_SIZE (1ull << 30) // bigger files aren't read (a column isn't worth minutes of disk)
+enum { HC_PENDING, HC_DONE, HC_FAILED, HC_TOO_BIG };
+
+typedef struct { char *path; i64 mtime; u64 size; u64 used; u32 crc; char sha[65]; u8 st; } HashEnt;
+typedef struct { char *path; i64 mtime; u64 size; u32 crc; char sha[65]; bool ok; } HashReq;
+
+static HashEnt g_hc[HC_SETS][HC_WAYS]; // main thread only
+static u64 g_hc_tick;
+static bool g_hash_redraw; // a result came in (the frame loop redraws)
+static struct {
+    pthread_mutex_t mtx;
+    pthread_cond_t cv;
+    HashReq *q[256]; // a stack: the newest first
+    int n;
+    bool started;
+} g_hq = {.mtx = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER};
+
+static u32 g_crc_table[256];
+
+static u32 crc32_update(u32 crc, const u8 *p, size_t n) {
+    if (!g_crc_table[1])
+        for (u32 i = 0; i < 256; i++) {
+            u32 c = i;
+            for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            g_crc_table[i] = c;
+        }
+    crc = ~crc;
+    while (n--) crc = g_crc_table[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
+    return ~crc;
+}
+
+static HashEnt *hash_set(const char *path) {
+    u64 h = 1469598103934665603ull;
+    for (const char *c = path; *c; c++) h = (h ^ (u8)*c) * 1099511628211ull;
+    return g_hc[h % HC_SETS];
+}
+
+// A result (dropped: never read, forget it so it's asked for again if it's still on screen).
+static void hash_result(HashReq *r, bool dropped) {
+    HashEnt *set = hash_set(r->path);
+    for (int k = 0; k < HC_WAYS; k++) {
+        HashEnt *e = &set[k];
+        if (!e->path || strcmp(e->path, r->path) || e->mtime != r->mtime || e->size != r->size || e->st != HC_PENDING) continue;
+        if (dropped) {
+            free(e->path);
+            *e = (HashEnt){0};
+        } else {
+            e->st = r->ok ? HC_DONE : HC_FAILED;
+            e->crc = r->crc;
+            memcpy(e->sha, r->sha, sizeof e->sha);
+            g_hash_redraw = true;
+        }
+    }
+    free(r->path);
+    free(r);
+}
+
+static void hash_done_cb(void *arg) { hash_result(arg, false); }
+static void hash_drop_cb(void *arg) { hash_result(arg, true); }
+
+static void *hash_thread(void *arg) {
+    (void)arg;
+    thread_background_priority();
+    u8 *buf = xmalloc(1 << 20);
+    for (;;) {
+        pthread_mutex_lock(&g_hq.mtx);
+        while (!g_hq.n) pthread_cond_wait(&g_hq.cv, &g_hq.mtx);
+        HashReq *r = g_hq.q[--g_hq.n];
+        pthread_mutex_unlock(&g_hq.mtx);
+        int fd = open(r->path, O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW);
+        struct stat st;
+        if (fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) { // (never a fifo or a device that would block)
+            Sha256 sh;
+            sha256_init(&sh);
+            u32 crc = 0;
+            ssize_t n;
+            while ((n = read(fd, buf, 1 << 20)) > 0) {
+                sha256_update(&sh, buf, (size_t)n);
+                crc = crc32_update(crc, buf, (size_t)n);
+            }
+            if (n == 0) {
+                sha256_final(&sh, r->sha);
+                r->crc = crc;
+                r->ok = true;
+            }
+        }
+        if (fd >= 0) close(fd);
+        main_post(hash_done_cb, r);
+    }
+    return NULL;
+}
+
+// The hashes of a regular file (path, its size and mtime from the listing), asked for when unknown: st is HC_PENDING
+// while it's being read, HC_DONE, HC_FAILED (unreadable) or HC_TOO_BIG.
+static const HashEnt *hash_get(const char *path, i64 mtime, u64 size) {
+    HashEnt *set = hash_set(path), *old = &set[0];
+    g_hc_tick++;
+    for (int k = 0; k < HC_WAYS; k++) {
+        HashEnt *e = &set[k];
+        if (e->path && !strcmp(e->path, path) && e->mtime == mtime && e->size == size) {
+            e->used = g_hc_tick;
+            return e;
+        }
+        if (!e->path || e->used < old->used) old = e;
+    }
+    free(old->path); // the least recently drawn of the set makes room
+    *old = (HashEnt){.path = strdup(path), .mtime = mtime, .size = size, .used = g_hc_tick, .st = size > HC_MAX_SIZE ? HC_TOO_BIG : HC_PENDING};
+    if (old->st == HC_TOO_BIG) return old;
+    HashReq *r = xcalloc(1, sizeof *r);
+    *r = (HashReq){.path = strdup(path), .mtime = mtime, .size = size};
+    pthread_mutex_lock(&g_hq.mtx);
+    if (g_hq.n == (int)ARRAY_COUNT(g_hq.q)) { // full: forget the oldest request (scrolled past long ago; asked again if seen)
+        HashReq *gone = g_hq.q[0];
+        memmove(g_hq.q, g_hq.q + 1, (size_t)(g_hq.n - 1) * sizeof g_hq.q[0]);
+        g_hq.n--;
+        main_post(hash_drop_cb, gone);
+    }
+    g_hq.q[g_hq.n++] = r;
+    if (!g_hq.started) {
+        g_hq.started = true;
+        pthread_t t;
+        pthread_create(&t, NULL, hash_thread, NULL);
+        pthread_setname_np(t, "fe-hash");
+        pthread_detach(t);
+    }
+    pthread_cond_signal(&g_hq.cv);
+    pthread_mutex_unlock(&g_hq.mtx);
+    return old;
+}
