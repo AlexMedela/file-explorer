@@ -1985,7 +1985,7 @@ static int run_selftest_m6(void) {
         PaneLayout *ly = &pn->cur->pane[0].ly;
         st_mouse(SDL_EVENT_MOUSE_MOTION, pn->plus.x + pn->plus.w * 0.5f, pn->plus.y + pn->plus.h * 0.5f, 0, 0, 0);
         ST_CHECK(A.cursor_shown == 3);
-        st_mouse(SDL_EVENT_MOUSE_MOTION, ly->pathbar.x + ly->pathbar.w - S(4), ly->pathbar.y + ly->pathbar.h * 0.5f, 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, pathbar_right(ly) - S(8), ly->pathbar.y + ly->pathbar.h * 0.5f, 0, 0, 0); // (not its copy button: a hand)
         ST_CHECK(A.cursor_shown == 4);
         st_mouse(SDL_EVENT_MOUSE_MOTION, ly->list.x + ly->list.w * 0.5f, ly->list.y + ly->list.h - S(4), 0, 0, 0);
         ST_CHECK(A.cursor_shown == 0);
