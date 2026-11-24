@@ -6323,11 +6323,15 @@ static void st_setup_m10(void) {
           "echo \"$@\" >> " M10_BASE "/tools/log\n"
           "case \"$1\" in\n"
           "mount) [ \"$3\" = /dev/fail ] && { echo 'Error mounting /dev/fail: wrong fs type' >&2; exit 1; }\n"
+          "  [ \"$3\" = /dev/loop8 ] && { echo 'Error mounting /dev/loop8: no filesystem' >&2; exit 1; }\n"
+          "  [ \"$3\" = /dev/loop7 ] && { mkdir -p '" M10_BASE "/media/IMG'; echo \"Error mounting /dev/loop7: GDBus.Error:org.freedesktop.UDisks2.Error."
+          "AlreadyMounted: Device /dev/loop7 is already mounted at \\`" M10_BASE "/media/IMG'.\" >&2; exit 1; }\n"
           "  [ \"$3\" = /dev/dirty ] && [ \"$5\" != ro ] && { echo 'Error mounting /dev/dirty at /run/media/me/WIN: wrong fs type, bad option, "
           "bad superblock on /dev/dirty, missing codepage or helper program, or other error (udisks-error-quark, 0)' >&2; exit 1; }\n"
           "  mkdir -p '" M10_BASE "/media/MY STICK'; echo \"Mounted $3 at " M10_BASE "/media/MY STICK.\" ;;\n"
           "unmount) echo \"Unmounted $3.\" ;;\n"
-          "power-off) ;;\n"
+          "power-off|loop-delete) ;;\n"
+          "loop-setup) case \"$4\" in *empty*) echo \"Mapped file $4 as /dev/loop8.\";; *) echo \"Mapped file $4 as /dev/loop7.\";; esac ;;\n"
           "esac\n", f);
     fclose(f);
     f = fopen(M10_BASE "/tools/gio", "w");
@@ -6603,6 +6607,46 @@ static int run_selftest_m10(void) {
         ST_CHECK(st_wait_cond(c_dev_idle, 5000));
         ST_CHECK(st_log_has("unmount -b /dev/sdz1") && st_log_has("power-off -b /dev/sdz"));
         ST_CHECK(!strcmp(A.toast, "Safe to remove"));
+    }
+    // discs and disk images: lsblk's "rom" (a disc in the drive) and loop devices with an image behind them (sysfs);
+    // free loop devices and snaps stay hidden
+    {
+        DevList dl;
+        mkdir(M10_BASE "/sys", 0755);
+        mkdir(M10_BASE "/sys/loop3", 0755);
+        mkdir(M10_BASE "/sys/loop3/loop", 0755);
+        st_write_text(M10_BASE "/sys/loop3/loop/backing_file", "/home/me/Linux Mint.iso\n");
+        setenv("FE_SYS_BLOCK", M10_BASE "/sys", 1);
+        devices_parse("PATH=\"/dev/sr0\" PKNAME=\"\" TYPE=\"rom\" RM=\"1\" HOTPLUG=\"0\" MAJ:MIN=\"11:0\" LABEL=\"MOVIE\" FSTYPE=\"udf\" SIZE=\"4\" PARTTYPE=\"\" UUID=\"\"\n"
+                      "PATH=\"/dev/sr1\" PKNAME=\"\" TYPE=\"rom\" RM=\"1\" HOTPLUG=\"0\" MAJ:MIN=\"11:1\" LABEL=\"\" FSTYPE=\"\" SIZE=\"0\" PARTTYPE=\"\" UUID=\"\"\n"
+                      "PATH=\"/dev/loop3\" PKNAME=\"\" TYPE=\"loop\" RM=\"0\" HOTPLUG=\"0\" MAJ:MIN=\"7:3\" LABEL=\"Mint\" FSTYPE=\"iso9660\" SIZE=\"4\" PARTTYPE=\"\" UUID=\"\"\n"
+                      "PATH=\"/dev/loop4\" PKNAME=\"\" TYPE=\"loop\" RM=\"0\" HOTPLUG=\"0\" MAJ:MIN=\"7:4\" LABEL=\"\" FSTYPE=\"ext4\" SIZE=\"4\" PARTTYPE=\"\" UUID=\"\"\n"
+                      "PATH=\"/dev/loop5\" PKNAME=\"\" TYPE=\"loop\" RM=\"0\" HOTPLUG=\"0\" MAJ:MIN=\"7:5\" LABEL=\"\" FSTYPE=\"squashfs\" SIZE=\"4\" PARTTYPE=\"\" UUID=\"\"\n", &dl);
+        unsetenv("FE_SYS_BLOCK");
+        ST_CHECK(dl.n == 2 && !strcmp(dl.d[0].dev, "/dev/sr0") && dl.d[0].optical && dl.d[0].removable && !strcmp(dl.d[0].disk, "sr0") &&
+                 !strcmp(dl.d[1].dev, "/dev/loop3") && !strcmp(dl.d[1].image, "/home/me/Linux Mint.iso") && dl.d[1].removable &&
+                 !strcmp(dl.d[1].disk, "loop3"));
+        // "Mount" on an image: a read-only loop device, its filesystem mounted and opened (the desktop's automounter got there
+        // first: its mount); nothing to mount: the loop goes
+        st_write(M10_BASE "/disc.iso", 10);
+        image_mount(M10_BASE "/disc.iso");
+        ST_CHECK(st_wait_cond(c_dev_idle, 5000));
+        st_wait();
+        ST_CHECK(st_log_has("loop-setup -r -f " M10_BASE "/disc.iso") && st_log_has("mount -b /dev/loop7") &&
+                 !strcmp(active_pane()->path, M10_BASE "/media/IMG"));
+        dev_start(DEV_IMAGE_MOUNT, M10_BASE "/empty.img", NULL, false);
+        ST_CHECK(st_wait_cond(c_dev_idle, 5000));
+        ST_CHECK(st_log_has("mount -b /dev/loop8") && st_log_has("loop-delete -b /dev/loop8") && strstr(A.toast, "Couldn't mount"));
+        // eject: an image's loop device is let go, a disc's tray opens
+        st_write_text(M10_BASE "/tools/eject", "#!/bin/sh\necho \"eject $*\" >> " M10_BASE "/tools/log\n");
+        chmod(M10_BASE "/tools/eject", 0755);
+        setenv("FE_EJECT", M10_BASE "/tools/eject", 1);
+        dev_start(DEV_EJECT, "/dev/loop3", "loop3", false);
+        ST_CHECK(st_wait_cond(c_dev_idle, 5000));
+        dev_start(DEV_EJECT, "/dev/sr0", "sr0", false);
+        ST_CHECK(st_wait_cond(c_dev_idle, 5000));
+        ST_CHECK(st_log_has("loop-delete -b /dev/loop3") && st_log_has("eject /dev/sr0") && !st_log_has("power-off -b /dev/sr0"));
+        unsetenv("FE_EJECT");
     }
     // errors are shown
     dev_start(DEV_MOUNT, "/dev/fail", NULL, true);
