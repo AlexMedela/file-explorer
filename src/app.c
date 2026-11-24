@@ -478,7 +478,6 @@ enum {
     ACT_IMG_MOUNT, ACT_IMG_BROWSE, // a disc / disk image file (.iso, .img): open it as a drive / an ISO's files like an archive's
     ACT_OW_APP_BASE = 520, // + index of an app in the Open with submenu (up to OW_MENU_APPS, below 540)
     ACT_CMP_DIALOG = 560,    // "Compare with...": the dialog with both folders
-    ACT_RIBBON_POS_BASE = 565, ACT_RIBBON_OVF_BASE = 570, ACT_RIBBON_OFF = 573, // the ribbon's menu: + RP_* / + RO_*, hide it
     ACT_ADDON_BASE = 580, ACT_ADDON_LAST = 599, // add-ons' actions (addons.c)
     ACT_CLOUD_NEW = 540, ACT_CLOUD_REFRESH, ACT_CLOUD_SECTION_TOGGLE, ACT_CLOUD_CONNECT, ACT_CLOUD_CONNECT_TAB, ACT_CLOUD_DISCONNECT,
     ACT_CLOUD_LOGIN, ACT_CLOUD_RECONNECT, ACT_CLOUD_LOG, ACT_CLOUD_COPY_PATH,
@@ -6512,13 +6511,6 @@ static void do_action(Pane *p, int act) {
         else if (act == ACT_CMP_DIALOG) cmp_action(p, act);
         else if (act >= ACT_OW_APP_BASE && act < ACT_OW_APP_BASE + OW_MENU_APPS) open_with_menu_app(p, act - ACT_OW_APP_BASE);
         else if (act >= ACT_UA_BASE && act < ACT_UA_BASE + UA_MAX) ua_run(p, act - ACT_UA_BASE);
-        else if ((act >= ACT_RIBBON_POS_BASE && act <= RP_RIGHT + ACT_RIBBON_POS_BASE) || (act >= ACT_RIBBON_OVF_BASE && act <= ACT_RIBBON_OFF)) {
-            if (act == ACT_RIBBON_OFF) A.ribbon = false;
-            else if (act >= ACT_RIBBON_OVF_BASE) A.ribbon_overflow = act - ACT_RIBBON_OVF_BASE;
-            else A.ribbon_pos = act - ACT_RIBBON_POS_BASE;
-            A.settings_dirty = true;
-            layout();
-        }
         else if (act == ACT_TRASH_RESTORE) trash_restore(p, false);
         else if (act == ACT_TRASH_RESTORE_ALL) trash_restore(p, true);
         else if (act == ACT_TRASH_EMPTY) trash_delete(p, true);

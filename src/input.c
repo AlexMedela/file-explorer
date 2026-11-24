@@ -2,7 +2,6 @@
 
 static bool upd_card_click(f32 x, f32 y); // (integration.c)
 static void ribbon_click(Pane *p, f32 x, f32 y); // (ribbon.c)
-static void ribbon_menu(Pane *p, f32 x, f32 y);
 static int ribbon_drop_at(f32 x, f32 y, Pane **pp);
 static void ribbon_drop(void);
 static bool ribbon_wheel(f32 x, f32 y, f32 wy);
@@ -446,7 +445,6 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
     if (pane_snap_on(p) && in_rect(ly->list, x, y)) { snap_mouse_down(p, b, x, y); return; }
     if (ly->has_snapbar && in_rect(ly->snapbar, x, y)) { snapbar_click(p, x, y); return; }
 
-    if (b->button == SDL_BUTTON_RIGHT && ly->ribbon.h > 0 && in_rect(ly->ribbon, x, y)) { ribbon_menu(p, x, y); return; }
     if (b->button == SDL_BUTTON_RIGHT && in_rect(ly->header, x, y)) { menu_open_columns(p, x, y); return; }
     if (b->button == SDL_BUTTON_RIGHT) {
         if (in_rect(ly->list, x, y) && p->order && !(ly->has_scroll && in_rect(ly->track, x, y))) {

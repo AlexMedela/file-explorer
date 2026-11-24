@@ -4105,20 +4105,6 @@ static int run_selftest_m9(void) {
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, rl->area.x + S(10), rl->list.y + S(100), SDL_BUTTON_LEFT, 1, 0);
         st_frames(1);
         ST_CHECK(A.drag == DRAG_NONE && A.ribbon_pos == RP_LEFT && rl->ribbon.x == rl->area.x && rl->list.x == rl->ribbon.x + rl->ribbon.w);
-        // right-click on it: its positions / overflow modes (checked), or hide it
-        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, rl->ribbon.x + rl->ribbon.w * 0.5f, rl->ribbon.y + rl->ribbon.h - S(4), SDL_BUTTON_RIGHT, 1, 0);
-        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, rl->ribbon.x + rl->ribbon.w * 0.5f, rl->ribbon.y + rl->ribbon.h - S(4), SDL_BUTTON_RIGHT, 1, 0);
-        int bi = -1;
-        bool left_checked = false;
-        for (int i = 0; A.menu.open && i < A.menu.n; i++) {
-            if (A.menu.items[i].act == ACT_RIBBON_POS_BASE + RP_BOTTOM) bi = i;
-            if (A.menu.items[i].act == ACT_RIBBON_POS_BASE + RP_LEFT) left_checked = A.menu.items[i].checked;
-        }
-        ST_CHECK(A.menu.open && bi >= 0 && left_checked);
-        st_shot("ribbon-menu");
-        if (bi >= 0) menu_activate(bi);
-        st_frames(1);
-        ST_CHECK(A.ribbon_pos == RP_BOTTOM && rl->ribbon.y + rl->ribbon.h == rl->area.y + rl->area.h);
         // Wrap: a narrow window gets a second row instead of "..."
         A.ribbon_pos = RP_BELOW;
         A.ribbon_overflow = RO_WRAP;

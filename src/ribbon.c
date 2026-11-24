@@ -178,12 +178,12 @@ static void ribbon_layout(Pane *p) {
 // Six dots: the grip that drags the ribbon to another place.
 static void ribbon_draw_grip(Rect g, bool hv) {
     if (hv) draw_rrect(g.x, g.y, g.w, g.h, S(4), C(COL_FIELD_HOVER));
-    f32 d = roundf(MAX(S(3.f), 2.f)), st = roundf(S(5.5f)), cx = g.x + g.w * 0.5f, cy = g.y + g.h * 0.5f;
+    f32 d = roundf(MAX(S(2.4f), 2.f)), st = roundf(S(5)), cx = g.x + g.w * 0.5f, cy = g.y + g.h * 0.5f;
     bool v = g.w > g.h; // (lying down at the side)
     for (int a = -1; a <= 1; a++)
         for (int b = 0; b < 2; b++) {
             f32 x = v ? cx + (f32)a * st : cx + ((f32)b - 0.5f) * st, y = v ? cy + ((f32)b - 0.5f) * st : cy + (f32)a * st;
-            draw_rrect(roundf(x - d * 0.5f), roundf(y - d * 0.5f), d, d, d * 0.5f, C(hv ? COL_TEXT : COL_TEXT_DIM));
+            draw_rrect(roundf(x - d * 0.5f), roundf(y - d * 0.5f), d, d, d * 0.5f, C(hv ? COL_TEXT_DIM : COL_TEXT_FAINT));
         }
 }
 
@@ -200,8 +200,7 @@ static void draw_ribbon(Pane *p) {
     }
     ribbon_layout(p);
     ribbon_draw_grip(g_rb.grip, A.drag == DRAG_RIBBON || hot(g_rb.grip));
-    static const char tip[] = "Drag to move the ribbon (or right-click it)";
-    fit_tip_offer_box(g_rb.grip.x, g_rb.grip.y, g_rb.grip.w, g_rb.grip.h, tip, (int)sizeof tip - 1);
+    fit_tip_offer_box(g_rb.grip.x, g_rb.grip.y, g_rb.grip.w, g_rb.grip.h, "Drag to move the ribbon", 23);
     ClipSave cs = {0};
     bool clip = g_rb.win.w > 0 && g_rb.prev.w > 0;
     if (clip) cs = draw_clip_push((SDL_Rect){(int)g_rb.win.x, (int)g_rb.win.y, (int)g_rb.win.w, (int)g_rb.win.h});
@@ -373,24 +372,4 @@ static void ribbon_drop(void) {
     A.ribbon_drop_pane = NULL;
     drag_cancel();
     A.redraw = true;
-}
-
-// Right-click on the ribbon: where it goes and what it does when it doesn't fit (as in Options), or hide it.
-static void ribbon_menu(Pane *p, f32 x, f32 y) {
-    static const char *pos[] = {"Below the path bar", "Above the path bar", "Bottom", "Left", "Right"}; // RP_*
-    static const char *ovf[] = {"More menu", "Wrap onto more rows", "Scroll"};                          // RO_*
-    Menu *m = &A.menu;
-    m->n = m->ninfo = 0;
-    m->hover = -1;
-    m->pane = p;
-    m->keep_open = false;
-    m->reopen = NULL;
-    menu_add_head("Ribbon position");
-    for (int i = 0; i < (int)ARRAY_COUNT(pos); i++) menu_add_check(pos[i], ACT_RIBBON_POS_BASE + i, A.ribbon_pos == i, true);
-    menu_sep();
-    menu_add_head("When it doesn't fit");
-    for (int i = 0; i < (int)ARRAY_COUNT(ovf); i++) menu_add_check(ovf[i], ACT_RIBBON_OVF_BASE + i, A.ribbon_overflow == i, true);
-    menu_sep();
-    menu_add("Hide the ribbon", "", ACT_RIBBON_OFF, true);
-    menu_finish(x, y);
 }
