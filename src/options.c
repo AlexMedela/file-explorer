@@ -602,6 +602,8 @@ static void opt_int_fmt(int id, char *buf, size_t cap) {
     else snprintf(buf, cap, "%d px", opt_int_get(id));
 }
 
+static bool opt_scroll_color_auto(void) { return g_scroll_custom == 0; }
+
 // Scrollbar colour: Enter or Apply takes what's typed (empty: Auto); the field then shows it as saved.
 static void opt_scroll_color_apply(void) {
     u32 c;
@@ -613,6 +615,8 @@ static void opt_scroll_color_apply(void) {
     if (c) snprintf(buf, sizeof buf, "#%06X", c & 0xFFFFFF);
     te_set(&g_opt.scroll_color, buf, (int)strlen(buf), (int)strlen(buf));
     g_opt.scroll_focus = false;
+    if (c) toast_success("Scrollbar colour applied");
+    else toast_success("Scrollbar colour set to Auto");
 }
 
 // App icon: an absolute .svg/.png keeps its own colours; empty leaves the built-in logo in effect.
@@ -685,10 +689,6 @@ static void opt_icon_button(int opt, int arg) {
         if (arg == 0) opt_title_icon_apply();
         else if (arg == 1) opt_title_icon_default();
     }
-}
-
-static bool opt_scroll_color_auto(void) {
-    return g_scroll_custom == 0;
 }
 
 static bool opt_terminal_path_valid(const char *s) {
