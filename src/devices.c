@@ -226,6 +226,192 @@ static void drives_scan(DevList *L) {
     free(out);
 }
 
+// --- disk health: temperature (hwmon) and SMART (udisks), both without root ------------------------------------
+// Read on a worker about once a minute for the drives listed in the sidebar; shown only when something's wrong (a dot),
+// on hover, and in the details panel at a drive's top folder.
+
+#define MAX_DISKS 16
+#define DH_NO_TEMP (-100000)
+typedef struct {
+    char disk[32];     // nvme0n1, sda
+    char model[64];
+    int temp;          // tenths of a degree Celsius, DH_NO_TEMP: unknown
+    bool smart;        // udisks knows its SMART data
+    bool failing;      // the drive says it's failing (SATA)
+    char warning[96];  // NVMe critical warnings, bad sectors... ("" none)
+    i64 hours;         // powered on (-1 unknown)
+} DiskHealth;
+typedef struct {
+    DiskHealth d[MAX_DISKS];
+    int n;
+    struct { char dev[32]; int di; } map[MAX_BLOCKDEVS]; // a listed device (sdb1, dm-0) -> its disk in d
+    int nmap;
+} DiskHealthList;
+
+static const char *sys_class_block(void) {
+    const char *e = getenv("FE_SYS_CLASS_BLOCK"); // (tests)
+    return e && e[0] ? e : "/sys/class/block";
+}
+
+// The physical disk under a block device (a partition's disk, what LUKS / LVM sit on); false: none (zram, loop...).
+static bool disk_of(const char *name, char *out, size_t cap) {
+    char cur[64], p[PATH_MAX];
+    snprintf(cur, sizeof cur, "%s", name);
+    for (int depth = 0; depth < 8; depth++) {
+        if (!strncmp(cur, "loop", 4) || !strncmp(cur, "zram", 4) || !strncmp(cur, "ram", 3) || !strncmp(cur, "sr", 2)) return false;
+        snprintf(p, sizeof p, "%s/%s/slaves", sys_class_block(), cur);
+        DIR *d = opendir(p);
+        bool down = false;
+        if (d) { // device-mapper (LUKS, LVM): what it's built on
+            struct dirent *de;
+            while ((de = readdir(d)))
+                if (de->d_name[0] != '.') { snprintf(cur, sizeof cur, "%s", de->d_name); down = true; break; }
+            closedir(d);
+        }
+        if (down) continue;
+        snprintf(p, sizeof p, "%s/%s/partition", sys_class_block(), cur);
+        if (access(p, F_OK) == 0) { // a partition: its disk is the folder above it
+            char link[PATH_MAX], real[PATH_MAX];
+            snprintf(link, sizeof link, "%s/%s", sys_class_block(), cur);
+            if (!realpath(link, real)) return false;
+            char *sl = strrchr(real, '/');
+            if (!sl) return false;
+            *sl = 0;
+            snprintf(cur, sizeof cur, "%s", path_basename(real));
+            continue;
+        }
+        snprintf(out, cap, "%s", cur);
+        return true;
+    }
+    return false;
+}
+
+// A disk's temperature from its hwmon sensor (NVMe always has one; SATA with the drivetemp module), DH_NO_TEMP: none.
+static int hwmon_temp(const char *disk) {
+    char base[PATH_MAX];
+    for (int k = 0; k < 2; k++) {
+        snprintf(base, sizeof base, k ? "%s/%s/device/hwmon" : "%s/%s/device", sys_class_block(), disk);
+        DIR *d = opendir(base);
+        if (!d) continue;
+        struct dirent *de;
+        int t = DH_NO_TEMP;
+        while ((de = readdir(d)) && t == DH_NO_TEMP) {
+            if (strncmp(de->d_name, "hwmon", 5) || !de->d_name[5]) continue;
+            char f[PATH_MAX + 64], buf[32] = "";
+            snprintf(f, sizeof f, "%s/%s/temp1_input", base, de->d_name);
+            int fd = open(f, O_RDONLY | O_CLOEXEC);
+            if (fd < 0) continue;
+            ssize_t n = read(fd, buf, sizeof buf - 1);
+            close(fd);
+            if (n > 0) { buf[n] = 0; t = (int)(atol(buf) / 100); } // millidegrees -> tenths
+        }
+        closedir(d);
+        if (t != DH_NO_TEMP) return t;
+    }
+    return DH_NO_TEMP;
+}
+
+// `udisksctl dump`: block devices name their drive object; drives carry the model and the SMART properties.
+static void udisks_health_parse(const char *text, DiskHealthList *L) {
+    enum { MAXD = 32 };
+    struct { char id[160], model[64], warn[96]; f64 kelvin; i64 hours; bool smart, failing; i64 bad; } dr[MAXD];
+    struct { char name[32], id[160]; } bl[64];
+    int nd = 0, nb = 0, cur_d = -1, cur_b = -1;
+    const char *p = text;
+    while (*p) {
+        const char *e = strchr(p, '\n');
+        size_t len = e ? (size_t)(e - p) : strlen(p);
+        char line[512];
+        snprintf(line, sizeof line, "%.*s", (int)MIN(len, sizeof line - 1), p);
+        p = e ? e + 1 : p + len;
+        if (!strncmp(line, "/org/freedesktop/UDisks2/", 25)) {
+            cur_d = cur_b = -1;
+            char *c = strrchr(line, ':');
+            if (c) *c = 0;
+            if (!strncmp(line + 25, "drives/", 7) && nd < MAXD) {
+                cur_d = nd++;
+                memset(&dr[cur_d], 0, sizeof dr[cur_d]);
+                dr[cur_d].hours = -1;
+                snprintf(dr[cur_d].id, sizeof dr[cur_d].id, "%s", line + 32);
+            } else if (!strncmp(line + 25, "block_devices/", 14) && nb < 64) {
+                cur_b = nb++;
+                snprintf(bl[cur_b].name, sizeof bl[cur_b].name, "%s", line + 39);
+                bl[cur_b].id[0] = 0;
+            }
+            continue;
+        }
+        char *k = line;
+        while (*k == ' ') k++;
+        char *colon = strchr(k, ':');
+        if (!colon || k - line < 4) continue; // (interface names: two spaces in)
+        *colon = 0;
+        char *v = colon + 1;
+        while (*v == ' ') v++;
+        for (size_t l = strlen(v); l && v[l - 1] == ' '; ) v[--l] = 0;
+        if (cur_b >= 0 && !strcmp(k, "Drive")) {
+            const char *q = strstr(v, "/drives/");
+            if (q) { snprintf(bl[cur_b].id, sizeof bl[cur_b].id, "%s", q + 8); bl[cur_b].id[strcspn(bl[cur_b].id, "'")] = 0; }
+        } else if (cur_d >= 0) {
+            if (!strcmp(k, "Model")) snprintf(dr[cur_d].model, sizeof dr[cur_d].model, "%s", v);
+            else if (!strcmp(k, "SmartTemperature")) { dr[cur_d].kelvin = atof(v); dr[cur_d].smart = true; }
+            else if (!strcmp(k, "SmartPowerOnHours")) { dr[cur_d].hours = atoll(v); dr[cur_d].smart = true; }
+            else if (!strcmp(k, "SmartPowerOnSeconds")) { dr[cur_d].hours = atoll(v) / 3600; dr[cur_d].smart = true; }
+            else if (!strcmp(k, "SmartFailing")) { dr[cur_d].failing = !strcmp(v, "true"); dr[cur_d].smart = true; }
+            else if (!strcmp(k, "SmartNumBadSectors")) dr[cur_d].bad = atoll(v);
+            else if (!strcmp(k, "SmartCriticalWarning")) snprintf(dr[cur_d].warn, sizeof dr[cur_d].warn, "%s", v);
+        }
+    }
+    for (int i = 0; i < L->n; i++) {
+        DiskHealth *h = &L->d[i];
+        for (int b = 0; b < nb; b++) {
+            if (strcmp(bl[b].name, h->disk) || !bl[b].id[0]) continue;
+            for (int k = 0; k < nd; k++) {
+                if (strcmp(dr[k].id, bl[b].id)) continue;
+                if (dr[k].model[0]) snprintf(h->model, sizeof h->model, "%s", dr[k].model);
+                h->smart = dr[k].smart;
+                h->failing = dr[k].failing;
+                h->hours = dr[k].hours;
+                if (dr[k].warn[0]) snprintf(h->warning, sizeof h->warning, "%s", dr[k].warn);
+                else if (dr[k].bad > 0) snprintf(h->warning, sizeof h->warning, "%lld bad sectors", (long long)dr[k].bad);
+                if (h->temp == DH_NO_TEMP && dr[k].kelvin > 200) h->temp = (int)lround((dr[k].kelvin - 273.15) * 10);
+            }
+        }
+    }
+}
+
+// Fill in L's disks (their names set): model, temperature, then udisks' SMART data (when it's there).
+static void disk_health_scan(DiskHealthList *L) {
+    for (int i = 0; i < L->n; i++) {
+        DiskHealth *h = &L->d[i];
+        h->temp = hwmon_temp(h->disk);
+        h->hours = -1;
+        char p[PATH_MAX], buf[96] = "";
+        snprintf(p, sizeof p, "%s/%s/device/model", sys_class_block(), h->disk);
+        int fd = open(p, O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            ssize_t n = read(fd, buf, sizeof buf - 1);
+            close(fd);
+            buf[n > 0 ? n : 0] = 0;
+            for (size_t l = strlen(buf); l && (buf[l - 1] == '\n' || buf[l - 1] == ' '); ) buf[--l] = 0;
+            snprintf(h->model, sizeof h->model, "%s", buf);
+        }
+    }
+    char *out = xmalloc(1 << 20);
+    char *argv[] = {(char *)tool("FE_UDISKSCTL", "udisksctl"), "dump", NULL};
+    if (L->n && run_capture(argv, out, 1 << 20) == 0) udisks_health_parse(out, L);
+    free(out);
+}
+
+// How bad (0 fine, 1 a warning or hot, 2 failing) and a line for it ("Good", "Failing: back it up now"...).
+static int disk_health_level(const DiskHealth *h, char *what, size_t cap) {
+    int hot = !strncmp(h->disk, "nvme", 4) ? 700 : 550; // tenths of a degree
+    if (h->failing) { snprintf(what, cap, "Failing: back it up now"); return 2; }
+    if (h->warning[0]) { snprintf(what, cap, "Warning: %s", h->warning); return 1; }
+    if (h->temp != DH_NO_TEMP && h->temp >= hot) { snprintf(what, cap, "Running hot"); return 1; }
+    snprintf(what, cap, h->smart ? "Good" : "");
+    return 0;
+}
+
 // --- network mounts ------------------------------------------------------------
 
 typedef struct { char path[PATH_MAX]; char label[64]; bool sshfs; } NetMount; // sshfs: label is its "user@host:/dir"

@@ -6463,6 +6463,7 @@ static void st_setup_m10(void) {
           "  mkdir -p '" M10_BASE "/media/MY STICK'; echo \"Mounted $3 at " M10_BASE "/media/MY STICK.\" ;;\n"
           "unmount) echo \"Unmounted $3.\" ;;\n"
           "power-off|loop-delete) ;;\n"
+          "dump) cat " M10_BASE "/tools/udisks-dump ;;\n"
           "loop-setup) case \"$4\" in *empty*) echo \"Mapped file $4 as /dev/loop8.\";; *) echo \"Mapped file $4 as /dev/loop7.\";; esac ;;\n"
           "esac\n", f);
     fclose(f);
@@ -6782,6 +6783,77 @@ static int run_selftest_m10(void) {
         ST_CHECK(st_wait_cond(c_dev_idle, 5000));
         ST_CHECK(st_log_has("loop-delete -b /dev/loop3") && st_log_has("eject /dev/sr0") && !st_log_has("power-off -b /dev/sr0"));
         unsetenv("FE_EJECT");
+    }
+    // disk health: a partition's / an encrypted volume's disk (sysfs), its temperature (hwmon), SMART from udisks;
+    // a dot only when something's wrong, the details on hover and in the details panel
+    {
+        const char *sb = M10_BASE "/sysblock";
+        char pth[PATH_MAX];
+        mkdir(sb, 0755);
+        snprintf(pth, sizeof pth, "%s/sdq", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/sdq/sdq1", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/sdq/sdq1/partition", sb); st_write_text(pth, "1\n");
+        snprintf(pth, sizeof pth, "%s/sdq1", sb); ST_CHECK(symlink("sdq/sdq1", pth) == 0);
+        snprintf(pth, sizeof pth, "%s/sdq/device", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/sdq/device/model", sb); st_write_text(pth, "Spinning Disk   \n");
+        snprintf(pth, sizeof pth, "%s/sdq/device/hwmon", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/sdq/device/hwmon/hwmon5", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/sdq/device/hwmon/hwmon5/temp1_input", sb); st_write_text(pth, "41000\n"); // SATA (drivetemp)
+        snprintf(pth, sizeof pth, "%s/dm-0", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/dm-0/slaves", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/dm-0/slaves/nvme9n1p2", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/nvme9n1", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/nvme9n1/nvme9n1p2", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/nvme9n1/nvme9n1p2/partition", sb); st_write_text(pth, "2\n");
+        snprintf(pth, sizeof pth, "%s/nvme9n1p2", sb); ST_CHECK(symlink("nvme9n1/nvme9n1p2", pth) == 0);
+        snprintf(pth, sizeof pth, "%s/nvme9n1/device", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/nvme9n1/device/hwmon3", sb); mkdir(pth, 0755);
+        snprintf(pth, sizeof pth, "%s/nvme9n1/device/hwmon3/temp1_input", sb); st_write_text(pth, "74500\n"); // NVMe: hot
+        st_write_text(M10_BASE "/tools/udisks-dump",
+                      "/org/freedesktop/UDisks2/block_devices/sdq:\n  org.freedesktop.UDisks2.Block:\n    Drive:   '/org/freedesktop/UDisks2/drives/Spin_1'\n"
+                      "/org/freedesktop/UDisks2/block_devices/nvme9n1:\n  org.freedesktop.UDisks2.Block:\n    Drive:   '/org/freedesktop/UDisks2/drives/Fast_2'\n"
+                      "/org/freedesktop/UDisks2/drives/Spin_1:\n  org.freedesktop.UDisks2.Drive:\n    Model:   Spinner 4000\n"
+                      "  org.freedesktop.UDisks2.Drive.Ata:\n    SmartFailing:   true\n    SmartPowerOnSeconds:   36000\n    SmartTemperature:   0.000000\n"
+                      "/org/freedesktop/UDisks2/drives/Fast_2:\n  org.freedesktop.UDisks2.Drive:\n    Model:   Fast NVMe\n"
+                      "  org.freedesktop.UDisks2.NVMe.Controller:\n    SmartCriticalWarning:   \n    SmartPowerOnHours:   1234\n    SmartTemperature:   330\n");
+        setenv("FE_SYS_CLASS_BLOCK", sb, 1);
+        char dk[32] = "";
+        ST_CHECK(disk_of("sdq1", dk, sizeof dk) && !strcmp(dk, "sdq") && disk_of("dm-0", dk, sizeof dk) && !strcmp(dk, "nvme9n1") &&
+                 !disk_of("loop3", dk, sizeof dk) && !disk_of("zram0", dk, sizeof dk));
+        ST_CHECK(hwmon_temp("sdq") == 410 && hwmon_temp("nvme9n1") == 745 && hwmon_temp("nope") == DH_NO_TEMP);
+        DiskHealthList *L = xcalloc(1, sizeof *L);
+        snprintf(L->map[0].dev, sizeof L->map[0].dev, "sdq1");
+        snprintf(L->map[1].dev, sizeof L->map[1].dev, "dm-0");
+        L->nmap = 2;
+        g_dh.n = 0;
+        disk_health_job(L); // (posts the result to the main thread)
+        for (int k = 0; k < 200 && g_dh.n < 2; k++) { st_frames(1); SDL_Delay(5); }
+        unsetenv("FE_SYS_CLASS_BLOCK");
+        ST_CHECK(g_dh.n == 2 && g_dh.nmap == 2 && g_dh.map[0].di == 0 && g_dh.map[1].di == 1);
+        char what[128];
+        const DiskHealth *s0 = &g_dh.d[0], *s1 = &g_dh.d[1];
+        ST_CHECK(!strcmp(s0->disk, "sdq") && !strcmp(s0->model, "Spinner 4000") && s0->temp == 410 && s0->failing && s0->hours == 10 &&
+                 disk_health_level(s0, what, sizeof what) == 2 && strstr(what, "Failing"));
+        ST_CHECK(!strcmp(s1->disk, "nvme9n1") && s1->temp == 745 && !s1->failing && s1->hours == 1234 && s1->smart &&
+                 disk_health_level(s1, what, sizeof what) == 1 && !strcmp(what, "Running hot")); // (74.5 C: over 70 for NVMe)
+        char line[256];
+        disk_health_line(s1, line, sizeof line);
+        ST_CHECK(strstr(line, "Fast NVMe") && strstr(line, "75 \xC2\xB0" "C") && strstr(line, "1,234 h on"));
+        // a sidebar drive on that disk: found by its mount, drawn with the dot
+        int nd = A.devs.n;
+        if (nd < MAX_BLOCKDEVS) {
+            mkdir(M10_BASE "/media/Q", 0755);
+            A.devs.d[nd] = (BlockDev){.dev = "/dev/sdq1", .disk = "sdq", .fstype = "ext4", .label = "Q", .size = 1000, .removable = true};
+            snprintf(A.devs.d[nd].mount, sizeof A.devs.d[nd].mount, "%s", M10_BASE "/media/Q");
+            A.devs.n++;
+            init_places();
+            ST_CHECK(disk_health_for_mount(M10_BASE "/media/Q") == s0 && !disk_health_for_mount(M10_BASE "/nowhere"));
+            st_frames(2);
+            st_shot("disk-health");
+            A.devs.n = nd;
+            init_places();
+        }
+        g_dh.n = g_dh.nmap = 0;
     }
     // errors are shown
     dev_start(DEV_MOUNT, "/dev/fail", NULL, true);
