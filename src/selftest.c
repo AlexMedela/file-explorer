@@ -5685,8 +5685,10 @@ static int run_selftest_m9(void) {
     }
 
     { // own title bar: buttons at the top right, drag areas, resize edges, the strip above the preview
-        ST_CHECK(!A.csd); // headless + automatic: left to the system
-        A.title_bar = TITLEBAR_APP;
+        ST_CHECK(!A.csd); // headless: the system bar unless opted in
+        ST_CHECK(opt_choice_count(OPT_TITLE_BAR) == 2 && !strcmp(opt_choice_label(OPT_TITLE_BAR, 0), "System")
+                 && !strcmp(opt_choice_label(OPT_TITLE_BAR, 1), "Default"));
+        A.title_bar = TITLEBAR_DEFAULT;
         titlebar_apply();
         st_frames(1);
         ST_CHECK(A.csd && A.r_wctl.w > 0 && fabsf(A.r_wctl.x + A.r_wctl.w - (f32)A.W) < 1);
@@ -5789,7 +5791,16 @@ static int run_selftest_m9(void) {
         st_frames(1);
         st_shot("m9-titlebar");
         if (!pv) preview_toggle();
-        A.title_bar = TITLEBAR_AUTO;
+        A.title_bar = TITLEBAR_SYSTEM;
+        titlebar_apply();
+        ST_CHECK(!A.csd && A.r_wctl.w == 0 && A.r_wstrip.w == 0);
+        // FE_TITLE_BAR forces one run: "default" (or the legacy "app") for ours, "system" for the desktop's
+        A.title_bar = TITLEBAR_SYSTEM;
+        setenv("FE_TITLE_BAR", "default", 1); titlebar_apply(); ST_CHECK(A.csd);
+        setenv("FE_TITLE_BAR", "app", 1); titlebar_apply(); ST_CHECK(A.csd); // (the older value still works)
+        setenv("FE_TITLE_BAR", "system", 1); titlebar_apply(); ST_CHECK(!A.csd && A.r_wctl.w == 0);
+        unsetenv("FE_TITLE_BAR");
+        A.title_bar = TITLEBAR_SYSTEM;
         titlebar_apply();
         ST_CHECK(!A.csd && A.r_wctl.w == 0 && A.r_wstrip.w == 0);
     }
@@ -8202,18 +8213,19 @@ static int run_selftest_m10(void) {
         // for real: another process changes title_bar while this one changes dim_inactive; both survive
         char sp[PATH_MAX], text[65536];
         settings_file(sp, sizeof sp, false);
+        A.title_bar = TITLEBAR_DEFAULT; // (what the file has to say: the other process changes it below)
         settings_save();
         settings_snapshot();
         st_read_text(sp, text, sizeof text);
-        char *tb = strstr(text, "title_bar=auto");
+        char *tb = strstr(text, "title_bar=default");
         ST_CHECK(tb != NULL);
-        if (tb) memcpy(tb, "title_bar=app ", 14); // "another process" ("app " + the line's own newline)
+        if (tb) memcpy(tb, "title_bar=system ", 17); // "another process" ("system " + the line's own newline)
         st_write_text(sp, text);
         bool dim = A.dim_inactive;
         A.dim_inactive = !dim;
         settings_save();
         st_read_text(sp, text, sizeof text);
-        ST_CHECK(strstr(text, "title_bar=app") && strstr(text, A.dim_inactive ? "dim_inactive=1" : "dim_inactive=0"));
+        ST_CHECK(strstr(text, "title_bar=system") && strstr(text, A.dim_inactive ? "dim_inactive=1" : "dim_inactive=0"));
         ST_CHECK(strstr(text, "settings_version=") != NULL);
         A.dim_inactive = dim;
         // a file from before settings_version: backed up on load (settings_migrate runs on the original)
@@ -8228,7 +8240,7 @@ static int run_selftest_m10(void) {
         settings_save(); // (writes the version again)
         st_read_text(sp, text, sizeof text);
         ST_CHECK(strstr(text, "\nsettings_version=") != NULL);
-        A.title_bar = TITLEBAR_AUTO;
+        A.title_bar = TITLEBAR_DEFAULT;
         settings_save();
         // an update replaced the binary while running: the old process notices
         char l1[] = "/usr/bin/file-explorer (deleted)", l2[] = "/usr/bin/file-explorer";

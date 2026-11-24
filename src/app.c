@@ -168,7 +168,7 @@ typedef struct {
 
 // --- views -------------------------------------------------------------------
 enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
-enum { TITLEBAR_AUTO, TITLEBAR_SYSTEM, TITLEBAR_APP }; // A.title_bar
+enum { TITLEBAR_SYSTEM, TITLEBAR_DEFAULT }; // A.title_bar
 enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
 enum { EXEC_ASK, EXEC_RUN, EXEC_TERMINAL, EXEC_OPEN }; // A.exec_open: opening an executable file asks, runs it (here / in a terminal), or opens it as a document
 enum { TABS_CARDS, TABS_PILLS }; // A.tab_style: classic tabs above the navigation bar, pills below it
@@ -1351,11 +1351,9 @@ static void window_close_requested(void);
 static bool titlebar_wanted(void) {
     int m = A.title_bar;
     const char *e = getenv("FE_TITLE_BAR"); // (tests, screenshots)
-    if (e && !strcmp(e, "app")) m = TITLEBAR_APP;
-    else if (e && !strcmp(e, "system")) m = TITLEBAR_SYSTEM;
-    if (m != TITLEBAR_AUTO) return m == TITLEBAR_APP;
-    const char *drv = SDL_GetCurrentVideoDriver();
-    return !drv || strcmp(drv, "offscreen"); // (not in self-tests and screenshots: FE_TITLE_BAR=app shows it there)
+    if (e && !strcmp(e, "system")) m = TITLEBAR_SYSTEM;
+    else if (e && (!strcmp(e, "app") || !strcmp(e, "default"))) m = TITLEBAR_DEFAULT;
+    return m == TITLEBAR_DEFAULT;
 }
 
 // 0 minimise, 1 maximise / restore, 2 close
@@ -14011,6 +14009,8 @@ int main(int argc, char **argv) {
     g_wake_event = SDL_RegisterEvents(1);
     pool_init();
 
+    const char *vd = getenv("SDL_VIDEODRIVER"); // an explicitly offscreen one is headless here too (as automatic treated it)
+    if ((any_selftest || A.screenshot) && (!vd || !strcmp(vd, "offscreen")) && !getenv("FE_TITLE_BAR")) A.title_bar = TITLEBAR_SYSTEM;
     A.csd = titlebar_wanted(); // (borderless from the start: no system title bar flashing up first)
     // rounded corners need an alpha channel, which only a new window can get (turning them on takes a restart)
     A.win_alpha = A.csd && A.round_corners && !headless && !picker_active() && !getenv("FE_SQUARE_CORNERS");

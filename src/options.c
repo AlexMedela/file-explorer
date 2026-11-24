@@ -39,7 +39,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_LOAD_TIMES, "Load times", "How long the folder took to list, in the status bar"},
     {OC_APPEARANCE, OK_BOOL, OPT_SMOOTH, "Smooth scrolling", "Ease scrolling, go further on quick wheel turns, let touchpad swipes glide on"},
     {OC_APPEARANCE, OK_CHOICE, OPT_TAB_STYLE, "Tab style", "Classic: the open tab joins the folder below it, above the navigation bar; Pills: rounded tabs centred in a box below it"},
-    {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: Explorer's own on every desktop (Automatic), or the desktop's title bar (System)"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: the desktop's own title bar (System), or Explorer's own on every desktop (Default)"},
     {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_BUTTONS, "Window buttons", "Minimise, maximise and close at the top right of Explorer's own title bar; without them, the desktop's keys close it"},
     {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
     {OC_APPEARANCE, OK_CHOICE, OPT_BRAND_NAME, "Name above the sidebar", "Explorer, this computer's name, your own text, or none (the sidebar then starts at the top)"},
@@ -123,7 +123,7 @@ static const char *g_sort_labels[SORT_COUNT] = {"Name", "Date modified", "Type",
                                                 "Permissions", "Owner", "Date accessed", "Group", "Link target"};
 static const char *g_group_labels[GROUP_COUNT] = {"None", "Date", "Type", "Size"};
 static const char *g_spacing_labels[3] = {"Compact", "Normal", "Comfortable"};
-static const char *g_title_bar_labels[] = {"Automatic", "System", "Explorer's own"}; // TITLEBAR_*
+static const char *g_title_bar_labels[] = {"System", "Default"}; // TITLEBAR_*
 static const char *g_renderers[] = {"auto", "vulkan", "opengl", "software"};
 static const char *g_renderer_labels[] = {"Automatic", "Vulkan", "OpenGL", "Software"};
 static bool g_renderer_auto_run; // this run started on Automatic (set in main): its label names what it picked
