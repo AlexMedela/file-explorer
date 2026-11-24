@@ -1283,7 +1283,7 @@ static Node *node_div_at(Node *n, f32 x, f32 y) {
     return r ? r : node_div_at(n->b, x, y);
 }
 
-static void trash_dirs(char *files, char *info, size_t cap);
+static void trash_dirs(char *files, size_t fcap, char *info, size_t icap);
 static int trash_drive_of(const char *path);
 static void trash_listing_extra(Pane *p, Listing *L);
 static void trash_roots_refresh(void);
@@ -2107,7 +2107,7 @@ static void layout_crumbs(Pane *p) {
     // Inside the trash: one "Trash" crumb instead of home > me > .local > share > Trash > files
     ly->crumbs_trash = false;
     char tf[PATH_MAX + 8], ti[PATH_MAX];
-    trash_dirs(tf, ti, sizeof tf);
+    trash_dirs(tf, sizeof tf, ti, sizeof ti);
     int dt = trash_drive_of(path);
     if (dt >= 0) snprintf(tf, sizeof tf, "%s/files", g_troots[dt].dir); // (a folder in another drive's trash)
     size_t tl = strlen(tf);
@@ -2263,7 +2263,7 @@ static void qa_defaults(void) {
     for (int i = 0; i < A.npins; i++)
         if (!qa_find(A.pins[i], NULL, NULL)) qa_insert(g, -1, "", A.pins[i]);
     char tf[PATH_MAX], ti[PATH_MAX];
-    trash_dirs(tf, ti, sizeof tf);
+    trash_dirs(tf, sizeof tf, ti, sizeof ti);
     qa_insert(g, -1, "Trash", tf);
 }
 
@@ -3076,7 +3076,7 @@ static void init_places(void) {
     A.nplaces = 0;
     const char *home = getenv("HOME") ? getenv("HOME") : "/";
     char tf[PATH_MAX], ti[PATH_MAX];
-    trash_dirs(tf, ti, sizeof tf);
+    trash_dirs(tf, sizeof tf, ti, sizeof ti);
     mkdir_p(tf, 0700);
     mkdir_p(ti, 0700);
     for (int g = 0; g < A.nqa; g++) {
@@ -3381,7 +3381,7 @@ static void pane_load_ex(Pane *p, const char *path_in, bool scan) {
     snprintf(path, sizeof path, "%s", path_in);
     char ti[PATH_MAX];
     int dt = trash_drive_of(path);
-    if (dt >= 0 && !strcmp(path + strlen(g_troots[dt].dir), "/files")) trash_dirs(path, ti, sizeof path); // a drive's trash: the one Trash
+    if (dt >= 0 && !strcmp(path + strlen(g_troots[dt].dir), "/files")) trash_dirs(path, sizeof path, ti, sizeof ti); // a drive's trash: the one Trash
     pane_drop_prev(p);
     if (p->L_next) {
         atomic_store(&p->L_next->cancel, 1);
@@ -5268,7 +5268,7 @@ static void trash_size_refresh(void) {
     g_trash_gen++;
     if (A.trash_job) { A.trash_again = true; return; }
     char tf[PATH_MAX], ti[PATH_MAX], df[MAX_TRASH_ROOTS][PATH_MAX + 8];
-    trash_dirs(tf, ti, sizeof tf);
+    trash_dirs(tf, sizeof tf, ti, sizeof ti);
     char *p[1 + MAX_TRASH_ROOTS] = {tf};
     for (int i = 0; i < g_ntroots; i++) { // other drives' trashes count too
         snprintf(df[i], sizeof df[i], "%s/files", g_troots[i].dir);
@@ -7952,23 +7952,24 @@ static void menu_open_types(Pane *p, f32 x, f32 y) {
 
 // --- trash view --------------------------------------------------------------
 
-static void trash_dirs(char *files, char *info, size_t cap) {
+// Each buffer has its own size: callers' files and info buffers differ (passing one size for both overflowed).
+static void trash_dirs(char *files, size_t fcap, char *info, size_t icap) {
     char dh[PATH_MAX];
     data_home(dh, sizeof dh);
-    snprintf(files, cap, "%s/Trash/files", dh);
-    snprintf(info, cap, "%s/Trash/info", dh);
+    snprintf(files, fcap, "%s/Trash/files", dh);
+    snprintf(info, icap, "%s/Trash/info", dh);
 }
 
 // The trash's files folder itself ($XDG_DATA_HOME/Trash/files), shown as "Trash".
 static bool is_trash_dir(const char *path) {
     char f[PATH_MAX], i[PATH_MAX];
-    trash_dirs(f, i, sizeof f);
+    trash_dirs(f, sizeof f, i, sizeof i);
     return !strcmp(path, f);
 }
 
 static bool pane_is_trash(const Pane *p) {
     char f[PATH_MAX], i[PATH_MAX];
-    trash_dirs(f, i, sizeof f);
+    trash_dirs(f, sizeof f, i, sizeof i);
     return !strcmp(p->path, f);
 }
 
@@ -7998,7 +7999,7 @@ static void trash_listing_extra(Pane *p, Listing *L) {
 static bool trash_item_paths(const char *name, char *file, char *info, size_t cap, char *top, size_t tcap) {
     if (name[0] != '/') {
         char files[PATH_MAX], idir[PATH_MAX];
-        trash_dirs(files, idir, sizeof files);
+        trash_dirs(files, sizeof files, idir, sizeof idir);
         if (strchr(name, '/')) return false; // (inside a trashed folder)
         snprintf(file, cap, "%s/%s", files, name);
         snprintf(info, cap, "%s/%s.trashinfo", idir, name);
@@ -8205,7 +8206,7 @@ static void trash_delete(Pane *p, bool all) {
     if (all && !(pane_is_trash(p) && L && atomic_load(&L->state) == LST_COMPLETE)) { // not listed here: read it
         TrashList *t = xcalloc(1, sizeof(TrashList));
         char ti[PATH_MAX];
-        trash_dirs(t->dirs[0], ti, sizeof t->dirs[0]);
+        trash_dirs(t->dirs[0], sizeof t->dirs[0], ti, sizeof ti);
         for (int i = 0; i < g_ntroots; i++) snprintf(t->dirs[1 + i], sizeof t->dirs[1 + i], "%s/files", g_troots[i].dir);
         t->ndirs = 1 + g_ntroots;
         pool_submit(trash_list_job, t);
@@ -9604,7 +9605,7 @@ static void watch_sync(void) {
     { // the trash too, while browsing elsewhere: its bin in the sidebar shows whether anything is in it
         static u64 retry; // no files folder yet (nothing trashed so far): try again every few seconds, not every loop
         char tf[PATH_MAX], ti[PATH_MAX];
-        trash_dirs(tf, ti, sizeof tf);
+        trash_dirs(tf, sizeof tf, ti, sizeof ti);
         u64 now = now_ns();
         if (now >= retry && !watch_use(tf)) retry = now + 3000000000ull;
         for (int i = 0; i < g_ntroots; i++) { // other drives' trashes
@@ -12905,7 +12906,7 @@ static void pin_toggle(const char *path) {
         if (!A.nqa) qa_add_group("Quick access");
         int at = A.qa[0].n; // before Trash when it's last
         char tf[PATH_MAX], ti[PATH_MAX];
-        trash_dirs(tf, ti, sizeof tf);
+        trash_dirs(tf, sizeof tf, ti, sizeof ti);
         if (at && !strcmp(A.qa[0].items[at - 1].path, tf)) at--;
         qa_insert(0, at, "", path);
         A.qa[0].collapsed = false;
