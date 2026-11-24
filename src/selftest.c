@@ -9476,7 +9476,7 @@ static int run_selftest_du(void) {
         static Pane tp;
         char ti[PATH_MAX];
         memset(&tp, 0, sizeof tp);
-        trash_dirs(tp.path, ti, sizeof tp.path);
+        trash_dirs(tp.path, sizeof tp.path, ti, sizeof ti);
         tp.du = true;
         ST_CHECK(!pane_du_on(&tp));
         snprintf(tp.path, sizeof tp.path, "%s", DU_BASE "/a.zip::/x");
