@@ -1040,6 +1040,14 @@ static void draw_sidebar(void) {
                     if (A.selftest) g_sidebar_meta_drawn[1] = mc;
                 }
                 lmax -= fw + S(8); // same room either way: the name doesn't jump when the button appears
+                const DiskHealth *dh = disk_health_for_mount(pl->path);
+                char dw[128];
+                int lv = dh ? disk_health_level(dh, dw, sizeof dw) : 0;
+                if (lv) { // its disk is hot, warns or fails: a dot before the free space (nothing while it's fine)
+                    f32 dr = roundf(S(3)), dx = r.x + r.w - S(8) - fw - S(7) - dr, dy = text_y(fs, r.y - S(3), r.h) + fs->line_h * 0.5f;
+                    if (!show_eject) draw_rrect(dx - dr, dy - dr, dr * 2, dr * 2, dr, C(lv == 2 ? COL_DANGER : COL_WARN));
+                    lmax -= dr * 2 + S(7);
+                }
                 f32 bw = MAX(S(10), bar_end - lx), by2 = r.y + r.h - roundf(S(7));
                 f32 bt = roundf(S(3));
                 draw_rrect(lx, by2, bw, bt, S(1.5f), C(COL_TRACK));
@@ -1056,6 +1064,13 @@ static void draw_sidebar(void) {
             if (show_eject && !has_bar) lmax -= roundf(S(22)) + S(4); // button next to a plain name
             draw_text_fit(f, lx, text_y(f, r.y - (has_bar ? S(3) : 0), r.h), lmax, pl->label,
                           (int)strlen(pl->label), C(active ? COL_TEXT : pl->kind == PK_UNMOUNTED || phone_off ? COL_TEXT_DIM : COL_TEXT2), 0);
+            const DiskHealth *th = pl->kind == PK_DRIVE ? disk_health_for_mount(pl->path) : NULL;
+            if (th) { // hover: its disk's model, temperature, health, hours (the name first: it may be cut off)
+                char line[256], tip[400];
+                disk_health_line(th, line, sizeof line);
+                int tl = snprintf(tip, sizeof tip, "%s\n%s", pl->label, line); // (a fact per line)
+                fit_tip_offer_box(r.x, r.y, r.w, r.h, tip, MIN(tl, (int)sizeof tip - 1));
+            }
         }
         g_alpha = 1.f;
     }
@@ -4025,6 +4040,25 @@ static void draw_preview(void) {
     }
     tilde_path(par, tp, sizeof tp);
     y = pv_row(fs, x, y, w, "Location", tp);
+    { // a drive's top folder: its disk (model, temperature, health, hours powered on)
+        char dp[PATH_MAX];
+        if (e) path_join(dp, sizeof dp, p->path, e->name);
+        else snprintf(dp, sizeof dp, "%s", p->path);
+        const DiskHealth *dh = !e || (e->flags & ENT_DIR) ? disk_health_for_mount(dp) : NULL;
+        if (dh) {
+            char what[128], b[64];
+            disk_health_level(dh, what, sizeof what);
+            y = pv_row(fs, x, y, w, "Disk", dh->model[0] ? dh->model : dh->disk);
+            if (dh->temp != DH_NO_TEMP) { snprintf(b, sizeof b, "%d.%d \xC2\xB0" "C", dh->temp / 10, abs(dh->temp % 10)); y = pv_row(fs, x, y, w, "Temperature", b); }
+            if (what[0]) y = pv_row(fs, x, y, w, "Health", what);
+            if (dh->hours >= 0) {
+                char c[32];
+                fmt_count(c, (u64)dh->hours);
+                snprintf(b, sizeof b, "%s hours", c);
+                y = pv_row(fs, x, y, w, "Powered on", b);
+            }
+        }
+    }
     if (pv && pv->note[0]) {
         y += roundf(S(8));
         draw_text_fit(fs, x, y, w, pv->note, (int)strlen(pv->note), C(COL_TEXT_FAINT), 0);

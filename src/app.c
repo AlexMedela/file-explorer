@@ -2377,6 +2377,76 @@ static void devices_refresh(void) {
     pool_submit(dev_scan_job, xcalloc(1, sizeof(DevList)));
 }
 
+// Disk health (temperature, SMART): the disks under the mounted drives, read on a worker about once a minute while
+// the sidebar's Devices section is open (not in self-tests / screenshots: they set g_dh themselves).
+static DiskHealthList g_dh;
+static bool g_dh_busy;
+static u64 g_dh_t;
+
+static void disk_health_done(void *arg) {
+    g_dh = *(DiskHealthList *)arg;
+    free(arg);
+    g_dh_busy = false;
+    A.redraw = true;
+}
+
+static void disk_health_job(void *arg) {
+    DiskHealthList *L = arg;
+    for (int m = 0; m < L->nmap; m++) { // the listed devices' disks (several partitions share one)
+        char disk[32];
+        L->map[m].di = -1;
+        if (!disk_of(L->map[m].dev, disk, sizeof disk)) continue;
+        int k = 0;
+        while (k < L->n && strcmp(L->d[k].disk, disk)) k++;
+        if (k == L->n && L->n < MAX_DISKS) snprintf(L->d[L->n++].disk, sizeof L->d[0].disk, "%s", disk);
+        if (k < L->n) L->map[m].di = k;
+    }
+    disk_health_scan(L);
+    main_post(disk_health_done, L);
+}
+
+static int disk_health_wait_ms(void) {
+    if (A.selftest || A.screenshot || !A.devs_enabled || A.devs_collapsed || g_dh_busy) return 0;
+    u64 due = g_dh_t + 60000000000ull, now = now_ns();
+    return now >= due ? 1 : (int)((due - now) / 1000000ull) + 1;
+}
+
+static void disk_health_tick(void) {
+    if (disk_health_wait_ms() != 1) return;
+    g_dh_t = now_ns();
+    DiskHealthList *L = xcalloc(1, sizeof *L);
+    for (int k = 0; k < A.devs.n && L->nmap < MAX_BLOCKDEVS; k++)
+        if (A.devs.d[k].mount[0]) snprintf(L->map[L->nmap++].dev, sizeof L->map[0].dev, "%s", path_basename(A.devs.d[k].dev));
+    if (!L->nmap) { free(L); return; }
+    g_dh_busy = true;
+    pool_submit(disk_health_job, L);
+}
+
+// The health of the disk a mounted folder is on (a sidebar drive, the details panel at a drive's top), NULL: unknown.
+static const DiskHealth *disk_health_for_mount(const char *mount) {
+    for (int k = 0; k < A.devs.n; k++) {
+        if (strcmp(A.devs.d[k].mount, mount)) continue;
+        const char *dev = path_basename(A.devs.d[k].dev);
+        for (int m = 0; m < g_dh.nmap; m++)
+            if (!strcmp(g_dh.map[m].dev, dev) && g_dh.map[m].di >= 0 && g_dh.map[m].di < g_dh.n) return &g_dh.d[g_dh.map[m].di];
+    }
+    return NULL;
+}
+
+// What's known of it, a line each: the model, "Temperature: 31 C", "Health: Good", "Powered on: 3,622 hours".
+static void disk_health_line(const DiskHealth *h, char *out, size_t cap) {
+    char what[128];
+    disk_health_level(h, what, sizeof what);
+    size_t o = (size_t)snprintf(out, cap, "%s", h->model[0] ? h->model : h->disk);
+    if (h->temp != DH_NO_TEMP && o < cap) o += (size_t)snprintf(out + o, cap - o, "\nTemperature: %d \xC2\xB0" "C", (h->temp + 5) / 10);
+    if (what[0] && o < cap) o += (size_t)snprintf(out + o, cap - o, "\nHealth: %s", what);
+    if (h->hours >= 0 && o < cap) {
+        char c[32];
+        fmt_count(c, (u64)h->hours);
+        snprintf(out + o, cap - o, "\nPowered on: %s hours", c);
+    }
+}
+
 // Panes showing something inside path go home first (an unmount fails while it's in use).
 static void panes_leave(const char *path) {
     size_t l = strlen(path);
@@ -13955,11 +14025,11 @@ int main(int argc, char **argv) {
         else if (loading || A.screenshot || ops_busy() || watch_pending() || A.search_due || A.pal_pending || sheet_busy())
             got = SDL_WaitEventTimeout(&e, MIN((loading || watch_pending() || A.search_due) ? 30 : ops_moving() ? 16 : 100,
                                                tip_ms > 0 ? tip_ms : INT_MAX));
-        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0 || borg_wait_ms() > 0 || tip_ms > 0) {
+        else if (addon_wait_ms() > 0 || git_wait_ms() > 0 || cloud_wait_ms() > 0 || borg_wait_ms() > 0 || tip_ms > 0 || disk_health_wait_ms() > 0) {
             // add-on / cloud status, .git polls, unused Borg mounts, a tooltip
             int t = INT_MAX;
-            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms(), borg_wait_ms(), tip_ms};
-            for (int k = 0; k < 5; k++) if (w[k] > 0) t = MIN(t, w[k]);
+            int w[] = {addon_wait_ms(), git_wait_ms(), cloud_wait_ms(), borg_wait_ms(), tip_ms, disk_health_wait_ms()};
+            for (int k = 0; k < 6; k++) if (w[k] > 0) t = MIN(t, w[k]);
             got = SDL_WaitEventTimeout(&e, t);
         }
         else got = SDL_WaitEvent(&e);
@@ -13989,6 +14059,7 @@ int main(int argc, char **argv) {
         cmp_tick();
         snap_tick();
         borg_tick();
+        disk_health_tick();
         tray_sync();
         layout();
         for (int i = 0; i < A.ntabs; i++)

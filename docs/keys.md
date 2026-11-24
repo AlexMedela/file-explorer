@@ -59,6 +59,7 @@ Every shortcut can be changed in Options → Keyboard (Ctrl+,).
 | Ctrl+P → "Layout: …" | Switch to a saved layout (panels, splits, tabs) |
 | Ctrl+Shift+A (or `@` in the palette) | **Search tabs**: every open tab in every panel + recently closed ones |
 | Sidebar → Devices | USB drives, SD cards, unmounted partitions and discs (CD / DVD / Blu-ray): click to mount and open, ⏏ to eject (udisks2; a disc's tray opens) |
+| Hover a drive in the sidebar | Its disk: model, temperature, health (SMART via udisks2), hours powered on (a line each); an amber / red dot before the free space when it runs hot, warns or is failing. The details panel (Ctrl+I) at a drive's top folder lists the same |
 | Double-click an `.iso` / `.img` (or right-click → Mount) | Opens the image read-only as a drive under Devices (named after the file); ⏏ there closes it. An ISO's menu also has Browse without mounting (like an archive) |
 | Sidebar → Devices (phones) | Phones and cameras on a USB cable (built-in iPhone / MTP / PTP connector, GVfs as a fallback): click to connect and open, ⏏ when done |
 | Sidebar → Network, `smb://` / `sftp://` in the path bar | Network locations (GVfs, sshfs, CIFS, NFS); typing a URI mounts it; ⏏ disconnects |
