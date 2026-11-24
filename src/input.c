@@ -484,8 +484,8 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
             menu_open_git(p, ly->gitchip.x, ly->gitchip.y + ly->gitchip.h + S(4));
             return;
         }
-        layout_crumbs(p);
-        for (int i = 0; i < ly->ncrumbs; i++) {
+        if (!A.path_text) layout_crumbs(p);
+        for (int i = 0; !A.path_text && i < ly->ncrumbs; i++) {
             if (in_rect(ly->crumbs[i].r, x, y)) {
                 char path[PATH_MAX];
                 int end = ly->crumbs[i].end;
