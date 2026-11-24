@@ -4613,6 +4613,13 @@ static int run_selftest_m9(void) {
             ST_CHECK(folder && direct && !memcmp(direct, folder, 16 * 16 * 4));
             opt_choice_set(OPT_ICON_THEME, saved_theme);
             g_app_icon_mode = saved_mode;
+            { // a late folder arrival (the desktop's icon, a reload) marks the launcher override stale
+                g_app_icon_theme_dirty = false;
+                g_app_icon_mode = APP_ICON_FILE_ICON;
+                icons_replace(icon_find("folder"), 16, after);
+                ST_CHECK(g_app_icon_theme_dirty);
+                g_app_icon_theme_dirty = false; // app_icon_sync() consumes it outside tests
+            }
             free(before);
             free(folder);
             free(after);

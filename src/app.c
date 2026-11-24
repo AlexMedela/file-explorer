@@ -13262,7 +13262,10 @@ static void app_icon_sync(void) {
     static bool first = true;
     if (A.selftest || A.screenshot) return;
     bool theme_changed = g_app_icon_mode == APP_ICON_FILE_ICON && g_icon_theme != applied_icon_theme;
-    bool path_changed = strcmp(g_app_icon_path, applied) != 0 || first || applied_mode != g_app_icon_mode || theme_changed;
+    bool launcher_stale = g_app_icon_theme_dirty; // the folder artwork arrived/changed after the override was written
+    g_app_icon_theme_dirty = false;
+    bool path_changed = strcmp(g_app_icon_path, applied) != 0 || first || applied_mode != g_app_icon_mode
+                        || theme_changed || launcher_stale;
     if (!path_changed && COL_ACCENT == done) return;
     if (!path_changed) {
         if (COL_ACCENT != seen) { seen = COL_ACCENT; since = now_ns(); return; }
