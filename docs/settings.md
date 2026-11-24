@@ -34,7 +34,10 @@ list's own selection colours and hover tints are unchanged.
 the folder search field respectively, independently of the header strip. `transparent_pathbar=1` (off by default)
 removes only the path field's fill, leaving a faint outline and the accent focus outline while editing; pills and the
 search field stay filled. `path_bar_text=1` (Options -> Appearance -> Path as text, off by default) shows the path as
-plain text instead of clickable parts (its start cut off when it doesn't fit); a click anywhere on it edits it. These keys were added after `settings_version` and default to the theme colour on older
+plain text instead of clickable parts (its start cut off when it doesn't fit); a click anywhere on it edits it.
+`ribbon=1` (Options -> Appearance -> Ribbon, off by default) adds a row of common file actions above the panels (cut,
+copy, paste, rename, delete, new folder / file, open, terminal, properties, select all, hidden files, tree view,
+details; Extract here / Mount when they apply). They act on the active panel; what doesn't fit is in its "..." menu. These keys were added after `settings_version` and default to the theme colour on older
 config files: no migration runs, so existing appearances are unchanged.
 `tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a
 box on the tab strip, instead of the open tab as a card joining the folder below it.

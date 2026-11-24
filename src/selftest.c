@@ -4007,6 +4007,43 @@ static int run_selftest_m9(void) {
         st_rmrf(M9_BASE "/cols");
     }
 
+    // --- the ribbon (off by default): above the panels, buttons for the active panel, the rest in "..." ---
+    {
+        ST_CHECK(!A.ribbon && A.r_ribbon.h == 0);
+        A.ribbon = true;
+        st_frames(2);
+        ST_CHECK(A.r_ribbon.h == roundf(S(44)) && A.r_ribbon.y == 0 && p->ly.toolbar.y >= A.r_ribbon.h && A.r_content.y == A.r_ribbon.h);
+        st_shot("ribbon");
+        int ci = -1, hi = -1;
+        for (int i = 0; i < RIBBON_N; i++) {
+            if (g_ribbon[i].act == ACT_COPY) ci = i;
+            if (g_ribbon[i].act == ACT_HIDDEN) hi = i;
+        }
+        // a button is the ribbon's; its empty end moves the window (like a title bar)
+        Rect cb = g_rb.r[ci];
+        ST_CHECK(ci >= 0 && cb.w > 0 && ribbon_button_at(cb.x + 4, cb.y + 4) && !ribbon_button_at(A.r_ribbon.x + A.r_ribbon.w - S(60), A.r_ribbon.y + 2));
+        // what doesn't fit: the "..." menu (a narrow window), its toggles checked like the buttons
+        int w0 = A.W;
+        A.W = (int)roundf(S(700));
+        st_frames(1);
+        ST_CHECK(g_rb.more.w > 0 && hi >= 0 && g_rb.shown[hi] && g_rb.r[hi].w == 0);
+        bool h0 = A.show_hidden;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_rb.more.x + 4, g_rb.more.y + 4, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, g_rb.more.x + 4, g_rb.more.y + 4, SDL_BUTTON_LEFT, 1, 0);
+        int mi = -1;
+        for (int i = 0; A.menu.open && i < A.menu.n; i++)
+            if (A.menu.items[i].act == ACT_HIDDEN) mi = i;
+        ST_CHECK(A.menu.open && mi >= 0);
+        st_shot("ribbon-more");
+        if (mi >= 0) menu_activate(mi);
+        ST_CHECK(A.show_hidden == !h0 && !A.menu.open);
+        do_action(p, ACT_HIDDEN);
+        A.W = w0;
+        A.ribbon = false;
+        st_frames(2);
+        ST_CHECK(A.r_ribbon.h == 0 && A.r_content.y == 0);
+    }
+
     // --- the toolbar's sort button: the same keys as the folder menu's Sort by, the direction, Folders first ---
     st_frames(1);
     Rect sb = p->ly.sortbtn;

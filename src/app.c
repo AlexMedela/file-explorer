@@ -674,6 +674,8 @@ static struct {
     char cs_error[64];     // shown in the search bar (bad regex)
     bool cs_case, cs_word, cs_regex; // contents search options: match case (else smart case), whole word, regex
     bool folder_sizes;
+    bool ribbon;     // the ribbon: common file actions in a row above the panels (ribbon.c)
+    Rect r_ribbon;
     bool path_text;  // the path bar shows the path as plain text (no breadcrumbs); a click edits it
     bool git_status; // git badges in the file list + branch in the status bar
     int du_style;    // disk usage view: 0 treemap, 1 sunburst
@@ -1268,7 +1270,7 @@ static const char *picker_title(void);
 static void layout(void) {
     f32 W = (f32)A.W, H = (f32)A.H;
     // the sidebar keeps >= 520 px for the panels when the window is narrow
-    f32 tb = 0, st = picker_active() ? picker_bar_h() : roundf(S(28)), sb = roundf(MIN(S(CLAMP(A.side_w, 150.f, 480.f)), MAX(S(150), W - S(520))));
+    f32 tb = A.ribbon && !picker_active() ? roundf(S(44)) : 0, st = picker_active() ? picker_bar_h() : roundf(S(28)), sb = roundf(MIN(S(CLAMP(A.side_w, 150.f, 480.f)), MAX(S(150), W - S(520))));
     f32 bh = A.brand_name == BRAND_HIDDEN ? 0 : roundf(S(44)); // logo centred on the tab strip
     A.r_brand = (Rect){0, 0, sb, bh};
     A.r_sidebar = (Rect){0, bh, sb, H - st - bh};
@@ -1290,12 +1292,14 @@ static void layout(void) {
     if (A.csd && A.window_buttons) {
         f32 bw = roundf(S(46)), bh2 = roundf(S(38));
         A.r_wctl = (Rect){W - 3 * bw, 0, 3 * bw, bh2};
-        if (A.preview_on) {
+        if (A.preview_on && tb < bh2) { // (the ribbon is above it: the buttons sit at the ribbon's end)
             A.r_wstrip = (Rect){A.r_preview.x, 0, A.r_preview.w, bh2};
             A.r_preview.y += bh2;
             A.r_preview.h -= bh2;
         }
     }
+    // the ribbon: across the file area (and the details panel) above the panels, ending before the window buttons
+    A.r_ribbon = tb ? (Rect){sb, 0, (A.r_wctl.w > 0 ? A.r_wctl.x : W) - sb, tb} : (Rect){0};
     A.side_row_h = roundf(S(30));
     A.side_top = roundf(S(8));
     places_layout();
@@ -1949,9 +1953,12 @@ static void shadow_draw(void) {
 
 // The parts of the title bar that move the window: the logo, the strip above the preview, and the empty part of
 // each tab band outside its tabs and buttons (the band follows the tab position setting).
+static bool ribbon_button_at(f32 x, f32 y); // ribbon.c
+
 static bool titlebar_drag_at(f32 x, f32 y) {
     if (!A.csd || in_rect(A.r_wctl, x, y)) return false;
     if (in_rect(A.r_brand, x, y) || in_rect(A.r_wstrip, x, y)) return true;
+    if (in_rect(A.r_ribbon, x, y)) return !ribbon_button_at(x, y); // (its empty space moves the window)
     for (int i = 0; i < A.npanels; i++) {
         Panel *pn = A.panels[i];
         if (!in_rect(pn->bar, x, y)) continue;
@@ -12883,6 +12890,7 @@ static bool g_caret_anim; // set by text-field drawing when caret blink/slide ne
 #include "input.c"
 
 #include "render.c"
+#include "ribbon.c"
 
 // --- start at login (XDG autostart entry) and the tray icon --------------------------------------------------
 
@@ -13094,6 +13102,7 @@ static void frame_draw(void) {
         }
     }
     draw_node_dividers(A.root);
+    draw_ribbon();
     draw_preview();
     draw_sidebar();
     draw_brand();

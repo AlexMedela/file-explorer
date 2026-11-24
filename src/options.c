@@ -7,7 +7,7 @@ enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 enum {
     OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_APP_ICON, OPT_TITLE_ICON, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
     OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
-    OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_POPUP, OPT_BRIGHT_STATUS, OPT_BRIGHT_PATHBAR, OPT_BRIGHT_SEARCHBAR, OPT_TRANSPARENT_PATHBAR, OPT_PATH_TEXT, OPT_SEPARATORS, OPT_NAV_SELECTION_OPACITY, OPT_NAV_SELECTOR_MARK, // (OPT_BRIGHT_*: SURF_* order)
+    OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_POPUP, OPT_BRIGHT_STATUS, OPT_BRIGHT_PATHBAR, OPT_BRIGHT_SEARCHBAR, OPT_TRANSPARENT_PATHBAR, OPT_PATH_TEXT, OPT_RIBBON, OPT_SEPARATORS, OPT_NAV_SELECTION_OPACITY, OPT_NAV_SELECTOR_MARK, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY, OPT_HIDE_SINGLE_TAB,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_FOLDERS_FIRST, OPT_DEF_GROUP,
     OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL_PATH,
@@ -48,6 +48,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED, "Unified surfaces", "Sidebar, header, preview and status bar take the file area's background; the lines between them stay"},
     {OC_APPEARANCE, OK_BOOL, OPT_SEPARATORS, "Separator lines", "Lines between the sidebar, header, columns, preview and status bar (an edge you can drag shows on hover)"},
     {OC_APPEARANCE, OK_BOOL, OPT_TRANSPARENT_PATHBAR, "Transparent path bar", "Remove only the path field fill; pills and search stay filled"},
+    {OC_APPEARANCE, OK_BOOL, OPT_RIBBON, "Ribbon", "A row of common file actions above the folders (cut, copy, paste, rename, new folder, terminal...), for the active panel"},
     {OC_APPEARANCE, OK_BOOL, OPT_PATH_TEXT, "Path as text", "Show the folder's path as plain text instead of clickable parts; a click puts it in edit mode (paste a path, Enter goes)"},
     {OC_APPEARANCE, OK_INT, OPT_NAV_SELECTION_OPACITY, "Navigation selection opacity", "Accent mix for sidebar, Options categories and pill tab selections, 0% to 100%"},
     {OC_APPEARANCE, OK_BOOL, OPT_NAV_SELECTOR_MARK, "Toggle navigation selector mark", "Show the small accent edge on selected sidebar and Options navigation rows"},
@@ -449,6 +450,7 @@ static bool opt_bool_get(int id) {
     case OPT_SEPARATORS: return g_separators;
     case OPT_TRANSPARENT_PATHBAR: return g_transparent_pathbar;
     case OPT_PATH_TEXT: return A.path_text;
+    case OPT_RIBBON: return A.ribbon;
     case OPT_NAV_SELECTOR_MARK: return g_nav_selector_mark;
     case OPT_ACCENT_DESKTOP: return g_accent_desktop;
     case OPT_ALT_ROWS: return A.alt_rows;
@@ -499,6 +501,7 @@ static void opt_bool_toggle(int id) {
     case OPT_SEPARATORS: g_separators = !g_separators; break;
     case OPT_TRANSPARENT_PATHBAR: g_transparent_pathbar = !g_transparent_pathbar; break;
     case OPT_PATH_TEXT: A.path_text = !A.path_text; break;
+    case OPT_RIBBON: A.ribbon = !A.ribbon; break;
     case OPT_NAV_SELECTOR_MARK: g_nav_selector_mark = !g_nav_selector_mark; break;
     case OPT_ACCENT_DESKTOP:
         g_accent_desktop = !g_accent_desktop;
