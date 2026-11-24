@@ -41,7 +41,7 @@ open with, terminal, properties, select all, views, group by, hidden files, deta
 they apply), with the right-click menu's icons and their names in a tooltip. Compress to, Open with, Views and Group by
 open the right-click menu's submenu as a dropdown. They act on that panel; greyed when they don't apply.
 `ribbon_position=below` (`above` the path bar, the list's `bottom`, `left`, `right`; also by dragging the dots at its
-start - a bar of the accent shows where it goes) and `ribbon_overflow=more` (what doesn't fit: a "..." menu; `wrap`
+end - a bar of the accent shows where it goes) and `ribbon_overflow=more` (what doesn't fit: a "..." menu; `wrap`
 onto more rows / columns; `scroll`: arrows at both ends and the wheel slide it along). These keys were added after `settings_version` and default to the theme colour on older
 config files: no migration runs, so existing appearances are unchanged.
 `tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a

@@ -62,7 +62,7 @@ static f32 ribbon_item_len(const RibbonItem *it) { return roundf(S(30)) + (it->s
 static int ribbon_lines(f32 len) {
     if (!A.ribbon) return 0;
     if (A.ribbon_overflow != RO_WRAP) return 1;
-    f32 start = roundf(S(24)), end = len - roundf(S(6)), u = start;
+    f32 start = roundf(S(6)), end = len - roundf(S(24)), u = start;
     int lines = 1, last = -1;
     for (int i = 0; i < RIBBON_N; i++) {
         const RibbonItem *it = &g_ribbon[i];
@@ -106,16 +106,16 @@ static bool ribbon_item_on(const RibbonItem *it, Pane *p) {
     return (it->act == ACT_HIDDEN && A.show_hidden) || (it->act == ACT_PREVIEW && A.preview_on);
 }
 
-// Place the icons in the pane's ribbon band, along its row (or down its column at the side), after the grip. What
-// doesn't fit: the "..." menu at the end, more lines (Wrap), or arrows that slide them along (Scroll).
+// Place the icons in the pane's ribbon band, along its row (or down its column at the side); the grip at the far end.
+// What doesn't fit: the "..." menu before the grip, more lines (Wrap), or arrows that slide them along (Scroll).
 static void ribbon_layout(Pane *p) {
     Rect r = p->ly.ribbon;
     bool v = ribbon_vertical();
     f32 bs = roundf(S(30)), gap = roundf(S(2)), sep = roundf(S(13)), lt = ribbon_line(), off = roundf((lt - bs) * 0.5f);
     f32 a0 = v ? r.y : r.x, a1 = v ? r.y + r.h : r.x + r.w, c0 = v ? r.x : r.y;
-    f32 start = a0 + roundf(S(24)), end = a1 - roundf(S(6));
+    f32 start = a0 + roundf(S(6)), end = a1 - roundf(S(24));
 #define RB_RECT(u, l, k) (v ? (Rect){c0 + off + (f32)(k) * lt, (u), bs, (l)} : (Rect){(u), c0 + off + (f32)(k) * lt, (l), bs})
-    g_rb.grip = v ? (Rect){c0 + off, a0 + roundf(S(4)), bs, roundf(S(16))} : (Rect){a0 + roundf(S(4)), c0 + off, roundf(S(16)), bs};
+    g_rb.grip = v ? (Rect){c0 + off, a1 - roundf(S(20)), bs, roundf(S(16))} : (Rect){a1 - roundf(S(20)), c0 + off, roundf(S(16)), bs};
     g_rb.more = g_rb.prev = g_rb.next = g_rb.win = (Rect){0};
     g_rb.total = 0;
     for (int i = 0; i < RIBBON_N; i++) { g_rb.shown[i] = ribbon_item_shown(&g_ribbon[i], p); g_rb.r[i] = (Rect){0}; g_rb.sep_before[i] = false; }
