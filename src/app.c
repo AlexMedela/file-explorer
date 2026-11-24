@@ -993,7 +993,7 @@ static TabBands tab_bands(f32 y, f32 scale, int count, f32 w) {
 }
 
 // Only the top row shares the window controls; a band below it keeps the full pane width.
-static f32 nav_available_width(f32 x, f32 y, f32 width) {
+static f32 header_available_width(f32 x, f32 y, f32 width) {
     return A.csd && A.r_wctl.w > 0 && y < 0.5f ? MAX(0.f, MIN(width, A.r_wctl.x - x)) : width;
 }
 
@@ -1004,7 +1004,7 @@ static void layout_pane(Pane *p, Rect area) {
     TabBands bands = tab_bands(area.y, S(1.f), panel_ntabs(tab_of(p)->panel), area.w);
     f32 nav_y = bands.navigation_y;
     f32 tb = roundf(S(46));
-    f32 width = nav_available_width(area.x, nav_y, area.w);
+    f32 width = header_available_width(area.x, nav_y, area.w);
     ly->toolbar = (Rect){area.x, nav_y, width, tb};
     ly->ribbon = (Rect){area.x, bands.ribbon_y, area.w, bands.ribbon_h}; // (h 0: off, or at the list's side / bottom)
     f32 bs = roundf(S(30)), by = nav_y + roundf((tb - bs) * 0.5f), gap = roundf(S(2));
@@ -1208,8 +1208,7 @@ static void layout_panel(Panel *pn, Rect r) {
     f32 tb = bands.tabs_h;
     pn->bar = (Rect){r.x, bands.tabs_y, r.w, tb};
     f32 bw = roundf(S(26)), by = bands.tabs_y + roundf(S(6));
-    f32 right = r.x + r.w; // a panel at the top right ends its tabs before the window buttons
-    if (A.r_wctl.w > 0 && r.y < 1 && right > A.r_wctl.x) right = MAX(r.x + S(140), A.r_wctl.x);
+    f32 right = r.x + header_available_width(r.x, r.y, r.w); // a panel at the top right ends its tabs before the window buttons
     f32 split_x = right - bw - roundf(S(6));
     pn->splitbtn = tb ? (Rect){split_x, by, bw, bw} : (Rect){0};
     int n = panel_ntabs(pn);
@@ -1325,7 +1324,7 @@ static void layout(void) {
     // tab-bar colour above it (the preview moves down to the panels' toolbars)
     A.r_wctl = A.r_wstrip = (Rect){0, 0, 0, 0};
     if (A.csd && A.window_buttons) {
-        f32 bw = roundf(S(46)), bh2 = roundf(S(38));
+        f32 bw = roundf(S(46)), bh2 = roundf(A.tab_style == TABS_PILLS ? S(46) : S(38)); // the row the controls share: the toolbar (pills) or the tab strip
         A.r_wctl = (Rect){W - 3 * bw, 0, 3 * bw, bh2};
         if (A.preview_on) {
             A.r_wstrip = (Rect){A.r_preview.x, 0, A.r_preview.w, bh2};

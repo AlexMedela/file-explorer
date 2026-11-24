@@ -2042,11 +2042,12 @@ static bool c_thumb_ready(void) {
     return false;
 }
 
-static bool c_wctl_settled(void) { return !g_wctl_sys_busy; } // the window controls' artwork ask (render.c)
 static bool c_sysi_settled(void) {
     for (int i = 0; i < g_nsysicons; i++) if (g_sysicons[i].state == SYSI_PENDING) return false;
     return true;
 }
+
+static bool c_wctl_settled(void) { return !g_wctl_sys_busy; } // the window controls' artwork ask (render.c)
 
 static int run_selftest_m7(void) {
     st_make_bmp(M7_BASE "/photo.bmp", 300, 200);
@@ -5928,14 +5929,16 @@ static int run_selftest_m9(void) {
             ST_CHECK(!wctl_sys_texture(WCTL_CLOSE, 16)); // no desktop theme: hand-drawn again
             if (wold[0]) setenv("XDG_DATA_DIRS", wold, 1); else unsetenv("XDG_DATA_DIRS");
             sysi_reset();
+            A.tab_style = TABS_PILLS; // the controls share the toolbar row (46) on pills, the tab strip (38) on cards
+            layout();
+            ST_CHECK(A.r_wctl.h == roundf(S(46)));
+            A.tab_style = TABS_CARDS;
+            layout();
+            ST_CHECK(A.r_wctl.h == roundf(S(38)));
         }
-        A.title_bar = TITLEBAR_SYSTEM;
-        titlebar_apply();
-        ST_CHECK(!A.csd && A.r_wctl.w == 0 && A.r_wstrip.w == 0);
         // FE_TITLE_BAR forces one run: "default" (or the legacy "app") for ours, "system" for the desktop's
         A.title_bar = TITLEBAR_SYSTEM;
         setenv("FE_TITLE_BAR", "default", 1); titlebar_apply(); ST_CHECK(A.csd);
-        setenv("FE_TITLE_BAR", "app", 1); titlebar_apply(); ST_CHECK(A.csd); // (the older value still works)
         setenv("FE_TITLE_BAR", "system", 1); titlebar_apply(); ST_CHECK(!A.csd && A.r_wctl.w == 0);
         unsetenv("FE_TITLE_BAR");
         A.title_bar = TITLEBAR_SYSTEM;
@@ -8351,19 +8354,18 @@ static int run_selftest_m10(void) {
         // for real: another process changes title_bar while this one changes dim_inactive; both survive
         char sp[PATH_MAX], text[65536];
         settings_file(sp, sizeof sp, false);
-        A.title_bar = TITLEBAR_DEFAULT; // (what the file has to say: the other process changes it below)
         settings_save();
         settings_snapshot();
         st_read_text(sp, text, sizeof text);
-        char *tb = strstr(text, "title_bar=default");
+        char *tb = strstr(text, "title_bar="); // (whatever value the headless default writes)
         ST_CHECK(tb != NULL);
-        if (tb) memcpy(tb, "title_bar=system ", 17); // "another process" ("system " + the line's own newline)
+        if (tb) memcpy(tb, "title_bar=app ", 14); // "another process" ("app " + the line's own newline)
         st_write_text(sp, text);
         bool dim = A.dim_inactive;
         A.dim_inactive = !dim;
         settings_save();
         st_read_text(sp, text, sizeof text);
-        ST_CHECK(strstr(text, "title_bar=system") && strstr(text, A.dim_inactive ? "dim_inactive=1" : "dim_inactive=0"));
+        ST_CHECK(strstr(text, "title_bar=app") && strstr(text, A.dim_inactive ? "dim_inactive=1" : "dim_inactive=0"));
         ST_CHECK(strstr(text, "settings_version=") != NULL);
         A.dim_inactive = dim;
         // a file from before settings_version: backed up on load (settings_migrate runs on the original)
@@ -8378,8 +8380,14 @@ static int run_selftest_m10(void) {
         settings_save(); // (writes the version again)
         st_read_text(sp, text, sizeof text);
         ST_CHECK(strstr(text, "\nsettings_version=") != NULL);
-        A.title_bar = TITLEBAR_DEFAULT;
+        // title_bar: System, and older files (auto / app) load as Default; saved back as default
+        st_write_text(sp, "title_bar=system\n"); settings_load(); ST_CHECK(A.title_bar == TITLEBAR_SYSTEM);
+        st_write_text(sp, "title_bar=auto\n"); settings_load(); ST_CHECK(A.title_bar == TITLEBAR_DEFAULT);
+        st_write_text(sp, "title_bar=app\n"); settings_load(); ST_CHECK(A.title_bar == TITLEBAR_DEFAULT);
         settings_save();
+        st_read_text(sp, text, sizeof text);
+        ST_CHECK(strstr(text, "title_bar=default"));
+        A.title_bar = TITLEBAR_SYSTEM; settings_save(); // headless runs as System (as automatic did); nothing after reads it
         // an update replaced the binary while running: the old process notices
         char l1[] = "/usr/bin/file-explorer (deleted)", l2[] = "/usr/bin/file-explorer";
         ST_CHECK(exe_link_replaced(l1) && !strcmp(l1, "/usr/bin/file-explorer") && !exe_link_replaced(l2));

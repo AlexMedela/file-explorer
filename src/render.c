@@ -909,18 +909,25 @@ static SDL_Texture *wctl_sys_texture(int i, int px) {
 // the preview.
 static void draw_window_controls(void) {
     if (!A.csd) return;
+    u32 areac = A.tab_style == TABS_PILLS ? COL_TOOLBAR : COL_TABBAR; // the row the controls share (its brightness config applies)
     Rect s = A.r_wstrip;
     if (s.w > 0) {
-        draw_rect(s.x, s.y, s.w, s.h, C(COL_TABBAR));
+        draw_rect(s.x, s.y, s.w, s.h, C(areac));
         if (g_separators) draw_rect(s.x, s.y, 1, s.h, C(COL_BORDER));
     }
+    draw_rect(A.r_wctl.x, A.r_wctl.y, A.r_wctl.w, A.r_wctl.h, C(areac));
     bool max = window_maximized();
     f32 lt = MAX(1.f, roundf(S(1))), is = roundf(S(10)), gs = roundf(S(16));
     for (int i = 0; A.r_wctl.w > 0 && i < 3; i++) {
         Rect b = wctl_button(i);
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(b, A.mx, A.my));
-        if (hover) draw_rect(b.x, b.y, b.w, b.h, i == 2 ? (Color){0xC4 / 255.f, 0x2B / 255.f, 0x1C / 255.f, 1} : C(COL_TAB_HOVER));
-        Color ic = hover ? (i == 2 ? (Color){1, 1, 1, 1} : C(COL_TEXT)) : C(COL_TEXT2);
+        if (hover) { // a rounded accent pill, a fifth smaller than the button; the close keeps its red
+            f32 mx = roundf(b.w * 0.15f), my = roundf(b.h * 0.15f);
+            draw_rrect(b.x + mx, b.y + my, b.w - 2 * mx, b.h - 2 * my, S(4), i == 2 ? (Color){0xC4 / 255.f, 0x2B / 255.f, 0x1C / 255.f, 1} : C(COL_ACCENT));
+        }
+        // at rest the row's other icons' colour; hovered: a very dark accent (or, with a dark accent, the readable one)
+        u32 hov = surface_foreground_color(rgb_mix(T.accent, 0x000000, 0.6f), T.accent);
+        Color ic = hover ? (i == 2 ? (Color){1, 1, 1, 1} : C(hov)) : C(COL_TEXT);
         static const int wctl_id[3] = {WCTL_MIN, WCTL_MAX, WCTL_CLOSE}; // (the buttons: minimise / maximise-restore / close)
         SDL_Texture *sys = wctl_sys_texture(i == 1 && max ? WCTL_RESTORE : wctl_id[i], (int)gs);
         if (sys) { // the desktop's artwork
