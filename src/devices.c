@@ -782,10 +782,128 @@ static void serial_norm(const char *s, char *out, size_t cap) {
     out[o] = 0;
 }
 
+// --- Android over ADB (adbfs): the phone's whole storage, also what MTP doesn't show -------------------------------
+// Only when both adb and adbfs are installed (so nobody else gets an adb server started). A phone with USB debugging on
+// is listed as "<model> (ADB)"; connecting runs adbfs (FUSE, no root) on a folder of ours; Eject unmounts it.
+
+static bool app_selftest(void); // app.c
+
+static const char *adb_tool(void) { return tool("FE_ADB", "adb"); }
+static const char *adbfs_tool(void) { return tool("FE_ADBFS", "adbfs"); }
+static bool adb_available(void) {
+    const char *a = adb_tool(), *f = adbfs_tool();
+    return (a[0] == '/' ? access(a, X_OK) == 0 : in_path(a)) && (f[0] == '/' ? access(f, X_OK) == 0 : in_path(f));
+}
+
+// Our folder for a phone's adbfs mount (by its serial).
+static void adb_mount_dir(const char *serial, char *out, size_t cap) {
+    const char *d = getenv("FE_ADB_DIR"), *rt = getenv("XDG_RUNTIME_DIR"); // (tests)
+    if (d && d[0]) snprintf(out, cap, "%s/%s", d, serial);
+    else snprintf(out, cap, "%s/file-explorer-adb/%s", rt && rt[0] ? rt : "/tmp", serial);
+}
+
+// Is an adbfs mounted there? (/proc/self/mounts; FE_ADB_MOUNTS: tests)
+static bool adb_mounted(const char *mp) {
+    const char *ov = getenv("FE_ADB_MOUNTS");
+    FILE *f = fopen(ov ? ov : "/proc/self/mounts", "r");
+    char line[PATH_MAX * 2], src[PATH_MAX], m[PATH_MAX], type[64], clean[PATH_MAX];
+    bool found = false;
+    while (f && !found && fgets(line, sizeof line, f)) {
+        if (sscanf(line, "%4095s %4095s %63s", src, m, type) != 3 || strcmp(type, "fuse.adbfs")) continue;
+        mount_unescape(m, clean, sizeof clean);
+        found = !strcmp(clean, mp);
+    }
+    if (f) fclose(f);
+    return found;
+}
+
+// `adb devices -l`: "SERIAL  device usb:1-2 product:x model:Pixel_7 device:y transport_id:1" (or unauthorized,
+// "no permissions (...)", offline) -> phones of kind 'd' after the others.
+static void adb_parse(const char *text, DevList *L) {
+    const char *p = text;
+    while (*p && L->nph < MAX_PHONES) {
+        const char *e = strchr(p, '\n');
+        size_t len = e ? (size_t)(e - p) : strlen(p);
+        char line[512], serial[96] = "", state[32] = "";
+        snprintf(line, sizeof line, "%.*s", (int)MIN(len, sizeof line - 1), p);
+        p = e ? e + 1 : p + len;
+        if (sscanf(line, "%95s %31s", serial, state) != 2 || !strcmp(serial, "List") || serial[0] == '*') continue;
+        if (strcmp(state, "device") && strcmp(state, "unauthorized") && strcmp(state, "no")) continue; // (offline...)
+        PhoneDev *ph = &L->ph[L->nph++];
+        memset(ph, 0, sizeof *ph);
+        ph->kind = 'd';
+        snprintf(ph->serial, sizeof ph->serial, "%s", serial);
+        snprintf(ph->uri, sizeof ph->uri, "adb:%s", serial);
+        const char *mo = strstr(line, " model:");
+        char model[96] = "Android";
+        if (mo) {
+            snprintf(model, sizeof model, "%.*s", (int)strcspn(mo + 7, " \t"), mo + 7);
+            for (char *c = model; *c; c++) if (*c == '_') *c = ' ';
+        }
+        snprintf(ph->name, sizeof ph->name, "%s (ADB)", model);
+        if (!strcmp(state, "unauthorized")) snprintf(ph->need, sizeof ph->need, "allow");
+        else if (!strcmp(state, "no")) snprintf(ph->need, sizeof ph->need, "permission");
+        char mp[PATH_MAX];
+        adb_mount_dir(serial, mp, sizeof mp);
+        if (adb_mounted(mp)) snprintf(ph->mount, sizeof ph->mount, "%s", mp);
+    }
+}
+
+// ADB phones into L; an adbfs mount of ours whose phone went away is let go (its folder would only hang).
+static void phones_scan_adb(DevList *L) {
+    if (!adb_available() || (app_selftest() && !getenv("FE_ADB"))) return; // (self-tests: only the stand-in)
+    char *out = xmalloc(16384);
+    char *argv[] = {(char *)adb_tool(), "devices", "-l", NULL};
+    int n0 = L->nph;
+    if (run_capture(argv, out, 16384) == 0) adb_parse(out, L);
+    free(out);
+    char dir[PATH_MAX];
+    adb_mount_dir("", dir, sizeof dir);
+    DIR *d = opendir(dir);
+    struct dirent *de;
+    while (d && (de = readdir(d))) {
+        if (de->d_name[0] == '.') continue;
+        bool listed = false;
+        for (int i = n0; i < L->nph && !listed; i++) listed = !strcmp(L->ph[i].serial, de->d_name);
+        char mp[PATH_MAX];
+        adb_mount_dir(de->d_name, mp, sizeof mp);
+        if (listed || !adb_mounted(mp)) continue;
+        char *um[] = {(char *)tool("FE_FUSERMOUNT", "fusermount3"), "-u", "-z", mp, NULL}, tmp[256];
+        run_capture(um, tmp, sizeof tmp);
+    }
+    if (d) closedir(d);
+}
+
+// Connect: adbfs on our folder for it (ANDROID_SERIAL picks the phone), then wait for the mount to show up.
+static int adb_mount_run(const char *serial, char *mount, size_t mcap, char *out, size_t ocap) {
+    char mp[PATH_MAX], env[160];
+    adb_mount_dir(serial, mp, sizeof mp);
+    char parent[PATH_MAX];
+    snprintf(parent, sizeof parent, "%s", mp);
+    char *sl = strrchr(parent, '/');
+    if (sl) { *sl = 0; mkdir(parent, 0700); }
+    mkdir(mp, 0700);
+    if (adb_mounted(mp)) { snprintf(mount, mcap, "%s", mp); return 0; }
+    snprintf(env, sizeof env, "ANDROID_SERIAL=%s", serial);
+    char *argv[] = {"env", env, (char *)adbfs_tool(), mp, NULL};
+    int rc = run_capture(argv, out, ocap);
+    for (int k = 0; rc == 0 && k < 30 && !adb_mounted(mp); k++) usleep(100000);
+    if (rc == 0 && !adb_mounted(mp)) { snprintf(out, ocap, "adbfs started but its folder didn't show up"); rc = 1; }
+    if (rc == 0) snprintf(mount, mcap, "%s", mp);
+    return rc;
+}
+
 // Phones and cameras: ours for every device our connector talks to (GVfs's entries for them folded in: kept only
 // when GVfs has it connected already), then GVfs's other ones.
+static void phones_scan_own(DevList *L, bool own);
+
 static void phones_scan(DevList *L) {
     bool own = own_phones_enabled();
+    phones_scan_own(L, own);
+    phones_scan_adb(L);
+}
+
+static void phones_scan_own(DevList *L, bool own) {
     phones_scan_gvfs(L, !own);
     if (!own) return;
     UsbDevInfo u[MAX_PHONES];
@@ -870,7 +988,7 @@ static void phone_error_hint(char kind, const char *err, char *out, size_t cap) 
 
 // --- actions (worker thread) ------------------------------------------------------
 
-enum { DEV_MOUNT, DEV_UNMOUNT, DEV_EJECT, DEV_NET_MOUNT, DEV_NET_UNMOUNT, DEV_OWN_MOUNT, DEV_IMAGE_MOUNT };
+enum { DEV_MOUNT, DEV_UNMOUNT, DEV_EJECT, DEV_NET_MOUNT, DEV_NET_UNMOUNT, DEV_OWN_MOUNT, DEV_IMAGE_MOUNT, DEV_ADB_MOUNT };
 typedef struct {
     int kind;
     char target[PATH_MAX]; // device, URI, or mount point
@@ -1427,6 +1545,7 @@ static void dev_job(void *arg) {
     case DEV_OWN_MOUNT:
         j->rc = own_mount_run(j);
         break;
+    case DEV_ADB_MOUNT: j->rc = adb_mount_run(j->target, j->mount, sizeof j->mount, j->out, sizeof j->out); break;
     case DEV_NET_UNMOUNT: {
         bool gvfs = strstr(j->target, "/gvfs/") != NULL;
         if (gvfs) {
