@@ -23,7 +23,8 @@ typedef struct CQuery {
 enum { MF_EXEC = 1, MF_DIRSIZE = 2, MF_NOSIZE = 4 }; // MF_DIRSIZE: size holds the recursive folder size (atomic access)
 // MF_NOSIZE (with MF_DIRSIZE, size 0): a kernel pseudo-filesystem (/proc, /sys, ...) whose file sizes mean nothing
 enum { META_PENDING, META_CLAIMED, META_READY };
-enum { SORT_NAME, SORT_DATE, SORT_TYPE, SORT_SIZE, SORT_CREATED, SORT_EXT, SORT_PERMS, SORT_OWNER, SORT_COUNT };
+enum { SORT_NAME, SORT_DATE, SORT_TYPE, SORT_SIZE, SORT_CREATED, SORT_EXT, SORT_PERMS, SORT_OWNER, SORT_ACCESSED, SORT_GROUP, SORT_LINK,
+       SORT_COUNT };
 enum { LST_SCANNING, LST_READY, LST_COMPLETE, LST_ERROR };
 
 typedef struct {
@@ -38,6 +39,8 @@ typedef struct {
     u64 size;
     i64 mtime;
     i64 btime; // creation time, 0 if the filesystem doesn't report it
+    i64 atime; // last access (as the mount records it: relatime / noatime)
+    u32 gid;
 } Entry;
 
 #define PRIO_MAX 256
@@ -77,6 +80,7 @@ typedef struct Listing {
     int tf_mode;      // type filter: 0 all, 1 files only, 2 folders only
     char tf_exts[512]; // hidden extensions "|png|jpg|" ("||" = files without extension)
     char *tree;        // tree view: expanded folders as "\nsub\nsub/deeper\n" (entries then use relative names); NULL = flat
+    char **links;      // symbolic links' targets by entry (set with their metadata; NULL: no links, or not a folder listing)
     char **extra;      // more folders listed into this one, their entries named by absolute path (the trashes of other drives)
     int nextra;
     // contents search: each matching file is followed by its ENT_MATCH entries (line in size, column | length << 32
@@ -136,6 +140,9 @@ static void listing_release(Listing *L) {
     free(L->order);
     free(L->path);
     free(L->tree);
+    if (L->links)
+        for (u32 i = 0; i < L->count; i++) free(L->links[i]);
+    free(L->links);
     for (int i = 0; i < L->nextra; i++) free(L->extra[i]);
     free(L->extra);
     free(L->cinfo);
@@ -173,6 +180,7 @@ enum { GROUP_NONE, GROUP_DATE, GROUP_TYPE, GROUP_SIZE, GROUP_COUNT };
 
 typedef struct {
     const Entry *ents;
+    char *const *links;
     int key;
     bool desc, meta;
     int group;
@@ -315,6 +323,18 @@ static int cmp_entries(const void *pa, const void *pb, void *pctx) {
     case SORT_OWNER:
         if (c->meta) r = (x->uid > y->uid) - (x->uid < y->uid);
         break;
+    case SORT_ACCESSED:
+        if (c->meta) r = (x->atime > y->atime) - (x->atime < y->atime);
+        break;
+    case SORT_GROUP:
+        if (c->meta) r = (x->gid > y->gid) - (x->gid < y->gid);
+        break;
+    case SORT_LINK:
+        if (c->meta && c->links) {
+            const char *a = c->links[x - c->ents], *b = c->links[y - c->ents];
+            r = a && b ? natcmp(a, b) : (a == NULL) - (b == NULL); // (ascending: the links first, by target)
+        }
+        break;
     }
     if (!r) r = natcmp(ent_label(x), ent_label(y));
     if (!r) r = strcmp(x->name, y->name);
@@ -429,7 +449,7 @@ static void listing_build_order_ex(const Listing *L, const OrderOpts *op, u32 **
     }
     int key = op->key, group = op->group;
     bool desc = op->desc, meta = op->meta;
-    SortCtx ctx = {L->entries, key, desc, meta, group, group ? local_midnight(time(NULL)) : 0, atomic_load(&g_folders_first)};
+    SortCtx ctx = {L->entries, L->links, key, desc, meta, group, group ? local_midnight(time(NULL)) : 0, atomic_load(&g_folders_first)};
     qsort_r(o, m, sizeof(u32), cmp_entries, &ctx);
     if (op->tree && m) m = tree_order(L, o, m);
     *out = o;
@@ -450,12 +470,19 @@ static void meta_one(Listing *L, u32 i) {
     if (!atomic_compare_exchange_strong(&e->meta, &expected, META_CLAIMED)) return;
     struct statx sx;
     if (statx(L->dirfd, e->name, AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC | AT_NO_AUTOMOUNT,
-              STATX_SIZE | STATX_MTIME | STATX_MODE | STATX_UID | STATX_BTIME, &sx) == 0) {
+              STATX_SIZE | STATX_MTIME | STATX_MODE | STATX_UID | STATX_GID | STATX_BTIME | STATX_ATIME, &sx) == 0) {
         e->size = sx.stx_size;
         e->mtime = sx.stx_mtime.tv_sec;
+        e->atime = (sx.stx_mask & STATX_ATIME) ? sx.stx_atime.tv_sec : 0;
         e->mode = sx.stx_mode;
         e->uid = sx.stx_uid;
+        e->gid = sx.stx_gid;
         e->btime = (sx.stx_mask & STATX_BTIME) ? sx.stx_btime.tv_sec : 0;
+        if (L->links && S_ISLNK(sx.stx_mode)) { // (only this worker writes this slot; read once META_READY)
+            char t[PATH_MAX];
+            ssize_t n = readlinkat(L->dirfd, e->name, t, sizeof t - 1);
+            if (n > 0) { t[n] = 0; L->links[i] = strdup(t); }
+        }
         if (S_ISREG(sx.stx_mode) && (sx.stx_mode & 0111)) e->mflags |= MF_EXEC;
     }
     atomic_store_explicit(&e->meta, META_READY, memory_order_release);
@@ -532,8 +559,10 @@ static void scan_dir(Listing *L, int fd, const char *prefix, char *buf, size_t b
             e->size = 0;
             e->mtime = 0;
             e->btime = 0;
+            e->atime = 0;
             e->mode = 0;
             e->uid = 0;
+            e->gid = 0;
             atomic_init(&e->meta, META_PENDING);
             u8 t = d->d_type;
             if (t == DT_DIR) {
@@ -598,6 +627,8 @@ static void scan_job(void *arg) {
 
     L->entries = ents;
     L->count = n;
+    for (u32 i = 0; i < n && !L->links; i++)
+        if (ents[i].flags & ENT_LINK) L->links = xcalloc(n, sizeof(char *)); // targets filled in with the metadata
     OrderOpts oo = {L->sort_key, L->sort_desc, L->show_hidden, false, L->filter, L->group, L->tf_mode, L->tf_exts, L->tree != NULL};
     listing_build_order_ex(L, &oo, &L->order, &L->order_count);
     L->t_names = now_ns();

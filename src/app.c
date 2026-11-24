@@ -181,7 +181,7 @@ static const struct { int view, px; const char *label; } g_zoom[] = {
 #define ZOOM_COUNT ((int)ARRAY_COUNT(g_zoom))
 
 // --- columns -----------------------------------------------------------------
-enum { COL_NAME, COL_DATE, COL_CREATED, COL_TYPE, COL_SIZE, COL_EXT, COL_PERMS, COL_OWNER, COL_COUNT };
+enum { COL_NAME, COL_DATE, COL_CREATED, COL_TYPE, COL_SIZE, COL_EXT, COL_PERMS, COL_OWNER, COL_ACCESSED, COL_GROUP, COL_LINK, COL_COUNT };
 static const struct {
     const char *label, *key;
     f32 defw; // logical px (Name is flexible)
@@ -196,7 +196,13 @@ static const struct {
     {"Extension", "ext", 80, false, SORT_EXT},
     {"Permissions", "perms", 96, false, SORT_PERMS},
     {"Owner", "owner", 90, false, SORT_OWNER},
+    {"Date accessed", "accessed", 140, false, SORT_ACCESSED},
+    {"Group", "group", 90, false, SORT_GROUP},
+    {"Link target", "link", 200, false, SORT_LINK},
 };
+// The columns menu's order (new columns are added at the end of the enum: saved settings keep their ids)
+static const int g_col_menu[COL_COUNT] = {COL_NAME, COL_DATE, COL_CREATED, COL_ACCESSED, COL_TYPE, COL_SIZE, COL_EXT, COL_PERMS,
+                                          COL_OWNER, COL_GROUP, COL_LINK};
 
 typedef struct {
     Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, sortbtn, header, list, track, thumb, trashbar, rrestore, rempty;
@@ -448,7 +454,7 @@ enum {
     ACT_COL_BASE = 200,  // + column id: toggle that column
     ACT_VIEW_BASE = 300, // + zoom level index
     ACT_SORT_BASE = 320, // + SORT_* key
-    ACT_SORT_ASC = 330, ACT_SORT_DESC,
+    ACT_SORT_ASC = 334, ACT_SORT_DESC,
     ACT_MENU_VIEWS, ACT_MENU_SORT, ACT_MENU_GROUP, // items that open the Views / Sort by / Group by submenus
     ACT_FOLDERS_FIRST, // sort menus: folders above files (every folder, every tab)
     ACT_GROUP_BASE = 340, // + GROUP_*
@@ -472,6 +478,7 @@ enum {
     ACT_COMPRESS_BASE, // + ARC_FMT_*: Compress to that format at its usual level (below 460)
 };
 _Static_assert(ACT_FIRST_FREE_ <= 100, "ACT_* ids must stay below the CMD_* ids");
+_Static_assert(ACT_SORT_BASE + SORT_COUNT <= ACT_SORT_ASC && ACT_FOLDERS_FIRST < ACT_GROUP_BASE, "sort ids overlap");
 _Static_assert(ACT_COMPRESS_BASE + ARC_NFMT <= ACT_QA_RENAME, "archive actions must stay below the Quick access ones");
 enum {
     CMD_NEW_TAB = 100, CMD_CLOSE_TAB, CMD_SPLIT, CMD_SWITCH_PANE, CMD_BACK, CMD_FORWARD, CMD_UP, CMD_SEARCH,
@@ -7606,11 +7613,12 @@ static void menu_sub_views(Pane *p) {
     menu_add("Reset folder view", "", ACT_FV_RESET, view != NULL);
 }
 
-// Name, dates, type and size always; Permissions and Owner only while their column is shown (sorting by what you can't
+// Name, modified / created dates, type and size always; the other columns' keys only while their column is shown (sorting by what you can't
 // see makes little sense). Extension sorts like Type: listed only while it's the current key. The same in the folder
 // menu's Sort by and the toolbar's sort button.
 static void menu_add_sort(Pane *p) {
-    static const char *labels[SORT_COUNT] = {"Name", "Date modified", "Type", "Size", "Date created", "Extension", "Permissions", "Owner"};
+    static const char *labels[SORT_COUNT] = {"Name", "Date modified", "Type", "Size", "Date created", "Extension", "Permissions", "Owner",
+                                             "Date accessed", "Group", "Link target"};
     for (int i = 0; i < SORT_COUNT; i++) {
         bool shown = i <= SORT_CREATED || p->sort_key == i;
         for (int c = 0; c < COL_COUNT && !shown; c++) shown = g_coldef[c].sort == i && i != SORT_EXT && col_visible(c);
@@ -7651,7 +7659,10 @@ static void menu_open_columns(Pane *p, f32 x, f32 y) {
     m->n = 0;
     m->hover = -1;
     m->pane = p;
-    for (int c = 0; c < COL_COUNT; c++) menu_add_check(g_coldef[c].label, ACT_COL_BASE + c, col_visible(c), c != COL_NAME);
+    for (int k = 0; k < COL_COUNT; k++) {
+        int c = g_col_menu[k];
+        menu_add_check(g_coldef[c].label, ACT_COL_BASE + c, col_visible(c), c != COL_NAME);
+    }
     menu_sep();
     menu_add_check("Size bars", ACT_SIZE_BARS, A.size_bars, true);
     menu_add_check("Alternating row colors", ACT_ALT_ROWS, A.alt_rows, true);
@@ -8998,6 +9009,8 @@ static void search_batch_cb(void *arg) {
             e->btime = h->btime;
             e->mode = h->mode;
             e->uid = h->uid;
+            e->gid = h->gid;
+            e->atime = h->atime;
             atomic_init(&e->meta, META_READY);
             e->ext = 0;
             if (!(e->flags & ENT_DIR)) {
@@ -9208,7 +9221,7 @@ static void content_batch_cb(void *arg) {
             char *s = arena_alloc(&L->names, len + 1, 1);
             memcpy(s, rel, len + 1);
             *e = (Entry){.name = s, .name_len = (u32)len, .flags = h->flags, .mflags = h->mflags, .mode = h->mode, .uid = h->uid,
-                         .size = h->size, .mtime = h->mtime, .btime = h->btime};
+                         .gid = h->gid, .size = h->size, .mtime = h->mtime, .btime = h->btime, .atime = h->atime};
             atomic_init(&e->meta, META_READY);
             const char *base = strrchr(s, '/');
             base = base ? base + 1 : s;

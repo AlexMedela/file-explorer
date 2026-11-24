@@ -507,15 +507,6 @@ static void props_toggle_perm(int k) {
     lstat(s->paths[0], &s->st);
 }
 
-static const char *group_name(gid_t gid) {
-    static char buf[64];
-    struct group gr, *res = NULL;
-    char tmp[1024];
-    if (getgrgid_r(gid, &gr, tmp, sizeof tmp, &res) == 0 && res) snprintf(buf, sizeof buf, "%s", gr.gr_name);
-    else snprintf(buf, sizeof buf, "%u", (unsigned)gid);
-    return buf;
-}
-
 static void props_date(i64 t0, char *buf, size_t cap);
 
 // Codec names as people know them ("h264" -> "H.264"); others in capitals.

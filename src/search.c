@@ -225,9 +225,9 @@ typedef struct {
     u32 rel; // offset of the relative path in the batch's strs
     u8 flags, mflags;
     u16 mode;
-    u32 uid;
+    u32 uid, gid;
     u64 size;
-    i64 mtime, btime;
+    i64 mtime, btime, atime;
 } SearchHit;
 
 typedef struct {
@@ -313,7 +313,7 @@ static void *search_worker(void *arg) {
                     if (!match && !is_dir && d->d_type != DT_UNKNOWN) continue;
                     struct statx sx;
                     bool have = statx(fd, nm, AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC | AT_NO_AUTOMOUNT,
-                                      STATX_TYPE | STATX_MODE | STATX_SIZE | STATX_MTIME | STATX_UID | STATX_BTIME, &sx) == 0;
+                                      STATX_TYPE | STATX_MODE | STATX_SIZE | STATX_MTIME | STATX_UID | STATX_GID | STATX_BTIME | STATX_ATIME, &sx) == 0;
                     if (have && d->d_type == DT_UNKNOWN) is_dir = S_ISDIR(sx.stx_mode);
                     char r2[PATH_MAX];
                     if (rel[0]) snprintf(r2, sizeof r2, "%s/%s", rel, nm);
@@ -339,6 +339,8 @@ static void *search_worker(void *arg) {
                         h->btime = have && (sx.stx_mask & STATX_BTIME) ? sx.stx_btime.tv_sec : 0;
                         h->mode = have ? sx.stx_mode : 0;
                         h->uid = have ? sx.stx_uid : 0;
+                        h->gid = have ? sx.stx_gid : 0;
+                        h->atime = have && (sx.stx_mask & STATX_ATIME) ? sx.stx_atime.tv_sec : 0;
                     }
                     // descend, staying on the same filesystem
                     if (c->recursive && is_dir && have && makedev(sx.stx_dev_major, sx.stx_dev_minor) == c->dev) {
@@ -478,7 +480,7 @@ static bool cq_find(const CQuery *c, const char *s, size_t n, size_t from, size_
     return false;
 }
 
-typedef struct { u32 rel; u8 flags, mflags; u16 mode; u32 uid; u64 size; i64 mtime, btime; u32 l0, nl; } CHitFile;
+typedef struct { u32 rel; u8 flags, mflags; u16 mode; u32 uid, gid; u64 size; i64 mtime, btime, atime; u32 l0, nl; } CHitFile;
 typedef struct { u32 line, col, len, text, rcol; bool elided; } CHitLine; // col: in the kept text, rcol: in the line
 
 typedef struct ContentBatch {
@@ -550,6 +552,8 @@ static CHitFile *cb_file(ContentBatch **bp, const char *rel, const struct statx 
     if (sx) {
         f->mode = sx->stx_mode;
         f->uid = sx->stx_uid;
+        f->gid = sx->stx_gid;
+        f->atime = (sx->stx_mask & STATX_ATIME) ? sx->stx_atime.tv_sec : 0;
         f->size = sx->stx_size;
         f->mtime = sx->stx_mtime.tv_sec;
         f->btime = (sx->stx_mask & STATX_BTIME) ? sx->stx_btime.tv_sec : 0;
@@ -668,7 +672,7 @@ static void *content_worker(void *arg) { // built-in search: folders from a shar
                     if (!is_dir && !content_glob_ok(c, r2, nm)) continue;
                     struct statx sx;
                     if (statx(fd, nm, AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC | AT_NO_AUTOMOUNT,
-                              STATX_TYPE | STATX_MODE | STATX_SIZE | STATX_MTIME | STATX_UID | STATX_BTIME, &sx)) continue;
+                              STATX_TYPE | STATX_MODE | STATX_SIZE | STATX_MTIME | STATX_UID | STATX_GID | STATX_BTIME | STATX_ATIME, &sx)) continue;
                     if (S_ISDIR(sx.stx_mode)) {
                         if (!c->recursive || makedev(sx.stx_dev_major, sx.stx_dev_minor) != c->dev) continue;
                         pthread_mutex_lock(&c->mtx);
@@ -795,7 +799,7 @@ static void *content_rg_thread(void *arg) {
             snprintf(cur, sizeof cur, "%s", path);
             struct statx sx;
             bool have = statx(c->rootfd, path, AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC, STATX_TYPE | STATX_MODE | STATX_SIZE |
-                              STATX_MTIME | STATX_UID | STATX_BTIME, &sx) == 0;
+                              STATX_MTIME | STATX_UID | STATX_GID | STATX_BTIME | STATX_ATIME, &sx) == 0;
             bool hidden = false;
             for (const char *q = path; q; q = strchr(q, '/'), q = q ? q + 1 : NULL) hidden |= *q == '.';
             skip_file = false;
@@ -1309,7 +1313,7 @@ static void dirsize_start(Listing *L, bool visible, bool hidden, bool remote, co
         c->dirs[c->n++] = i;
     }
     if (!c->n) { free(c->dirs); free(c); return; }
-    SortCtx ctx = {L->entries, SORT_NAME, false, false, GROUP_NONE, 0, true};
+    SortCtx ctx = {L->entries, L->links, SORT_NAME, false, false, GROUP_NONE, 0, true};
     qsort_r(c->dirs, c->n, sizeof(u32), cmp_entries, &ctx);
     c->L = L;
     listing_retain(L);

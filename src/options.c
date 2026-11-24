@@ -117,7 +117,7 @@ static const char *opt_section_title(int id) {
 }
 
 static const char *g_sort_labels[SORT_COUNT] = {"Name", "Date modified", "Type", "Size", "Date created", "Extension",
-                                                "Permissions", "Owner"};
+                                                "Permissions", "Owner", "Date accessed", "Group", "Link target"};
 static const char *g_group_labels[GROUP_COUNT] = {"None", "Date", "Type", "Size"};
 static const char *g_spacing_labels[3] = {"Compact", "Normal", "Comfortable"};
 static const char *g_title_bar_labels[] = {"Automatic", "System", "Explorer's own"}; // TITLEBAR_*
