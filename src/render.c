@@ -86,7 +86,7 @@ static int cursor_edge(void) {
 
 static void cursor_apply(void) {
     // dragging items, a tab or a sidebar place: the grabbing hand from the start (not only once it leaves the window)
-    bool grab = A.cur_grab && (A.drag == DRAG_ITEMS || A.drag == DRAG_TAB || A.drag == DRAG_PLACE);
+    bool grab = A.cur_grab && (A.drag == DRAG_ITEMS || A.drag == DRAG_TAB || A.drag == DRAG_PLACE || A.drag == DRAG_RIBBON);
     int edge = cursor_edge();
     int want = edge ? edge : A.cursor_ew ? A.cursor_ew : grab ? 5 : !A.mouse_in || A.drag != DRAG_NONE ? 0 : A.ptr_text ? 4 : A.ptr_hand ? 3 : 0;
     if (want == A.cursor_shown) return;

@@ -4079,6 +4079,60 @@ static int run_selftest_m9(void) {
         ST_CHECK(A.preview_on == !p0 && !A.menu.open);
         if (A.preview_on != p0) preview_toggle();
         A.W = w0;
+        st_frames(1);
+        // positions: above the path bar, the list's bottom / left / right (the list gives up the room)
+        A.ribbon_pos = RP_ABOVE;
+        st_frames(1);
+        ST_CHECK(rl->ribbon.y + rl->ribbon.h == rl->toolbar.y && rl->header.y == rl->toolbar.y + rl->toolbar.h);
+        A.ribbon_pos = RP_BOTTOM;
+        st_frames(1);
+        ST_CHECK(rl->header.y == hy0 && rl->ribbon.y + rl->ribbon.h == rl->area.y + rl->area.h && rl->list.y + rl->list.h <= rl->ribbon.y);
+        A.ribbon_pos = RP_RIGHT;
+        st_frames(1);
+        ST_CHECK(rl->ribbon.w == roundf(S(40)) && rl->ribbon.x + rl->ribbon.w == rl->area.x + rl->area.w && rl->list.x + rl->list.w == rl->ribbon.x);
+        st_shot("ribbon-right");
+        // dragged by its grip to the pane's left edge: it goes there (shown while dragging)
+        ribbon_layout(p);
+        Rect gr = g_rb.grip;
+        ST_CHECK(gr.w > 0 && in_rect(rl->ribbon, gr.x + 2, gr.y + 2));
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, gr.x + gr.w * 0.5f, gr.y + gr.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.drag == DRAG_RIBBON);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, rl->area.x + S(10), rl->list.y + S(100), 0, 0, 0);
+        ST_CHECK(A.ribbon_drop == RP_LEFT && A.ribbon_drop_pane == p);
+        st_frames(1);
+        st_shot("ribbon-drag");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, rl->area.x + S(10), rl->list.y + S(100), SDL_BUTTON_LEFT, 1, 0);
+        st_frames(1);
+        ST_CHECK(A.drag == DRAG_NONE && A.ribbon_pos == RP_LEFT && rl->ribbon.x == rl->area.x && rl->list.x == rl->ribbon.x + rl->ribbon.w);
+        // Wrap: a narrow window gets a second row instead of "..."
+        A.ribbon_pos = RP_BELOW;
+        A.ribbon_overflow = RO_WRAP;
+        A.W = (int)roundf(S(640));
+        st_frames(1);
+        ribbon_layout(p);
+        ST_CHECK(rl->ribbon.h == roundf(S(36)) * 2 && g_rb.more.w == 0 && di >= 0 && g_rb.r[di].w > 0 && g_rb.r[di].y > rl->ribbon.y + S(30));
+        st_shot("ribbon-wrap");
+        // Scroll: arrows at both ends; the next one (and the wheel) slide it along
+        A.ribbon_overflow = RO_SCROLL;
+        st_frames(1);
+        ribbon_layout(p);
+        ST_CHECK(rl->ribbon.h == roundf(S(36)) && g_rb.prev.w > 0 && g_rb.next.w > 0 && p->rb_scroll == 0 && g_rb.r[di].w == 0);
+        Rect nb = g_rb.next;
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, nb.x + nb.w * 0.5f, nb.y + nb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, nb.x + nb.w * 0.5f, nb.y + nb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        f32 sc1 = p->rb_scroll;
+        ST_CHECK(sc1 > 0);
+        f32 rcx = rl->ribbon.x + rl->ribbon.w * 0.5f, rcy = rl->ribbon.y + rl->ribbon.h * 0.5f;
+        ST_CHECK(ribbon_wheel(rcx, rcy, 2)); // back a little
+        st_frames(1);
+        ST_CHECK(p->rb_scroll < sc1);
+        ribbon_wheel(rcx, rcy, -60); // forward past the end: kept at the end, the last icon shows
+        st_frames(1);
+        ribbon_layout(p);
+        ST_CHECK(fabsf(p->rb_scroll - (g_rb.total - g_rb.avail)) < 0.5f && g_rb.r[di].w > 0);
+        st_shot("ribbon-scroll");
+        A.ribbon_overflow = RO_MORE;
+        A.W = w0;
         A.ribbon = false;
         st_frames(2);
         ST_CHECK(p->ly.ribbon.h == 0 && p->ly.header.y == hy0);
@@ -4587,31 +4641,31 @@ static int run_selftest_m9(void) {
         ST_CHECK(!strcmp(opt_choice_label(OPT_TAB_STYLE, 0), "Classic") &&
                  !strcmp(opt_choice_label(OPT_TAB_STYLE, 1), "Pills"));
         opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
-        TabBands b = tab_bands(100.f, 1.f, 2);
+        TabBands b = tab_bands(100.f, 1.f, 2, 0);
         ST_CHECK(b.tabs_y == 100.f && b.tabs_h == 38.f);
         ST_CHECK(b.navigation_y == 138.f && b.nav_h == 46.f);
         ST_CHECK(b.content_y == b.navigation_y + b.nav_h);
         opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
-        b = tab_bands(100.f, 1.f, 2);
+        b = tab_bands(100.f, 1.f, 2, 0);
         ST_CHECK(b.navigation_y == 100.f && b.nav_h == 46.f);
         ST_CHECK(b.tabs_y == 146.f && b.tabs_h == 44.f);
         ST_CHECK(b.content_y == b.tabs_y + b.tabs_h);
-        ST_CHECK(tab_bands(100.f, 1.f, 1).tabs_h == 44.f); // default: the strip stays
+        ST_CHECK(tab_bands(100.f, 1.f, 1, 0).tabs_h == 44.f); // default: the strip stays
         ST_CHECK(!g_hide_single_tab);
         opt_bool_toggle(OPT_HIDE_SINGLE_TAB);
         ST_CHECK(g_hide_single_tab);
-        b = tab_bands(100.f, 1.f, 1);
+        b = tab_bands(100.f, 1.f, 1, 0);
         ST_CHECK(b.tabs_h == 0.f && b.content_y == b.navigation_y + b.nav_h);
-        ST_CHECK(tab_bands(100.f, 1.f, 2).tabs_h == 44.f);
+        ST_CHECK(tab_bands(100.f, 1.f, 2, 0).tabs_h == 44.f);
         opt_bool_toggle(OPT_HIDE_SINGLE_TAB);
         ST_CHECK(!g_hide_single_tab);
         Panel *pn = A.ap;
         opt_choice_set(OPT_TAB_STYLE, TABS_PILLS);
         layout();
         ST_CHECK(pn->bar.y == pn->area.y + 46.f);
-        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn)).content_y);
+        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn), 0).content_y);
         {
-            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn));
+            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn), 0);
             PaneLayout *pnly = &pn->cur->pane[0].ly;
             ST_CHECK(pnly->toolbar.y == pnb.navigation_y);
             ST_CHECK(pnly->header.y == pnb.content_y && pnly->list.y == pnb.content_y + pnly->header.h);
@@ -4619,9 +4673,9 @@ static int run_selftest_m9(void) {
         opt_choice_set(OPT_TAB_STYLE, TABS_CARDS);
         layout();
         ST_CHECK(pn->bar.y == pn->area.y);
-        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn)).content_y);
+        ST_CHECK(panel_content_rect(pn).y == tab_bands(pn->area.y, 1.f, panel_ntabs(pn), 0).content_y);
         {
-            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn));
+            TabBands pnb = tab_bands(pn->area.y, 1.f, panel_ntabs(pn), 0);
             PaneLayout *pnly = &pn->cur->pane[0].ly;
             ST_CHECK(pnly->toolbar.y == pnb.navigation_y);
             ST_CHECK(pnly->header.y == pnb.content_y && pnly->list.y == pnb.content_y + pnly->header.h);

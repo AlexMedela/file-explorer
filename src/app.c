@@ -245,6 +245,7 @@ typedef struct Pane {
     u32 sel_count;
     i64 cursor, anchor;
     f64 scroll, scroll_target;
+    f32 rb_scroll; // the ribbon (Scroll): slid along by
     int sort_key;
     bool sort_desc;
     u32 sort_gen;
@@ -394,7 +395,10 @@ typedef struct { // one sidebar row
 } Place;
 
 enum { DRAG_NONE, DRAG_SCROLL, DRAG_BAND_PENDING, DRAG_BAND, DRAG_SPLIT, DRAG_ITEMS_PENDING, DRAG_ITEMS, DRAG_PREVIEW, DRAG_SIDEBAR,
-       DRAG_TAB_PENDING, DRAG_TAB, DRAG_COL_RESIZE, DRAG_COL_PENDING, DRAG_COL, DRAG_PLACE_PENDING, DRAG_PLACE, DRAG_DOCK, DRAG_SIZE };
+       DRAG_TAB_PENDING, DRAG_TAB, DRAG_COL_RESIZE, DRAG_COL_PENDING, DRAG_COL, DRAG_PLACE_PENDING, DRAG_PLACE, DRAG_DOCK, DRAG_SIZE,
+       DRAG_RIBBON };
+enum { RP_BELOW, RP_ABOVE, RP_BOTTOM, RP_LEFT, RP_RIGHT }; // where the ribbon is: under / over the path bar, the list's bottom / sides
+enum { RO_MORE, RO_WRAP, RO_SCROLL };                       // the ribbon when it doesn't fit: a "..." menu, more lines, arrows
 
 enum { U_RENAME, U_MOVE, U_COPY, U_TRASH, U_CREATE };
 typedef struct {
@@ -674,7 +678,10 @@ static struct {
     char cs_error[64];     // shown in the search bar (bad regex)
     bool cs_case, cs_word, cs_regex; // contents search options: match case (else smart case), whole word, regex
     bool folder_sizes;
-    bool ribbon;     // the ribbon: a row of common file actions under each panel's navigation bar (ribbon.c)
+    bool ribbon;     // the ribbon: a row of common file actions in each panel (ribbon.c)
+    int ribbon_pos, ribbon_overflow; // RP_*, RO_*
+    int ribbon_drop;                 // dragging it: where it would go (RP_*, -1 nowhere), over which pane
+    struct Pane *ribbon_drop_pane;
     bool path_text;  // the path bar shows the path as plain text (no breadcrumbs); a click edits it
     bool git_status; // git badges in the file list + branch in the status bar
     int du_style;    // disk usage view: 0 treemap, 1 sunburst
@@ -959,21 +966,26 @@ static Rect item_rect(const Pane *p, i64 i) {
 
 typedef struct { f32 navigation_y, tabs_y, nav_h, tabs_h, ribbon_y, ribbon_h, content_y; } TabBands;
 
+static int ribbon_lines(f32 len); // ribbon.c
+
 // The navigation band is 46 high, the tab band 38. Classic tabs sit above the navigation bar, pills below it; the
-// ribbon (when on) right under the navigation bar.
-static TabBands tab_bands(f32 y, f32 scale, int count) {
+// ribbon (when it's under / over the path bar: w, the panel's width, decides its rows when it wraps) next to the
+// navigation bar.
+static TabBands tab_bands(f32 y, f32 scale, int count, f32 w) {
     TabBands b;
     b.nav_h = roundf(46.f * scale);
     b.tabs_h = g_hide_single_tab && count <= 1 ? 0.f : roundf((A.tab_style == TABS_PILLS ? 44.f : 38.f) * scale);
-    b.ribbon_h = A.ribbon ? roundf(36.f * scale) : 0.f;
+    bool band = A.ribbon && (A.ribbon_pos == RP_BELOW || A.ribbon_pos == RP_ABOVE);
+    b.ribbon_h = band ? roundf(36.f * scale) * (f32)ribbon_lines(w) : 0.f;
+    f32 nav_off = A.ribbon_pos == RP_ABOVE ? b.ribbon_h : 0, rb_off = A.ribbon_pos == RP_ABOVE ? 0 : b.nav_h;
     if (A.tab_style == TABS_CARDS) {
         b.tabs_y = y;
-        b.navigation_y = y + b.tabs_h;
-        b.ribbon_y = b.navigation_y + b.nav_h;
+        b.navigation_y = y + b.tabs_h + nav_off;
+        b.ribbon_y = y + b.tabs_h + rb_off;
     } else {
-        b.navigation_y = y;
-        b.ribbon_y = y + b.nav_h;
-        b.tabs_y = b.ribbon_y + b.ribbon_h;
+        b.navigation_y = y + nav_off;
+        b.ribbon_y = y + rb_off;
+        b.tabs_y = y + b.nav_h + b.ribbon_h;
     }
     b.content_y = y + b.nav_h + b.tabs_h + b.ribbon_h;
     return b;
@@ -988,12 +1000,12 @@ static f32 nav_available_width(f32 x, f32 y, f32 width) {
 static void layout_pane(Pane *p, Rect area) {
     PaneLayout *ly = &p->ly;
     ly->area = area;
-    TabBands bands = tab_bands(area.y, S(1.f), panel_ntabs(tab_of(p)->panel));
+    TabBands bands = tab_bands(area.y, S(1.f), panel_ntabs(tab_of(p)->panel), area.w);
     f32 nav_y = bands.navigation_y;
     f32 tb = roundf(S(46));
     f32 width = nav_available_width(area.x, nav_y, area.w);
     ly->toolbar = (Rect){area.x, nav_y, width, tb};
-    ly->ribbon = (Rect){area.x, bands.ribbon_y, area.w, bands.ribbon_h}; // (h 0: off)
+    ly->ribbon = (Rect){area.x, bands.ribbon_y, area.w, bands.ribbon_h}; // (h 0: off, or at the list's side / bottom)
     f32 bs = roundf(S(30)), by = nav_y + roundf((tb - bs) * 0.5f), gap = roundf(S(2));
     ly->back = (Rect){area.x + roundf(S(8)), by, bs, bs};
     ly->fwd = (Rect){ly->back.x + bs + gap, by, bs, bs};
@@ -1021,15 +1033,27 @@ static void layout_pane(Pane *p, Rect area) {
     f32 cps = roundf(S(26)); // copy the folder's path: a button at the path bar's right end (not in a narrow one)
     ly->copypath = ly->pathbar.w >= S(200) ? (Rect){px + ly->pathbar.w - cps - roundf(S(2)), by + roundf((bs - cps) * 0.5f), cps, cps} : (Rect){0};
     f32 hh = p->view == VIEW_DETAILS && !pane_du_on(p) && !pane_snap_on(p) ? roundf(S(32)) : 0; // list/grid sort from the menu, no header
-    ly->header = (Rect){area.x, bands.content_y, area.w, hh};
-    ly->list = (Rect){area.x, bands.content_y + hh, area.w, area.h - (bands.content_y - area.y) - hh};
+    // what's under the bands: the list and its bars, less the ribbon when it's at the list's side or bottom
+    Rect ca = {area.x, bands.content_y, area.w, area.h - (bands.content_y - area.y)};
+    if (A.ribbon && !tab_of(p)->term && (A.ribbon_pos == RP_LEFT || A.ribbon_pos == RP_RIGHT)) {
+        f32 rw = roundf(S(40)) * (f32)ribbon_lines(ca.h);
+        ly->ribbon = (Rect){A.ribbon_pos == RP_LEFT ? ca.x : ca.x + ca.w - rw, ca.y, rw, ca.h};
+        if (A.ribbon_pos == RP_LEFT) ca.x += rw;
+        ca.w -= rw;
+    } else if (A.ribbon && !tab_of(p)->term && A.ribbon_pos == RP_BOTTOM) {
+        f32 rh = roundf(S(36)) * (f32)ribbon_lines(ca.w);
+        ly->ribbon = (Rect){ca.x, ca.y + ca.h - rh, ca.w, rh};
+        ca.h -= rh;
+    }
+    ly->header = (Rect){ca.x, ca.y, ca.w, hh};
+    ly->list = (Rect){ca.x, ca.y + hh, ca.w, ca.h - hh};
     ly->has_trashbar = pane_is_trash(p);
     if (ly->has_trashbar) {
         f32 tbh = roundf(S(44));
         ly->list.h -= tbh;
-        ly->trashbar = (Rect){area.x, ly->list.y + ly->list.h, area.w, tbh};
+        ly->trashbar = (Rect){ca.x, ly->list.y + ly->list.h, ca.w, tbh};
         f32 bw = roundf(S(120)), bh2 = roundf(S(30)), byy = ly->trashbar.y + roundf((tbh - bh2) * 0.5f);
-        ly->rempty = (Rect){area.x + area.w - bw - roundf(S(10)), byy, bw, bh2};
+        ly->rempty = (Rect){ca.x + ca.w - bw - roundf(S(10)), byy, bw, bh2};
         ly->rrestore = (Rect){ly->rempty.x - bw - roundf(S(8)), byy, bw, bh2};
     }
     char bmp[PATH_MAX];
@@ -1037,19 +1061,19 @@ static void layout_pane(Pane *p, Rect area) {
     if (ly->has_snapbar) {
         f32 sbh2 = roundf(S(40));
         ly->list.h -= sbh2;
-        ly->snapbar = (Rect){area.x, ly->list.y + ly->list.h, area.w, sbh2};
+        ly->snapbar = (Rect){ca.x, ly->list.y + ly->list.h, ca.w, sbh2};
     }
     ly->has_cmpbar = cmp_side(p) >= 0;
     if (ly->has_cmpbar) {
         f32 cbh = roundf(S(40));
         ly->list.h -= cbh;
-        ly->cmpbar = (Rect){area.x, ly->list.y + ly->list.h, area.w, cbh};
+        ly->cmpbar = (Rect){ca.x, ly->list.y + ly->list.h, ca.w, cbh};
     }
     ly->has_sbar = A.search_pane == p || p->search_q[0];
     if (ly->has_sbar) {
         f32 sbh = roundf(S(44));
         ly->list.h -= sbh;
-        ly->sbar = (Rect){area.x, ly->list.y + ly->list.h, area.w, sbh};
+        ly->sbar = (Rect){ca.x, ly->list.y + ly->list.h, ca.w, sbh};
     }
     static const f32 row_px[3] = {22, 26, 32};
     ly->row_h = roundf(S(row_px[CLAMP(A.row_spacing, 0, 2)]));
@@ -1175,7 +1199,7 @@ static void col_toggle(int id) {
 
 static void layout_panel(Panel *pn, Rect r) {
     pn->area = r;
-    TabBands bands = tab_bands(r.y, S(1.f), panel_ntabs(pn));
+    TabBands bands = tab_bands(r.y, S(1.f), panel_ntabs(pn), r.w);
     f32 tb = bands.tabs_h;
     pn->bar = (Rect){r.x, bands.tabs_y, r.w, tb};
     f32 bw = roundf(S(26)), by = bands.tabs_y + roundf(S(6));
@@ -13108,6 +13132,7 @@ static void frame_draw(void) {
         }
     }
     draw_node_dividers(A.root);
+    draw_ribbon_drop();
     draw_preview();
     draw_sidebar();
     draw_brand();

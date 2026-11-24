@@ -39,8 +39,10 @@ plain text instead of clickable parts (its start cut off when it doesn't fit); a
 panel's navigation bar (cut, copy, paste, rename, move to Trash, compress to, new folder / file, open,
 open with, terminal, properties, select all, views, group by, hidden files, details panel; Extract here / Mount when
 they apply), with the right-click menu's icons and their names in a tooltip. Compress to, Open with, Views and Group by
-open the right-click menu's submenu as a dropdown. They act on that panel; greyed when they don't apply; what doesn't
-fit is in its "..." menu. These keys were added after `settings_version` and default to the theme colour on older
+open the right-click menu's submenu as a dropdown. They act on that panel; greyed when they don't apply.
+`ribbon_position=below` (`above` the path bar, the list's `bottom`, `left`, `right`; also by dragging the dots at its
+start - a bar of the accent shows where it goes) and `ribbon_overflow=more` (what doesn't fit: a "..." menu; `wrap`
+onto more rows / columns; `scroll`: arrows at both ends and the wheel slide it along). These keys were added after `settings_version` and default to the theme colour on older
 config files: no migration runs, so existing appearances are unchanged.
 `tab_style=pills` (Options -> Appearance -> Tab style, `cards` by default) draws the tabs as rounded pills centred in a
 box on the tab strip, instead of the open tab as a card joining the folder below it.
