@@ -12,7 +12,8 @@ static void settings_file(char *out, size_t cap, bool dir_only) {
     else snprintf(out, cap, "%s/settings.conf", base);
 }
 
-static const char *g_sort_names[SORT_COUNT] = {"name", "date", "type", "size", "created", "ext", "perms", "owner"};
+static const char *g_sort_names[SORT_COUNT] = {"name", "date", "type", "size", "created", "ext", "perms", "owner",
+                                                "accessed", "group", "link"};
 static const char *const g_exec_names[] = {"ask", "run", "terminal", "open"}; // EXEC_*
 
 static void settings_defaults(void) {

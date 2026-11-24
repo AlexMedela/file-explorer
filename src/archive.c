@@ -164,6 +164,8 @@ static void arc_scan(Listing *L) {
         e->btime = 0;
         e->mode = kids[i].mode;
         e->uid = getuid();
+        e->gid = getgid();
+        e->atime = 0;
         atomic_init(&e->meta, META_READY);
         e->ext = 0;
         if (!kids[i].dir) {

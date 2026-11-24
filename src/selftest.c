@@ -3917,13 +3917,46 @@ static int run_selftest_m9(void) {
         ST_CHECK(te_key(&e, SDLK_LEFT, SDL_KMOD_NONE) && e.animation.input > 1);
     }
 
+    // --- Date accessed, Group, Link target columns: filled with the metadata, sorted by, drawn ---
+    {
+        char back[PATH_MAX];
+        snprintf(back, sizeof back, "%s", p->path);
+        mkdir(M9_BASE "/cols", 0755);
+        st_write(M9_BASE "/cols/plain", 3);
+        symlink("zz-target", M9_BASE "/cols/l1");
+        symlink("aa-target", M9_BASE "/cols/l2");
+        pane_navigate(p, M9_BASE "/cols", true);
+        st_wait();
+        Listing *L = p->L;
+        ST_CHECK(L && L->links && L->count == 3);
+        for (u32 i = 0; L && i < L->count; i++) {
+            Entry *e = &L->entries[i];
+            const char *want = !strcmp(e->name, "l1") ? "zz-target" : !strcmp(e->name, "l2") ? "aa-target" : NULL;
+            ST_CHECK(e->gid == getgid() && e->atime > 0 && (want ? L->links[i] && !strcmp(L->links[i], want) : !L->links[i]));
+        }
+        for (int c = COL_ACCESSED; c <= COL_LINK; c++) do_action(p, ACT_COL_BASE + c);
+        ST_CHECK(col_visible(COL_ACCESSED) && col_visible(COL_GROUP) && col_visible(COL_LINK));
+        do_action(p, ACT_SORT_BASE + SORT_LINK);
+        st_wait();
+        st_frames(1);
+        ST_CHECK(p->sort_key == SORT_LINK && p->count == 3 && !strcmp(L->entries[p->order[0]].name, "l2") &&
+                 !strcmp(L->entries[p->order[1]].name, "l1") && !strcmp(L->entries[p->order[2]].name, "plain"));
+        st_shot("columns-link");
+        for (int c = COL_ACCESSED; c <= COL_LINK; c++) do_action(p, ACT_COL_BASE + c);
+        do_action(p, ACT_SORT_BASE + SORT_NAME);
+        pane_navigate(p, back, true);
+        st_wait();
+        st_rmrf(M9_BASE "/cols");
+    }
+
     // --- the toolbar's sort button: the same keys as the folder menu's Sort by, the direction, Folders first ---
     st_frames(1);
     Rect sb = p->ly.sortbtn;
     ST_CHECK(sb.w > 0 && sb.x + sb.w <= p->ly.filterbtn.x && p->ly.pathbar.x + p->ly.pathbar.w <= sb.x);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
     st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, sb.x + 5, sb.y + 5, SDL_BUTTON_LEFT, 1, 0);
-    int nkeys = SORT_CREATED + 1 + col_visible(COL_PERMS) + col_visible(COL_OWNER);
+    int nkeys = SORT_CREATED + 1 + col_visible(COL_PERMS) + col_visible(COL_OWNER) + col_visible(COL_ACCESSED) + col_visible(COL_GROUP) +
+                col_visible(COL_LINK);
     ST_CHECK(A.menu.open && A.menu.pane == p && A.menu.n == nkeys + 5);
     if (A.menu.open && A.menu.n == nkeys + 5) {
         bool has_ext = false;

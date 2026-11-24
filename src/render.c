@@ -1100,6 +1100,20 @@ static const char *owner_name(u32 uid) {
     return cache[k].name;
 }
 
+static const char *group_name(u32 gid) {
+    static struct { u32 gid; char name[32]; } cache[64];
+    static int n;
+    for (int i = 0; i < n; i++)
+        if (cache[i].gid == gid) return cache[i].name;
+    int k = n < 64 ? n++ : (int)(gid % 64);
+    cache[k].gid = gid;
+    struct group gr, *res = NULL;
+    char buf[1024];
+    if (getgrgid_r(gid, &gr, buf, sizeof buf, &res) == 0 && res) snprintf(cache[k].name, sizeof cache[k].name, "%s", gr.gr_name);
+    else snprintf(cache[k].name, sizeof cache[k].name, "%u", gid);
+    return cache[k].name;
+}
+
 static void fmt_perms(const Entry *e, char *out) {
     u16 m = e->mode;
     out[0] = (e->flags & ENT_LINK) ? 'l' : (e->flags & ENT_DIR) ? 'd' : '-';
@@ -2510,6 +2524,11 @@ static void draw_list(Pane *p, bool active) {
                 break;
             case COL_PERMS: if (meta) fmt_perms(e, buf); break;
             case COL_OWNER: if (meta) snprintf(buf, sizeof buf, "%s", owner_name(e->uid)); break;
+            case COL_ACCESSED: if (meta) fmt_date(e->atime, buf, sizeof buf, &tm_now); break;
+            case COL_GROUP: if (meta) snprintf(buf, sizeof buf, "%s", group_name(e->gid)); break;
+            case COL_LINK: // (the whole target, cut off at the column's edge)
+                if (meta && L->links && L->links[ei]) draw_text_fit(f, x0, ty, cw, L->links[ei], (int)strlen(L->links[ei]), dim, 0);
+                break;
             case COL_SIZE: {
                 u64 sz = 0;
                 bool have = false;
