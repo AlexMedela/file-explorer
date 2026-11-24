@@ -10,7 +10,9 @@ typedef struct {
     char uuid[64];        // filesystem UUID (several partitions share one in a multi-device btrfs)
     char mount[PATH_MAX]; // "" = not mounted
     u64 size;
-    bool removable;       // RM or HOTPLUG (USB sticks, SD cards, external disks)
+    bool removable;       // RM or HOTPLUG (USB sticks, SD cards, external disks), a disc, an opened image
+    bool optical;         // a CD / DVD / Blu-ray in a drive (eject opens the tray)
+    char image[PATH_MAX]; // a loop device: the disc / disk image file it shows (.iso, .img), else ""
 } BlockDev;
 
 // A phone or camera on a USB cable, as GVfs's volume monitors see it (browsed through GVfs's FUSE bridge).
@@ -92,6 +94,21 @@ static bool dev_hidden_parttype(const char *t) {
     return false;
 }
 
+// The image file behind a loop device ("loop0"), from sysfs; false: none (a free loop device).
+static bool loop_backing_file(const char *loop, char *out, size_t cap) {
+    const char *sys = getenv("FE_SYS_BLOCK"); // (tests)
+    char p[160];
+    snprintf(p, sizeof p, "%s/%s/loop/backing_file", sys && sys[0] ? sys : "/sys/block", loop);
+    int fd = open(p, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    ssize_t n = read(fd, out, cap - 1);
+    close(fd);
+    if (n <= 0) return false;
+    out[n] = 0;
+    out[strcspn(out, "\n")] = 0;
+    return out[0] == '/';
+}
+
 // Build the list from `lsblk -P` output (separate for tests).
 static void devices_parse(const char *text, DevList *L) {
     L->n = 0;
@@ -115,11 +132,15 @@ static void devices_parse(const char *text, DevList *L) {
         lsblk_field(line, "PKNAME", pk, sizeof pk);
         lsblk_field(line, "UUID", uuid, sizeof uuid);
         if (!path[0] || !fstype[0]) continue;                   // nothing to mount
-        if (strcmp(type, "part") && strcmp(type, "disk") && strcmp(type, "crypt") && strcmp(type, "lvm")) continue;
+        bool rom = !strcmp(type, "rom"), loop = !strncmp(path, "/dev/loop", 9); // a disc; an opened image (or a snap...)
+        if (strcmp(type, "part") && strcmp(type, "disk") && strcmp(type, "crypt") && strcmp(type, "lvm") && !rom && !(loop && !strcmp(type, "loop")))
+            continue;
+        char image[PATH_MAX] = "";
+        if (loop && !loop_backing_file(pk[0] ? pk : path_basename(path), image, sizeof image)) continue;
         if (!strcmp(fstype, "swap") || !strncmp(fstype, "crypto_", 7) || !strcmp(fstype, "LVM2_member") ||
             !strcmp(fstype, "linux_raid_member") || !strcmp(fstype, "squashfs"))
             continue;
-        if (!strncmp(path, "/dev/zram", 9) || !strncmp(path, "/dev/loop", 9) || dev_hidden_parttype(ptype)) continue;
+        if (!strncmp(path, "/dev/zram", 9) || dev_hidden_parttype(ptype)) continue;
         BlockDev *d = &L->d[L->n];
         memset(d, 0, sizeof *d);
         snprintf(d->dev, sizeof d->dev, "%s", path);
@@ -128,7 +149,9 @@ static void devices_parse(const char *text, DevList *L) {
         snprintf(d->fstype, sizeof d->fstype, "%s", fstype);
         snprintf(d->uuid, sizeof d->uuid, "%s", uuid);
         d->size = strtoull(size, NULL, 10);
-        d->removable = !strcmp(rm, "1") || !strcmp(hp, "1");
+        d->removable = !strcmp(rm, "1") || !strcmp(hp, "1") || rom || loop;
+        d->optical = rom;
+        snprintf(d->image, sizeof d->image, "%s", image);
         dev_mount_point(mm, path, d->mount, sizeof d->mount);
         L->n++;
     }
@@ -661,7 +684,7 @@ static void phone_error_hint(char kind, const char *err, char *out, size_t cap) 
 
 // --- actions (worker thread) ------------------------------------------------------
 
-enum { DEV_MOUNT, DEV_UNMOUNT, DEV_EJECT, DEV_NET_MOUNT, DEV_NET_UNMOUNT, DEV_OWN_MOUNT };
+enum { DEV_MOUNT, DEV_UNMOUNT, DEV_EJECT, DEV_NET_MOUNT, DEV_NET_UNMOUNT, DEV_OWN_MOUNT, DEV_IMAGE_MOUNT };
 typedef struct {
     int kind;
     char target[PATH_MAX]; // device, URI, or mount point
@@ -1136,20 +1159,50 @@ static int own_mount_run(DevJob *j) {
     return res;
 }
 
+// udisksctl mount -b dev [-o opts]: rc, its output in out, where it went in mount. Already mounted (the desktop's
+// automounter can be quicker for an image we just opened): that mount, rc 0.
+static int udisks_mount(const char *ud, const char *dev, const char *opts, char *out, size_t cap, char *mount, size_t mcap) {
+    char *argv[] = {(char *)ud, "mount", "-b", (char *)dev, opts && opts[0] ? "-o" : NULL, (char *)opts, NULL};
+    int rc = run_capture(argv, out, cap);
+    // "Mounted /dev/sdb1 at /run/media/me/STICK", "... is already mounted at `/run/media/me/X'."
+    const char *at = rc ? strstr(out, "already mounted at `") : strstr(out, " at ");
+    if (at) {
+        snprintf(mount, mcap, "%s", at + (rc ? 20 : 4));
+        mount[strcspn(mount, "\n'")] = 0;
+        size_t l = strlen(mount);
+        if (l && mount[l - 1] == '.') mount[l - 1] = 0;
+        if (rc && mount[0] == '/') rc = 0;
+    }
+    return rc;
+}
+
 static void dev_job(void *arg) {
     DevJob *j = arg;
     const char *ud = tool("FE_UDISKSCTL", "udisksctl");
     switch (j->kind) {
-    case DEV_MOUNT: {
-        char *argv[] = {(char *)ud, "mount", "-b", j->target, j->opts[0] ? "-o" : NULL, j->opts, NULL};
+    case DEV_MOUNT: j->rc = udisks_mount(ud, j->target, j->opts, j->out, sizeof j->out, j->mount, sizeof j->mount); break;
+    case DEV_IMAGE_MOUNT: { // a disc / disk image: a read-only loop device (udisks: no root), then its filesystem
+        char *argv[] = {(char *)ud, "loop-setup", "-r", "-f", j->target, NULL};
         j->rc = run_capture(argv, j->out, sizeof j->out);
-        // "Mounted /dev/sdb1 at /run/media/me/STICK"
-        const char *at = strstr(j->out, " at ");
-        if (!j->rc && at) {
-            snprintf(j->mount, sizeof j->mount, "%s", at + 4);
-            j->mount[strcspn(j->mount, "\n")] = 0;
-            size_t l = strlen(j->mount);
-            if (l && j->mount[l - 1] == '.') j->mount[l - 1] = 0;
+        const char *as = strstr(j->out, " as /dev/"); // "Mapped file /x/a.iso as /dev/loop0."
+        if (j->rc || !as) { if (!j->rc) j->rc = 1; break; }
+        char loop[64];
+        snprintf(loop, sizeof loop, "%s", as + 4);
+        loop[strcspn(loop, " .\n")] = 0;
+        j->rc = udisks_mount(ud, loop, NULL, j->out, sizeof j->out, j->mount, sizeof j->mount);
+        // a disk image with partitions: its first partition that mounts (the others are in Devices); the kernel adds
+        // their nodes a moment after the loop device
+        for (int k = 1; j->rc && k <= 8; k++) {
+            char part[80], o2[512];
+            snprintf(part, sizeof part, "%sp%d", loop, k);
+            struct stat st;
+            for (int w = 0; w < 10 && stat(part, &st); w++) usleep(50000);
+            if (stat(part, &st)) break;
+            if (!udisks_mount(ud, part, NULL, o2, sizeof o2, j->mount, sizeof j->mount)) j->rc = 0;
+        }
+        if (j->rc) { // nothing in it to open: let the loop device go
+            char *del[] = {(char *)ud, "loop-delete", "-b", loop, NULL}, tmp[256];
+            run_capture(del, tmp, sizeof tmp);
         }
         break;
     }
@@ -1157,12 +1210,19 @@ static void dev_job(void *arg) {
     case DEV_EJECT: {
         char *argv[] = {(char *)ud, "unmount", "-b", j->target, NULL};
         j->rc = run_capture(argv, j->out, sizeof j->out);
-        if (!j->rc && j->kind == DEV_EJECT && j->disk[0]) { // spin down / power off so it can be pulled out
-            char disk[80];
+        if (!j->rc && j->kind == DEV_EJECT && j->disk[0]) {
+            char disk[80], tmp[256];
             snprintf(disk, sizeof disk, "/dev/%s", j->disk);
-            char *argv2[] = {(char *)ud, "power-off", "-b", disk, NULL};
-            char tmp[256];
-            run_capture(argv2, tmp, sizeof tmp); // not every device supports it; unmounted is what matters
+            if (!strncmp(j->disk, "loop", 4)) { // an opened image: the loop device goes (the file stays)
+                char *argv2[] = {(char *)ud, "loop-delete", "-b", disk, NULL};
+                run_capture(argv2, tmp, sizeof tmp);
+            } else if (!strncmp(j->disk, "sr", 2)) { // a disc: open the tray
+                char *argv2[] = {(char *)tool("FE_EJECT", "eject"), disk, NULL};
+                run_capture(argv2, tmp, sizeof tmp);
+            } else { // spin down / power off so it can be pulled out
+                char *argv2[] = {(char *)ud, "power-off", "-b", disk, NULL};
+                run_capture(argv2, tmp, sizeof tmp); // not every device supports it; unmounted is what matters
+            }
         }
         break;
     }

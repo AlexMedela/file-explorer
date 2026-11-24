@@ -471,6 +471,7 @@ enum {
     ACT_QA_MOVE_BASE = 480, // + group index (up to 16)
     ACT_DEV_MOUNT = 500, ACT_DEV_UNMOUNT, ACT_DEV_EJECT, ACT_NET_DISCONNECT, ACT_DEV_OPEN_TAB,
     ACT_DEV_RENAME, ACT_DEV_RESET_NAME, ACT_DEV_SECTION_TOGGLE, ACT_NET_CONNECT_SAVED, ACT_NET_FORGET, ACT_NET_EDIT_SAVED, ACT_NET_NEW,
+    ACT_IMG_MOUNT, ACT_IMG_BROWSE, // a disc / disk image file (.iso, .img): open it as a drive / an ISO's files like an archive's
     ACT_OW_APP_BASE = 520, // + index of an app in the Open with submenu (up to OW_MENU_APPS, below 540)
     ACT_CMP_DIALOG = 560,    // "Compare with...": the dialog with both folders
     ACT_ADDON_BASE = 580, ACT_ADDON_LAST = 599, // add-ons' actions (addons.c)
@@ -2396,6 +2397,20 @@ static void open_folder(const char *path) {
 static const char *place_open_path(const Place *p, char *buf, size_t cap); // remote servers
 static void net_server_folder(const char *uri, const char *mount, char *out, size_t cap); // remote servers
 
+// A disc or disk image a loop device can show (.iso, .img): "Mount" in its menu.
+static bool is_disc_image(const char *name) {
+    const char *dot = strrchr(name, '.');
+    return dot && (!strcasecmp(dot, ".iso") || !strcasecmp(dot, ".img"));
+}
+
+// Mount a disc / disk image read-only and open it (already open: just go there).
+static void image_mount(const char *path) {
+    for (int k = 0; k < A.devs.n; k++)
+        if (!strcmp(A.devs.d[k].image, path) && A.devs.d[k].mount[0]) { open_folder(A.devs.d[k].mount); return; }
+    toast("Mounting \xE2\x80\x9C%s\xE2\x80\x9D\xE2\x80\xA6", path_basename(path));
+    dev_start(DEV_IMAGE_MOUNT, path, NULL, true);
+}
+
 static void place_dev_action(int row, int act) {
     if (row < 0 || row >= A.nplaces) return;
     Place *pl = &A.places[row];
@@ -2477,7 +2492,7 @@ static void dev_job_done(void *arg) {
     A.dev_busy--;
     char first[600];
     snprintf(first, sizeof first, "%s", j->out);
-    if (j->kind == DEV_MOUNT || j->kind == DEV_UNMOUNT || j->kind == DEV_EJECT) udisks_tidy(first);
+    if (j->kind == DEV_MOUNT || j->kind == DEV_UNMOUNT || j->kind == DEV_EJECT || j->kind == DEV_IMAGE_MOUNT) udisks_tidy(first);
     else first[strcspn(first, "\n")] = 0;
     if (j->rc != 0 && j->kind == DEV_MOUNT && !j->opts[0]) { // a Windows volume that wasn't shut down cleanly
         const BlockDev *bd = NULL;
@@ -2537,7 +2552,7 @@ static void dev_job_done(void *arg) {
         phone_error_hint(j->phone, first, hint, sizeof hint);
         toast("Couldn't open the %s: %s", j->phone == 'a' ? "iPhone" : j->phone == 'c' ? "camera" : "phone", hint);
     } else if (j->rc != 0) {
-        const char *what = j->kind == DEV_MOUNT || j->kind == DEV_NET_MOUNT ? "mount" : "unmount";
+        const char *what = j->kind == DEV_MOUNT || j->kind == DEV_NET_MOUNT || j->kind == DEV_IMAGE_MOUNT ? "mount" : "unmount";
         if (j->rc == -1 && !first[0]) toast("Couldn't %s: the helper tool isn't installed", what);
         else toast("Couldn't %s: %s", what, first[0] ? first : "unknown error");
     } else if (j->kind == DEV_EJECT || j->kind == DEV_UNMOUNT) {
@@ -2547,7 +2562,7 @@ static void dev_job_done(void *arg) {
         for (int k = 0; k < A.devs.nph && !phone; k++) phone = !strcmp(A.devs.ph[k].mount, j->target);
         toast(phone ? "Safe to unplug" : "Disconnected");
     }
-    if (j->rc == 0 && j->kind == DEV_MOUNT && j->open_after && j->mount[0]) {
+    if (j->rc == 0 && (j->kind == DEV_MOUNT || j->kind == DEV_IMAGE_MOUNT) && j->open_after && j->mount[0]) {
         if (A.dev_open_tab) tab_new(j->mount, A.cur + 1, true);
         else open_folder(j->mount);
     }
@@ -2981,7 +2996,9 @@ static void init_places(void) {
         p->dev = k;
         p->removable = d->removable;
         snprintf(p->path, sizeof p->path, "%s", d->mount);
-        if (d->label[0]) snprintf(p->label, sizeof p->label, "%s", d->label);
+        if (d->image[0]) snprintf(p->label, sizeof p->label, "%s", path_basename(d->image)); // an opened image: its file
+        else if (d->label[0]) snprintf(p->label, sizeof p->label, "%s", d->label);
+        else if (d->optical) snprintf(p->label, sizeof p->label, "Disc");
         else if (d->mount[0]) snprintf(p->label, sizeof p->label, "%s", path_basename(d->mount));
         else {
             char sz[32];
@@ -4563,6 +4580,7 @@ static void open_entry(Pane *p, i64 pos, bool new_tab) {
     path_join(full, sizeof full, p->path, e->name);
     if (!(e->flags & ENT_DIR) && picker_open_file(p, full)) return; // picking: the file is the answer
     if (!(e->flags & ENT_DIR) && pane_is_archive(p)) { arc_extract_open(p, e->name); return; }
+    if (!(e->flags & ENT_DIR) && is_disc_image(e->name) && !path_is_remote(p->path)) { image_mount(full); return; } // a drive
     if (!(e->flags & ENT_DIR) && !p->L->is_search && is_archive_name(e->name) && !new_tab) { // browse it like a folder
         char vp[PATH_MAX + 4];
         snprintf(vp, sizeof vp, "%s::", full);
@@ -6259,6 +6277,21 @@ static void do_action(Pane *p, int act) {
     case ACT_QA_GROUP_DELETE: case ACT_QA_GROUP_TOGGLE:
         qa_action(act);
         break;
+    case ACT_IMG_MOUNT:
+        if (p->order && p->cursor >= 0 && p->cursor < (i64)p->count) {
+            char full[PATH_MAX];
+            path_join(full, sizeof full, p->path, p->L->entries[p->order[p->cursor]].name);
+            image_mount(full);
+        }
+        break;
+    case ACT_IMG_BROWSE:
+        if (p->order && p->cursor >= 0 && p->cursor < (i64)p->count) {
+            char vp[PATH_MAX + 4];
+            path_join(vp, sizeof vp, p->path, p->L->entries[p->order[p->cursor]].name);
+            strncat(vp, "::", sizeof vp - strlen(vp) - 1);
+            pane_navigate(p, vp, true);
+        }
+        break;
     case ACT_DEV_MOUNT: case ACT_DEV_UNMOUNT: case ACT_DEV_EJECT: case ACT_NET_DISCONNECT: case ACT_DEV_OPEN_TAB:
         if (A.menu_place >= 0 && A.menu_place < A.nplaces && A.places[A.menu_place].kind == PK_BORG) { // a saved backup: open it
             Place *bp = &A.places[A.menu_place];
@@ -7463,7 +7496,11 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         if (pane_is_archive(p)) {
             menu_add("Extract next to the archive", "Drag out", ACT_EXTRACT_SEL, true);
             menu_sep();
-        } else if (!dir && is_archive_name(e->name)) {
+        } else if (!dir && is_disc_image(e->name) && !path_is_remote(p->path)) {
+            menu_add("Mount", "Double-click", ACT_IMG_MOUNT, true);
+            if (is_archive_name(e->name)) menu_add("Browse without mounting", "", ACT_IMG_BROWSE, true); // (an ISO, like an archive)
+        }
+        if (!pane_is_archive(p) && !dir && is_archive_name(e->name)) {
             int na = extract_here_count(p, false);
             static char lbl[48]; // (the menu keeps the pointer)
             if (na > 1) snprintf(lbl, sizeof lbl, "Extract %d archives here", na);
@@ -8416,7 +8453,7 @@ static int menu_action_icon(const MenuItem *it) {
     case ACT_TERMINAL_EXTERNAL: return UI_SQUARE_TERMINAL;
     case ACT_RUN: return UI_PLAY;
     case ACT_RUN_TERM: return UI_SQUARE_TERMINAL;
-    case ACT_OPEN: case ACT_DU_OPEN: case ACT_SNAP_OPEN: case ACT_DEV_MOUNT: return UI_FOLDER_OPEN;
+    case ACT_OPEN: case ACT_DU_OPEN: case ACT_SNAP_OPEN: case ACT_DEV_MOUNT: case ACT_IMG_MOUNT: case ACT_IMG_BROWSE: return UI_FOLDER_OPEN;
     case ACT_OPEN_WITH: return it->sub ? UI_FOLDER_OPEN : UI_ELLIPSIS; // the submenu / "Other app..."
     case ACT_OPEN_TAB: case ACT_PLACE_NEW_TAB: case ACT_DU_OPEN_TAB: case ACT_DEV_OPEN_TAB: case ACT_CLOUD_CONNECT_TAB:
     case ACT_TAB_NEW: return UI_SQUARE_PLUS;
