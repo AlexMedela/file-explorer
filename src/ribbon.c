@@ -1,6 +1,6 @@
-// ribbon.c - the ribbon (Options > Appearance > Ribbon, off by default): one row of the common file actions across the
-// top of the window's file area, above the panels (so above every path bar), acting on the active panel. Buttons that
-// don't apply are greyed; what doesn't fit goes into its "..." menu. Included from app.c after render.c.
+// ribbon.c - the ribbon (Options > Appearance > Ribbon, off by default): a row of icons for the common file actions
+// right under each panel's navigation bar, acting on that panel. Icons that don't apply are greyed; their names show
+// in a tooltip; what doesn't fit goes into its "..." menu. Included from app.c after render.c.
 
 typedef struct {
     const char *label;
@@ -37,11 +37,9 @@ static struct {
     Rect r[RIBBON_N]; // where each shown button is (w 0: in the "..." menu, or not shown here)
     bool shown[RIBBON_N];
     Rect more;        // the "..." button (w 0: everything fits)
-} g_rb;
+} g_rb;           // (of the pane last laid out: drawing and clicks lay it out first)
 
-static f32 ribbon_height(void) { return A.ribbon ? roundf(S(44)) : 0.f; } // (the brand row's height: they line up)
-
-// The entry under the cursor of the active pane (NULL: none, or a line of a contents search).
+// The entry under the cursor of the pane (NULL: none, or a line of a contents search).
 static Entry *ribbon_cursor_entry(Pane *p) {
     if (!p || !p->L || !p->order || p->cursor < 0 || p->cursor >= (i64)p->count) return NULL;
     Entry *e = &p->L->entries[p->order[p->cursor]];
@@ -72,17 +70,14 @@ static bool ribbon_item_on(const RibbonItem *it, Pane *p) {
     return (it->act == ACT_HIDDEN && A.show_hidden) || (it->act == ACT_PREVIEW && A.preview_on) || (it->act == ACT_TREE_VIEW && p->tree);
 }
 
-static f32 ribbon_item_w(const RibbonItem *it) {
-    return roundf(S(10) + S(16) + S(6)) + text_width(&A.font_small, it->label, (int)strlen(it->label)) + roundf(S(10));
-}
-
-// Place the buttons in A.r_ribbon; the ones that don't fit (in order, from the end) go into the "..." menu.
+// Place the icons in the pane's ribbon band, from the left under the back button; the ones that don't fit (from the
+// end) go into the "..." menu at its right end.
 static void ribbon_layout(Pane *p) {
-    Rect r = A.r_ribbon;
-    f32 gap = roundf(S(2)), sep = roundf(S(13)), bh = roundf(S(32)), by = r.y + roundf((r.h - bh) * 0.5f);
-    f32 morew = roundf(S(32)), x0 = r.x + roundf(S(8)), right = r.x + r.w - roundf(S(8));
+    Rect r = p->ly.ribbon;
+    f32 bs = roundf(S(30)), gap = roundf(S(2)), sep = roundf(S(13)), by = r.y + roundf((r.h - bs) * 0.5f) - roundf(S(2));
+    f32 x0 = r.x + roundf(S(8)), right = r.x + r.w - roundf(S(8));
     for (int pass = 0; pass < 2; pass++) { // pass 1: with room for "..."
-        f32 x = x0, lim = pass ? right - morew - gap : right;
+        f32 x = x0, lim = pass ? right - bs - gap : right;
         bool all = true;
         int last_group = -1;
         for (int i = 0; i < RIBBON_N; i++) {
@@ -90,41 +85,40 @@ static void ribbon_layout(Pane *p) {
             g_rb.shown[i] = ribbon_item_shown(it, p);
             g_rb.r[i] = (Rect){0};
             if (!g_rb.shown[i]) continue;
-            f32 w = ribbon_item_w(it), sx = last_group >= 0 && it->group != last_group ? sep : 0;
-            if (!all || x + sx + w > lim) { all = false; continue; }
+            f32 sx = last_group >= 0 && it->group != last_group ? sep : 0;
+            if (!all || x + sx + bs > lim) { all = false; continue; }
             x += sx;
-            g_rb.r[i] = (Rect){x, by, w, bh};
-            x += w + gap;
+            g_rb.r[i] = (Rect){x, by, bs, bs};
+            x += bs + gap;
             last_group = it->group;
         }
-        g_rb.more = all ? (Rect){0} : (Rect){right - morew, by, morew, bh};
+        g_rb.more = all ? (Rect){0} : (Rect){right - bs, by, bs, bs};
         if (all || pass) break;
     }
 }
 
-static void draw_ribbon(void) {
-    if (!A.ribbon || A.r_ribbon.w <= 0) return;
-    Rect r = A.r_ribbon;
-    Pane *p = active_pane();
-    draw_rect(r.x, r.y, r.w, r.h, C(COL_TABBAR));
-    if (g_separators) draw_rect(r.x, r.y + r.h - 1, r.w, 1, C(COL_BORDER));
+// The pane's ribbon: icons on the navigation bar's colour (it reads as a second row of it); the name of each in a
+// tooltip.
+static void draw_ribbon(Pane *p) {
+    Rect r = p->ly.ribbon;
+    if (r.h <= 0 || r.w <= 0) return;
+    draw_rect(r.x, r.y, r.w, r.h, C(COL_TOOLBAR));
     ribbon_layout(p);
-    Font *f = &A.font_small;
     int last_group = -1;
     for (int i = 0; i < RIBBON_N; i++) {
         Rect b = g_rb.r[i];
         if (b.w <= 0) continue;
         const RibbonItem *it = &g_ribbon[i];
         if (last_group >= 0 && it->group != last_group) // the line between two groups
-            draw_rect(b.x - roundf(S(7)), b.y + roundf(S(7)), 1, b.h - roundf(S(14)), C(COL_BORDER));
+            draw_rect(b.x - roundf(S(7)), b.y + roundf(S(8)), 1, b.h - roundf(S(16)), C(COL_BORDER));
         last_group = it->group;
         bool en = ribbon_item_enabled(it, p), on = ribbon_item_on(it, p), hv = en && hot(b);
         if (on || hv) draw_rrect(b.x, b.y, b.w, b.h, S(6), on ? CA(COL_ACCENT, hv ? 0.30f : 0.22f) : C(COL_FIELD_HOVER));
-        Color c = !en ? C(COL_TEXT_FAINT) : on ? C(COL_ACCENT) : C(COL_TEXT);
-        f32 is = roundf(S(16)), ix = b.x + roundf(S(10));
+        f32 is = roundf(S(18));
         int icon = it->act == ACT_HIDDEN && !A.show_hidden ? UI_EYE_OFF : it->icon;
-        draw_ui_icon(icon, ix, roundf(b.y + (b.h - is) * 0.5f), is, en ? (on ? C(COL_ACCENT) : C(COL_TEXT_DIM)) : C(COL_TEXT_FAINT));
-        draw_text(f, ix + is + roundf(S(6)), text_y(f, b.y, b.h), it->label, (int)strlen(it->label), c);
+        draw_ui_icon(icon, roundf(b.x + (b.w - is) * 0.5f), roundf(b.y + (b.h - is) * 0.5f), is,
+                     !en ? C(COL_TEXT_FAINT) : on ? C(COL_ACCENT) : C(COL_TEXT_DIM));
+        fit_tip_offer_box(b.x, b.y, b.w, b.h, it->label, (int)strlen(it->label)); // (its name, after a moment)
     }
     if (g_rb.more.w > 0) {
         Rect b = g_rb.more;
@@ -132,6 +126,7 @@ static void draw_ribbon(void) {
         if (open || hot(b)) draw_rrect(b.x, b.y, b.w, b.h, S(6), C(COL_FIELD_HOVER));
         f32 is = roundf(S(18));
         draw_ui_icon(UI_ELLIPSIS, roundf(b.x + (b.w - is) * 0.5f), roundf(b.y + (b.h - is) * 0.5f), is, C(COL_TEXT_DIM));
+        fit_tip_offer_box(b.x, b.y, b.w, b.h, "More", 4);
     }
 }
 
@@ -156,26 +151,14 @@ static void ribbon_more_menu(Pane *p) {
     menu_finish(g_rb.more.x, g_rb.more.y + g_rb.more.h + S(4));
 }
 
-// On a button (else the ribbon's empty space, which moves the window like a title bar).
-static bool ribbon_button_at(f32 x, f32 y) {
-    if (!A.ribbon || !in_rect(A.r_ribbon, x, y)) return false;
-    if (in_rect(g_rb.more, x, y)) return true;
-    for (int i = 0; i < RIBBON_N; i++)
-        if (g_rb.r[i].w > 0 && in_rect(g_rb.r[i], x, y)) return true;
-    return false;
-}
-
-// A click in the ribbon (true: it was the ribbon's, even on empty space).
-static bool ribbon_mouse_down(f32 x, f32 y) {
-    if (!A.ribbon || !in_rect(A.r_ribbon, x, y)) return false;
-    Pane *p = active_pane();
+// A click in the pane's ribbon: the button there (greyed ones do nothing), or the "..." menu.
+static void ribbon_click(Pane *p, f32 x, f32 y) {
     ribbon_layout(p);
-    if (g_rb.more.w > 0 && in_rect(g_rb.more, x, y)) { ribbon_more_menu(p); return true; }
+    if (g_rb.more.w > 0 && in_rect(g_rb.more, x, y)) { ribbon_more_menu(p); return; }
     for (int i = 0; i < RIBBON_N; i++) {
         if (g_rb.r[i].w <= 0 || !in_rect(g_rb.r[i], x, y)) continue;
         if (ribbon_item_enabled(&g_ribbon[i], p)) do_action(p, g_ribbon[i].act);
         A.redraw = true;
-        return true;
+        return;
     }
-    return true;
 }

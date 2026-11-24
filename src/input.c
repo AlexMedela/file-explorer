@@ -1,7 +1,7 @@
 // input.c - keyboard, text and mouse handlers, and SDL event dispatch (handle_event) (included from app.c)
 
 static bool upd_card_click(f32 x, f32 y); // (integration.c)
-static bool ribbon_mouse_down(f32 x, f32 y); // (ribbon.c)
+static void ribbon_click(Pane *p, f32 x, f32 y); // (ribbon.c)
 
 // --- input -----------------------------------------------------------------
 
@@ -464,6 +464,7 @@ static void on_mouse_down_pane(Pane *p, SDL_MouseButtonEvent *b, f32 x, f32 y) {
     }
     if (b->button != SDL_BUTTON_LEFT) return;
 
+    if (ly->ribbon.h > 0 && in_rect(ly->ribbon, x, y)) { ribbon_click(p, x, y); return; }
     if (in_rect(ly->back, x, y)) { pane_history(p, -1); return; }
     if (in_rect(ly->fwd, x, y)) { pane_history(p, +1); return; }
     if (in_rect(ly->up, x, y)) { pane_up(p); return; }
@@ -689,7 +690,6 @@ static void on_mouse_down(SDL_MouseButtonEvent *b) {
     if (A.edit_pane && !in_rect(A.edit_pane->ly.pathbar, x, y)) A.edit_pane = NULL;
 
     if (titlebar_mouse_down(b, x, y)) return;
-    if (b->button == SDL_BUTTON_LEFT && ribbon_mouse_down(x, y)) return;
     Node *dn = node_div_at(A.root, x, y);
     if (dn && b->button == SDL_BUTTON_LEFT) {
         A.drag = DRAG_SPLIT;

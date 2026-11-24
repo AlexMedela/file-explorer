@@ -48,7 +48,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED, "Unified surfaces", "Sidebar, header, preview and status bar take the file area's background; the lines between them stay"},
     {OC_APPEARANCE, OK_BOOL, OPT_SEPARATORS, "Separator lines", "Lines between the sidebar, header, columns, preview and status bar (an edge you can drag shows on hover)"},
     {OC_APPEARANCE, OK_BOOL, OPT_TRANSPARENT_PATHBAR, "Transparent path bar", "Remove only the path field fill; pills and search stay filled"},
-    {OC_APPEARANCE, OK_BOOL, OPT_RIBBON, "Ribbon", "A row of common file actions above the folders (cut, copy, paste, rename, new folder, terminal...), for the active panel"},
+    {OC_APPEARANCE, OK_BOOL, OPT_RIBBON, "Ribbon", "A row of icons for common file actions under the path bar (cut, copy, paste, rename, new folder, terminal...)"},
     {OC_APPEARANCE, OK_BOOL, OPT_PATH_TEXT, "Path as text", "Show the folder's path as plain text instead of clickable parts; a click puts it in edit mode (paste a path, Enter goes)"},
     {OC_APPEARANCE, OK_INT, OPT_NAV_SELECTION_OPACITY, "Navigation selection opacity", "Accent mix for sidebar, Options categories and pill tab selections, 0% to 100%"},
     {OC_APPEARANCE, OK_BOOL, OPT_NAV_SELECTOR_MARK, "Toggle navigation selector mark", "Show the small accent edge on selected sidebar and Options navigation rows"},

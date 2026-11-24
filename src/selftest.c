@@ -4007,41 +4007,51 @@ static int run_selftest_m9(void) {
         st_rmrf(M9_BASE "/cols");
     }
 
-    // --- the ribbon (off by default): above the panels, buttons for the active panel, the rest in "..." ---
+    // --- the ribbon (off by default): icons under the navigation bar, for that panel; the rest in "..." ---
     {
-        ST_CHECK(!A.ribbon && A.r_ribbon.h == 0);
+        ST_CHECK(!A.ribbon && p->ly.ribbon.h == 0);
+        f32 hy0 = p->ly.header.y;
         A.ribbon = true;
         st_frames(2);
-        ST_CHECK(A.r_ribbon.h == roundf(S(44)) && A.r_ribbon.y == 0 && p->ly.toolbar.y >= A.r_ribbon.h && A.r_content.y == A.r_ribbon.h);
+        PaneLayout *rl = &p->ly;
+        ST_CHECK(rl->ribbon.h == roundf(S(36)) && rl->ribbon.y == rl->toolbar.y + rl->toolbar.h && rl->header.y == rl->ribbon.y + rl->ribbon.h &&
+                 rl->header.y == hy0 + rl->ribbon.h);
         st_shot("ribbon");
-        int ci = -1, hi = -1;
+        int hi = -1, di = -1;
         for (int i = 0; i < RIBBON_N; i++) {
-            if (g_ribbon[i].act == ACT_COPY) ci = i;
             if (g_ribbon[i].act == ACT_HIDDEN) hi = i;
+            if (g_ribbon[i].act == ACT_PREVIEW) di = i;
         }
-        // a button is the ribbon's; its empty end moves the window (like a title bar)
-        Rect cb = g_rb.r[ci];
-        ST_CHECK(ci >= 0 && cb.w > 0 && ribbon_button_at(cb.x + 4, cb.y + 4) && !ribbon_button_at(A.r_ribbon.x + A.r_ribbon.w - S(60), A.r_ribbon.y + 2));
-        // what doesn't fit: the "..." menu (a narrow window), its toggles checked like the buttons
-        int w0 = A.W;
-        A.W = (int)roundf(S(700));
-        st_frames(1);
-        ST_CHECK(g_rb.more.w > 0 && hi >= 0 && g_rb.shown[hi] && g_rb.r[hi].w == 0);
+        // everything fits in a wide panel; a click on an icon runs it (here: hidden files, drawn as on)
+        ribbon_layout(p);
         bool h0 = A.show_hidden;
+        ST_CHECK(g_rb.more.w == 0 && hi >= 0 && g_rb.r[hi].w > 0);
+        Rect hb = g_rb.r[hi];
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, hb.x + hb.w * 0.5f, hb.y + hb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, hb.x + hb.w * 0.5f, hb.y + hb.h * 0.5f, SDL_BUTTON_LEFT, 1, 0);
+        ST_CHECK(A.show_hidden == !h0 && ribbon_item_on(&g_ribbon[hi], p) == A.show_hidden);
+        do_action(p, ACT_HIDDEN);
+        // a narrow window: the last ones go into "...", which runs them like the icons
+        int w0 = A.W;
+        A.W = (int)roundf(S(640));
+        st_frames(1);
+        ribbon_layout(p);
+        ST_CHECK(g_rb.more.w > 0 && di >= 0 && g_rb.shown[di] && g_rb.r[di].w == 0 && g_rb.more.x + g_rb.more.w <= rl->ribbon.x + rl->ribbon.w);
+        bool p0 = A.preview_on;
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, g_rb.more.x + 4, g_rb.more.y + 4, SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, g_rb.more.x + 4, g_rb.more.y + 4, SDL_BUTTON_LEFT, 1, 0);
         int mi = -1;
         for (int i = 0; A.menu.open && i < A.menu.n; i++)
-            if (A.menu.items[i].act == ACT_HIDDEN) mi = i;
+            if (A.menu.items[i].act == ACT_PREVIEW) mi = i;
         ST_CHECK(A.menu.open && mi >= 0);
         st_shot("ribbon-more");
         if (mi >= 0) menu_activate(mi);
-        ST_CHECK(A.show_hidden == !h0 && !A.menu.open);
-        do_action(p, ACT_HIDDEN);
+        ST_CHECK(A.preview_on == !p0 && !A.menu.open);
+        if (A.preview_on != p0) preview_toggle();
         A.W = w0;
         A.ribbon = false;
         st_frames(2);
-        ST_CHECK(A.r_ribbon.h == 0 && A.r_content.y == 0);
+        ST_CHECK(p->ly.ribbon.h == 0 && p->ly.header.y == hy0);
     }
 
     // --- the toolbar's sort button: the same keys as the folder menu's Sort by, the direction, Folders first ---

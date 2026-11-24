@@ -2756,6 +2756,8 @@ static void draw_cmpbar(Pane *p) {
     draw_cross(close.x + close.w * 0.5f, close.y + close.h * 0.5f, S(9), MAX(1.f, S(1.5f)), C(ch ? COL_TEXT : COL_TEXT_DIM));
 }
 
+static void draw_ribbon(Pane *p); // ribbon.c
+
 static void draw_pane(Pane *p, bool active, bool split) {
     draw_cmpbar(p);
     draw_snapbar(p);
@@ -2764,6 +2766,7 @@ static void draw_pane(Pane *p, bool active, bool split) {
     draw_list(p, active || !split);
     draw_header(p);
     draw_toolbar(p, active, split);
+    draw_ribbon(p);
 }
 
 // Gear: ring with 8 teeth and a hole (bg = colour behind it, used for the hole).

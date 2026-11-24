@@ -208,7 +208,7 @@ static const int g_col_menu[COL_COUNT] = {COL_NAME, COL_DATE, COL_CREATED, COL_A
                                           COL_OWNER, COL_GROUP, COL_LINK, COL_CRC32, COL_SHA256};
 
 typedef struct {
-    Rect area, toolbar, back, fwd, up, pathbar, filterbtn, morebtn, sortbtn, header, list, track, thumb, trashbar, rrestore, rempty;
+    Rect area, toolbar, ribbon, back, fwd, up, pathbar, filterbtn, morebtn, sortbtn, header, list, track, thumb, trashbar, rrestore, rempty;
     bool has_trashbar;
     f32 col_name;              // x of the icon inside the Name column
     f32 name_end;              // right edge of the Name column
@@ -674,8 +674,7 @@ static struct {
     char cs_error[64];     // shown in the search bar (bad regex)
     bool cs_case, cs_word, cs_regex; // contents search options: match case (else smart case), whole word, regex
     bool folder_sizes;
-    bool ribbon;     // the ribbon: common file actions in a row above the panels (ribbon.c)
-    Rect r_ribbon;
+    bool ribbon;     // the ribbon: a row of common file actions under each panel's navigation bar (ribbon.c)
     bool path_text;  // the path bar shows the path as plain text (no breadcrumbs); a click edits it
     bool git_status; // git badges in the file list + branch in the status bar
     int du_style;    // disk usage view: 0 treemap, 1 sunburst
@@ -958,21 +957,25 @@ static Rect item_rect(const Pane *p, i64 i) {
                   ly->cell_w, ly->cell_h};
 }
 
-typedef struct { f32 navigation_y, tabs_y, nav_h, tabs_h, content_y; } TabBands;
+typedef struct { f32 navigation_y, tabs_y, nav_h, tabs_h, ribbon_y, ribbon_h, content_y; } TabBands;
 
-// The navigation band is 46 high, the tab band 38. Classic tabs sit above the navigation bar, pills below it.
+// The navigation band is 46 high, the tab band 38. Classic tabs sit above the navigation bar, pills below it; the
+// ribbon (when on) right under the navigation bar.
 static TabBands tab_bands(f32 y, f32 scale, int count) {
     TabBands b;
     b.nav_h = roundf(46.f * scale);
     b.tabs_h = g_hide_single_tab && count <= 1 ? 0.f : roundf((A.tab_style == TABS_PILLS ? 44.f : 38.f) * scale);
+    b.ribbon_h = A.ribbon ? roundf(36.f * scale) : 0.f;
     if (A.tab_style == TABS_CARDS) {
         b.tabs_y = y;
         b.navigation_y = y + b.tabs_h;
+        b.ribbon_y = b.navigation_y + b.nav_h;
     } else {
         b.navigation_y = y;
-        b.tabs_y = y + b.nav_h;
+        b.ribbon_y = y + b.nav_h;
+        b.tabs_y = b.ribbon_y + b.ribbon_h;
     }
-    b.content_y = y + b.nav_h + b.tabs_h;
+    b.content_y = y + b.nav_h + b.tabs_h + b.ribbon_h;
     return b;
 }
 
@@ -990,6 +993,7 @@ static void layout_pane(Pane *p, Rect area) {
     f32 tb = roundf(S(46));
     f32 width = nav_available_width(area.x, nav_y, area.w);
     ly->toolbar = (Rect){area.x, nav_y, width, tb};
+    ly->ribbon = (Rect){area.x, bands.ribbon_y, area.w, bands.ribbon_h}; // (h 0: off)
     f32 bs = roundf(S(30)), by = nav_y + roundf((tb - bs) * 0.5f), gap = roundf(S(2));
     ly->back = (Rect){area.x + roundf(S(8)), by, bs, bs};
     ly->fwd = (Rect){ly->back.x + bs + gap, by, bs, bs};
@@ -1270,7 +1274,7 @@ static const char *picker_title(void);
 static void layout(void) {
     f32 W = (f32)A.W, H = (f32)A.H;
     // the sidebar keeps >= 520 px for the panels when the window is narrow
-    f32 tb = A.ribbon && !picker_active() ? roundf(S(44)) : 0, st = picker_active() ? picker_bar_h() : roundf(S(28)), sb = roundf(MIN(S(CLAMP(A.side_w, 150.f, 480.f)), MAX(S(150), W - S(520))));
+    f32 tb = 0, st = picker_active() ? picker_bar_h() : roundf(S(28)), sb = roundf(MIN(S(CLAMP(A.side_w, 150.f, 480.f)), MAX(S(150), W - S(520))));
     f32 bh = A.brand_name == BRAND_HIDDEN ? 0 : roundf(S(44)); // logo centred on the tab strip
     A.r_brand = (Rect){0, 0, sb, bh};
     A.r_sidebar = (Rect){0, bh, sb, H - st - bh};
@@ -1292,14 +1296,12 @@ static void layout(void) {
     if (A.csd && A.window_buttons) {
         f32 bw = roundf(S(46)), bh2 = roundf(S(38));
         A.r_wctl = (Rect){W - 3 * bw, 0, 3 * bw, bh2};
-        if (A.preview_on && tb < bh2) { // (the ribbon is above it: the buttons sit at the ribbon's end)
+        if (A.preview_on) {
             A.r_wstrip = (Rect){A.r_preview.x, 0, A.r_preview.w, bh2};
             A.r_preview.y += bh2;
             A.r_preview.h -= bh2;
         }
     }
-    // the ribbon: across the file area (and the details panel) above the panels, ending before the window buttons
-    A.r_ribbon = tb ? (Rect){sb, 0, (A.r_wctl.w > 0 ? A.r_wctl.x : W) - sb, tb} : (Rect){0};
     A.side_row_h = roundf(S(30));
     A.side_top = roundf(S(8));
     places_layout();
@@ -1953,12 +1955,9 @@ static void shadow_draw(void) {
 
 // The parts of the title bar that move the window: the logo, the strip above the preview, and the empty part of
 // each tab band outside its tabs and buttons (the band follows the tab position setting).
-static bool ribbon_button_at(f32 x, f32 y); // ribbon.c
-
 static bool titlebar_drag_at(f32 x, f32 y) {
     if (!A.csd || in_rect(A.r_wctl, x, y)) return false;
     if (in_rect(A.r_brand, x, y) || in_rect(A.r_wstrip, x, y)) return true;
-    if (in_rect(A.r_ribbon, x, y)) return !ribbon_button_at(x, y); // (its empty space moves the window)
     for (int i = 0; i < A.npanels; i++) {
         Panel *pn = A.panels[i];
         if (!in_rect(pn->bar, x, y)) continue;
@@ -13102,7 +13101,6 @@ static void frame_draw(void) {
         }
     }
     draw_node_dividers(A.root);
-    draw_ribbon();
     draw_preview();
     draw_sidebar();
     draw_brand();
