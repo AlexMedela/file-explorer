@@ -5442,6 +5442,22 @@ static int run_selftest_m9(void) {
         pane_refresh(p);
         st_wait();
     }
+    // and back: dropped onto a file row inside the expanded folder -> into that folder (its whole section is the target)
+    {
+        f32 fy = st_row_y(p, "new.txt"), tx = p->ly.col_name + S(60), ty = st_row_y(p, "tree/inner.txt");
+        ST_CHECK(fy > 0 && ty > 0);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tx, fy, SDL_BUTTON_LEFT, 1, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, tx + S(20), fy + S(20), 0, 0, 0);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, tx, ty, 0, 0, 0);
+        ST_CHECK(A.drag == DRAG_ITEMS && A.drop_row >= 0 && !strcmp(A.drop_dir, M9_BASE "/tree") &&
+                 !strcmp(p->L->entries[p->order[A.drop_row]].name, "tree") && A.drop_end > A.drop_row);
+        st_shot("tree-drop");
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tx, ty, SDL_BUTTON_LEFT, 1, 0);
+        st_wait_ops();
+        ST_CHECK(st_exists(M9_BASE "/tree/new.txt") && !st_exists(M9_BASE "/new.txt"));
+        pane_refresh(p);
+        st_wait();
+    }
     // rename inside the tree renames within the subfolder
     st_wait();
     ST_CHECK(st_select(p, "tree/inner.txt"));

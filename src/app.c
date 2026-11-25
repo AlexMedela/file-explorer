@@ -589,6 +589,7 @@ static struct {
     char drop_dir[PATH_MAX];
     Pane *drop_pane;
     i64 drop_row;
+    i64 drop_end; // tree view: last row inside the expanded folder at drop_row (== drop_row when it isn't open)
     int drop_place;
     bool drop_copy, drop_link; // what a drop would do now (drop_link: Ctrl+Shift)
     bool drop_ask;           // setting: a drop without Ctrl/Shift asks (Move / Copy / Link here) instead of moving
@@ -8978,6 +8979,35 @@ static bool drag_all_in(Pane *src, const char *dir) {
     return true;
 }
 
+// Tree view: the folder a drop onto row r goes into - the row's own folder, or the nearest expanded folder it sits in
+// (skipping folders being dragged themselves). -1: the pane's own folder.
+static i64 tree_drop_row(Pane *p, Pane *src, i64 r) {
+    char want[PATH_MAX];
+    snprintf(want, sizeof want, "%s", p->L->entries[p->order[r]].name);
+    for (i64 i = r;;) {
+        Entry *e = &p->L->entries[p->order[i]];
+        if ((e->flags & ENT_DIR) && !(p == src && p->sel[p->order[i]])) return i;
+        char *sl = strrchr(want, '/');
+        if (!sl || sl == want) return -1;
+        *sl = 0;
+        while (--i >= 0 && strcmp(p->L->entries[p->order[i]].name, want)) {} // its parent: a row above
+        if (i < 0) return -1;
+    }
+}
+
+// Tree view: last row of the folder at row r with everything expanded inside it (r itself when it's closed).
+static i64 tree_folder_end(Pane *p, i64 r) {
+    const char *name = p->L->entries[p->order[r]].name;
+    size_t l = strlen(name);
+    i64 i = r + 1;
+    while (i < (i64)p->count) {
+        const char *n = p->L->entries[p->order[i]].name;
+        if (strncmp(n, name, l) || n[l] != '/') break;
+        i++;
+    }
+    return i - 1;
+}
+
 // Find the folder under (x,y) that items would be dropped into. src may be NULL (external drop).
 static void drop_target(Pane *src, f32 x, f32 y) {
     A.drop_dir[0] = 0;
@@ -9016,11 +9046,18 @@ static void drop_target(Pane *src, f32 x, f32 y) {
         if (p && p->order) {
             A.drop_pane = p;
             i64 r = in_rect(p->ly.list, x, y) ? item_at(p, x, y) : -1;
-            if (r >= 0) {
+            if (r >= 0 && p->L->tree) { // anywhere over an expanded folder's rows drops into that folder
+                r = tree_drop_row(p, src, r);
+                if (r >= 0) {
+                    A.drop_row = r;
+                    A.drop_end = tree_folder_end(p, r);
+                    path_join(A.drop_dir, sizeof A.drop_dir, p->path, p->L->entries[p->order[r]].name);
+                }
+            } else if (r >= 0) {
                 Entry *e = &p->L->entries[p->order[r]];
                 bool dragged = p == src && p->sel[p->order[r]];
                 if ((e->flags & ENT_DIR) && !dragged) {
-                    A.drop_row = r;
+                    A.drop_row = A.drop_end = r;
                     path_join(A.drop_dir, sizeof A.drop_dir, p->path, e->name);
                 }
             }
