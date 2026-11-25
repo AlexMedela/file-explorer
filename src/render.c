@@ -1159,7 +1159,7 @@ static void draw_sidebar(void) {
             draw_clip_pop(ac);
         }
         if (lifted) g_alpha = 0.45f;
-        f32 is = roundf(S(16)), ix = roundf(r.x + S(12)), iy = roundf(r.y + (r.h - is) * 0.5f);
+        f32 is = roundf(S(A.def_sidebar_icon ? A.def_sidebar_icon : 16)), ix = roundf(r.x + S(12)), iy = roundf(r.y + (r.h - is) * 0.5f);
         pl->eject = (Rect){0, 0, 0, 0};
         bool show_eject = pl->removable && hover && A.drag == DRAG_NONE && pl->kind != PK_UNMOUNTED;
         bool phone_off = pl->kind == PK_PHONE && !pl->path[0]; // not connected yet: dim, "Connect" on hover

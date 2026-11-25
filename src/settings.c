@@ -76,6 +76,7 @@ static void settings_defaults(void) {
     A.def_view = VIEW_DETAILS;
     A.def_icon = 96;
     A.def_list_icon = A.def_listv_icon = 16;
+    A.def_sidebar_icon = 16;
     A.view_per_folder = false;
     A.def_group = GROUP_NONE;
     snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "Material");
@@ -343,6 +344,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "icon_size")) A.def_icon = CLAMP(atoi(v), 32, 256);
         else if (!strcmp(k, "list_icon_size")) A.def_list_icon = CLAMP(atoi(v), 16, 64);
         else if (!strcmp(k, "list_view_icon_size")) A.def_listv_icon = CLAMP(atoi(v), 16, 64);
+        else if (!strcmp(k, "sidebar_icon_size")) A.def_sidebar_icon = CLAMP(atoi(v), 16, 32);
         else if (!strcmp(k, "view_per_folder")) A.view_per_folder = atoi(v);
         else if (!strcmp(k, "group")) A.def_group = CLAMP(atoi(v), 0, GROUP_COUNT - 1);
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
@@ -615,8 +617,8 @@ static void settings_write(FILE *f) {
     fprintf(f, "navigation_selection_opacity=%d\nnavigation_selector_mark=%d\n", g_navigation_selection_opacity, g_nav_selector_mark);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
-    fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",
-            A.def_view == VIEW_GRID ? "grid" : A.def_view == VIEW_LIST ? "list" : "details", A.def_icon, A.def_list_icon, A.def_listv_icon, A.view_per_folder,
+    fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nsidebar_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",
+            A.def_view == VIEW_GRID ? "grid" : A.def_view == VIEW_LIST ? "list" : "details", A.def_icon, A.def_list_icon, A.def_listv_icon, A.def_sidebar_icon, A.view_per_folder,
             A.def_group);
     fprintf(f, "verify_copies=%d\ntransfers_at_once=%d\n", A.verify_copies, A.transfers_at_once);
     fprintf(f, "integration_prev_folder_app=%s\nintegration_show_in_folder=%d\nintegration_asked=%d\n", A.ig_prev_fm, A.ig_fm1,

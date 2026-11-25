@@ -6,7 +6,7 @@ enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
 enum {
     OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_APP_ICON, OPT_TITLE_ICON, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
-    OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
+    OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_SIDEBAR_ICON_SIZE, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_POPUP, OPT_BRIGHT_STATUS, OPT_BRIGHT_PATHBAR, OPT_BRIGHT_SEARCHBAR, OPT_TRANSPARENT_PATHBAR, OPT_PATH_TEXT, OPT_RIBBON, OPT_RIBBON_POS, OPT_RIBBON_OVERFLOW, OPT_SEPARATORS, OPT_NAV_SELECTION_OPACITY, OPT_NAV_SELECTOR_MARK, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY, OPT_HIDE_SINGLE_TAB,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_FOLDERS_FIRST, OPT_DEF_GROUP,
@@ -46,6 +46,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_REPO_ICON, "Repository folder icon", "A repository folder keeps its own icon, or wears the one that matches it (Git, Borg)"},
     {OC_APPEARANCE, OK_CHOICE, OPT_BRAND_NAME, "Name above the sidebar", "Explorer, this computer's name, your own text, or none (the sidebar then starts at the top)"},
     {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "Show the icon before the name above the sidebar; off hides a custom title bar icon too"},
+    {OC_APPEARANCE, OK_INT, OPT_SIDEBAR_ICON_SIZE, "Sidebar icon size", "Size of icons in the sidebar places list (16-32 px); useful for icon themes with small/large variants"},
     {OC_APPEARANCE, OK_TEXT, OPT_BRAND_TEXT, "Your own name", "Shown above the sidebar instead of Explorer"},
     {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED, "Unified surfaces", "Sidebar, header, preview and status bar take the file area's background; the lines between them stay"},
     {OC_APPEARANCE, OK_BOOL, OPT_SEPARATORS, "Separator lines", "Lines between the sidebar, header, columns, preview and status bar (an edge you can drag shows on hover)"},
@@ -580,6 +581,7 @@ static void opt_bool_toggle(int id) {
 static int opt_int_get(int id) {
     switch (id) {
     case OPT_FONT_SIZE: return A.font_size;
+    case OPT_SIDEBAR_ICON_SIZE: return A.def_sidebar_icon ? A.def_sidebar_icon : 16;
     case OPT_ZOOM: return (int)lroundf(A.zoom * 100);
     case OPT_NAV_SELECTION_OPACITY: return g_navigation_selection_opacity;
     }
@@ -592,6 +594,13 @@ static void opt_int_step(int id, int dir) {
     case OPT_FONT_SIZE:
         A.font_size = CLAMP(A.font_size + dir, 9, 24);
         reload_fonts();
+        break;
+    case OPT_SIDEBAR_ICON_SIZE:
+        A.def_sidebar_icon = CLAMP((A.def_sidebar_icon ? A.def_sidebar_icon : 16) + dir, 16, 32);
+        A.side_row_h = roundf(S(MAX(30, A.def_sidebar_icon + 14)));
+        places_layout();
+        A.settings_dirty = true;
+        A.redraw = true;
         break;
     case OPT_ZOOM: set_zoom(A.zoom + 0.1f * (f32)dir); break;
     case OPT_NAV_SELECTION_OPACITY:

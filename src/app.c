@@ -614,7 +614,7 @@ static struct {
     u32 pal_gen;
     int pal_n, pal_sel, pal_top;
     Rect pal_r, pal_list;
-    int def_view, def_icon, def_list_icon, def_listv_icon, def_group; // (sizes: the last ones picked, per view)
+    int def_view, def_icon, def_list_icon, def_listv_icon, def_sidebar_icon, def_group; // (sizes: the last ones picked, per view)
     bool view_per_folder; // off: a tab keeps its view (layout, icon size) while browsing; new tabs start in def_view
     char icon_theme_name[64]; // from settings, applied once the renderer exists (custom themes are scanned first)
     Rect r_viewbtn[3], r_gear, r_feat, r_xfer;
@@ -1336,7 +1336,7 @@ static void layout(void) {
             A.r_preview.h -= bh2;
         }
     }
-    A.side_row_h = roundf(S(30));
+    A.side_row_h = roundf(S(MAX(30, (A.def_sidebar_icon ? A.def_sidebar_icon : 16) + 14)));
     A.side_top = roundf(S(8));
     places_layout();
 
