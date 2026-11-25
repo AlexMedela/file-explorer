@@ -285,18 +285,18 @@ static int sysi_names(int id, const char **out) {
         return n;
     }
     if (id >= ICON_EXTRA_BASE && id < ICON_EXTRA_BASE + EXTRA_COUNT) {
-        static const char *const extra_names[EXTRA_COUNT][5] = {
-            {"folder-remote", "folder-publicshare", "network-server", NULL, NULL},
-            {"folder-publicshare", "folder-remote", "network-server", NULL, NULL},
-            {"folder-network", "network-workgroup", "folder-remote", NULL, NULL},
-            {"drive-harddisk", "drive-harddisk-system", "drive-harddisk-symbolic", NULL, NULL},
-            {"drive-removable-media", "drive-removable-media-usb", "drive-harddisk-usb", "drive-harddisk", NULL},
-            {"drive-optical", "drive-cdrom", "media-optical", "drive-removable-media", NULL},
-            {"folder-cloud", "folder-gdrive", "folder-remote", NULL, NULL},
-            {"network-server", "network-workgroup", "folder-remote", NULL, NULL},
+        static const char *const extra_names[EXTRA_COUNT][6] = {
+            {"folder-remote", "folder-publicshare", "network-server", NULL, NULL, NULL},
+            {"folder-publicshare", "folder-remote", "network-server", NULL, NULL, NULL},
+            {"folder-network", "network-workgroup", "folder-remote", NULL, NULL, NULL},
+            {"drive-harddisk-system", "drive-harddisk-root", "drive-harddisk", "drive-harddisk-solidstate", "drive-harddisk-symbolic", NULL},
+            {"drive-removable-media-usb", "drive-removable-media", "drive-harddisk-usb", "drive-harddisk", "drive-removable-media-symbolic", NULL},
+            {"drive-optical", "drive-cdrom", "media-optical", "drive-removable-media", "media-optical-symbolic", NULL},
+            {"folder-cloud", "folder-gdrive", "folder-remote", "folder-network", NULL, NULL},
+            {"network-server", "network-workgroup", "folder-remote", "network-server-symbolic", NULL, NULL},
         };
         int e = id - ICON_EXTRA_BASE, n = 0;
-        for (int i = 0; i < 5 && extra_names[e][i]; i++) out[n++] = extra_names[e][i];
+        for (int i = 0; i < 6 && extra_names[e][i]; i++) out[n++] = extra_names[e][i];
         return n;
     }
     static const IconMap map[] = {
