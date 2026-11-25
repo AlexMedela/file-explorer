@@ -505,6 +505,7 @@ static void git_subs_job(void *arg) {
     GitSubsJob *j = arg;
     int cap = 0;
     j->self_borg = borg_repo_kind(j->path);
+    if (!j->self_borg && borgfs_mount_at(j->path)) j->self_borg = BORG_V1; // a mounted repository (borgfs)
     for (int i = 0; i < j->n; i++) {
         char dir[PATH_MAX], probe[PATH_MAX + 8], gitdir[PATH_MAX];
         path_join(dir, sizeof dir, j->path, j->names[i]);
@@ -512,6 +513,7 @@ static void git_subs_job(void *arg) {
         struct stat st;
         if (!j->git || lstat(probe, &st)) {
             int bk = borg_repo_kind(dir);
+            if (!bk && borgfs_mount_at(dir)) bk = BORG_V1; // a mounted repository (borgfs)
             if (!bk) continue;
             GitSub g = {.name = j->names[i], .borg = bk};
             j->names[i] = NULL;

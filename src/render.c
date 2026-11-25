@@ -139,8 +139,20 @@ static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
 // custom icon theme's emblem, the desktop icon theme's, or the app's own.
 static bool draw_badge(f32 x, f32 y, f32 size, int badge, int slot, bool hidden) {
     int id = badge_art_id(badge);
-    f32 b = roundf(MAX(S(5), size * 0.32f));
-    return draw_icon_id(roundf(x + size - b), roundf(y + size - b * (1 + slot)), b, id, hidden);
+    f32 b = roundf(MAX(S(6), size * 0.32f));
+    f32 bx = roundf(x + size - b), by = roundf(y + size - b * (1 + slot));
+    // The artwork is rasterized once (at least 16 px) and scaled, so a badge is the same mark at every zoom.
+    SDL_Texture *t = big_icon_tex(id, (int)MAX(16.f, roundf(b)));
+    if (!t) return draw_icon_id(bx, by, b, id, hidden);
+    draw_flush();
+    SDL_FRect dst = {bx, by, b, b};
+    SDL_SetTextureAlphaMod(t, (u8)(255.f * g_alpha * (hidden ? 0.55f : 1.f)));
+    f32 tint = icon_texture_tint(t);
+    SDL_SetTextureColorMod(t, (u8)(255 * tint), (u8)(255 * tint), (u8)(255 * tint));
+    SDL_RenderTexture(A.ren, t, NULL, &dst);
+    SDL_SetTextureColorMod(t, 255, 255, 255);
+    SDL_SetTextureAlphaMod(t, 255);
+    return true;
 }
 
 // The badges a row carries, in the order they stack: a shared folder, a symlink, a repository. Returns how many.
@@ -1679,11 +1691,11 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
             const GitSub *gsub = git_entry_sub(p, e);
             draw_entry_badges(p, e, ix, iy, isz, hid);
             if (gsub && gsub->borg) { // a Borg repository: a history mark on the icon's bottom-left corner
-                f32 bs = roundf(MAX(S(18), isz * 0.3f)), bx = ix - S(2), by = iy + isz - bs + S(2);
+                f32 bs = roundf(MAX(S(7), isz * 0.22f)), bx = ix - S(2), by = iy + isz - bs + S(2);
                 draw_rrect(bx - S(2), by - S(2), bs + S(4), bs + S(4), (bs + S(4)) * 0.5f, C(COL_BG));
                 draw_rrect(bx, by, bs, bs, bs * 0.5f, C(COL_CHIP));
-                f32 is = roundf(S(12));
-                draw_ui_icon(UI_ROTATE_CCW_CLOCK, bx + (bs - is) * 0.5f, by + (bs - is) * 0.5f, is, C(COL_TEXT2));
+                f32 is = roundf(bs * 0.62f); // the mark inside it, in step with the mark around it
+                draw_ui_icon(UI_ROTATE_CCW_CLOCK, bx + (bs - is) * 0.5f, by + (bs - is) * 0.5f, is, C(COL_TEXT));
             }
             f32 lyy = iy + isz + roundf(S(6)), lw = r.w - S(12), lh = roundf(f->line_h * 1.1f);
             if (renaming) {

@@ -7720,7 +7720,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
             if (k >= 0 && borg_saved_of_mount(k) < 0) menu_add("Add to sidebar", "", ACT_BORG_SAVE, true);
             menu_add("Close backups", "", ACT_BORG_CLOSE, true);
             menu_sep();
-        } else if (pane_borg_repo(p)) {
+        } else if (pane_borg_repo(p) && !borgfs_mount_at(p->path)) { // (a mounted repository is not one to save)
             menu_add("Add to sidebar", "", ACT_BORG_SAVE, true);
             menu_sep();
         }

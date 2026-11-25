@@ -54,6 +54,30 @@ static void borg_mount_point(const char *repo, char *out, size_t cap) {
     snprintf(out, cap, "%s/%s-%08x", dir, name[0] ? name : "repo", (unsigned)(h ^ (h >> 32)));
 }
 
+// The mount table: /proc/self/mounts, or the file FE_MOUNTS names (the tests).
+static const char *mounts_file(void) {
+    const char *p = getenv("FE_MOUNTS");
+    return p && p[0] ? p : "/proc/self/mounts";
+}
+
+// A Borg filesystem at (or holding) the path: borg's own FUSE mount, borgmatic's too. A mounted repository shows
+// its archives, not its own layout, so the marker files are not there to be found.
+static bool borgfs_mount_at(const char *path) {
+    if (!path || path[0] != '/') return false;
+    FILE *f = fopen(mounts_file(), "re");
+    if (!f) return false;
+    char line[8192];
+    bool found = false;
+    while (fgets(line, sizeof line, f)) {
+        char type[64], mp[PATH_MAX];
+        if (sscanf(line, "%63s %4095s", type, mp) != 2 || !strstr(type, "borg")) continue; // borgfs, borgfs2, fuse.borgfs...
+        size_t ml = strlen(mp);
+        if (!strncmp(path, mp, ml) && (!path[ml] || path[ml] == '/')) { found = true; break; }
+    }
+    fclose(f);
+    return found;
+}
+
 // The mount a path is in (out: its folder), when it's one of ours.
 static bool borg_mount_of(const char *path, char *mp, size_t cap) {
     char dir[PATH_MAX];

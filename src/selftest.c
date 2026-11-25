@@ -10765,6 +10765,20 @@ static int run_selftest_borg(void) {
     ST_CHECK(borg_classify("something odd\n\n", err, sizeof err) == BORG_E_OTHER && !strcmp(err, "something odd"));
     ST_CHECK(borg_repo_kind(BORG_BASE "/home/repo1") == BORG_V1 && borg_repo_kind(BORG_BASE "/home/repo2") == BORG_V2);
     ST_CHECK(!borg_repo_kind(BORG_BASE "/home/fake") && !borg_repo_kind(BORG_BASE "/home/plain") && !borg_repo_kind(BORG_BASE "/nothing"));
+    // a repository mounted by someone else (borgfs, borgmatic): the mount table is what says so
+    char mf[PATH_MAX];
+    snprintf(mf, sizeof mf, "%s/mounts", BORG_BASE);
+    FILE *mfd = fopen(mf, "w");
+    ST_CHECK(mfd != NULL);
+    if (mfd) {
+        fprintf(mfd, "borgfs %s/borgfs-mount fuse ro,nosuid,nodev,relatime 0 0\nfuse.borgfs2 %s/borgfs2-mount fuse ro 0 0\ntmpfs /run tmpfs rw 0 0\n", BORG_BASE, BORG_BASE);
+        fclose(mfd);
+    }
+    setenv("FE_MOUNTS", mf, 1);
+    ST_CHECK(borgfs_mount_at(BORG_BASE "/borgfs-mount") && borgfs_mount_at(BORG_BASE "/borgfs-mount/inside"));
+    ST_CHECK(borgfs_mount_at(BORG_BASE "/borgfs2-mount"));
+    ST_CHECK(!borgfs_mount_at(BORG_BASE "/home/repo1") && !borgfs_mount_at(BORG_BASE "/nothing"));
+    unsetenv("FE_MOUNTS");
 
     // --- marked in their folder like git repositories (git status off: still marked)
     A.git_status = false;
