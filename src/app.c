@@ -2017,6 +2017,12 @@ static SDL_HitTestResult window_edge_at(f32 x, f32 y) {
     return SDL_HITTEST_NORMAL;
 }
 
+static bool sheet_open(void); // ui_tools.c: a modal sheet is open
+
+// An overlay (the Options sheet, a dialog, a menu, the command palette) owns the pointer: no drag and no click
+// under it. One place decides that.
+static bool overlay_open(void) { return A.menu.open || A.pal_open || sheet_open() || A.dlg.open; }
+
 static SDL_HitTestResult window_hit_test(SDL_Window *w, const SDL_Point *pt, void *ud) {
     (void)ud;
     if (!A.csd || A.drag != DRAG_NONE) return SDL_HITTEST_NORMAL;
@@ -2028,6 +2034,7 @@ static SDL_HitTestResult window_hit_test(SDL_Window *w, const SDL_Point *pt, voi
     }
     SDL_HitTestResult e = window_edge_at(x, y);
     if (e != SDL_HITTEST_NORMAL) return e;
+    if (overlay_open()) return SDL_HITTEST_NORMAL; // an overlay owns the pointer: a press there is not a move
     return titlebar_drag_at(x, y) ? SDL_HITTEST_DRAGGABLE : SDL_HITTEST_NORMAL;
 }
 
@@ -13218,7 +13225,7 @@ static void frame_draw(void) {
     A.ptr_hand = A.ptr_text = false;
     // While a menu, the palette, a sheet or a dialog is open, nothing underneath reacts to the mouse.
     bool mouse_in = A.mouse_in;
-    if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open) A.mouse_in = false;
+    if (overlay_open()) A.mouse_in = false;
     fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     bool multi = A.npanels > 1;
     for (int i = 0; i < A.npanels; i++) {
@@ -13258,7 +13265,7 @@ static void frame_draw(void) {
     draw_drag_badge();
     draw_tab_drop();
     draw_quicklook();
-    if (A.menu.open || A.pal_open || sheet_open() || A.dlg.open) g_text_field_count = 0; // under an overlay: no clicks
+    if (overlay_open()) g_text_field_count = 0; // under an overlay: no clicks
     A.mouse_in = mouse_in; // overlays get the mouse
     fit_tip_mouse(A.mouse_in && A.drag == DRAG_NONE);
     draw_menu();
