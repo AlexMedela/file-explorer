@@ -142,15 +142,25 @@ static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
 static bool draw_badge(f32 x, f32 y, f32 size, int badge, int slot, bool hidden) {
     int id = badge_art_id(badge);
     f32 b = roundf(MAX(S(6), size * 0.32f));
+    int px = MAX(8, (int)b);
     f32 bx = roundf(x + size - b), by = roundf(y + size - b * (1 + slot));
-    // The artwork is rasterized once (BADGE_ART_PX) and scaled from there: the same mark, in every view, at every zoom.
-    SDL_Texture *t = big_icon_tex(id, BADGE_ART_PX);
+    // Rasterize at the target size: scaling a small Lucide stroke makes thin lines look uneven.
+    SDL_Texture *t = big_icon_tex(id, px);
+    if (!t) { px = BADGE_ART_PX; t = big_icon_tex(id, px); }
     if (!t) return draw_icon_id(bx, by, b, id, hidden);
     draw_flush();
     SDL_FRect dst = {bx, by, b, b};
     SDL_SetTextureAlphaMod(t, (u8)(255.f * g_alpha * (hidden ? 0.55f : 1.f)));
-    f32 tint = icon_texture_tint(t);
-    SDL_SetTextureColorMod(t, (u8)(255 * tint), (u8)(255 * tint), (u8)(255 * tint));
+    CustomIconTheme *ct = icon_custom();
+    bool custom = ct && ct->badge[badge];
+    if (badge == BADGE_BORG && !custom) {
+        u32 bc = theme_is_light(&T) ? rgb_mix(COL_ACCENT, 0x000000, 0.28f) : rgb_mix(COL_ACCENT, 0xFFFFFF, 0.18f);
+        Color c = C(bc);
+        SDL_SetTextureColorMod(t, (u8)(255 * c.r), (u8)(255 * c.g), (u8)(255 * c.b));
+    } else {
+        f32 tint = icon_texture_tint(t);
+        SDL_SetTextureColorMod(t, (u8)(255 * tint), (u8)(255 * tint), (u8)(255 * tint));
+    }
     SDL_RenderTexture(A.ren, t, NULL, &dst);
     SDL_SetTextureColorMod(t, 255, 255, 255);
     SDL_SetTextureAlphaMod(t, 255);
@@ -169,22 +179,38 @@ static bool folder_is_share(const char *path) {
     return false;
 }
 
+// A shared folder's own icon from the icon theme (folder-remote / folder-publicshare / folder-network): when the
+// theme has one, the folder wears it instead of the plain folder plus a share badge.
+static int share_folder_icon(void) {
+    for (int i = 0; i < FOLDER_EXTRA_COUNT; i++) {
+        int id = folder_extra_icon(i);
+        if (id >= 0 && icon_has_art(id)) return id;
+    }
+    static const char *const names[] = {"folder-remote", "folder-publicshare", "folder-network", "folder-shared"};
+    for (size_t i = 0; i < ARRAY_COUNT(names); i++) {
+        int id = icon_find(names[i]);
+        if (id >= 0 && icon_has_art(id)) return id;
+    }
+    return -1;
+}
+
 // The badges a row carries, in the order they stack: a shared folder, a symlink, a repository. Returns how many.
-// A Borg repository is not a Git one: it keeps its own mark, not the Git logo.
-static int entry_badges(bool dir, bool link, const GitSub *g, const char *path, int *out) {
+// A Borg repository is not a Git one: it keeps its own mark, not the Git logo. A shared folder that already wears
+// its own folder icon doesn't get the share badge too.
+static int entry_badges(bool dir, bool link, const GitSub *g, const char *path, bool share_icon, int *out) {
     int n = 0;
-    if (dir && path && folder_is_share(path)) out[n++] = BADGE_SHARE;
+    if (dir && path && !share_icon && folder_is_share(path)) out[n++] = BADGE_SHARE;
     if (link) out[n++] = BADGE_LINK;
     if (g) out[n++] = g->borg ? BADGE_BORG : BADGE_GIT;
     return n;
 }
 
 // The badges on a row's icon: a shared folder, a symlink, a repository - stacked upward on the icon's right edge.
-static void draw_entry_badges(Pane *p, const Entry *e, f32 x, f32 y, f32 size, bool hidden) {
+static void draw_entry_badges(Pane *p, const Entry *e, f32 x, f32 y, f32 size, bool hidden, bool share_icon) {
     char path[PATH_MAX];
     const char *pp = NULL;
     if (e->flags & ENT_DIR) { path_join(path, sizeof path, p->path, e->name); pp = path; }
-    int b[3], n = entry_badges(e->flags & ENT_DIR, e->flags & ENT_LINK, git_entry_sub(p, e), pp, b);
+    int b[3], n = entry_badges(e->flags & ENT_DIR, e->flags & ENT_LINK, git_entry_sub(p, e), pp, share_icon, b);
     for (int k = 0; k < n; k++) draw_badge(x, y, size, b[k], k, hidden);
 }
 
@@ -202,6 +228,20 @@ static bool draw_repo_dir_icon(Pane *p, const Entry *e, f32 x, f32 y, f32 s, boo
 static void draw_dir_icon(f32 x, f32 y, f32 s, const char *name, bool hidden) {
     if (draw_icon_id(x, y, s, folder_icon_for_name(name), hidden)) return;
     draw_folder_icon(x, y + (s > 48 ? s * 0.04f : 0), s, hidden ? rgb_mix(COL_FOLDER, COL_BG, 0.35f) : COL_FOLDER, hidden ? rgb_mix(COL_FOLDER_TAB, COL_BG, 0.35f) : COL_FOLDER_TAB);
+}
+
+// A directory entry's folder icon: repo icon, then a share folder icon from the theme, then the named folder icon.
+static bool draw_dir_entry_icon(Pane *p, const Entry *e, f32 x, f32 y, f32 s, bool hidden, bool *share_icon) {
+    if (share_icon) *share_icon = false;
+    if (draw_repo_dir_icon(p, e, x, y, s, hidden)) return true;
+    char path[PATH_MAX];
+    path_join(path, sizeof path, p->path, e->name);
+    if (folder_is_share(path)) {
+        int id = share_folder_icon();
+        if (id >= 0 && draw_icon_id(x, y, s, id, hidden)) { if (share_icon) *share_icon = true; return true; }
+    }
+    draw_dir_icon(x, y, s, rel_base(e->name), hidden);
+    return true;
 }
 
 // A backup mount of ours or one of its archives: the backup's icon (the sidebar's), else NULL.
@@ -233,9 +273,15 @@ static void draw_file_icon(f32 x, f32 y, f32 s, u32 col) {
     draw_rect(ox, roundf(y + s * 0.58f), w, roundf(s * 0.2f), C(col));
 }
 
-// Drive: body, slot and status light, pixel-snapped so they stay centred and crisp at any scale.
-// dim (not mounted): solid colours faded towards the sidebar, so the slot keeps its contrast.
-static void draw_drive_icon_ex(f32 x, f32 y, f32 s, bool dim) {
+static bool draw_extra_themed_icon(f32 x, f32 y, f32 s, int extra, bool dim) {
+    int id = extra_icon(extra);
+    return id >= 0 && icon_has_art(id) && draw_icon_id(x, y, s, id, dim);
+}
+
+// Drive: themed icon when the selected icon theme (or desktop theme) provides one, else the built-in drawing.
+// dim (not mounted): faded towards the sidebar.
+static void draw_drive_icon_ex(f32 x, f32 y, f32 s, bool dim, int extra) {
+    if (extra >= 0 && draw_extra_themed_icon(x, y, s, extra, dim)) return;
     u32 body = 0x9AA0AC, slot = 0x5C616B, light = 0x4FD18B;
     if (dim) {
         body = rgb_mix(body, COL_SIDEBAR, 0.45f);
@@ -250,7 +296,7 @@ static void draw_drive_icon_ex(f32 x, f32 y, f32 s, bool dim) {
     draw_rrect(bx + roundf(s * 0.16f), by + roundf((bh - lh) * 0.5f), roundf(s * 0.36f), lh, lh * 0.5f, C(slot));
 }
 
-static void draw_drive_icon(f32 x, f32 y, f32 s) { draw_drive_icon_ex(x, y, s, false); }
+static void draw_drive_icon(f32 x, f32 y, f32 s) { draw_drive_icon_ex(x, y, s, false, EXTRA_DRIVE_HARDDISK); }
 
 // Phone (upright body, screen, speaker slot) or camera (body, bump, lens), the drive icon's colours; dim: not connected.
 static void draw_phone_icon(f32 x, f32 y, f32 s, bool camera, bool dim) {
@@ -1120,18 +1166,30 @@ static void draw_sidebar(void) {
         Cloud *cl = pl->kind == PK_CLOUD && pl->item < g_ncloud ? &g_cloud[pl->item] : NULL;
         bool cloud_off = cl && !pl->path[0];
         if (pl->kind == PK_HOME) draw_dir_icon(ix, iy, is, "home", false);
-        else if (pl->kind == PK_DRIVE) draw_drive_icon(ix, iy, is);
-        else if (pl->kind == PK_UNMOUNTED) draw_drive_icon_ex(ix, iy, is, true);
+        else if (pl->kind == PK_DRIVE || pl->kind == PK_UNMOUNTED) {
+            bool dim = pl->kind == PK_UNMOUNTED;
+            int extra = EXTRA_DRIVE_HARDDISK;
+            BlockDev *bd = pl->dev >= 0 && pl->dev < A.devs.n ? &A.devs.d[pl->dev] : NULL;
+            if (bd && bd->optical) extra = EXTRA_DRIVE_OPTICAL;
+            else if (bd && bd->removable) extra = EXTRA_DRIVE_REMOVABLE;
+            draw_drive_icon_ex(ix, iy, is, dim, extra);
+        }
         else if (pl->kind == PK_PHONE)
             draw_phone_icon(ix, iy, is, pl->phone >= 0 && pl->phone < A.devs.nph && A.devs.ph[pl->phone].kind == 'c', phone_off);
-        else if (pl->kind == PK_NETWORK || pl->kind == PK_NETSAVED) // the server's chosen icon (saved, not connected: faded)
-            draw_net_icon(ix, iy, is, pl->server >= 0 && pl->server < A.nservers ? A.servers[pl->server].icon : "",
-                          pl->kind == PK_NETSAVED ? 0.5f : 1.f);
+        else if (pl->kind == PK_NETWORK || pl->kind == PK_NETSAVED) { // the server's chosen icon (saved, not connected: faded)
+            const char *nic = pl->server >= 0 && pl->server < A.nservers ? A.servers[pl->server].icon : "";
+            bool generic = !nic || !nic[0] || !strcmp(nic, "network") || !strcmp(nic, "server");
+            bool saved = pl->kind == PK_NETSAVED;
+            if (!(generic && draw_extra_themed_icon(ix, iy, is, EXTRA_NETWORK_SERVER, saved)))
+                draw_net_icon(ix, iy, is, nic, saved ? 0.5f : 1.f);
+        }
         else if (pl->kind == PK_BORG) { // a saved backup: its icon (not open: faded); one open now: the default
             const char *ic = pl->item >= 0 && pl->item < A.nborgs && A.borgs[pl->item].icon[0] ? A.borgs[pl->item].icon : BORG_ICON_DEFAULT;
             draw_net_icon(ix, iy, is, ic, pl->path[0] ? 1.f : 0.5f);
         } else if (cl) { // the service's icon (not connected: faded) + a status dot while connecting / failing
-            draw_net_icon(ix, iy, is, cloud_icon(cl), cloud_off && cl->state != CS_FAILED && cl->state != CS_RETRY ? 0.5f : 1.f);
+            f32 alpha = cloud_off && cl->state != CS_FAILED && cl->state != CS_RETRY ? 0.5f : 1.f;
+            if (!draw_extra_themed_icon(ix, iy, is, EXTRA_FOLDER_CLOUD, alpha < 1.f))
+                draw_net_icon(ix, iy, is, cloud_icon(cl), alpha);
             draw_status_dot(ix, iy, is, cloud_busy(cl) && cl->state != CS_RETRY ? 0xE8B04B : cl->state == CS_RETRY || cl->state == CS_FAILED ? 0xE5534B : 0, hover);
         } else if (pl->kind == PK_TRASH) draw_path_icon(ix, iy, is, pl->path);
         else draw_dir_icon(ix, iy, is, path_basename(pl->path), false);
@@ -1673,12 +1731,14 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
         name_c = git_name_color(gs, name_c, bright);
         if (p->view == VIEW_LIST) {
             f32 is = roundf(S(p->listv_px)), ix = r.x + S(10), iy = roundf(r.y + (r.h - is) * 0.5f);
-            if (p->listv_px >= 32) draw_item_icon_big(p, e, ix, iy, is, cut); // (big enough for thumbnails)
-            else if (e->flags & ENT_DIR) {
-                if (!draw_repo_dir_icon(p, e, ix, iy, is, hidden)) draw_dir_icon(ix, iy, is, name, hidden);
+            bool share_icon = false;
+            if (p->listv_px >= 32) {
+                if (e->flags & ENT_DIR) draw_dir_entry_icon(p, e, ix, iy, is, hidden, &share_icon);
+                else draw_item_icon_big(p, e, ix, iy, is, cut);
             }
+            else if (e->flags & ENT_DIR) draw_dir_entry_icon(p, e, ix, iy, is, hidden, &share_icon);
             else if (!draw_icon_for_name(ix, iy, is, name, e->mflags & MF_EXEC)) draw_file_icon(ix, iy, is, file_color(e));
-            draw_entry_badges(p, e, ix, iy, is, hidden);
+            draw_entry_badges(p, e, ix, iy, is, hidden, share_icon);
             f32 tx = ix + is + S(8);
             if (renaming) {
                 Rect fr = {tx - S(4), r.y + S(3), r.x + r.w - S(6) - (tx - S(4)), r.h - S(6)};
@@ -1694,7 +1754,9 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
             }
         } else {
             f32 isz = roundf(S(p->icon_px)), ix = roundf(r.x + (r.w - isz) * 0.5f), iy = r.y + roundf(S(8));
-            draw_item_icon_big(p, e, ix, iy, isz, cut);
+            bool share_icon = false;
+            if (e->flags & ENT_DIR) draw_dir_entry_icon(p, e, ix, iy, isz, hidden, &share_icon);
+            else draw_item_icon_big(p, e, ix, iy, isz, cut);
             if (gs > GS_IGNORED || cmp_marked(cs)) { // git / compare: a dot on the icon's top-right corner
                 f32 gr2 = roundf(MAX(S(4), isz * 0.07f));
                 f32 gx = ix + isz - gr2 * 2, gy = iy;
@@ -1702,7 +1764,7 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
                 draw_rrect(gx, gy, gr2 * 2, gr2 * 2, gr2, C(cmp_marked(cs) ? cmp_color(cs) : git_color(gs)));
             }
             bool hid = e->flags & ENT_HIDDEN;
-            draw_entry_badges(p, e, ix, iy, isz, hid);
+            draw_entry_badges(p, e, ix, iy, isz, hid, share_icon);
 
             f32 lyy = iy + isz + roundf(S(6)), lw = r.w - S(12), lh = roundf(f->line_h * 1.1f);
             if (renaming) {
@@ -2633,12 +2695,14 @@ static void draw_list(Pane *p, bool active) {
             for (int k = 0; k < d; k++)
                 draw_rect(roundf(ly->col_name + roundf(S(16)) * (f32)k + roundf(S(7))), y, 1, rh, CA(COL_TEXT_FAINT, 0.35f));
         }
-        if (p->list_px >= 32) draw_item_icon_big(p, e, icx, iy, is, cut); // (big enough for thumbnails)
-        else if (e->flags & ENT_DIR) {
-            if (!draw_repo_dir_icon(p, e, icx, iy, is, hidden)) draw_dir_icon(icx, iy, is, rel_base(e->name), hidden);
+        bool share_icon = false;
+        if (p->list_px >= 32) {
+            if (e->flags & ENT_DIR) draw_dir_entry_icon(p, e, icx, iy, is, hidden, &share_icon);
+            else draw_item_icon_big(p, e, icx, iy, is, cut);
         }
+        else if (e->flags & ENT_DIR) draw_dir_entry_icon(p, e, icx, iy, is, hidden, &share_icon);
         else if (!draw_icon_for_name(icx, iy, is, rel_base(e->name), e->mflags & MF_EXEC)) draw_file_icon(icx, iy, is, file_color(e));
-        draw_entry_badges(p, e, icx, iy, is, hidden);
+        draw_entry_badges(p, e, icx, iy, is, hidden, share_icon);
 
         f32 ty = text_y(f, y, rh);
         f32 nx = icx + is + roundf(S(9));
@@ -4012,7 +4076,7 @@ static void draw_palette(void) {
         } else if (it->kind == PI_FILE) {
             if (!draw_icon_for_name(ix, iy, is, path_basename(it->text), false)) draw_file_icon(ix, iy, is, 0x8C8F99);
         } else if (it->kind == PI_PLACE && !strcmp(it->text, "/")) {
-            draw_drive_icon(ix, iy, is);
+            draw_drive_icon_ex(ix, iy, is, false, EXTRA_DRIVE_HARDDISK);
         } else {
             draw_path_icon(ix, iy, is, it->text);
         }

@@ -274,14 +274,29 @@ static u8 *sysi_raster(const char *path, int px, u32 ink) {
 static int sysi_names(int id, const char **out) {
     // the badges: the desktop theme's own emblems (the Git one is never taken from a theme: the app's logo is its own)
     if (id >= ICON_BADGE_BASE && id < ICON_BADGE_BASE + BADGE_COUNT) {
-        static const char *const badge_names[BADGE_COUNT][3] = {
-            {"emblem-symbolic-link", "symbolic-link", NULL},
-            {NULL, NULL, NULL},
-            {"emblem-shared", "folder-shared", "folder-remote"},
-            {NULL, NULL, NULL},
+        static const char *const badge_names[BADGE_COUNT][4] = {
+            {"emblem-symbolic-link", "symbolic-link", NULL, NULL},
+            {NULL, NULL, NULL, NULL},
+            {"emblem-shared", "folder-publicshare", "folder-remote", "folder-network"},
+            {"emblem-borg", NULL, NULL, NULL},
         };
         int b = id - ICON_BADGE_BASE, n = 0;
-        for (int i = 0; i < 3 && badge_names[b][i]; i++) out[n++] = badge_names[b][i];
+        for (int i = 0; i < 4 && badge_names[b][i]; i++) out[n++] = badge_names[b][i];
+        return n;
+    }
+    if (id >= ICON_EXTRA_BASE && id < ICON_EXTRA_BASE + EXTRA_COUNT) {
+        static const char *const extra_names[EXTRA_COUNT][5] = {
+            {"folder-remote", "folder-publicshare", "network-server", NULL, NULL},
+            {"folder-publicshare", "folder-remote", "network-server", NULL, NULL},
+            {"folder-network", "network-workgroup", "folder-remote", NULL, NULL},
+            {"drive-harddisk", "drive-harddisk-system", "drive-harddisk-symbolic", NULL, NULL},
+            {"drive-removable-media", "drive-removable-media-usb", "drive-harddisk-usb", "drive-harddisk", NULL},
+            {"drive-optical", "drive-cdrom", "media-optical", "drive-removable-media", NULL},
+            {"folder-cloud", "folder-gdrive", "folder-remote", NULL, NULL},
+            {"network-server", "network-workgroup", "folder-remote", NULL, NULL},
+        };
+        int e = id - ICON_EXTRA_BASE, n = 0;
+        for (int i = 0; i < 5 && extra_names[e][i]; i++) out[n++] = extra_names[e][i];
         return n;
     }
     static const IconMap map[] = {
@@ -351,7 +366,7 @@ static void sysi_job(void *arg) { // (worker)
 // The desktop's pixels for bundled icon id at px, NULL while they're on their way or if it has none (draw the
 // bundled one). The first ask starts the lookup.
 static const u8 *sysi_pixels(int id, int px) {
-    if (id < 0 || (id >= ICON_COUNT && (id < ICON_BADGE_BASE || id >= ICON_BADGE_BASE + BADGE_COUNT)) || !g_desktop.icons[0]) return NULL;
+    if (id < 0 || (id >= ICON_COUNT && (id < ICON_BADGE_BASE || id >= ICON_BADGE_BASE + BADGE_COUNT) && (id < ICON_EXTRA_BASE || id >= ICON_EXTRA_BASE + EXTRA_COUNT)) || !g_desktop.icons[0]) return NULL;
     for (int i = 0; i < g_nsysicons; i++)
         if (g_sysicons[i].id == id && g_sysicons[i].px == px) return g_sysicons[i].rgba;
     if (g_sysi_bytes > (32u << 20)) { // keep the memory bounded: drop what's drawn (asked again after an atlas reset)

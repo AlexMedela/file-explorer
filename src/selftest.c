@@ -2121,7 +2121,7 @@ static int run_selftest_m7(void) {
         ST_CHECK(icon_theme_find("TestIcons") < 0 && g_icon_theme == 0);
         ST_CHECK(badge_icon(BADGE_GIT) < 0 && badge_icon(BADGE_LINK) < 0); // built in: no theme emblem
         ST_CHECK(icon_src(ICON_BADGE_BASE) && strstr(icon_src(ICON_BADGE_BASE), "<svg")); // the app's own marks
-        ST_CHECK(icon_src(badge_art_id(BADGE_GIT)) && !strstr(icon_src(badge_art_id(BADGE_GIT)), "#e64a19")); // the interface set's branch
+        ST_CHECK(icon_src(badge_art_id(BADGE_GIT)) && strstr(icon_src(badge_art_id(BADGE_GIT)), "#e64a19")); // the classic orange logo
         ST_CHECK(icon_src(badge_art_id(BADGE_SHARE)) && strstr(icon_src(badge_art_id(BADGE_SHARE)), "stroke-width=\"3\"")); // drawn a little bolder
         ST_CHECK(trash_icon(true) == icon_find("trash-full") && trash_icon(false) == icon_find("trash")); // built in: both bins
     }
@@ -5765,14 +5765,14 @@ static int run_selftest_m9(void) {
         int b[3];
         GitSub g = {0};
         snprintf(g.branch, sizeof g.branch, "main");
-        ST_CHECK(entry_badges(true, false, NULL, sp, b) == 1 && b[0] == BADGE_SHARE);
-        ST_CHECK(entry_badges(true, false, &g, sp, b) == 2 && b[1] == BADGE_GIT);
-        ST_CHECK(entry_badges(true, true, &g, sp, b) == 3 && b[0] == BADGE_SHARE && b[1] == BADGE_LINK && b[2] == BADGE_GIT);
-        ST_CHECK(entry_badges(false, true, NULL, NULL, b) == 1 && b[0] == BADGE_LINK); // a symlinked file: the link one only
-        ST_CHECK(entry_badges(true, false, NULL, "/tmp/fe-m9-badges-not-a-share", b) == 0);
+        ST_CHECK(entry_badges(true, false, NULL, sp, false, b) == 1 && b[0] == BADGE_SHARE);
+        ST_CHECK(entry_badges(true, false, &g, sp, false, b) == 2 && b[1] == BADGE_GIT);
+        ST_CHECK(entry_badges(true, true, &g, sp, false, b) == 3 && b[0] == BADGE_SHARE && b[1] == BADGE_LINK && b[2] == BADGE_GIT);
+        ST_CHECK(entry_badges(false, true, NULL, NULL, false, b) == 1 && b[0] == BADGE_LINK); // a symlinked file: the link one only
+        ST_CHECK(entry_badges(true, false, NULL, "/tmp/fe-m9-badges-not-a-share", false, b) == 0);
         GitSub bg = {0};
         bg.borg = BORG_V2;
-        ST_CHECK(entry_badges(true, false, &bg, NULL, b) == 1 && b[0] == BADGE_BORG); // a Borg repository: its own mark
+        ST_CHECK(entry_badges(true, false, &bg, NULL, false, b) == 1 && b[0] == BADGE_BORG); // a Borg repository: its own mark
         { // a mounted remote filesystem (NFS, CIFS, WebDAV, sshfs, rclone) is a share too
             char mf[PATH_MAX];
             snprintf(mf, sizeof mf, "/tmp/fe-m9-mounts");
