@@ -2391,6 +2391,14 @@ static void draw_list(Pane *p, bool active) {
     }
 
     if (p->view != VIEW_DETAILS) draw_cells(p, active, hover, sel_col, sel_cur);
+    // tree view: dropping onto an expanded folder - its whole section (the folder's row and everything open inside)
+    bool drop_sect = p->view == VIEW_DETAILS && A.drop_pane == p && A.drop_row >= 0 && A.drop_end > A.drop_row;
+    f32 sect_y = 0, sect_h = 0;
+    if (drop_sect) {
+        sect_y = roundf((f32)((f64)lr.y + (f64)A.drop_row * rh - p->scroll)) + 1;
+        sect_h = roundf((f32)((f64)(A.drop_end - A.drop_row + 1) * rh)) - 2;
+        draw_rrect(rx, sect_y, rw, sect_h, S(5), CA(COL_ACCENT, 0.08f));
+    }
     i64 i = p->nhdr ? grp_first_pos(p, first) : first;
     int hi = p->nhdr ? grp_first_hdr(p, first) : 0;
     for (i64 row = first; p->view == VIEW_DETAILS; row++, i++) {
@@ -2424,7 +2432,7 @@ static void draw_list(Pane *p, bool active) {
         if (cur && !sel && active) draw_rrect_outline(rx, y + 1, rw, rh - 2, S(5), MAX(1.f, S(1.f)), CA(COL_ACCENT, 0.7f));
         if (A.drop_pane == p && A.drop_row == i) {
             draw_rrect(rx, y + 1, rw, rh - 2, S(5), CA(COL_ACCENT, 0.22f));
-            draw_rrect_outline(rx, y + 1, rw, rh - 2, S(5), MAX(1.f, S(1.3f)), C(COL_ACCENT));
+            if (!drop_sect) draw_rrect_outline(rx, y + 1, rw, rh - 2, S(5), MAX(1.f, S(1.3f)), C(COL_ACCENT));
         }
         bool cut = clip_is_cut(p->path, e->name);
         if (cut) g_alpha = 0.45f;
@@ -2606,6 +2614,7 @@ static void draw_list(Pane *p, bool active) {
         draw_rect(bx + bw - 1, by, 1, bh, CA(COL_ACCENT, 0.8f));
     }
 
+    if (drop_sect) draw_rrect_outline(rx, sect_y, rw, sect_h, S(5), MAX(1.f, S(1.3f)), C(COL_ACCENT));
     if (A.drop_pane == p && A.drop_row < 0 && A.drop_dir[0])
         draw_rrect_outline(lr.x + S(3), lr.y + S(3), lr.w - S(6), lr.h - S(6), S(6), MAX(1.f, S(1.5f)), C(COL_ACCENT));
 
