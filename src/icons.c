@@ -97,16 +97,21 @@ static int icon_id_limit(void) { CustomIconTheme *c = icon_custom(); return ICON
 
 static int icon_find(const char *name); // below
 
-// The app's own badge artwork, for a theme that has none: the share arrow, the link arrow, and the classic orange
-// Git logo (the "git" file icon's artwork, but the badge has an id of its own).
+// The app's own badge artwork, for a theme that has none: the interface set (Lucide), drawn a little bolder so it
+// still reads at the smallest zoom.
 static const char *badge_bundled_src(int badge) {
-    static const char *share = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><path d=\"M2 14V9Q2 5 7 5H10V1L16 7L10 13V9H7Q5 9 5 12V14Z\" fill=\"#7FB2FF\" stroke=\"#20242C\" stroke-width=\"1\"/></svg>";
-    static const char *link = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><path d=\"M6.7 9.3a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-1 1\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.4\" stroke-linecap=\"round\"/><path d=\"M9.3 6.7a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l1-1\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.4\" stroke-linecap=\"round\"/></svg>";
-    static const char *borg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><circle cx=\"8\" cy=\"8\" r=\"6\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.5\"/><path d=\"M8 4.6V8l2.6 1.6\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.5\" stroke-linecap=\"round\"/></svg>";
-    if (badge == BADGE_SHARE) return share;
-    if (badge == BADGE_LINK) return link;
-    if (badge == BADGE_BORG) return borg;
-    return g_icon_svg[0][icon_find("git")];
+    int ui = badge == BADGE_SHARE ? UI_SHARE_2 : badge == BADGE_LINK ? UI_LINK : badge == BADGE_BORG ? UI_ROTATE_CCW_CLOCK : UI_GIT_BRANCH;
+    const char *src = g_ui_icons[ui];
+    if (!src) return NULL;
+    static char buf[4096];
+    size_t n = strlen(src);
+    if (n + 8 >= sizeof buf) return src;
+    // a heavier stroke: the interface set is drawn for a full icon, a badge is a third of one
+    const char *at = strstr(src, "stroke-width=\"2\"");
+    if (!at) return src;
+    size_t head = (size_t)(at - src);
+    snprintf(buf, sizeof buf, "%.*sstroke-width=\"3\"%s", (int)head, src, at + strlen("stroke-width=\"2\""));
+    return buf;
 }
 
 // SVG text of icon id in the current theme.

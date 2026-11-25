@@ -2121,7 +2121,8 @@ static int run_selftest_m7(void) {
         ST_CHECK(icon_theme_find("TestIcons") < 0 && g_icon_theme == 0);
         ST_CHECK(badge_icon(BADGE_GIT) < 0 && badge_icon(BADGE_LINK) < 0); // built in: no theme emblem
         ST_CHECK(icon_src(ICON_BADGE_BASE) && strstr(icon_src(ICON_BADGE_BASE), "<svg")); // the app's own marks
-        ST_CHECK(icon_src(badge_art_id(BADGE_GIT)) && strstr(icon_src(badge_art_id(BADGE_GIT)), "#e64a19")); // the classic orange logo
+        ST_CHECK(icon_src(badge_art_id(BADGE_GIT)) && !strstr(icon_src(badge_art_id(BADGE_GIT)), "#e64a19")); // the interface set's branch
+        ST_CHECK(icon_src(badge_art_id(BADGE_SHARE)) && strstr(icon_src(badge_art_id(BADGE_SHARE)), "stroke-width=\"3\"")); // drawn a little bolder
         ST_CHECK(trash_icon(true) == icon_find("trash-full") && trash_icon(false) == icon_find("trash")); // built in: both bins
     }
     { // File icons "System": the desktop's icon theme, looked up and drawn on a worker, over the bundled icon meanwhile
