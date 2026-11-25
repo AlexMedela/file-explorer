@@ -4999,6 +4999,19 @@ static int run_selftest_m9(void) {
         opt_app_icon_chosen("");
         settings_save();
     }
+    { // File Icon -> Default: the launcher keeps an icon (the base accent makes no copy of its own)
+        char dh[PATH_MAX], dh2[PATH_MAX], svg2[PATH_MAX + 48], png2[PATH_MAX + 48];
+        data_home(dh, sizeof dh);
+        snprintf(dh2, sizeof dh2, "%s/appicon2", dh);
+        snprintf(svg2, sizeof svg2, "%s/icons/hicolor/scalable/apps/dev.fileexplorer.svg", dh2);
+        snprintf(png2, sizeof png2, "%s/icons/hicolor/256x256/apps/dev.fileexplorer.png", dh2);
+        g_app_icon_mode = APP_ICON_FILE_ICON;
+        ST_CHECK(app_icon_write_ex(dh2, LOGO_BASE_ACCENT, NULL, false)); // the folder icon as the launcher icon
+        ST_CHECK(access(png2, F_OK) == 0 && access(svg2, F_OK) != 0);
+        g_app_icon_mode = APP_ICON_DEFAULT;
+        ST_CHECK(app_icon_write(dh2, LOGO_BASE_ACCENT)); // back to the app's own icon
+        ST_CHECK(access(png2, F_OK) != 0 && access(svg2, F_OK) == 0); // the override is there: not gone from the launcher
+    }
     { // scrollbar colour: Auto (the theme's own; System: the desktop's accent), or #RRGGBB / #RGB typed and applied
         int saved = g_theme_cur;
         g_theme_cur = theme_find("Dark");
