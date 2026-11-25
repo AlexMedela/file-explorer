@@ -4318,7 +4318,14 @@ static int run_selftest_m9(void) {
     st_opt_click(st_opt_hit(HP_SWATCH, OPT_ACCENT, 3)); // Pink
     ST_CHECK(g_accent_custom == (0x01000000u | g_accents[2].rgb) && T.accent == g_accents[2].rgb);
     ST_CHECK(T.sel != g_theme_light.sel);
-    st_opt_click(st_opt_hit(HP_SWATCH, OPT_ACCENT, 0)); // theme default
+    { // picking a palette swatch also leaves desktop-accent mode
+        bool da = g_accent_desktop; u32 de = g_desktop.accent;
+        g_accent_desktop = true; g_desktop.accent = 0x01000000u | 0x3584E4; theme_apply();
+        st_opt_click(st_opt_hit(HP_SWATCH, OPT_ACCENT, 0)); // theme default
+        ST_CHECK(!g_accent_desktop && !g_accent_custom && T.accent == g_theme_light.accent);
+        g_desktop.accent = de; g_accent_desktop = da; theme_apply();
+    }
+    st_opt_click(st_opt_hit(HP_SWATCH, OPT_ACCENT, 0)); // theme default (idempotent)
     ST_CHECK(!g_accent_custom && T.accent == g_theme_light.accent);
     { // the theme's own accent only gets its own swatch when it isn't a preset (Dark's is Blue: no duplicate)
         int saved = g_theme_cur, counts[2] = {0, 0};

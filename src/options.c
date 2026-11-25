@@ -981,6 +981,20 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
     switch (o->kind) {
     case OK_BOOL: {
         Rect t = {x + w - roundf(S(40)), roundf(cy - S(10)), roundf(S(40)), roundf(S(20))};
+        if (o->id == OPT_ACCENT_DESKTOP) {
+            f32 sz = roundf(S(22)), gap = roundf(S(8));
+            Rect c = {t.x - gap - sz, roundf(cy - sz * 0.5f), sz, sz};
+            bool on = g_accent_desktop;
+            bool known = g_desktop.accent != 0;
+            u32 col = known ? (g_desktop.accent & 0xFFFFFF) : 0;
+            if (on || opt_hover(c))
+                draw_rrect_outline(c.x - S(3), c.y - S(3), sz + S(6), sz + S(6), (sz + S(6)) * 0.5f, MAX(1.f, S(1.5f)),
+                                   C(on ? COL_TEXT : COL_TEXT_FAINT));
+            if (on && known)
+                draw_rrect(c.x, c.y, sz, sz, sz * 0.5f, C(col));
+            else
+                draw_rrect_outline(c.x, c.y, sz, sz, sz * 0.5f, MAX(1.f, S(1.2f)), C(COL_TEXT_FAINT));
+        }
         opt_toggle_draw(t, opt_bool_get(o->id), opt_hover(t));
         opt_hit(t, HP_TOGGLE, o->id, 0);
         break;
@@ -2021,8 +2035,10 @@ static void options_click(f32 x, f32 y, int clicks) {
         case HP_MINUS: opt_int_step(hp->opt, -1); return;
         case HP_PLUS: opt_int_step(hp->opt, +1); return;
         case HP_SWATCH:
+            g_accent_desktop = false;
             g_accent_custom = hp->arg == 0 ? 0 : 0x01000000u | g_accents[hp->arg - 1].rgb;
             theme_apply();
+            desktop_look_sync();
             A.settings_dirty = true;
             return;
         case HP_BUTTON:
