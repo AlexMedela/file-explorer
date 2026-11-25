@@ -531,7 +531,7 @@ static u8 *app_icon_raster(int px) {
 
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
-    const u8 *sys = (icon_system_selected() || id >= ICON_BADGE_BASE) && w == h ? sysi_pixels(id, w) : NULL;
+    const u8 *sys = (icon_system_selected() || id >= ICON_BADGE_BASE || (id >= ICON_EXTRA_BASE && id < ICON_EXTRA_BASE + EXTRA_COUNT)) && w == h ? sysi_pixels(id, w) : NULL;
     if (sys) {
         u8 *buf = xmalloc((size_t)w * h * 4);
         memcpy(buf, sys, (size_t)w * h * 4);
