@@ -5784,6 +5784,17 @@ static int run_selftest_m9(void) {
             setenv("FE_MOUNTS", mf, 1);
             remote_mounts_load();
             ST_CHECK(folder_is_share("/mnt/fe-nfs") && folder_is_share("/mnt/fe-rclone"));
+            { // a Borg repository is not a share: it wears its own mark
+                FILE *bf = fopen(mf, "a");
+                ST_CHECK(bf != NULL);
+                if (bf) {
+                    fprintf(bf, "borgfs /mnt/fe-borg fuse ro 0 0\n");
+                    fclose(bf);
+                }
+                remote_mounts_load();
+                ST_CHECK(!folder_is_share("/mnt/fe-borg"));
+                ST_CHECK(borgfs_mount_at("/mnt/fe-borg"));
+            }
             ST_CHECK(!folder_is_share("/mnt/fe-nfs/sub") && !folder_is_share("/mnt/fe-other"));
             unsetenv("FE_MOUNTS");
             remote_mounts_load();

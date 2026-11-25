@@ -161,6 +161,7 @@ static bool draw_badge(f32 x, f32 y, f32 size, int badge, int slot, bool hidden)
 // filesystem (NFS, CIFS, WebDAV, sshfs, rclone) or a cloud remote's folder.
 static bool folder_is_share(const char *path) {
     if (!path || !path[0]) return false;
+    if (borgfs_mount_at(path)) return false;                     // a Borg repository: it wears its own mark
     if (local_share_kind(&g_local_shares, path)) return true; // a share configured here
     if (path_in_cloud(path)) return true;                      // a cloud remote (rclone, WebDAV)
     for (int i = 0; i < g_nremote; i++)                       // a mounted remote filesystem
