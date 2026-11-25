@@ -5060,6 +5060,14 @@ static int run_selftest_m9(void) {
         settings_load();
         init_places();
         ST_CHECK(!strcmp(g_app_icon_path, svg));
+        // the repository tag's style and the repository folder icon: they survive a save and a load
+        A.repo_tag = REPO_TAG_ICON;
+        A.repo_icon = REPO_ICON_MATCH;
+        settings_save();
+        settings_load();
+        ST_CHECK(A.repo_tag == REPO_TAG_ICON && A.repo_icon == REPO_ICON_MATCH);
+        A.repo_tag = REPO_TAG_FULL;
+        A.repo_icon = REPO_ICON_KEEP;
         opt_app_icon_chosen("");
         settings_save();
     }
@@ -5758,6 +5766,21 @@ static int run_selftest_m9(void) {
         ST_CHECK(entry_badges(true, true, true, sp, b) == 3 && b[0] == BADGE_SHARE && b[1] == BADGE_LINK && b[2] == BADGE_GIT);
         ST_CHECK(entry_badges(false, true, false, NULL, b) == 1 && b[0] == BADGE_LINK); // a symlinked file: the link one only
         ST_CHECK(entry_badges(true, false, false, "/tmp/fe-m9-badges-not-a-share", b) == 0);
+    }
+    { // the repository tag: its style, and the folder icon that matches it
+        GitSub g = {0};
+        snprintf(g.branch, sizeof g.branch, "main");
+        ST_CHECK(A.repo_tag == REPO_TAG_FULL && A.repo_icon == REPO_ICON_KEEP); // the defaults
+        ST_CHECK(repo_pill_w(&g) > S(40)); // the tag with the branch name
+        A.repo_tag = REPO_TAG_ICON;
+        ST_CHECK(repo_pill_w(&g) < S(40)); // the mark alone
+        A.repo_tag = REPO_TAG_HIDDEN;
+        ST_CHECK(repo_pill_w(&g) == 0); // no tag: the name takes the room
+        A.repo_tag = REPO_TAG_FULL;
+        ST_CHECK(repo_folder_icon(&g) == icon_find("folder-git")); // a Git repository
+        g.borg = BORG_V2;
+        ST_CHECK(repo_folder_icon(&g) == icon_find("folder-backup")); // a Borg one
+        ST_CHECK(repo_color(&g) != repo_color(&(GitSub){0})); // the two kinds differ
     }
     { // own title bar: buttons at the top right, drag areas, resize edges, the strip above the preview
         ST_CHECK(!A.csd); // headless: the system bar unless opted in

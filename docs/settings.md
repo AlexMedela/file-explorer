@@ -64,6 +64,10 @@ desktops that close and tile windows from the keyboard; the tab strip then runs 
 `brand_name=app|host|custom|hidden` (Options -> Appearance -> Name above the sidebar) shows Explorer, this computer's
 name, your own `brand_text=` (typed under it in Options), or nothing: the sidebar then starts at the top.
 `brand_logo=0` (Options -> Appearance -> Logo) shows that name without the logo.
+`repo_tag=full|icon|hidden` (Options -> Appearance -> Repository tag) styles the tag on a repository folder: its
+branch, its mark alone, or none (the name then takes the room). `repo_icon=keep|match` (Options -> Appearance ->
+Repository folder icon) lets a repository folder keep its own icon or wear the one that matches it (the Git folder,
+the archive of a Borg backup).
 `round_corners=1` (Options -> Appearance -> Rounded corners, off by default) rounds the window's corners with Explorer's own title bar,
 and draws a drop shadow round it the way GTK apps do (square and without shadow when maximised or snapped). On X11 this
 needs a compositor (else the corners stay square) and the OpenGL renderer (Automatic picks it there); the shadow needs a

@@ -48,6 +48,8 @@ static void settings_defaults(void) {
     A.round_corners = false;
     A.window_buttons = true;
     A.brand_logo = true;
+    A.repo_tag = REPO_TAG_FULL;
+    A.repo_icon = REPO_ICON_KEEP;
     A.brand_name = BRAND_APP;
     A.brand_text[0] = 0;
     A.tab_style = TABS_CARDS;
@@ -327,6 +329,8 @@ static void settings_load(void) {
         else if (!strcmp(k, "round_corners")) A.round_corners = atoi(v);
         else if (!strcmp(k, "window_buttons")) A.window_buttons = atoi(v);
         else if (!strcmp(k, "brand_logo")) A.brand_logo = atoi(v);
+        else if (!strcmp(k, "repo_tag")) A.repo_tag = !strcmp(v, "icon") ? REPO_TAG_ICON : !strcmp(v, "hidden") ? REPO_TAG_HIDDEN : REPO_TAG_FULL;
+        else if (!strcmp(k, "repo_icon")) A.repo_icon = !strcmp(v, "match") ? REPO_ICON_MATCH : REPO_ICON_KEEP;
         else if (!strcmp(k, "brand_name")) A.brand_name = !strcmp(v, "host") ? BRAND_HOST : !strcmp(v, "custom") ? BRAND_CUSTOM : !strcmp(v, "hidden") ? BRAND_HIDDEN : BRAND_APP;
         else if (!strcmp(k, "brand_text")) snprintf(A.brand_text, sizeof A.brand_text, "%s", v);
         else if (!strcmp(k, "tab_style")) A.tab_style = !strcmp(v, "pills") ? TABS_PILLS : TABS_CARDS;
@@ -623,6 +627,8 @@ static void settings_write(FILE *f) {
     fprintf(f, "round_corners=%d\n", A.round_corners);
     fprintf(f, "window_buttons=%d\n", A.window_buttons);
     fprintf(f, "brand_logo=%d\n", A.brand_logo);
+    fprintf(f, "repo_tag=%s\nrepo_icon=%s\n", A.repo_tag == REPO_TAG_ICON ? "icon" : A.repo_tag == REPO_TAG_HIDDEN ? "hidden" : "full",
+            A.repo_icon == REPO_ICON_MATCH ? "match" : "keep");
     static const char *brand_names[] = {"app", "host", "custom", "hidden"}; // BRAND_*
     fprintf(f, "brand_name=%s\nbrand_text=%s\n", brand_names[CLAMP(A.brand_name, 0, BRAND_HIDDEN)], A.brand_text);
     fprintf(f, "tab_style=%s\n", A.tab_style == TABS_PILLS ? "pills" : "cards");

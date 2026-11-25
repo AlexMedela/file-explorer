@@ -170,6 +170,8 @@ typedef struct {
 enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
 enum { TITLEBAR_SYSTEM, TITLEBAR_DEFAULT }; // A.title_bar
 enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
+enum { REPO_TAG_FULL, REPO_TAG_ICON, REPO_TAG_HIDDEN }; // A.repo_tag: the repository tag's style
+enum { REPO_ICON_KEEP, REPO_ICON_MATCH }; // A.repo_icon: a repository folder wears the icon that matches it
 enum { EXEC_ASK, EXEC_RUN, EXEC_TERMINAL, EXEC_OPEN }; // A.exec_open: opening an executable file asks, runs it (here / in a terminal), or opens it as a document
 enum { TABS_CARDS, TABS_PILLS }; // A.tab_style: classic tabs above the navigation bar, pills below it
 static bool g_hide_single_tab = false; // Behavior: give the folder the tab row back when only one tab is open
@@ -718,6 +720,8 @@ static struct {
     bool round_corners; // round the window's corners with our own title bar (setting)
     bool window_buttons; // minimise / maximise / close in our own title bar (setting; off: the desktop's keys close it)
     bool brand_logo;     // the logo before the name above the sidebar (setting)
+    int repo_tag;        // REPO_TAG_*: the repository tag's style (setting)
+    int repo_icon;       // REPO_ICON_*: a repository folder wears the icon that matches it (setting)
     int brand_name;      // BRAND_*: which name is shown there (setting; hidden: the sidebar starts at the top)
     char brand_text[96]; // the name for BRAND_CUSTOM (setting)
     int tab_style;       // TABS_*: the open tab as a card joining the toolbar, or rounded pills centred in a box (setting)

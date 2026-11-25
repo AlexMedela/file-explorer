@@ -10,7 +10,7 @@ enum {
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_POPUP, OPT_BRIGHT_STATUS, OPT_BRIGHT_PATHBAR, OPT_BRIGHT_SEARCHBAR, OPT_TRANSPARENT_PATHBAR, OPT_PATH_TEXT, OPT_RIBBON, OPT_RIBBON_POS, OPT_RIBBON_OVERFLOW, OPT_SEPARATORS, OPT_NAV_SELECTION_OPACITY, OPT_NAV_SELECTOR_MARK, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY, OPT_HIDE_SINGLE_TAB,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_FOLDERS_FIRST, OPT_DEF_GROUP,
-    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL_PATH,
+    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_REPO_TAG, OPT_REPO_ICON, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL_PATH,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
 };
 
@@ -42,6 +42,8 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: the desktop's own title bar (System), or Explorer's own on every desktop (Default)"},
     {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_BUTTONS, "Window buttons", "Minimise, maximise and close at the top right of Explorer's own title bar; without them, the desktop's keys close it"},
     {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_REPO_TAG, "Repository tag", "The tag on a repository folder: its branch, its icon alone, or none"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_REPO_ICON, "Repository folder icon", "A repository folder keeps its own icon, or wears the one that matches it (Git, Borg)"},
     {OC_APPEARANCE, OK_CHOICE, OPT_BRAND_NAME, "Name above the sidebar", "Explorer, this computer's name, your own text, or none (the sidebar then starts at the top)"},
     {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "Show the icon before the name above the sidebar; off hides a custom title bar icon too"},
     {OC_APPEARANCE, OK_TEXT, OPT_BRAND_TEXT, "Your own name", "Shown above the sidebar instead of Explorer"},
@@ -145,6 +147,8 @@ static const int g_transfer_counts[] = {1, 2, 4, 0}; // A.transfers_at_once (0 =
 static const char *g_transfer_labels[] = {"One at a time", "Two at a time", "Four at a time", "All at once"};
 static const char *g_exec_labels[] = {"Ask", "Run", "Run in terminal", "Open as a document (programs still ask)"}; // EXEC_*
 static const char *g_tab_style_labels[] = {"Classic", "Pills"}; // TABS_*
+static const char *g_repo_tag_labels[] = {"Name and branch", "Icon only", "Hidden"}; // REPO_TAG_*
+static const char *g_repo_icon_labels[] = {"Keep its own", "Match the repository"}; // REPO_ICON_*
 static const char *g_ribbon_pos_labels[] = {"Below the path bar", "Above the path bar", "Bottom", "Left", "Right"}; // RP_*
 static const char *g_ribbon_overflow_labels[] = {"More menu", "Wrap onto more rows", "Scroll"}; // RO_*
 static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
@@ -286,6 +290,8 @@ static int opt_choice_count(int id) {
     case OPT_TITLE_BAR: return (int)ARRAY_COUNT(g_title_bar_labels);
     case OPT_BRAND_NAME: return (int)ARRAY_COUNT(g_brand_labels);
     case OPT_TAB_STYLE: return (int)ARRAY_COUNT(g_tab_style_labels);
+    case OPT_REPO_TAG: return (int)ARRAY_COUNT(g_repo_tag_labels);
+    case OPT_REPO_ICON: return (int)ARRAY_COUNT(g_repo_icon_labels);
     case OPT_RIBBON_POS: return (int)ARRAY_COUNT(g_ribbon_pos_labels);
     case OPT_RIBBON_OVERFLOW: return (int)ARRAY_COUNT(g_ribbon_overflow_labels);
     case OPT_FONT: opt_load_families(); return 1 + g_opt.nfamilies;
@@ -328,6 +334,8 @@ static const char *opt_choice_label(int id, int i) {
     case OPT_TITLE_BAR: return g_title_bar_labels[i];
     case OPT_BRAND_NAME: return g_brand_labels[i];
     case OPT_TAB_STYLE: return g_tab_style_labels[i];
+    case OPT_REPO_TAG: return g_repo_tag_labels[i];
+    case OPT_REPO_ICON: return g_repo_icon_labels[i];
     case OPT_RIBBON_POS: return g_ribbon_pos_labels[i];
     case OPT_RIBBON_OVERFLOW: return g_ribbon_overflow_labels[i];
     case OPT_TRANSFERS: return g_transfer_labels[i];
@@ -351,6 +359,8 @@ static int opt_choice_get(int id) {
     case OPT_TITLE_BAR: return A.title_bar;
     case OPT_BRAND_NAME: return A.brand_name;
     case OPT_TAB_STYLE: return A.tab_style;
+    case OPT_REPO_TAG: return A.repo_tag;
+    case OPT_REPO_ICON: return A.repo_icon;
     case OPT_RIBBON_POS: return A.ribbon_pos;
     case OPT_RIBBON_OVERFLOW: return A.ribbon_overflow;
     case OPT_FONT:
@@ -424,6 +434,8 @@ static void opt_choice_set(int id, int i) {
     case OPT_TERM_LOOK: g_term_look_setting = i; tc_reload_all(); break;
     case OPT_TITLE_BAR: A.title_bar = i; titlebar_apply(); break;
     case OPT_TAB_STYLE: A.tab_style = i; layout(); break;
+    case OPT_REPO_TAG: A.repo_tag = i; layout(); break;
+    case OPT_REPO_ICON: A.repo_icon = i; layout(); break;
     case OPT_RIBBON_POS: A.ribbon_pos = i; layout(); break;
     case OPT_RIBBON_OVERFLOW: A.ribbon_overflow = i; layout(); break;
     case OPT_BRAND_NAME:

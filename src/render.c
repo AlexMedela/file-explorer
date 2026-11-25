@@ -161,6 +161,16 @@ static void draw_entry_badges(Pane *p, const Entry *e, f32 x, f32 y, f32 size, b
     for (int k = 0; k < n; k++) draw_badge(x, y, size, b[k], k, hidden);
 }
 
+// The folder icon that matches a repository: Git, or the archive of a Borg backup.
+static int repo_folder_icon(const GitSub *g) { return g ? icon_find(g->borg ? "folder-backup" : "folder-git") : -1; }
+
+// A repository folder may wear the icon that matches it.
+static bool draw_repo_dir_icon(Pane *p, const Entry *e, f32 x, f32 y, f32 s, bool hidden) {
+    if (A.repo_icon != REPO_ICON_MATCH) return false;
+    int id = repo_folder_icon(git_entry_sub(p, e));
+    return id >= 0 && draw_icon_id(x, y, s, id, hidden);
+}
+
 // A folder: the icon set's folder icon for this name (falls back to the built-in folder).
 static void draw_dir_icon(f32 x, f32 y, f32 s, const char *name, bool hidden) {
     if (draw_icon_id(x, y, s, folder_icon_for_name(name), hidden)) return;
@@ -1452,7 +1462,7 @@ static void render_tex_fit(SDL_Texture *t, int tw, int th, f32 x, f32 y, f32 box
 static void draw_item_icon_big(Pane *p, Entry *e, f32 ix, f32 iy, f32 isz, bool cut) {
     bool hidden = e->flags & ENT_HIDDEN;
     if (e->flags & ENT_DIR) {
-        draw_dir_icon(ix, iy, isz, rel_base(e->name), hidden);
+        if (!draw_repo_dir_icon(p, e, ix, iy, isz, hidden)) draw_dir_icon(ix, iy, isz, rel_base(e->name), hidden);
         return;
     }
     const char *name = rel_base(e->name);
@@ -1502,25 +1512,34 @@ static const char *repo_pill_text(const GitSub *g) {
     return g->branch[0] ? g->branch : "no commits";
 }
 
+// The tag's colour: a Git repository wears the Git orange, a Borg backup the blue.
+static u32 repo_color(const GitSub *g) { return g && g->borg ? 0x4C9BFFu : 0xE64A19u; }
+
 static f32 repo_pill_w(const GitSub *g) {
+    if (A.repo_tag == REPO_TAG_HIDDEN) return 0;
+    if (A.repo_tag == REPO_TAG_ICON) return roundf(S(26)); // the icon alone
     const char *b = repo_pill_text(g);
     return roundf(MIN(text_width(&A.font_small, b, (int)strlen(b)), S(140)) + S(31));
 }
+
 
 static void draw_repo_pill(const GitSub *g, f32 x, f32 y, f32 h, f32 maxw, bool bright) {
     Font *fs = &A.font_small;
     const char *b = repo_pill_text(g);
     f32 pw = MIN(repo_pill_w(g), maxw), ph = roundf(MAX(S(14), MIN(h - S(8), fs->line_h + S(6))));
-    if (pw < S(44)) return;
+    if (!pw || pw < S(24)) return;
     x = roundf(x);
     f32 py = roundf(y + (h - ph) * 0.5f);
-    draw_rrect(x, py, pw, ph, ph * 0.5f, bright ? CA(COL_SEL_TEXT, 0.18f) : C(COL_CHIP));
+    u32 rc = repo_color(g);
+    draw_rrect(x, py, pw, ph, ph * 0.5f, bright ? CA(COL_SEL_TEXT, 0.18f) : CA(rc, 0.18f)); // the repository's own colour
+    Color ic = bright ? C(COL_SEL_DIM) : C(rc);
     if (g->borg) {
         f32 is = roundf(S(12));
-        draw_ui_icon(UI_ROTATE_CCW_CLOCK, x + S(7), roundf(py + (ph - is) * 0.5f), is, bright ? C(COL_SEL_DIM) : C(COL_TEXT_DIM));
-    } else draw_branch_icon(x + S(6), py + ph * 0.5f, bright ? C(COL_SEL_DIM) : C(COL_TEXT_DIM));
+        draw_ui_icon(UI_ROTATE_CCW_CLOCK, x + S(7), roundf(py + (ph - is) * 0.5f), is, ic);
+    } else draw_branch_icon(x + S(6), py + ph * 0.5f, ic);
+    if (A.repo_tag == REPO_TAG_ICON) return; // the mark alone
     f32 tx = x + S(23);
-    draw_text_fit(fs, tx, text_y(fs, py, ph), x + pw - S(8) - tx, b, (int)strlen(b), bright ? C(COL_SEL_TEXT) : C(COL_TEXT2), 0);
+    draw_text_fit(fs, tx, text_y(fs, py, ph), x + pw - S(8) - tx, b, (int)strlen(b), bright ? C(COL_SEL_TEXT) : C(COL_TEXT), 0);
     f32 rx = x + pw + S(8);
     if (g->disp[0] && x + maxw - rx > S(40))
         draw_text_fit(fs, rx, text_y(fs, y, h), x + maxw - rx, g->disp, (int)strlen(g->disp), bright ? C(COL_SEL_DIM) : C(COL_TEXT_FAINT), 0);
@@ -1628,7 +1647,9 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
         if (p->view == VIEW_LIST) {
             f32 is = roundf(S(p->listv_px)), ix = r.x + S(10), iy = roundf(r.y + (r.h - is) * 0.5f);
             if (p->listv_px >= 32) draw_item_icon_big(p, e, ix, iy, is, cut); // (big enough for thumbnails)
-            else if (e->flags & ENT_DIR) draw_dir_icon(ix, iy, is, name, hidden);
+            else if (e->flags & ENT_DIR) {
+                if (!draw_repo_dir_icon(p, e, ix, iy, is, hidden)) draw_dir_icon(ix, iy, is, name, hidden);
+            }
             else if (!draw_icon_for_name(ix, iy, is, name, e->mflags & MF_EXEC)) draw_file_icon(ix, iy, is, file_color(e));
             draw_entry_badges(p, e, ix, iy, is, hidden);
             f32 tx = ix + is + S(8);
@@ -2593,7 +2614,9 @@ static void draw_list(Pane *p, bool active) {
                 draw_rect(roundf(ly->col_name + roundf(S(16)) * (f32)k + roundf(S(7))), y, 1, rh, CA(COL_TEXT_FAINT, 0.35f));
         }
         if (p->list_px >= 32) draw_item_icon_big(p, e, icx, iy, is, cut); // (big enough for thumbnails)
-        else if (e->flags & ENT_DIR) draw_dir_icon(icx, iy, is, rel_base(e->name), hidden);
+        else if (e->flags & ENT_DIR) {
+            if (!draw_repo_dir_icon(p, e, icx, iy, is, hidden)) draw_dir_icon(icx, iy, is, rel_base(e->name), hidden);
+        }
         else if (!draw_icon_for_name(icx, iy, is, rel_base(e->name), e->mflags & MF_EXEC)) draw_file_icon(icx, iy, is, file_color(e));
         draw_entry_badges(p, e, icx, iy, is, hidden);
 
