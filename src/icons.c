@@ -156,7 +156,7 @@ static bool icon_has_art(int id) {
     if (id < 0) return false;
     CustomIconTheme *c = icon_custom();
     if (id >= ICON_EXT_BASE) return c && id - ICON_EXT_BASE < c->next && c->ext_svg[id - ICON_EXT_BASE];
-    if (id >= ICON_EXTRA_BASE) { int f = id - ICON_EXTRA_BASE; return c && f >= 0 && f < EXTRA_COUNT && c->extra[f]; }
+    if (id >= ICON_EXTRA_BASE) { int f = id - ICON_EXTRA_BASE; return f >= 0 && f < EXTRA_COUNT && ((c && c->extra[f]) || icon_system_selected()); }
     if (id >= ICON_BADGE_BASE) {
         int b = id - ICON_BADGE_BASE;
         return b >= 0 && b < BADGE_COUNT && icon_src(id) != NULL;
@@ -531,7 +531,10 @@ static u8 *app_icon_raster(int px) {
 
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
-    const u8 *sys = (icon_system_selected() || id >= ICON_BADGE_BASE || (id >= ICON_EXTRA_BASE && id < ICON_EXTRA_BASE + EXTRA_COUNT)) && w == h ? sysi_pixels(id, w) : NULL;
+    bool extra = id >= ICON_EXTRA_BASE && id < ICON_EXTRA_BASE + EXTRA_COUNT;
+    CustomIconTheme *ct = icon_custom();
+    bool extra_custom = extra && ct && ct->extra[id - ICON_EXTRA_BASE];
+    const u8 *sys = (icon_system_selected() || id >= ICON_BADGE_BASE || (extra && !extra_custom)) && w == h ? sysi_pixels(id, w) : NULL;
     if (sys) {
         u8 *buf = xmalloc((size_t)w * h * 4);
         memcpy(buf, sys, (size_t)w * h * 4);
