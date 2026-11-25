@@ -278,6 +278,7 @@ static int sysi_names(int id, const char **out) {
             {"emblem-symbolic-link", "symbolic-link", NULL},
             {NULL, NULL, NULL},
             {"emblem-shared", "folder-shared", "folder-remote"},
+            {NULL, NULL, NULL},
         };
         int b = id - ICON_BADGE_BASE, n = 0;
         for (int i = 0; i < 3 && badge_names[b][i]; i++) out[n++] = badge_names[b][i];

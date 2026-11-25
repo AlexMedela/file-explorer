@@ -135,14 +135,16 @@ static bool draw_icon_id(f32 x, f32 y, f32 s, int id, bool hidden) {
     return true;
 }
 
+#define BADGE_ART_PX 64 // the artwork is rasterized at this size and scaled down: the same mark at every zoom
+
 // A badge (BADGE_*) on the icon at (x, y), size px: lower right, slot 1 stacked above slot 0. The artwork is the
 // custom icon theme's emblem, the desktop icon theme's, or the app's own.
 static bool draw_badge(f32 x, f32 y, f32 size, int badge, int slot, bool hidden) {
     int id = badge_art_id(badge);
     f32 b = roundf(MAX(S(6), size * 0.32f));
     f32 bx = roundf(x + size - b), by = roundf(y + size - b * (1 + slot));
-    // The artwork is rasterized once (at least 16 px) and scaled, so a badge is the same mark at every zoom.
-    SDL_Texture *t = big_icon_tex(id, (int)MAX(16.f, roundf(b)));
+    // The artwork is rasterized once (BADGE_ART_PX) and scaled from there: the same mark, in every view, at every zoom.
+    SDL_Texture *t = big_icon_tex(id, BADGE_ART_PX);
     if (!t) return draw_icon_id(bx, by, b, id, hidden);
     draw_flush();
     SDL_FRect dst = {bx, by, b, b};
@@ -155,13 +157,24 @@ static bool draw_badge(f32 x, f32 y, f32 size, int badge, int slot, bool hidden)
     return true;
 }
 
+// A folder that is a share: a local share root (Samba, NFS, WebDAV configured on this machine), a mounted remote
+// filesystem (NFS, CIFS, WebDAV, sshfs, rclone) or a cloud remote's folder.
+static bool folder_is_share(const char *path) {
+    if (!path || !path[0]) return false;
+    if (local_share_kind(&g_local_shares, path)) return true; // a share configured here
+    if (path_in_cloud(path)) return true;                      // a cloud remote (rclone, WebDAV)
+    for (int i = 0; i < g_nremote; i++)                       // a mounted remote filesystem
+        if (!strcmp(path, g_remote[i])) return true;
+    return false;
+}
+
 // The badges a row carries, in the order they stack: a shared folder, a symlink, a repository. Returns how many.
 // A Borg repository is not a Git one: it keeps its own mark, not the Git logo.
 static int entry_badges(bool dir, bool link, const GitSub *g, const char *path, int *out) {
     int n = 0;
-    if (dir && path && local_share_kind(&g_local_shares, path)) out[n++] = BADGE_SHARE;
+    if (dir && path && folder_is_share(path)) out[n++] = BADGE_SHARE;
     if (link) out[n++] = BADGE_LINK;
-    if (g && !g->borg) out[n++] = BADGE_GIT;
+    if (g) out[n++] = g->borg ? BADGE_BORG : BADGE_GIT;
     return n;
 }
 
@@ -1688,15 +1701,8 @@ static void draw_cells(Pane *p, bool active, i64 hover, u32 sel_col, u32 sel_cur
                 draw_rrect(gx, gy, gr2 * 2, gr2 * 2, gr2, C(cmp_marked(cs) ? cmp_color(cs) : git_color(gs)));
             }
             bool hid = e->flags & ENT_HIDDEN;
-            const GitSub *gsub = git_entry_sub(p, e);
             draw_entry_badges(p, e, ix, iy, isz, hid);
-            if (gsub && gsub->borg) { // a Borg repository: a history mark on the icon's bottom-left corner
-                f32 bs = roundf(MAX(S(7), isz * 0.22f)), bx = ix - S(2), by = iy + isz - bs + S(2);
-                draw_rrect(bx - S(2), by - S(2), bs + S(4), bs + S(4), (bs + S(4)) * 0.5f, C(COL_BG));
-                draw_rrect(bx, by, bs, bs, bs * 0.5f, C(COL_CHIP));
-                f32 is = roundf(bs * 0.62f); // the mark inside it, in step with the mark around it
-                draw_ui_icon(UI_ROTATE_CCW_CLOCK, bx + (bs - is) * 0.5f, by + (bs - is) * 0.5f, is, C(COL_TEXT));
-            }
+
             f32 lyy = iy + isz + roundf(S(6)), lw = r.w - S(12), lh = roundf(f->line_h * 1.1f);
             if (renaming) {
                 Rect fr = {r.x + S(4), lyy - S(2), r.w - S(8), lh + S(6)};

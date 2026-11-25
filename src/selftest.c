@@ -5770,7 +5770,23 @@ static int run_selftest_m9(void) {
         ST_CHECK(entry_badges(true, false, NULL, "/tmp/fe-m9-badges-not-a-share", b) == 0);
         GitSub bg = {0};
         bg.borg = BORG_V2;
-        ST_CHECK(entry_badges(true, false, &bg, NULL, b) == 0); // a Borg repository: not the Git logo
+        ST_CHECK(entry_badges(true, false, &bg, NULL, b) == 1 && b[0] == BADGE_BORG); // a Borg repository: its own mark
+        { // a mounted remote filesystem (NFS, CIFS, WebDAV, sshfs, rclone) is a share too
+            char mf[PATH_MAX];
+            snprintf(mf, sizeof mf, "/tmp/fe-m9-mounts");
+            FILE *f = fopen(mf, "w");
+            ST_CHECK(f != NULL);
+            if (f) {
+                fprintf(f, "server:/export /mnt/fe-nfs nfs4 rw 0 0\nlocal /mnt/fe-rclone fuse.rclone rw 0 0\ntmpfs /run tmpfs rw 0 0\n");
+                fclose(f);
+            }
+            setenv("FE_MOUNTS", mf, 1);
+            remote_mounts_load();
+            ST_CHECK(folder_is_share("/mnt/fe-nfs") && folder_is_share("/mnt/fe-rclone"));
+            ST_CHECK(!folder_is_share("/mnt/fe-nfs/sub") && !folder_is_share("/mnt/fe-other"));
+            unsetenv("FE_MOUNTS");
+            remote_mounts_load();
+        }
     }
     { // the repository tag: its style, and the folder icon that matches it
         GitSub g = {0};

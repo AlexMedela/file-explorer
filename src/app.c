@@ -2176,7 +2176,7 @@ static void remote_mounts_load(void) {
     strv_free(g_remote, g_nremote);
     g_remote = NULL;
     g_nremote = 0;
-    FILE *f = fopen("/proc/self/mounts", "r");
+    FILE *f = fopen(mounts_file(), "r"); // the same table the Borg mount is read from
     if (!f) return;
     char line[PATH_MAX * 2], src[PATH_MAX], mp[PATH_MAX], type[64];
     static const char *types[] = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "fuse.sshfs", "fuse.rclone", "fuse.gvfsd-fuse", "fuse.fe-device", "fuse.adbfs",

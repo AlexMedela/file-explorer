@@ -31,8 +31,8 @@ static int g_icon_theme; // 0..ICON_THEMES-1 built in, then custom themes (icon_
 #define MAX_CUSTOM_ICON_THEMES 16
 // Badges on an icon's lower right that a custom theme may draw itself (freedesktop emblem names); there are no
 // built-in SVGs for them: without the theme's own, render.c draws its usual marks.
-enum { BADGE_LINK, BADGE_GIT, BADGE_SHARE, BADGE_COUNT };
-static const char *g_badge_names[BADGE_COUNT] = {"emblem-symbolic-link", "emblem-git", "emblem-symbolic-share"};
+enum { BADGE_LINK, BADGE_GIT, BADGE_SHARE, BADGE_BORG, BADGE_COUNT };
+static const char *g_badge_names[BADGE_COUNT] = {"emblem-symbolic-link", "emblem-git", "emblem-symbolic-share", "emblem-borg"};
 #define ICON_BADGE_BASE (ICON_COUNT + 3) // ids of the badges (after the logo and branch ids)
 #define ICON_EXT_BASE (ICON_BADGE_BASE + BADGE_COUNT) // ids of a custom theme's ext-*.svg icons
 typedef struct {
@@ -102,8 +102,10 @@ static int icon_find(const char *name); // below
 static const char *badge_bundled_src(int badge) {
     static const char *share = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><path d=\"M2 14V9Q2 5 7 5H10V1L16 7L10 13V9H7Q5 9 5 12V14Z\" fill=\"#7FB2FF\" stroke=\"#20242C\" stroke-width=\"1\"/></svg>";
     static const char *link = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><path d=\"M6.7 9.3a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-1 1\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.4\" stroke-linecap=\"round\"/><path d=\"M9.3 6.7a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l1-1\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.4\" stroke-linecap=\"round\"/></svg>";
+    static const char *borg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><circle cx=\"8\" cy=\"8\" r=\"6\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.5\"/><path d=\"M8 4.6V8l2.6 1.6\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.5\" stroke-linecap=\"round\"/></svg>";
     if (badge == BADGE_SHARE) return share;
     if (badge == BADGE_LINK) return link;
+    if (badge == BADGE_BORG) return borg;
     return g_icon_svg[0][icon_find("git")];
 }
 
