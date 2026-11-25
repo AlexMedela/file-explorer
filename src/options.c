@@ -1062,7 +1062,8 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             Rect r = {x0 + (sz + gap) * (f32)k, roundf(cy - sz * 0.5f), sz, sz};
             u32 col = i == 0 ? tdef : g_accents[i - 1].rgb;
             bool is_default = i == 0 || i - 1 == same;
-            bool on = is_default && !g_accent_custom ? true : i > 0 && g_accent_custom == (0x01000000u | g_accents[i - 1].rgb);
+            bool on = !g_accent_desktop && (is_default && !g_accent_custom ? true
+                                                                   : i > 0 && g_accent_custom == (0x01000000u | g_accents[i - 1].rgb));
             if (on || opt_hover(r))
                 draw_rrect_outline(r.x - S(3), r.y - S(3), sz + S(6), sz + S(6), (sz + S(6)) * 0.5f, MAX(1.f, S(1.5f)),
                                    C(on ? COL_TEXT : COL_TEXT_FAINT));
