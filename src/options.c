@@ -1,6 +1,6 @@
 // options.c - Options window (Ctrl+,): every setting in one searchable sheet (included from ui_tools.c)
 
-static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Actions", "Integration", "Updates", "Advanced"};
+static const char *g_opt_cats[OC_COUNT] = {"Appearance", "Behaviour", "Views", "Keyboard", "Layouts", "Actions", "Context menus", "Integration", "Updates", "Advanced"};
 
 enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
@@ -175,7 +175,7 @@ enum { HP_NONE, HP_NAV, HP_TOGGLE, HP_SEG, HP_DROP, HP_MINUS, HP_PLUS, HP_SWATCH
        HP_KEYCHIP, HP_KEYDEL, HP_KEYADD, HP_KEYRESET, HP_LNAME, HP_LSAVE, HP_LOPEN, HP_LUPDATE, HP_LDELETE, HP_TEXT,
        HP_ACT_NEW, HP_ACT_FOLDER, HP_ACT_TOGGLE, HP_ACT_EDIT, HP_ACT_UP, HP_ACT_DOWN, HP_ACT_DELETE, HP_ACT_FIELD, HP_ACT_TYPE, HP_ACT_GROUPS, HP_ACT_NEEDS,
        HP_ACT_TEXT, HP_ACT_CANCEL, HP_ACT_SAVE,
-       HP_EDIT_APPLY, HP_EDIT_RESET };
+       HP_EDIT_APPLY, HP_EDIT_RESET, HP_MENU_TOGGLE };
 typedef struct { Rect r; int part, opt, arg; } OptHit;
 
 static struct {
@@ -1787,6 +1787,22 @@ static f32 opt_draw_actions(f32 x, f32 y, f32 w, Rect list, const char *q) {
     return y;
 }
 
+static f32 opt_draw_menus(f32 x, f32 y, f32 w, Rect list) {
+    Font *f = &A.font;
+    f32 rh = roundf(S(46));
+    y = props_heading(x, y, "Show in right-click menus");
+    props_card(x, y, w, MENU_TOGGLES, rh, 0);
+    for (int i = 0; i < MENU_TOGGLES; i++, y += rh) {
+        if (y + rh <= list.y || y >= list.y + list.h) continue;
+        const char *l = g_menu_toggles[i].label;
+        draw_text_fit(f, x + S(16), text_y(f, y, rh), w - roundf(S(100)), l, (int)strlen(l), C(COL_TEXT), 0);
+        Rect t = {x + w - roundf(S(54)), roundf(y + rh * 0.5f - S(10)), roundf(S(40)), roundf(S(20))};
+        opt_toggle_draw(t, !g_menu_hidden[i], opt_hover(t));
+        opt_hit(t, HP_MENU_TOGGLE, -1, i);
+    }
+    return y;
+}
+
 static void options_draw(void) {
     Sheet *s = &g_sheet;
     g_opt.nhits = 0;
@@ -1891,6 +1907,12 @@ static void options_draw(void) {
             shown++;
         }
     }
+
+    if (!q[0] && g_opt.cat == OC_MENUS) {
+        y = opt_draw_menus(cx, y, cwid, list) + gap;
+        shown++;
+    }
+
     if (!q[0] && g_opt.cat == OC_ACTIONS) {
         y = opt_draw_actions(cx, y, cwid, list, q) + gap;
         shown++;
@@ -2105,6 +2127,10 @@ static void options_click(f32 x, f32 y, int clicks) {
                 KeySeq sq = g_keys[hp->opt].seq[s2];
                 keys_assign(&g_keys[hp->opt], s2, &sq);
             }
+            A.settings_dirty = true;
+            return;
+        case HP_MENU_TOGGLE:
+            g_menu_hidden[hp->arg] = !g_menu_hidden[hp->arg];
             A.settings_dirty = true;
             return;
         default: break;
