@@ -5748,6 +5748,17 @@ static int run_selftest_m9(void) {
         ST_CHECK(!g_preedit[0]);
     }
 
+    { // the badges on a folder row: the share one, the symlink and the repository, stacked in that order
+        char sp[PATH_MAX];
+        snprintf(sp, sizeof sp, "/tmp/fe-m9-badges");
+        share_add(&g_local_shares, sp, LOCAL_SHARE_SMB);
+        int b[3];
+        ST_CHECK(entry_badges(true, false, false, sp, b) == 1 && b[0] == BADGE_SHARE);
+        ST_CHECK(entry_badges(true, false, true, sp, b) == 2 && b[1] == BADGE_GIT);
+        ST_CHECK(entry_badges(true, true, true, sp, b) == 3 && b[0] == BADGE_SHARE && b[1] == BADGE_LINK && b[2] == BADGE_GIT);
+        ST_CHECK(entry_badges(false, true, false, NULL, b) == 1 && b[0] == BADGE_LINK); // a symlinked file: the link one only
+        ST_CHECK(entry_badges(true, false, false, "/tmp/fe-m9-badges-not-a-share", b) == 0);
+    }
     { // own title bar: buttons at the top right, drag areas, resize edges, the strip above the preview
         ST_CHECK(!A.csd); // headless: the system bar unless opted in
         ST_CHECK(opt_choice_count(OPT_TITLE_BAR) == 2 && !strcmp(opt_choice_label(OPT_TITLE_BAR, 0), "System")

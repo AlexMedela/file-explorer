@@ -14243,6 +14243,7 @@ int main(int argc, char **argv) {
         addon_tick();
         cloud_tick();
         git_tick();
+        local_shares_tick(); // the share roots, re-read every ten seconds
         du_tick();
         cmp_tick();
         snap_tick();

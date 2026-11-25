@@ -163,3 +163,9 @@ static unsigned local_share_path(const char *path) {
         local_shares_refresh();
     return local_share_kind(&g_local_shares, path);
 }
+
+// The roots are re-read every ten seconds (once a frame, not once a row: the files are small, the answer is not).
+static void local_shares_tick(void) {
+    u64 now = now_ns();
+    if (!g_local_shares_checked || now - g_local_shares_checked > 10ull * 1000000000ull) local_shares_refresh();
+}
