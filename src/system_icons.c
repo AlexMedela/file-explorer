@@ -272,6 +272,17 @@ static u8 *sysi_raster(const char *path, int px, u32 ink) {
 
 // Freedesktop names for a bundled icon id, most specific first (the generic folder / document last).
 static int sysi_names(int id, const char **out) {
+    // the badges: the desktop theme's own emblems (the Git one is never taken from a theme: the app's logo is its own)
+    if (id >= ICON_BADGE_BASE && id < ICON_BADGE_BASE + BADGE_COUNT) {
+        static const char *const badge_names[BADGE_COUNT][3] = {
+            {"emblem-symbolic-link", "symbolic-link", NULL},
+            {NULL, NULL, NULL},
+            {"emblem-shared", "folder-shared", "folder-remote"},
+        };
+        int b = id - ICON_BADGE_BASE, n = 0;
+        for (int i = 0; i < 3 && badge_names[b][i]; i++) out[n++] = badge_names[b][i];
+        return n;
+    }
     static const IconMap map[] = {
         {"folder-shared", "folder-remote"}, {"folder-home", "user-home"}, {"folder-docs", "folder-documents"},
         {"folder-images", "folder-pictures"}, {"folder-audio", "folder-music"}, {"folder-video", "folder-videos"},
@@ -339,7 +350,7 @@ static void sysi_job(void *arg) { // (worker)
 // The desktop's pixels for bundled icon id at px, NULL while they're on their way or if it has none (draw the
 // bundled one). The first ask starts the lookup.
 static const u8 *sysi_pixels(int id, int px) {
-    if (id < 0 || id >= ICON_COUNT || !g_desktop.icons[0]) return NULL;
+    if (id < 0 || (id >= ICON_COUNT && (id < ICON_BADGE_BASE || id >= ICON_BADGE_BASE + BADGE_COUNT)) || !g_desktop.icons[0]) return NULL;
     for (int i = 0; i < g_nsysicons; i++)
         if (g_sysicons[i].id == id && g_sysicons[i].px == px) return g_sysicons[i].rgba;
     if (g_sysi_bytes > (32u << 20)) { // keep the memory bounded: drop what's drawn (asked again after an atlas reset)

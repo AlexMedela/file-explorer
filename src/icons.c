@@ -31,8 +31,8 @@ static int g_icon_theme; // 0..ICON_THEMES-1 built in, then custom themes (icon_
 #define MAX_CUSTOM_ICON_THEMES 16
 // Badges on an icon's lower right that a custom theme may draw itself (freedesktop emblem names); there are no
 // built-in SVGs for them: without the theme's own, render.c draws its usual marks.
-enum { BADGE_LINK, BADGE_GIT, BADGE_COUNT };
-static const char *g_badge_names[BADGE_COUNT] = {"emblem-symbolic-link", "emblem-git"};
+enum { BADGE_LINK, BADGE_GIT, BADGE_SHARE, BADGE_COUNT };
+static const char *g_badge_names[BADGE_COUNT] = {"emblem-symbolic-link", "emblem-git", "emblem-symbolic-share"};
 #define ICON_BADGE_BASE (ICON_COUNT + 3) // ids of the badges (after the logo and branch ids)
 #define ICON_EXT_BASE (ICON_BADGE_BASE + BADGE_COUNT) // ids of a custom theme's ext-*.svg icons
 typedef struct {
@@ -95,11 +95,27 @@ static const char *icon_theme_name(int t) {
 static CustomIconTheme *icon_custom(void) { return g_icon_theme >= ICON_THEMES && g_icon_theme < ICON_THEMES + g_ncit ? &g_cit[g_icon_theme - ICON_THEMES] : NULL; }
 static int icon_id_limit(void) { CustomIconTheme *c = icon_custom(); return ICON_EXT_BASE + (c ? c->next : 0); }
 
+static int icon_find(const char *name); // below
+
+// The app's own badge artwork, for a theme that has none: the share arrow, the link arrow, and the classic orange
+// Git logo (the "git" file icon's artwork, but the badge has an id of its own).
+static const char *badge_bundled_src(int badge) {
+    static const char *share = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><path d=\"M2 14V9Q2 5 7 5H10V1L16 7L10 13V9H7Q5 9 5 12V14Z\" fill=\"#7FB2FF\" stroke=\"#20242C\" stroke-width=\"1\"/></svg>";
+    static const char *link = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\"><path d=\"M6.7 9.3a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-1 1\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.4\" stroke-linecap=\"round\"/><path d=\"M9.3 6.7a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l1-1\" fill=\"none\" stroke=\"#7FB2FF\" stroke-width=\"1.4\" stroke-linecap=\"round\"/></svg>";
+    if (badge == BADGE_SHARE) return share;
+    if (badge == BADGE_LINK) return link;
+    return g_icon_svg[0][icon_find("git")];
+}
+
 // SVG text of icon id in the current theme.
 static const char *icon_src(int id) {
     CustomIconTheme *c = icon_custom();
     if (id >= ICON_EXT_BASE) return c && id - ICON_EXT_BASE < c->next ? c->ext_svg[id - ICON_EXT_BASE] : NULL;
-    if (id >= ICON_BADGE_BASE) return c ? c->badge[id - ICON_BADGE_BASE] : NULL;
+    if (id >= ICON_BADGE_BASE) {
+        int b = id - ICON_BADGE_BASE;
+        if (b < 0 || b >= BADGE_COUNT) return NULL;
+        return c && c->badge[b] ? c->badge[b] : badge_bundled_src(b); // the theme's emblem, else the app's own
+    }
     if (!c) return g_icon_svg[g_icon_theme < ICON_THEMES ? g_icon_theme : 0][id]; // (System: Material until the desktop's arrive)
     return c->svg[id] ? c->svg[id] : g_icon_svg[c->base][id];
 }
@@ -123,6 +139,9 @@ static int badge_icon(int badge) {
     CustomIconTheme *c = icon_custom();
     return c && c->badge[badge] ? ICON_BADGE_BASE + badge : -1;
 }
+
+// The badge's own id: its artwork is the theme's emblem, the desktop icon theme's, or the app's own.
+static int badge_art_id(int badge) { return ICON_BADGE_BASE + badge; }
 
 // The trash's own bin (sidebar, tab, path bar): full when something is in it. A custom theme with its own bin but
 // no trash-full.svg keeps its bin rather than mixing in the built-in full one.
@@ -462,7 +481,7 @@ static u8 *app_icon_raster(int px) {
 
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
-    const u8 *sys = icon_system_selected() && w == h ? sysi_pixels(id, w) : NULL;
+    const u8 *sys = (icon_system_selected() || id >= ICON_BADGE_BASE) && w == h ? sysi_pixels(id, w) : NULL;
     if (sys) {
         u8 *buf = xmalloc((size_t)w * h * 4);
         memcpy(buf, sys, (size_t)w * h * 4);
@@ -937,9 +956,10 @@ static void icon_themes_readme(const char *dir) {
                "    ext-blend.svg     icon for one file extension (any extension, also ones the app doesn't know)\n"
                "    trash-full.svg    the Trash's bin when something is in it (trash.svg: empty); with only\n"
                "                      trash.svg, that one is used either way\n"
-               "    emblem-symbolic-link.svg  badge on links, emblem-git.svg  badge on Git repositories: drawn on\n"
-               "                      the icon's lower right (about a third of its size; both: the Git one above);\n"
-               "                      without them the app draws its usual marks\n"
+               "    emblem-symbolic-link.svg  badge on links, emblem-git.svg  badge on Git repositories,\n"
+               "                      emblem-symbolic-share.svg  badge on shared folders: drawn on the icon's\n"
+               "                      lower right (about a third of its size; more than one: the next one above);\n"
+               "                      without them the desktop icon theme's, or the app's own, is used\n"
                "    net-homelab.svg   an extra icon for network locations (Connect to server > Icon), offered\n"
                "                      whichever file icon theme is selected; a folder may hold only net-*.svg files\n\n"
                "After adding or editing files, press \"Icon themes folder\" in Options again to reload.\n\n"

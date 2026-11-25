@@ -2100,6 +2100,11 @@ static int run_selftest_m7(void) {
         ST_CHECK(icon_glyph(py, 16) != NULL);
         // badges: the theme's emblem-git.svg replaces the app's Git mark; no emblem-symbolic-link.svg: the app's own
         ST_CHECK(badge_icon(BADGE_GIT) == ICON_BADGE_BASE + BADGE_GIT && badge_icon(BADGE_LINK) < 0);
+        // the share badge, and the app's own artwork for every badge when no theme has one
+        ST_CHECK(BADGE_COUNT == 3 && !strcmp(g_badge_names[BADGE_SHARE], "emblem-symbolic-share"));
+        ST_CHECK(badge_art_id(BADGE_SHARE) == ICON_BADGE_BASE + BADGE_SHARE);
+        ST_CHECK(icon_src(badge_art_id(BADGE_SHARE)) && strstr(icon_src(badge_art_id(BADGE_SHARE)), "<svg")); // no emblem: the app's own
+        ST_CHECK(icon_glyph(badge_art_id(BADGE_SHARE), 16) && icon_glyph(badge_art_id(BADGE_GIT), 16));
         ST_CHECK(icon_glyph(badge_icon(BADGE_GIT), 16) && big_icon_tex(badge_icon(BADGE_GIT), 82));
         ST_CHECK(icon_find("emblem-git") < 0 && xi != ICON_BADGE_BASE + BADGE_GIT); // (not a file icon, ids apart)
         settings_save();
@@ -2113,7 +2118,9 @@ static int run_selftest_m7(void) {
         if (system(path)) {}
         icon_themes_reload();
         ST_CHECK(icon_theme_find("TestIcons") < 0 && g_icon_theme == 0);
-        ST_CHECK(badge_icon(BADGE_GIT) < 0 && badge_icon(BADGE_LINK) < 0 && !icon_src(ICON_BADGE_BASE)); // built in: the app's marks
+        ST_CHECK(badge_icon(BADGE_GIT) < 0 && badge_icon(BADGE_LINK) < 0); // built in: no theme emblem
+        ST_CHECK(icon_src(ICON_BADGE_BASE) && strstr(icon_src(ICON_BADGE_BASE), "<svg")); // the app's own marks
+        ST_CHECK(icon_src(badge_art_id(BADGE_GIT)) && strstr(icon_src(badge_art_id(BADGE_GIT)), "#e64a19")); // the classic orange logo
         ST_CHECK(trash_icon(true) == icon_find("trash-full") && trash_icon(false) == icon_find("trash")); // built in: both bins
     }
     { // File icons "System": the desktop's icon theme, looked up and drawn on a worker, over the bundled icon meanwhile
