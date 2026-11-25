@@ -26,6 +26,7 @@ const char *__lsan_default_suppressions(void) { return "leak:libX11.so\nleak:lib
 #include "pool.c"
 #include "ipc.c"
 #include "fs.c"
+#include "local_shares.c"
 #include "ops.c"
 #include "archive.c"
 #include "search.c"
