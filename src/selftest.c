@@ -5761,11 +5761,16 @@ static int run_selftest_m9(void) {
         snprintf(sp, sizeof sp, "/tmp/fe-m9-badges");
         share_add(&g_local_shares, sp, LOCAL_SHARE_SMB);
         int b[3];
-        ST_CHECK(entry_badges(true, false, false, sp, b) == 1 && b[0] == BADGE_SHARE);
-        ST_CHECK(entry_badges(true, false, true, sp, b) == 2 && b[1] == BADGE_GIT);
-        ST_CHECK(entry_badges(true, true, true, sp, b) == 3 && b[0] == BADGE_SHARE && b[1] == BADGE_LINK && b[2] == BADGE_GIT);
-        ST_CHECK(entry_badges(false, true, false, NULL, b) == 1 && b[0] == BADGE_LINK); // a symlinked file: the link one only
-        ST_CHECK(entry_badges(true, false, false, "/tmp/fe-m9-badges-not-a-share", b) == 0);
+        GitSub g = {0};
+        snprintf(g.branch, sizeof g.branch, "main");
+        ST_CHECK(entry_badges(true, false, NULL, sp, b) == 1 && b[0] == BADGE_SHARE);
+        ST_CHECK(entry_badges(true, false, &g, sp, b) == 2 && b[1] == BADGE_GIT);
+        ST_CHECK(entry_badges(true, true, &g, sp, b) == 3 && b[0] == BADGE_SHARE && b[1] == BADGE_LINK && b[2] == BADGE_GIT);
+        ST_CHECK(entry_badges(false, true, NULL, NULL, b) == 1 && b[0] == BADGE_LINK); // a symlinked file: the link one only
+        ST_CHECK(entry_badges(true, false, NULL, "/tmp/fe-m9-badges-not-a-share", b) == 0);
+        GitSub bg = {0};
+        bg.borg = BORG_V2;
+        ST_CHECK(entry_badges(true, false, &bg, NULL, b) == 0); // a Borg repository: not the Git logo
     }
     { // the repository tag: its style, and the folder icon that matches it
         GitSub g = {0};

@@ -144,11 +144,12 @@ static bool draw_badge(f32 x, f32 y, f32 size, int badge, int slot, bool hidden)
 }
 
 // The badges a row carries, in the order they stack: a shared folder, a symlink, a repository. Returns how many.
-static int entry_badges(bool dir, bool link, bool repo, const char *path, int *out) {
+// A Borg repository is not a Git one: it keeps its own mark, not the Git logo.
+static int entry_badges(bool dir, bool link, const GitSub *g, const char *path, int *out) {
     int n = 0;
     if (dir && path && local_share_kind(&g_local_shares, path)) out[n++] = BADGE_SHARE;
     if (link) out[n++] = BADGE_LINK;
-    if (repo) out[n++] = BADGE_GIT;
+    if (g && !g->borg) out[n++] = BADGE_GIT;
     return n;
 }
 
@@ -157,7 +158,7 @@ static void draw_entry_badges(Pane *p, const Entry *e, f32 x, f32 y, f32 size, b
     char path[PATH_MAX];
     const char *pp = NULL;
     if (e->flags & ENT_DIR) { path_join(path, sizeof path, p->path, e->name); pp = path; }
-    int b[3], n = entry_badges(e->flags & ENT_DIR, e->flags & ENT_LINK, git_entry_sub(p, e) != NULL, pp, b);
+    int b[3], n = entry_badges(e->flags & ENT_DIR, e->flags & ENT_LINK, git_entry_sub(p, e), pp, b);
     for (int k = 0; k < n; k++) draw_badge(x, y, size, b[k], k, hidden);
 }
 
