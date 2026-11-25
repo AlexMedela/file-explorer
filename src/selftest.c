@@ -2101,7 +2101,8 @@ static int run_selftest_m7(void) {
         // badges: the theme's emblem-git.svg replaces the app's Git mark; no emblem-symbolic-link.svg: the app's own
         ST_CHECK(badge_icon(BADGE_GIT) == ICON_BADGE_BASE + BADGE_GIT && badge_icon(BADGE_LINK) < 0);
         // the share badge, and the app's own artwork for every badge when no theme has one
-        ST_CHECK(BADGE_COUNT == 3 && !strcmp(g_badge_names[BADGE_SHARE], "emblem-symbolic-share"));
+        ST_CHECK(BADGE_COUNT == 4 && !strcmp(g_badge_names[BADGE_SHARE], "emblem-symbolic-share")
+                 && !strcmp(g_badge_names[BADGE_BORG], "emblem-borg"));
         ST_CHECK(badge_art_id(BADGE_SHARE) == ICON_BADGE_BASE + BADGE_SHARE);
         ST_CHECK(icon_src(badge_art_id(BADGE_SHARE)) && strstr(icon_src(badge_art_id(BADGE_SHARE)), "<svg")); // no emblem: the app's own
         ST_CHECK(icon_glyph(badge_art_id(BADGE_SHARE), 16) && icon_glyph(badge_art_id(BADGE_GIT), 16));
