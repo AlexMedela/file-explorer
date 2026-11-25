@@ -355,7 +355,7 @@ static void sysi_done(void *arg) { // (main thread)
 
 static void sysi_job(void *arg) { // (worker)
     SysIconReq *r = arg;
-    const char *names[4];
+    const char *names[6];
     int n = sysi_names(r->id, names);
     char path[PATH_MAX];
     for (int i = 0; i < n && !r->rgba; i++)
