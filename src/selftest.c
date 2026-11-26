@@ -4371,6 +4371,16 @@ static int run_selftest_m9(void) {
     ST_CHECK(A.show_hidden == !hid);
     st_opt_click(st_opt_hit(HP_TOGGLE, OPT_HIDDEN, 0));
     ST_CHECK(A.show_hidden == hid);
+    // the pointer: the hand only over a control, the plain arrow over the rest of its row
+    {
+        Rect t = st_opt_hit(HP_TOGGLE, OPT_HIDDEN, 0)->r;
+        st_mouse(SDL_EVENT_MOUSE_MOTION, t.x + t.w * 0.5f, t.y + t.h * 0.5f, 0, 0, 0);
+        st_frames(1);
+        ST_CHECK(A.ptr_hand);
+        st_mouse(SDL_EVENT_MOUSE_MOTION, t.x - S(150), t.y + t.h * 0.5f, 0, 0, 0);
+        st_frames(1);
+        ST_CHECK(!A.ptr_hand && g_opt.hover_row >= 0);
+    }
     // appearance: font size, row spacing (the icon rows pushed these below the fold)
     st_opt_click(st_opt_hit(HP_NAV, -1, OC_APPEARANCE));
     st_frames(1);
