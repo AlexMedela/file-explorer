@@ -3221,7 +3221,8 @@ static void draw_ops(void) {
         Op *op = A.ops[i];
         if (!op_card_visible(op, now) || op->dismissed) continue;
         bool done = atomic_load(&op->phase) == OPS_DONE;
-        bool retry = done && op->nerr && op->perm_errs && !op->admin && op_admin_ok(op->kind); // permission denied
+        bool no_trash = done && op->nerr && op->kind == OP_TRASH && op->trash_broken && !op->admin; // offer to delete instead
+        bool retry = no_trash || (done && op->nerr && op->perm_errs && !op->admin && op_admin_ok(op->kind)); // permission denied
         f32 h = roundf(S(retry ? 110 : 74));
         y -= h;
         A.op_card[i] = (Rect){x, y, w, h};
@@ -3239,16 +3240,19 @@ static void draw_ops(void) {
         char det[600];
         op_detail(op, now, det, sizeof det);
         draw_text_fit(fs, x + pad, y + S(48), w - pad * 2, det, (int)strlen(det), C(done && (op->nerr || op_cancelled(op)) ? COL_DANGER_TEXT : COL_TEXT_DIM), 0);
-        if (retry) { // the same again with the administrator's rights (pkexec asks for the password)
-            const char *lb = op->kind == OP_TRASH ? "Delete as administrator\xE2\x80\xA6" : "Retry as administrator";
+        if (retry) { // the same again with the administrator's rights (pkexec asks for the password), or deleted for good
+            const char *lb = no_trash ? "Delete permanently\xE2\x80\xA6" : op->kind == OP_TRASH ? "Delete as administrator\xE2\x80\xA6" : "Retry as administrator";
             f32 rbw = roundf(text_width(f, lb, (int)strlen(lb)) + S(28)), rbh = roundf(S(28));
             A.op_retry[i] = (Rect){x + w - pad - rbw, y + h - pad - rbh + S(4), rbw, rbh};
             sheet_button(A.op_retry[i], lb, true, true);
             f32 ls = roundf(S(13)), lx = x + pad, ly2 = roundf(A.op_retry[i].y + (rbh - ls) * 0.5f); // a padlock
             Color lc = C(COL_TEXT_DIM);
-            draw_rrect_outline(lx + ls * 0.2f, ly2, ls * 0.6f, ls * 0.7f, ls * 0.3f, MAX(1.f, S(1.4f)), lc);
-            draw_rrect(lx, ly2 + ls * 0.42f, ls, ls * 0.58f, S(2), lc);
-            draw_text(fs, lx + ls + S(8), text_y(fs, A.op_retry[i].y, rbh), "Not allowed", 11, lc);
+            if (no_trash) draw_text(fs, lx, text_y(fs, A.op_retry[i].y, rbh), "No Trash here", 13, lc);
+            else {
+                draw_rrect_outline(lx + ls * 0.2f, ly2, ls * 0.6f, ls * 0.7f, ls * 0.3f, MAX(1.f, S(1.4f)), lc);
+                draw_rrect(lx, ly2 + ls * 0.42f, ls, ls * 0.58f, S(2), lc);
+                draw_text(fs, lx + ls + S(8), text_y(fs, A.op_retry[i].y, rbh), "Not allowed", 11, lc);
+            }
         }
         y -= roundf(S(8));
     }

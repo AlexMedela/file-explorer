@@ -20,6 +20,8 @@ typedef struct Op {
     bool admin;      // runs as the administrator: through pkexec, in a helper (this program with --admin-op)
     bool trash_first; // OP_SYNC: what's at a destination goes to the Trash before it's replaced (restoring a version)
     int perm_errs;   // errors that were "permission denied" / "not permitted" (the card offers to retry as admin)
+    bool trash_broken; // OP_TRASH: a trash itself couldn't be used (a file in its place, read-only, full...): offers to delete
+    void (*done_cb)(struct Op *op); // (main thread) called when it has finished, after the usual refreshes
     char **aux_in;   // OP_RESTORE: .trashinfo files to remove after success
     char *dst_dir;   // OP_COPY / OP_MOVE / OP_EXTRACT
     char *arc;       // OP_EXTRACT: archive to read; OP_COMPRESS: archive to write
@@ -722,6 +724,7 @@ static int trash_one(Op *op, const char *src) {
     snprintf(files, sizeof files, "%s/files", trash);
     snprintf(info, sizeof info, "%s/info", trash);
     if (mkdir_p(files, 0700) || mkdir_p(info, 0700)) {
+        op->trash_broken = true;
         op_error(op, "Can't use the trash for \"%s\": %s", path_basename(src), strerror(errno));
         return -1;
     }
@@ -741,6 +744,7 @@ static int trash_one(Op *op, const char *src) {
         int fd = open(ipath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
         if (fd < 0) {
             if (errno == EEXIST) continue;
+            op->trash_broken = true; // (its info folder)
             op_error(op, "Can't trash \"%s\": %s", base, strerror(errno));
             return -1;
         }
@@ -748,7 +752,7 @@ static int trash_one(Op *op, const char *src) {
         int n = snprintf(content, sizeof content, "[Trash Info]\nPath=%s\nDeletionDate=%s\n", enc, date);
         bool ok = write(fd, content, (size_t)n) == n;
         close(fd);
-        if (!ok) { unlink(ipath); op_error(op, "Can't write trash info for \"%s\"", base); return -1; }
+        if (!ok) { unlink(ipath); op->trash_broken = true; op_error(op, "Can't write trash info for \"%s\"", base); return -1; }
         if (rename_noreplace(AT_FDCWD, src, AT_FDCWD, fpath) == 0) {
             op_record(op, src, fpath, ipath);
             atomic_fetch_add(&op->files_done, 1);

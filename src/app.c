@@ -565,7 +565,7 @@ static struct {
     // file operations
     Op *ops[MAX_OPS];
     Rect op_close[MAX_OPS];
-    Rect op_retry[MAX_OPS]; // "Retry as administrator" on a card that failed for lack of permission
+    Rect op_retry[MAX_OPS]; // "Retry as administrator" on a card that failed for lack of permission ("Delete permanently": no trash)
     Rect op_pause[MAX_OPS], op_card[MAX_OPS]; // a card's pause / resume button; the card (click: the transfer queue)
     int nops;
     // transfer queue panel (Ctrl+J): every operation in queue order, with pause, reorder, speed and time left
@@ -5328,6 +5328,7 @@ static void op_finished(void *arg) {
     }
     if (op->from_cut && !op->nerr && !atomic_load(&op->cancel)) clip_clear();
     if (op->kind == OP_COMPRESS && (op->nerr || op->warn[0])) toast("%s", op->nerr ? op->err : op->warn); // (a card without errors goes quickly)
+    if (op->done_cb) op->done_cb(op);
     A.redraw = true;
 }
 
@@ -5352,19 +5353,48 @@ static void admin_delete_cb(int choice, bool check, void *ud) {
     else op_free(op);
 }
 
-// Run what failed again as the administrator (what already worked isn't repeated). Trash -> delete: the system's
-// files can't go to your Trash, so that one asks first.
-static void op_retry_admin(Op *op) {
-    if (!admin_allowed()) return;
+// What an op didn't get done (its sources minus what it finished); dst: their destinations, if it has any.
+static int op_left_over(Op *op, char **src, char **dst) {
     int n = 0;
-    char **src = xmalloc((size_t)MAX(op->nsrc, 1) * sizeof(char *)), **dst = xmalloc((size_t)MAX(op->nsrc, 1) * sizeof(char *));
     for (int i = 0; i < op->nsrc; i++) {
         bool done = false;
         for (int k = 0; k < op->nout && !done; k++) done = op->in[k] && !strcmp(op->in[k], op->src[i]);
         if (done) continue;
         src[n] = op->src[i];
-        dst[n++] = op->dst ? op->dst[i] : NULL;
+        if (dst) dst[n] = op->dst ? op->dst[i] : NULL;
+        n++;
     }
+    return n;
+}
+
+// The trash couldn't be used (no trash on that drive, or it was turned off by putting a file in its place): what
+// didn't go there can be deleted for good instead, after asking.
+static void op_delete_instead(Op *op) {
+    char **src = xmalloc((size_t)MAX(op->nsrc, 1) * sizeof(char *));
+    int n = op_left_over(op, src, NULL);
+    op->dismissed = true;
+    if (n) {
+        Op *r = op_new(OP_DELETE, src, n, NULL);
+        r->done_cb = op->done_cb;
+        char msg[600];
+        if (n == 1) snprintf(msg, sizeof msg, "The Trash can't be used, so \xE2\x80\x9C%s\xE2\x80\x9D stayed where it was. Delete it permanently? This can't be undone.", path_basename(src[0]));
+        else snprintf(msg, sizeof msg, "The Trash can't be used, so these %d items stayed where they were. Delete them permanently? This can't be undone.", n);
+        static const char *b[] = {"Delete", "Cancel"};
+        dialog_open("Delete permanently", msg, b, 2, 0, 1, NULL, admin_delete_cb, r);
+        A.dlg.icon = DI_DANGER;
+        A.dlg.danger = true;
+        dialog_items(src, n, true);
+    }
+    free(src);
+}
+
+// Run what failed again as the administrator (what already worked isn't repeated). Trash -> delete: the system's
+// files can't go to your Trash, so that one asks first.
+static void op_retry_admin(Op *op) {
+    if (op->kind == OP_TRASH && op->trash_broken) { op_delete_instead(op); return; } // (the card's button for that)
+    if (!admin_allowed()) return;
+    char **src = xmalloc((size_t)MAX(op->nsrc, 1) * sizeof(char *)), **dst = xmalloc((size_t)MAX(op->nsrc, 1) * sizeof(char *));
+    int n = op_left_over(op, src, dst);
     if (!n) { free(src); free(dst); op->dismissed = true; return; }
     int kind = op->kind == OP_TRASH ? OP_DELETE : op->kind;
     Op *r = op_new(kind, src, n, op->dst_dir);

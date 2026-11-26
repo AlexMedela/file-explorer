@@ -10267,6 +10267,39 @@ static int run_selftest_admin(void) {
              strstr(log, "--admin-op mkdir -- " ADM_BASE "/locked/New folder"));
     chmod(ADM_BASE "/locked", 0755);
 
+    // --- the trash turned off (a file in its place, #103): the card offers "Delete permanently..." (asks, no pkexec);
+    // an action deleted in Options shows again when it couldn't go
+    {
+        mkdir_p(ADM_BASE "/xdg/file-explorer/actions", 0755);
+        st_write_text(ADM_BASE "/xdg/file-explorer/actions/note.action", "[Action]\nActive=true\nName=Note\nExec=true\n");
+        st_rmrf(ADM_BASE "/xdg/Trash"); // (the test above made it)
+        st_write_text(ADM_BASE "/xdg/Trash", "off\n");
+        ua_load();
+        int ai = -1;
+        for (int i = 0; i < g_nua; i++)
+            if (!strcmp(g_ua[i].file, "note.action")) ai = i;
+        ST_CHECK(ai >= 0);
+        int nua = g_nua;
+        if (ai >= 0) opt_act_delete_cb(1, false, (void *)(intptr_t)ai);
+        st_wait_ops();
+        st_frames(2);
+        Op *op = st_last_op();
+        int ti2 = A.nops - 1;
+        ST_CHECK(op && op->kind == OP_TRASH && op->nerr == 1 && op->trash_broken && A.op_retry[ti2].w > 0);
+        ST_CHECK(st_exists(ADM_BASE "/xdg/file-explorer/actions/note.action") && g_nua == nua); // (back in the list)
+        st_shot("admin-notrash-card");
+        truncate(ADM_BASE "/tools/pkexec.log", 0);
+        st_click_rect(A.op_retry[ti2]);
+        ST_CHECK(A.dlg.open && A.dlg.fn == admin_delete_cb && A.dlg.danger); // (the old card is dismissed and freed)
+        A.dlg.open = false;
+        admin_delete_cb(0, false, A.dlg.ud);
+        st_wait_ops();
+        ST_CHECK(!st_exists(ADM_BASE "/xdg/file-explorer/actions/note.action") && g_nua == nua - 1);
+        st_read_text(ADM_BASE "/tools/pkexec.log", log, sizeof log);
+        ST_CHECK(!log[0]); // (not as the administrator)
+        unlink(ADM_BASE "/xdg/Trash");
+    }
+
     // --- previous versions: Snapper (#1 = #2), Timeshift (same as now), newest first
     {
         SnapJob *j = snap_start(ADM_BASE "/vol/docs/a.txt");
