@@ -13496,7 +13496,9 @@ static bool app_icon_write_ex(const char *dh, u32 accent, const char *custom, bo
     } else {
         bool png_exists = access(png, F_OK) == 0;
         if (png_exists) { unlink(png); changed = true; } // a stale File-Icon override would win over the built-in one
-        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(svg, F_OK)) return changed; // no copy yet: none made for Blue
+        // no copy yet: none made for Blue - unless the File-Icon override we just removed was the icon the
+        // launcher had: then the copy must come back, or the app's icon vanishes from the launcher and dock
+        if ((accent & 0xFFFFFF) == LOGO_BASE_ACCENT && access(svg, F_OK) && !png_exists) return changed;
         static const char from[] = "width=\"624\" height=\"456\" viewBox=\"0 0 624 456\"";
         const char *at = strstr(g_logo_svg, from);
         if (!at) return changed;
