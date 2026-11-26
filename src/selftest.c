@@ -4520,6 +4520,42 @@ static int run_selftest_m9(void) {
         g_accent_custom = saved_accent;
     }
 
+    { // Connect to server: a short window scrolls the fields, the buttons stay; hidden rows don't take clicks
+        sheet_close();
+        connect_open(-1);
+        st_frames(2);
+        ST_CHECK(g_sheet.kind == SHEET_CONNECT && g_sheet.cn_max_scroll == 0); // a tall window: the whole dialog fits, as before
+        int h0 = A.H;
+        A.H = (int)roundf(S(330));
+        st_frames(2);
+        f32 btn_y = g_sheet.cn_rconnect.y;
+        ST_CHECK(g_sheet.cn_max_scroll > 0 && g_sheet.cn_body.h > 0 && btn_y + g_sheet.cn_rconnect.h <= g_sheet.r.y + g_sheet.r.h);
+        f32 host0 = g_sheet.cn_rf[CN_HOST].y;
+        sheet_wheel(-3.f);
+        st_frames(2);
+        ST_CHECK(g_sheet.cn_scroll > 0 && g_sheet.cn_rf[CN_HOST].y < host0 && g_sheet.cn_rconnect.y == btn_y);
+        Rect nm = g_sheet.cn_rf[CN_NAME];
+        ST_CHECK(nm.w > 0 && nm.y + nm.h <= g_sheet.cn_body.y); // the name field is scrolled out above the body
+        int focus0 = g_sheet.cn_focus;
+        f32 tx = g_sheet.cn_body.x + S(20), ty = g_sheet.r.y + S(40); // inside the dialog's title area, above the body: not a row
+        ST_CHECK(ty < g_sheet.cn_body.y && in_rect(g_sheet.r, tx, ty));
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, tx, ty, SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+        st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, tx, ty, SDL_BUTTON_LEFT, 1, SDL_KMOD_NONE);
+        st_frames(1);
+        ST_CHECK(g_sheet.kind == SHEET_CONNECT && g_sheet.cn_focus == focus0);
+        g_sheet.cn_focus = CN_HOST;
+        st_frames(1);
+        for (int t = 0; t < 4; t++) { // Tab keeps the focused field in the body
+            st_key(SDLK_TAB, SDL_KMOD_NONE);
+            st_frames(2);
+            Rect f = g_sheet.cn_rf[g_sheet.cn_focus];
+            ST_CHECK(f.w > 0 && f.y >= g_sheet.cn_body.y && f.y + f.h <= g_sheet.cn_body.y + g_sheet.cn_body.h);
+        }
+        A.H = h0;
+        st_frames(2);
+        sheet_close();
+    }
+
     // settings round trip
     g_theme_cur = theme_find("Nord");
     g_accent_custom = 0x01000000u | 0x123456;
