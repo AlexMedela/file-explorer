@@ -1622,12 +1622,14 @@ static void connect_draw(void) {
     cn_addr(&a);
     char uri[1024], line[1100];
     bool ok = net_proto_available(s->cn_proto);
+    bool preview = (ok && a.host[0]); // the line shows the URI we will connect to
     if (!ok) snprintf(line, sizeof line, "Not available: GVfs's %s backend (gvfsd-%s) isn't installed", g_net_protos[s->cn_proto].label,
                       g_net_protos[s->cn_proto].backend);
-    else if (a.host[0]) { net_uri(&a, uri, sizeof uri); snprintf(line, sizeof line, "%s", uri); }
-    else snprintf(line, sizeof line, "Enter a server name or address");
+    else if (preview) { net_uri(&a, uri, sizeof uri); snprintf(line, sizeof line, "%s", uri); }
+    else snprintf(line, sizeof line, "Enter a server name or address for preview");
     Font *fm = A.mono_path ? &A.font_mono : fs;
-    draw_text_fit(ok && a.host[0] ? fm : fs, x + S(2), y, cw, line, (int)strlen(line), C(ok ? COL_TEXT_DIM : COL_DANGER), 0);
+    u32 pc = !ok ? COL_DANGER : preview ? COL_TEXT_DIM : COL_WARN;
+    draw_text_fit(ok && preview ? fm : fs, x + S(2), y, cw, line, (int)strlen(line), C(pc), 0);
     y += roundf(fs->line_h + S(10));
     s->cn_rremember = (Rect){0, 0, 0, 0};
     if (s->cn_edit < 0) {
