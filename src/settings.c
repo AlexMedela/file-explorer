@@ -113,6 +113,7 @@ static void settings_defaults(void) {
     A.dblclick_up = true;
     A.def_tree = false;
     A.single_instance = true;
+    memset(g_menu_hidden, 0, sizeof g_menu_hidden);
     keys_defaults();
 }
 
@@ -411,6 +412,7 @@ static void settings_load(void) {
             memcpy(A.cols, cols, (size_t)n * sizeof(int));
             A.ncols = n;
         }
+        else if (!strcmp(k, "menu_hidden")) menu_hidden_parse(v);
         else settings_keep_other(k, v);
     }
     fclose(f);
@@ -597,6 +599,7 @@ static void settings_write(FILE *f) {
     fprintf(f, "single_click=%d\ndblclick_up=%d\ndrop_ask=%d\ntree_view=%d\nsingle_instance=%d\n", A.single_click,
             A.dblclick_up, A.drop_ask, A.def_tree, A.single_instance);
     fprintf(f, "exec_open=%s\n", g_exec_names[CLAMP(A.exec_open, 0, EXEC_OPEN)]);
+    menu_hidden_write(f);
     keys_save(f);
     fprintf(f, "unified_surfaces=%d\nshow_separators=%d\nsystem_accent=%d\n", g_unified_surfaces, g_separators, g_accent_desktop);
     fprintf(f, "theme_light=%s\ntheme_dark=%s\n", g_theme_pick[0], g_theme_pick[1]);

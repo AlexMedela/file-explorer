@@ -4883,7 +4883,7 @@ static void options_open(void);
 static void ipc_handle(char *msg);
 static bool exe_link_replaced(char *link);
 static bool options_is_open(void);
-enum { OC_APPEARANCE, OC_BEHAVIOUR, OC_VIEWS, OC_KEYBOARD, OC_LAYOUTS, OC_ACTIONS, OC_INTEGRATION, OC_UPDATES, OC_ADVANCED, OC_COUNT }; // Options pages
+enum { OC_APPEARANCE, OC_BEHAVIOUR, OC_VIEWS, OC_KEYBOARD, OC_LAYOUTS, OC_ACTIONS, OC_MENUS, OC_INTEGRATION, OC_UPDATES, OC_ADVANCED, OC_COUNT }; // Options pages
 static void options_open_page(int cat);
 typedef struct {
     char name[64];
@@ -6835,6 +6835,69 @@ static void menu_add_head(const char *label) {
     if (m->n < (int)ARRAY_COUNT(m->items)) m->items[m->n++] = (MenuItem){label, "", -1, false, false, false, false, false, NULL, true};
 }
 
+// Context-menu entries the user can hide
+static const struct { const char *key, *label; int act; } g_menu_toggles[] = {
+    {"open_tab",         "Open in new tab",               ACT_OPEN_TAB},
+    {"open_split_right", "Open in right split",           ACT_OPEN_SPLIT_RIGHT},
+    {"open_split_down",  "Open in bottom split",          ACT_OPEN_SPLIT_DOWN},
+    {"open_with",        "Open with",                     ACT_OPEN_WITH},
+    {"search_inside",    "Search inside files here",      ACT_CS_HERE},
+    {"disk_usage",       "Disk usage",                    ACT_DU_NEW_TAB},
+    {"delete_permanent", "Delete permanently",            ACT_DELETE},
+    {"pin",              "Pin to sidebar",                ACT_PIN},
+    {"compress",         "Compress to",                   ACT_COMPRESS_MENU},
+    {"copy_path",        "Copy path",                     ACT_COPY_PATH},
+    {"terminal_tab",     "Open terminal tab here",        ACT_TERMINAL},
+    {"terminal_local",   "Open local terminal here",      ACT_TERMINAL_LOCAL},
+    {"terminal_panel",   "Show / hide terminal panel",    ACT_TERM_PANEL},
+    {"terminal_ext",     "Open in external terminal",     ACT_TERMINAL_EXTERNAL},
+    {"compare",          "Compare with\xE2\x80\xA6",      ACT_CMP_DIALOG},
+    {"views",            "Views (folder menu)",           ACT_MENU_VIEWS},
+    {"sort",             "Sort by (folder menu)",         ACT_MENU_SORT},
+    {"group",            "Group by (folder menu)",        ACT_MENU_GROUP},
+    {"properties",       "Properties",                    ACT_PROPERTIES},
+};
+
+#define MENU_TOGGLES ((int)ARRAY_COUNT(g_menu_toggles))
+static bool g_menu_hidden[ARRAY_COUNT(g_menu_toggles)];
+
+static bool menu_act_hidden(int act) {
+    if (act < 0) return false;
+    for (int i = 0; i < MENU_TOGGLES; i++)
+        if (g_menu_hidden[i] && g_menu_toggles[i].act == act) return true;
+    return false;
+}
+
+static void menu_hidden_parse(const char *v) {
+    memset(g_menu_hidden, 0, sizeof g_menu_hidden);
+    char buf[512];
+    snprintf(buf, sizeof buf, "%s", v);
+    for (char *s = buf, *tok; (tok = strsep(&s, ","));)
+        for (int i = 0; i < MENU_TOGGLES; i++)
+            if (!strcmp(tok, g_menu_toggles[i].key)) g_menu_hidden[i] = true;
+}
+
+static void menu_hidden_write(FILE *f) {
+    fprintf(f, "menu_hidden=");
+    bool first = true;
+    for (int i = 0; i < MENU_TOGGLES; i++)
+        if (g_menu_hidden[i]) { fprintf(f, "%s%s", first ? "" : ",", g_menu_toggles[i].key); first = false; }
+    fprintf(f, "\n");
+}
+
+// Drop hidden entries
+static void menu_filter_hidden(Menu *m) {
+    int w = 0;
+    for (int i = 0; i < m->n; i++) {
+        MenuItem *it = &m->items[i];
+        if (!it->sep && menu_act_hidden(it->act)) continue;
+        if (it->sep && (w == 0 || m->items[w - 1].sep)) continue;
+        m->items[w++] = *it;
+    }
+    while (w && m->items[w - 1].sep) w--;
+    m->n = w;
+}
+
 static void menu_finish(f32 x, f32 y);
 static void menu_add_check_key(const char *label, int act, bool checked, int key_id);
 static void menu_open_columns(Pane *p, f32 x, f32 y);
@@ -8707,6 +8770,7 @@ static void menu_layout(Menu *m, f32 x, f32 y, f32 x_left) {
 }
 
 static void menu_finish(f32 x, f32 y) {
+    menu_filter_hidden(&A.menu);
     g_menu_sub.open = false; // a new menu (or one rebuilt in place) starts without its submenu
     g_menu_sub_of = -1;
     menu_layout(&A.menu, x, y, -1);
