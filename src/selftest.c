@@ -5709,6 +5709,21 @@ static int run_selftest_m9(void) {
         ST_CHECK(ST_HIT(A.W - 1, A.H - 1) == SDL_HITTEST_RESIZE_BOTTOMRIGHT);
         ST_CHECK(ST_HIT(A.W * 0.5f, A.H * 0.5f) == SDL_HITTEST_NORMAL);
         #undef ST_HIT
+        // an overlay owns the pointer: the header row is not a drag area any more (a press there would move the
+        // window instead of reaching the overlay)
+        options_open();
+        st_frames(1);
+        ST_CHECK(overlay_open());
+        ST_CHECK(window_hit_test(A.win, &(SDL_Point){(int)((A.r_brand.x + A.r_brand.w * 0.5f) / d), (int)((A.r_brand.y + A.r_brand.h * 0.5f) / d)}, NULL) == SDL_HITTEST_NORMAL);
+        if (tr) {
+            f32 ex = tr->plus.x + tr->plus.w + S(16);
+            if (ex < tr->splitbtn.x)
+                ST_CHECK(window_hit_test(A.win, &(SDL_Point){(int)(ex / d), (int)((tr->bar.y + tr->bar.h * 0.5f) / d)}, NULL) == SDL_HITTEST_NORMAL);
+        }
+        ST_CHECK(window_hit_test(A.win, &(SDL_Point){(int)(1 / d), (int)(A.H * 0.5f / d)}, NULL) == SDL_HITTEST_RESIZE_LEFT); // the edges still resize
+        sheet_close();
+        ST_CHECK(!overlay_open());
+        ST_CHECK(window_hit_test(A.win, &(SDL_Point){(int)((A.r_brand.x + A.r_brand.w * 0.5f) / d), (int)((A.r_brand.y + A.r_brand.h * 0.5f) / d)}, NULL) == SDL_HITTEST_DRAGGABLE);
         A.last_opened[0] = 0;
         st_mouse(SDL_EVENT_MOUSE_BUTTON_DOWN, wctl_button(1).x + S(20), S(15), SDL_BUTTON_LEFT, 1, 0);
         st_mouse(SDL_EVENT_MOUSE_BUTTON_UP, 0, 0, 0, 0, 0);
