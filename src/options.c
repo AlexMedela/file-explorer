@@ -900,6 +900,8 @@ static void opt_action_button(Rect r, const char *label, bool enabled, bool acti
 }
 
 static bool opt_hover(Rect r) { return hot(r); }
+// The mouse is over r, without the hand pointer (whole rows: only their controls are clickable).
+static bool opt_inside(Rect r) { return A.mouse_in && in_rect(r, A.mx, A.my); }
 
 // The icon of choice i of a dropdown (-1: none): the custom actions' icons.
 static int opt_choice_icon(int id, int i) {
@@ -1901,7 +1903,7 @@ static void options_draw(void) {
             if (q[0] ? !opt_matches(ok, q) : opt_hidden(ok->id)) continue;
             Rect rr = {cx, y, cwid, rh};
             if (y + rh > list.y && y < list.y + list.h) {
-                bool hv = opt_hover(rr) && opt_hover(list) && g_opt.drop_opt < 0;
+                bool hv = opt_inside(rr) && opt_inside(list) && g_opt.drop_opt < 0;
                 if (hv) g_opt.hover_row = k; // (no highlight: rows are static, their controls react)
                 f32 tx = rr.x + S(16), ctlw = MIN(roundf(S(380)), rr.w * 0.55f), lw = rr.w - ctlw - S(44);
                 if (ok->id == OPT_APP_ICON || ok->id == OPT_TITLE_ICON) // preview + field + mode buttons
@@ -1961,7 +1963,7 @@ static void options_draw(void) {
             if (!keydef_matches(d, q)) continue;
             Rect rr = {cx, y, cwid, krh};
             if (y + krh > list.y && y < list.y + list.h) {
-                bool hv = opt_hover(rr) && opt_hover(list) && g_opt.drop_opt < 0;
+                bool hv = opt_inside(rr) && opt_inside(list) && g_opt.drop_opt < 0;
                 (void)hv;
                 if (g_opt.rec_def == i) draw_rrect(rr.x + S(3), rr.y + S(3), rr.w - S(6), rr.h - S(6), S(6), C(COL_HOVER)); // recording
                 const char *l = cmd_label(d->id);
