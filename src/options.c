@@ -1521,13 +1521,20 @@ static void opt_act_toggle(int i) {
     else toast("Couldn't save %s: %s", g_ua[i].file, strerror(errno));
 }
 
+static void opt_act_deleted(Op *op) {
+    (void)op;
+    ua_load();
+}
+
 static void opt_act_delete_cb(int choice, bool check, void *ud) {
     (void)check;
     int i = (int)(intptr_t)ud;
     if (choice != 1 || i < 0 || i >= g_nua) return;
     char path[PATH_MAX];
     path_join(path, sizeof path, g_ua_dir, g_ua[i].file);
-    ops_start(op_new(OP_TRASH, (char *[]){path}, 1, NULL));
+    Op *op = op_new(OP_TRASH, (char *[]){path}, 1, NULL);
+    op->done_cb = opt_act_deleted; // (if it couldn't go, it shows again)
+    ops_start(op);
     memmove(&g_ua[i], &g_ua[i + 1], (size_t)(g_nua - i - 1) * sizeof g_ua[0]); // (the trash takes it on a worker)
     g_nua--;
     opt_act_close();
