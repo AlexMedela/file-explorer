@@ -800,22 +800,144 @@ static void draw_preedit(void) {
     draw_rect(x + pad, y + h - roundf(S(5)), w - pad * 2, MAX(1.f, roundf(S(1))), C(COL_ACCENT));
 }
 
+// Our own controls with the desktop theme's own artwork: minimise / maximise / restore / close looked up by the
+// freedesktop names on a worker (the theme index may be cold), rasterized white and tinted at draw like the UI
+// glyphs. Where the theme has none (or until one arrives) the hand-drawn glyph below shows.
+enum { WCTL_MIN, WCTL_MAX, WCTL_RESTORE, WCTL_CLOSE, WCTL_NSYS };
+static SDL_Texture *g_wctl_sys[WCTL_NSYS]; // the desktop's artwork per control; NULL while on its way / absent
+static int g_wctl_sys_px;
+static char g_wctl_sys_theme[64];
+static char g_wctl_sys_deco[64]; // the window decorator's artwork theme (Breeze on KDE), asked before the desktop theme
+static bool g_wctl_sys_busy;
+
+static const char *const g_wctl_sys_names[WCTL_NSYS][2] = {
+    {"window-minimize-symbolic", "window-minimize"},
+    {"window-maximize-symbolic", "window-maximize"},
+    {"window-restore-symbolic", "window-restore"},
+    {"window-close-symbolic", "window-close"},
+};
+
+static void wctl_sys_drop(void) {
+    for (int i = 0; i < WCTL_NSYS; i++) {
+        if (g_wctl_sys[i]) SDL_DestroyTexture(g_wctl_sys[i]);
+        g_wctl_sys[i] = NULL;
+    }
+}
+
+typedef struct { char theme[64], deco[64]; int px; u8 *rgba[WCTL_NSYS]; } WctlSysReq;
+
+static void wctl_sys_done(void *arg) { // (main thread)
+    WctlSysReq *r = arg;
+    if (g_wctl_sys_px == r->px && !strcmp(g_wctl_sys_theme, r->theme) && !strcmp(g_wctl_sys_deco, r->deco) && A.ren) { // still the current ask
+        for (int i = 0; i < WCTL_NSYS; i++) {
+            SDL_Texture *t = NULL;
+            if (r->rgba[i]) {
+                t = SDL_CreateTexture(A.ren, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, r->px, r->px);
+                if (t && !SDL_UpdateTexture(t, NULL, r->rgba[i], r->px * 4)) { SDL_DestroyTexture(t); t = NULL; }
+            }
+            g_wctl_sys[i] = t;
+        }
+        A.redraw = true; // the artwork arrived after a frame was already up
+    } else g_wctl_sys_px = -1; // a newer theme/size was seen while we were out: the next draw asks again
+    for (int i = 0; i < WCTL_NSYS; i++) free(r->rgba[i]);
+    g_wctl_sys_busy = false;
+    free(r);
+}
+
+// UI symbols are monochrome: whatever fill the theme's file bakes in (Adwaita's greys, legacy PNGs), the control
+// draws in the UI's own colour - keep the shape's alpha, set every visible pixel to the ink.
+static void wctl_sys_ink(u8 *rgba, int px, u32 ink) {
+    size_t n = (size_t)px * px * 4;
+    for (size_t i = 0; i < n; i += 4)
+        if (rgba[i + 3]) {
+            rgba[i] = (u8)(ink >> 16 & 0xFF);
+            rgba[i + 1] = (u8)(ink >> 8 & 0xFF);
+            rgba[i + 2] = (u8)(ink & 0xFF);
+        }
+}
+
+// A raster with no visible pixel at all (a symbol nanosvg couldn't draw): treated as a miss, so the hand-drawn
+// glyph shows instead of an invisible texture.
+static bool wctl_sys_blank(const u8 *rgba, int px) {
+    size_t n = (size_t)px * px * 4;
+    for (size_t i = 3; i < n; i += 4) if (rgba[i] > 8) return false;
+    return true;
+}
+
+static void wctl_sys_job(void *arg) { // (worker)
+    WctlSysReq *r = arg;
+    char path[PATH_MAX];
+    // the window decorator's own artwork first (Breeze on KDE), then the desktop's icon theme, then Adwaita's
+    // canonical symbols: where none of them has one, the hand-drawn glyph shows
+    const char *themes[3] = {r->deco, r->theme, "Adwaita"};
+    for (int i = 0; i < WCTL_NSYS && (r->theme[0] || r->deco[0]); i++)
+        for (int th = 0; th < 3 && !r->rgba[i]; th++) {
+            const char *theme = themes[th];
+            if (!theme[0]) continue;
+            for (int v = 0; v < 2 && !r->rgba[i]; v++) // symbolic first, then the plain name
+                if (sysi_lookup(theme, g_wctl_sys_names[i][v], r->px, path, sizeof path)) {
+                    r->rgba[i] = sysi_raster(path, r->px, 0xFFFFFF);
+                    if (r->rgba[i] && wctl_sys_blank(r->rgba[i], r->px)) { free(r->rgba[i]); r->rgba[i] = NULL; }
+                    else if (r->rgba[i]) wctl_sys_ink(r->rgba[i], r->px, 0xFFFFFF);
+                }
+        }
+    main_post(wctl_sys_done, r);
+}
+
+// The desktop's texture for a window control, NULL while it's on its way or if the theme has none.
+static SDL_Texture *wctl_sys_texture(int i, int px) {
+    if (!A.csd) return NULL;
+    if (!g_desktop.icons[0]) { wctl_sys_drop(); return NULL; } // no desktop theme: the hand-drawn glyph shows
+    if (g_wctl_sys_px != px || strcmp(g_wctl_sys_theme, g_desktop.icons) || strcmp(g_wctl_sys_deco, g_desktop.deco)) { // another size or theme: ask again
+        wctl_sys_drop();
+        g_wctl_sys_px = px;
+        snprintf(g_wctl_sys_theme, sizeof g_wctl_sys_theme, "%s", g_desktop.icons);
+        snprintf(g_wctl_sys_deco, sizeof g_wctl_sys_deco, "%s", g_desktop.deco);
+        if (!g_wctl_sys_busy) {
+            WctlSysReq *r = xcalloc(1, sizeof *r);
+            *r = (WctlSysReq){.px = px};
+            snprintf(r->theme, sizeof r->theme, "%s", g_wctl_sys_theme);
+            snprintf(r->deco, sizeof r->deco, "%s", g_wctl_sys_deco);
+            g_wctl_sys_busy = true;
+            pool_submit(wctl_sys_job, r);
+        }
+    }
+    return g_wctl_sys[i];
+}
+
 // Own title bar: minimise / maximise / close at the top right (Windows-sized, red close on hover) and the strip above
 // the preview.
 static void draw_window_controls(void) {
     if (!A.csd) return;
+    u32 areac = A.tab_style == TABS_PILLS ? COL_TOOLBAR : COL_TABBAR; // the row the controls share (its brightness config applies)
     Rect s = A.r_wstrip;
     if (s.w > 0) {
-        draw_rect(s.x, s.y, s.w, s.h, C(COL_TABBAR));
+        draw_rect(s.x, s.y, s.w, s.h, C(areac));
         if (g_separators) draw_rect(s.x, s.y, 1, s.h, C(COL_BORDER));
     }
+    draw_rect(A.r_wctl.x, A.r_wctl.y, A.r_wctl.w, A.r_wctl.h, C(areac));
     bool max = window_maximized();
-    f32 lt = MAX(1.f, roundf(S(1))), is = roundf(S(10));
+    f32 lt = MAX(1.f, roundf(S(1))), is = roundf(S(10)), gs = roundf(S(16));
     for (int i = 0; A.r_wctl.w > 0 && i < 3; i++) {
         Rect b = wctl_button(i);
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(b, A.mx, A.my));
-        if (hover) draw_rect(b.x, b.y, b.w, b.h, i == 2 ? (Color){0xC4 / 255.f, 0x2B / 255.f, 0x1C / 255.f, 1} : C(COL_TAB_HOVER));
-        Color ic = hover ? (i == 2 ? (Color){1, 1, 1, 1} : C(COL_TEXT)) : C(COL_TEXT2);
+        if (hover) { // a rounded accent pill, a fifth smaller than the button; the close keeps its red
+            f32 mx = roundf(b.w * 0.15f), my = roundf(b.h * 0.15f);
+            draw_rrect(b.x + mx, b.y + my, b.w - 2 * mx, b.h - 2 * my, S(4), i == 2 ? (Color){0xC4 / 255.f, 0x2B / 255.f, 0x1C / 255.f, 1} : C(COL_ACCENT));
+        }
+        // at rest the row's other icons' colour; hovered: a very dark accent (or, with a dark accent, the readable one)
+        u32 hov = surface_foreground_color(rgb_mix(T.accent, 0x000000, 0.6f), T.accent);
+        Color ic = hover ? (i == 2 ? (Color){1, 1, 1, 1} : C(hov)) : C(COL_TEXT);
+        static const int wctl_id[3] = {WCTL_MIN, WCTL_MAX, WCTL_CLOSE}; // (the buttons: minimise / maximise-restore / close)
+        SDL_Texture *sys = wctl_sys_texture(i == 1 && max ? WCTL_RESTORE : wctl_id[i], (int)gs);
+        if (sys) { // the desktop's artwork
+            draw_flush(); // the row's background is still batched: it would be drawn over the texture
+            SDL_SetTextureColorMod(sys, (u8)(ic.r * 255), (u8)(ic.g * 255), (u8)(ic.b * 255));
+            SDL_SetTextureAlphaMod(sys, (u8)(ic.a * 255));
+            SDL_FRect dst = {roundf(b.x + (b.w - gs) * 0.5f), roundf(b.y + (b.h - gs) * 0.5f), gs, gs};
+            SDL_RenderTexture(A.ren, sys, NULL, &dst);
+            continue;
+        }
         f32 cx = roundf(b.x + b.w * 0.5f), cy = roundf(b.y + b.h * 0.5f), x0 = cx - is * 0.5f, y0 = cy - is * 0.5f;
         if (i == 0) draw_rect(x0, cy, is, lt, ic);
         else if (i == 1 && !max) draw_rrect_outline(x0, y0, is, is, S(1.5f), lt, ic);

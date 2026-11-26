@@ -44,7 +44,7 @@ static void settings_defaults(void) {
     A.sess_cur = 0;
     A.sess_layout[0] = 0;
     A.dim_inactive = true;
-    A.title_bar = TITLEBAR_AUTO;
+    A.title_bar = TITLEBAR_DEFAULT;
     A.round_corners = false;
     A.window_buttons = true;
     A.brand_logo = true;
@@ -323,7 +323,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "update_checked")) A.ig_update_checked = atoll(v);
         else if (!strcmp(k, "update_auto_install")) A.upd_auto = atoi(v);
         else if (!strcmp(k, "update_seen")) snprintf(A.upd_seen, sizeof A.upd_seen, "%s", v);
-        else if (!strcmp(k, "title_bar")) A.title_bar = !strcmp(v, "system") ? TITLEBAR_SYSTEM : !strcmp(v, "app") ? TITLEBAR_APP : TITLEBAR_AUTO;
+        else if (!strcmp(k, "title_bar")) A.title_bar = !strcmp(v, "system") ? TITLEBAR_SYSTEM : TITLEBAR_DEFAULT;
         else if (!strcmp(k, "round_corners")) A.round_corners = atoi(v);
         else if (!strcmp(k, "window_buttons")) A.window_buttons = atoi(v);
         else if (!strcmp(k, "brand_logo")) A.brand_logo = atoi(v);
@@ -619,7 +619,7 @@ static void settings_write(FILE *f) {
             A.ig_asked);
     fprintf(f, "check_updates=%d\nupdate_checked=%lld\nupdate_auto_install=%d\nupdate_seen=%s\n", A.ig_check_updates,
             (long long)A.ig_update_checked, A.upd_auto, A.upd_seen);
-    fprintf(f, "title_bar=%s\n", A.title_bar == TITLEBAR_SYSTEM ? "system" : A.title_bar == TITLEBAR_APP ? "app" : "auto");
+    fprintf(f, "title_bar=%s\n", A.title_bar == TITLEBAR_SYSTEM ? "system" : "default");
     fprintf(f, "round_corners=%d\n", A.round_corners);
     fprintf(f, "window_buttons=%d\n", A.window_buttons);
     fprintf(f, "brand_logo=%d\n", A.brand_logo);

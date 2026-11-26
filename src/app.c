@@ -168,7 +168,7 @@ typedef struct {
 
 // --- views -------------------------------------------------------------------
 enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
-enum { TITLEBAR_AUTO, TITLEBAR_SYSTEM, TITLEBAR_APP }; // A.title_bar
+enum { TITLEBAR_SYSTEM, TITLEBAR_DEFAULT }; // A.title_bar
 enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
 enum { EXEC_ASK, EXEC_RUN, EXEC_TERMINAL, EXEC_OPEN }; // A.exec_open: opening an executable file asks, runs it (here / in a terminal), or opens it as a document
 enum { TABS_CARDS, TABS_PILLS }; // A.tab_style: classic tabs above the navigation bar, pills below it
@@ -993,7 +993,7 @@ static TabBands tab_bands(f32 y, f32 scale, int count, f32 w) {
 }
 
 // Only the top row shares the window controls; a band below it keeps the full pane width.
-static f32 nav_available_width(f32 x, f32 y, f32 width) {
+static f32 header_available_width(f32 x, f32 y, f32 width) {
     return A.csd && A.r_wctl.w > 0 && y < 0.5f ? MAX(0.f, MIN(width, A.r_wctl.x - x)) : width;
 }
 
@@ -1004,7 +1004,7 @@ static void layout_pane(Pane *p, Rect area) {
     TabBands bands = tab_bands(area.y, S(1.f), panel_ntabs(tab_of(p)->panel), area.w);
     f32 nav_y = bands.navigation_y;
     f32 tb = roundf(S(46));
-    f32 width = nav_available_width(area.x, nav_y, area.w);
+    f32 width = header_available_width(area.x, nav_y, area.w);
     ly->toolbar = (Rect){area.x, nav_y, width, tb};
     ly->ribbon = (Rect){area.x, bands.ribbon_y, area.w, bands.ribbon_h}; // (h 0: off, or at the list's side / bottom)
     f32 bs = roundf(S(30)), by = nav_y + roundf((tb - bs) * 0.5f), gap = roundf(S(2));
@@ -1208,8 +1208,7 @@ static void layout_panel(Panel *pn, Rect r) {
     f32 tb = bands.tabs_h;
     pn->bar = (Rect){r.x, bands.tabs_y, r.w, tb};
     f32 bw = roundf(S(26)), by = bands.tabs_y + roundf(S(6));
-    f32 right = r.x + r.w; // a panel at the top right ends its tabs before the window buttons
-    if (A.r_wctl.w > 0 && r.y < 1 && right > A.r_wctl.x) right = MAX(r.x + S(140), A.r_wctl.x);
+    f32 right = r.x + header_available_width(r.x, r.y, r.w); // a panel at the top right ends its tabs before the window buttons
     f32 split_x = right - bw - roundf(S(6));
     pn->splitbtn = tb ? (Rect){split_x, by, bw, bw} : (Rect){0};
     int n = panel_ntabs(pn);
@@ -1325,7 +1324,7 @@ static void layout(void) {
     // tab-bar colour above it (the preview moves down to the panels' toolbars)
     A.r_wctl = A.r_wstrip = (Rect){0, 0, 0, 0};
     if (A.csd && A.window_buttons) {
-        f32 bw = roundf(S(46)), bh2 = roundf(S(38));
+        f32 bw = roundf(S(46)), bh2 = roundf(A.tab_style == TABS_PILLS ? S(46) : S(38)); // the row the controls share: the toolbar (pills) or the tab strip
         A.r_wctl = (Rect){W - 3 * bw, 0, 3 * bw, bh2};
         if (A.preview_on) {
             A.r_wstrip = (Rect){A.r_preview.x, 0, A.r_preview.w, bh2};
@@ -1351,11 +1350,9 @@ static void window_close_requested(void);
 static bool titlebar_wanted(void) {
     int m = A.title_bar;
     const char *e = getenv("FE_TITLE_BAR"); // (tests, screenshots)
-    if (e && !strcmp(e, "app")) m = TITLEBAR_APP;
-    else if (e && !strcmp(e, "system")) m = TITLEBAR_SYSTEM;
-    if (m != TITLEBAR_AUTO) return m == TITLEBAR_APP;
-    const char *drv = SDL_GetCurrentVideoDriver();
-    return !drv || strcmp(drv, "offscreen"); // (not in self-tests and screenshots: FE_TITLE_BAR=app shows it there)
+    if (e && !strcmp(e, "system")) m = TITLEBAR_SYSTEM;
+    else if (e && (!strcmp(e, "app") || !strcmp(e, "default"))) m = TITLEBAR_DEFAULT;
+    return m == TITLEBAR_DEFAULT;
 }
 
 // 0 minimise, 1 maximise / restore, 2 close
@@ -2040,6 +2037,8 @@ static SDL_HitTestResult window_hit_test(SDL_Window *w, const SDL_Point *pt, voi
 }
 
 // Switch between our title bar and the system's (startup, and when the setting changes).
+static void desktop_look_sync(void); // integration.c: also our own title bar's control glyphs (the desktop's icon theme)
+
 static void titlebar_apply(void) {
     bool csd = titlebar_wanted();
     if (A.win && !A.selftest) {
@@ -2047,6 +2046,7 @@ static void titlebar_apply(void) {
         SDL_SetWindowHitTest(A.win, csd ? window_hit_test : NULL, NULL);
     }
     A.csd = csd;
+    desktop_look_sync(); // (Default mode: the controls draw the desktop theme's artwork)
     layout();
     A.redraw = true;
 }
@@ -14011,6 +14011,8 @@ int main(int argc, char **argv) {
     g_wake_event = SDL_RegisterEvents(1);
     pool_init();
 
+    const char *vd = getenv("SDL_VIDEODRIVER"); // an explicitly offscreen one is headless here too (as automatic treated it)
+    if ((any_selftest || A.screenshot) && (!vd || !strcmp(vd, "offscreen")) && !getenv("FE_TITLE_BAR")) A.title_bar = TITLEBAR_SYSTEM;
     A.csd = titlebar_wanted(); // (borderless from the start: no system title bar flashing up first)
     // rounded corners need an alpha channel, which only a new window can get (turning them on takes a restart)
     A.win_alpha = A.csd && A.round_corners && !headless && !picker_active() && !getenv("FE_SQUARE_CORNERS");

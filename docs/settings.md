@@ -53,11 +53,12 @@ file-area background and a higher-contrast enclosure, with extra padding and a s
 `hide_single_tab=1` (Options -> Behaviour -> Hide tab bar with one tab, off by default) hides the tab band while only one
 tab is open, giving that row back to the folder; open another tab and the band returns, and new tabs still fit.
 
-`title_bar=auto` (Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop, tiling
-compositors included, so it looks the same everywhere: minimise / maximise / close at the end of the tab strip; drag
-the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.
-`system` leaves the title bar to the desktop (on a tiling compositor: no buttons at all).
-`FE_TITLE_BAR=app|system` overrides it for one run.
+`title_bar=default` (the default, Options -> Appearance -> Title bar) draws Explorer's own title bar on every desktop,
+tiling compositors included, so it looks the same everywhere: minimise / maximise / close at the end of the tab strip;
+drag the empty strip or the logo to move, double-click it to maximise, right-click for the window menu, the edges resize.
+`title_bar=system` leaves the title bar to the desktop: its own decorations and window controls (on a tiling compositor:
+no buttons at all). Settings from older versions (`title_bar=auto` or `title_bar=app`) load as `default`.
+`FE_TITLE_BAR=default|system` (the older `app` value still works) overrides it for one run.
 `window_buttons=0` (Options -> Appearance -> Window buttons, on by default) leaves out minimise / maximise / close, for
 desktops that close and tile windows from the keyboard; the tab strip then runs to the window's edge.
 `brand_name=app|host|custom|hidden` (Options -> Appearance -> Name above the sidebar) shows Explorer, this computer's

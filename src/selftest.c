@@ -2047,6 +2047,8 @@ static bool c_sysi_settled(void) {
     return true;
 }
 
+static bool c_wctl_settled(void) { return !g_wctl_sys_busy; } // the window controls' artwork ask (render.c)
+
 static int run_selftest_m7(void) {
     st_make_bmp(M7_BASE "/photo.bmp", 300, 200);
     pane_refresh(active_pane());
@@ -5740,8 +5742,10 @@ static int run_selftest_m9(void) {
     }
 
     { // own title bar: buttons at the top right, drag areas, resize edges, the strip above the preview
-        ST_CHECK(!A.csd); // headless + automatic: left to the system
-        A.title_bar = TITLEBAR_APP;
+        ST_CHECK(!A.csd); // headless: the system bar unless opted in
+        ST_CHECK(opt_choice_count(OPT_TITLE_BAR) == 2 && !strcmp(opt_choice_label(OPT_TITLE_BAR, 0), "System")
+                 && !strcmp(opt_choice_label(OPT_TITLE_BAR, 1), "Default"));
+        A.title_bar = TITLEBAR_DEFAULT;
         titlebar_apply();
         st_frames(1);
         ST_CHECK(A.csd && A.r_wctl.w > 0 && fabsf(A.r_wctl.x + A.r_wctl.w - (f32)A.W) < 1);
@@ -5844,7 +5848,155 @@ static int run_selftest_m9(void) {
         st_frames(1);
         st_shot("m9-titlebar");
         if (!pv) preview_toggle();
-        A.title_bar = TITLEBAR_AUTO;
+        { // our own controls draw the desktop theme's window-control artwork where it has any (else the hand-drawn glyphs)
+            char wp[PATH_MAX], wold[4096] = "";
+            const char *od = getenv("XDG_DATA_DIRS");
+            if (od) snprintf(wold, sizeof wold, "%s", od);
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl/scalable/apps", M9_BASE);
+            mkdir_p(wp, 0755);
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl/index.theme", M9_BASE);
+            st_write_text(wp, "[Icon Theme]\nName=FEWctl\nDirectories=scalable/apps\n\n[scalable/apps]\nSize=16\nType=Scalable\n");
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl/scalable/apps/window-close-symbolic.svg", M9_BASE);
+            st_write_text(wp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"currentColor\"/></svg>");
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl2", M9_BASE);
+            mkdir_p(wp, 0755);
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl2/index.theme", M9_BASE);
+            st_write_text(wp, "[Icon Theme]\nName=FEWctl2\nDirectories=scalable/apps\n\n[scalable/apps]\nSize=16\nType=Scalable\n");
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl2/scalable/apps/window-close-symbolic.svg", M9_BASE);
+            st_write_text(wp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"12\" height=\"12\" x=\"2\" y=\"2\" fill=\"currentColor\"/></svg>");
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl3", M9_BASE); // its close rasterizes to nothing: a miss
+            mkdir_p(wp, 0755);
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl3/index.theme", M9_BASE);
+            st_write_text(wp, "[Icon Theme]\nName=FEWctl3\nDirectories=scalable/apps\n\n[scalable/apps]\nSize=16\nType=Scalable\n");
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl3/scalable/apps/window-close-symbolic.svg", M9_BASE);
+            st_write_text(wp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"none\"/></svg>");
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl4", M9_BASE); // artwork for all three controls
+            mkdir_p(wp, 0755);
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl4/index.theme", M9_BASE);
+            st_write_text(wp, "[Icon Theme]\nName=FEWctl4\nDirectories=scalable/apps\n\n[scalable/apps]\nSize=16\nType=Scalable\n");
+            static const char *const w4[] = {"window-minimize-symbolic.svg", "window-maximize-symbolic.svg", "window-close-symbolic.svg"};
+            for (int i = 0; i < 3; i++) {
+                snprintf(wp, sizeof wp, "%s/wctl-data/icons/FEWctl4/scalable/apps/%s", M9_BASE, w4[i]);
+                st_write_text(wp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"currentColor\"/></svg>");
+            }
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/fewcase", M9_BASE); // its folder's spelling differs from its name
+            mkdir_p(wp, 0755);
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/fewcase/index.theme", M9_BASE);
+            st_write_text(wp, "[Icon Theme]\nName=FEWCase\nDirectories=scalable/apps\n\n[scalable/apps]\nSize=16\nType=Scalable\n");
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/fewcase/scalable/apps/window-close-symbolic.svg", M9_BASE);
+            st_write_text(wp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"currentColor\"/></svg>");
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/Adwaita/scalable/apps", M9_BASE); // the canonical fallback theme
+            mkdir_p(wp, 0755);
+            snprintf(wp, sizeof wp, "%s/wctl-data/icons/Adwaita/index.theme", M9_BASE);
+            st_write_text(wp, "[Icon Theme]\nName=Adwaita\nDirectories=scalable/apps\n\n[scalable/apps]\nSize=16\nType=Scalable\n");
+            for (int i = 0; i < 3; i++) {
+                snprintf(wp, sizeof wp, "%s/wctl-data/icons/Adwaita/scalable/apps/%s", M9_BASE, w4[i]);
+                st_write_text(wp, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect x=\"4\" y=\"4\" width=\"8\" height=\"8\" fill=\"currentColor\"/></svg>");
+            }
+            snprintf(wp, sizeof wp, "%s/wctl-data", M9_BASE);
+            setenv("XDG_DATA_DIRS", wp, 1);
+            char dsaved[64]; // g_desktop.icons is normally empty here, but a dev desktop may have set it
+            snprintf(dsaved, sizeof dsaved, "%s", g_desktop.icons);
+            snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl");
+            sysi_reset(); // re-read the index with the fixture root
+            st_frames(1); // the draw asks the worker
+            ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
+            st_frames(1); // the redraw shows the artwork
+            // close from the theme, the other two from the canonical fallback (Adwaita's symbols)
+            ST_CHECK(wctl_sys_texture(WCTL_CLOSE, 16) && wctl_sys_texture(WCTL_MIN, 16) && wctl_sys_texture(WCTL_MAX, 16));
+            // the lost re-ask: the ask was updated while busy (a draw saw the new theme first: its drop cleared the
+            // textures), then the stale answer arrived and was dropped: ask == desktop again, nothing re-posts.
+            snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl2");
+            g_wctl_sys_px = 16;
+            snprintf(g_wctl_sys_theme, sizeof g_wctl_sys_theme, "FEWctl2"); // (the state the busy interleaving leaves)
+            for (int i = 0; i < WCTL_NSYS; i++) g_wctl_sys[i] = NULL; // (dropped by that same mismatch draw)
+            WctlSysReq *stale = xcalloc(1, sizeof *stale); // the lookup that went out for FEWctl before the switch
+            *stale = (WctlSysReq){.px = 16};
+            snprintf(stale->theme, sizeof stale->theme, "FEWctl");
+            wctl_sys_done(stale); // (direct: the real interleaving would be a worker-timing race)
+            st_frames(1);
+            ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
+            st_frames(1);
+            ST_CHECK(wctl_sys_texture(WCTL_CLOSE, 16)); // FEWctl2's artwork made it despite the switch
+            { // the window decorator's own artwork is asked before the desktop theme's (Breeze on KDE)
+                snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl");
+                snprintf(g_desktop.deco, sizeof g_desktop.deco, "FEWctl2"); // the decorator: its close is inset 2px
+                st_frames(1);
+                ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
+                st_frames(1);
+                SDL_Surface *shot = SDL_RenderReadPixels(A.ren, &(SDL_Rect){A.W - 31, 11, 16, 16}); // the close glyph
+                ST_CHECK(shot != NULL);
+                if (shot) {
+                    const u8 *p = shot->pixels;
+                    int pitch = shot->pitch / 4;
+                    int edge_inked = p[(8 * pitch + 0) * 4] + p[(8 * pitch + 0) * 4 + 1] + p[(8 * pitch + 0) * 4 + 2] > 300;
+                    int mid_inked = p[(8 * pitch + 8) * 4] + p[(8 * pitch + 8) * 4 + 1] + p[(8 * pitch + 8) * 4 + 2] > 300;
+                    ST_CHECK(mid_inked && !edge_inked); // the decorator's inset artwork won over the desktop theme's
+                    SDL_DestroySurface(shot);
+                }
+                g_desktop.deco[0] = 0;
+            }
+            { // the artwork is drawn immediately: the row's background must not still be batched over it
+                snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl4");
+                st_frames(1);
+                ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
+                st_frames(1);
+                int gs = (int)roundf(S(16)); // the size the controls draw at
+                ST_CHECK(wctl_sys_texture(WCTL_MIN, gs) && wctl_sys_texture(WCTL_MAX, gs) && wctl_sys_texture(WCTL_CLOSE, gs));
+                ST_CHECK(A.csd && A.window_buttons && A.r_wctl.w > 0);
+                draw_rect(1, 1, 4, 4, (Color){1, 1, 1, 1}); // a stand-in for the row's background
+                ST_CHECK(g_nv > 0);
+                draw_window_controls();
+                ST_CHECK(g_nv == 0); // the artwork flushed the queue first; a deferred row would paint over it
+            }
+            { // a theme's folder may spell its name differently (KDE: "Breeze" lives in .../icons/breeze)
+                snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWCase");
+                st_frames(1);
+                ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
+                st_frames(1);
+                ST_CHECK(wctl_sys_texture(WCTL_CLOSE, (int)roundf(S(16))));
+            }
+            { // where the desktop's theme has none, Adwaita's canonical symbols are the fallback (else the hand-drawn glyph)
+                snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl"); // it has the close symbol only
+                st_frames(1);
+                ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
+                st_frames(1);
+                ST_CHECK(wctl_sys_texture(WCTL_MIN, (int)roundf(S(16))) && wctl_sys_texture(WCTL_MAX, (int)roundf(S(16))));
+            }
+            { // a theme whose close symbol rasterizes to nothing: a miss, not an invisible texture
+                snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl3");
+                st_frames(1);
+                ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
+                st_frames(1);
+                st_frames(1); // the redraw shows the next theme's artwork
+                SDL_Surface *shot = SDL_RenderReadPixels(A.ren, &(SDL_Rect){A.W - 31, 11, 16, 16}); // the close glyph
+                ST_CHECK(shot != NULL);
+                if (shot) {
+                    const u8 *p = shot->pixels;
+                    int pitch = shot->pitch / 4;
+                    int mid = p[(8 * pitch + 8) * 4] + p[(8 * pitch + 8) * 4 + 1] + p[(8 * pitch + 8) * 4 + 2];
+                    ST_CHECK(mid > 300); // something is drawn: never the blank art
+                    SDL_DestroySurface(shot);
+                }
+            }
+            snprintf(g_desktop.icons, sizeof g_desktop.icons, "%s", dsaved);
+            st_frames(1);
+            ST_CHECK(!wctl_sys_texture(WCTL_CLOSE, 16)); // no desktop theme: hand-drawn again
+            if (wold[0]) setenv("XDG_DATA_DIRS", wold, 1); else unsetenv("XDG_DATA_DIRS");
+            sysi_reset();
+            A.tab_style = TABS_PILLS; // the controls share the toolbar row (46) on pills, the tab strip (38) on cards
+            layout();
+            ST_CHECK(A.r_wctl.h == roundf(S(46)));
+            A.tab_style = TABS_CARDS;
+            layout();
+            ST_CHECK(A.r_wctl.h == roundf(S(38)));
+        }
+        // FE_TITLE_BAR forces one run: "default" (or the legacy "app") for ours, "system" for the desktop's
+        A.title_bar = TITLEBAR_SYSTEM;
+        setenv("FE_TITLE_BAR", "default", 1); titlebar_apply(); ST_CHECK(A.csd);
+        setenv("FE_TITLE_BAR", "system", 1); titlebar_apply(); ST_CHECK(!A.csd && A.r_wctl.w == 0);
+        unsetenv("FE_TITLE_BAR");
+        A.title_bar = TITLEBAR_SYSTEM;
         titlebar_apply();
         ST_CHECK(!A.csd && A.r_wctl.w == 0 && A.r_wstrip.w == 0);
     }
@@ -8260,7 +8412,7 @@ static int run_selftest_m10(void) {
         settings_save();
         settings_snapshot();
         st_read_text(sp, text, sizeof text);
-        char *tb = strstr(text, "title_bar=auto");
+        char *tb = strstr(text, "title_bar="); // (whatever value the headless default writes)
         ST_CHECK(tb != NULL);
         if (tb) memcpy(tb, "title_bar=app ", 14); // "another process" ("app " + the line's own newline)
         st_write_text(sp, text);
@@ -8283,8 +8435,14 @@ static int run_selftest_m10(void) {
         settings_save(); // (writes the version again)
         st_read_text(sp, text, sizeof text);
         ST_CHECK(strstr(text, "\nsettings_version=") != NULL);
-        A.title_bar = TITLEBAR_AUTO;
+        // title_bar: System, and older files (auto / app) load as Default; saved back as default
+        st_write_text(sp, "title_bar=system\n"); settings_load(); ST_CHECK(A.title_bar == TITLEBAR_SYSTEM);
+        st_write_text(sp, "title_bar=auto\n"); settings_load(); ST_CHECK(A.title_bar == TITLEBAR_DEFAULT);
+        st_write_text(sp, "title_bar=app\n"); settings_load(); ST_CHECK(A.title_bar == TITLEBAR_DEFAULT);
         settings_save();
+        st_read_text(sp, text, sizeof text);
+        ST_CHECK(strstr(text, "title_bar=default"));
+        A.title_bar = TITLEBAR_SYSTEM; settings_save(); // headless runs as System (as automatic did); nothing after reads it
         // an update replaced the binary while running: the old process notices
         char l1[] = "/usr/bin/file-explorer (deleted)", l2[] = "/usr/bin/file-explorer";
         ST_CHECK(exe_link_replaced(l1) && !strcmp(l1, "/usr/bin/file-explorer") && !exe_link_replaced(l2));

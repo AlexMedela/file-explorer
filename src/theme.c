@@ -112,7 +112,9 @@ static u32 g_status_bg; // the status bar: the toolbar's colour, unless its brig
 // The desktop's look, read off the UI thread (integration.c, "desktop look") only while Theme or File icons is System.
 // accent and kde[]: 0 = none, else 0x01000000 | rgb; kde[]: KDE's colour scheme (all 0 elsewhere).
 enum { KDE_VIEW, KDE_WINDOW, KDE_TEXT, KDE_SELECTION, KDE_COLORS };
-static struct { bool known, light; u32 accent, kde[KDE_COLORS]; char icons[64]; } g_desktop;
+static struct { bool known, light; u32 accent, kde[KDE_COLORS]; char icons[64], deco[64]; } g_desktop;
+                                              // deco: the window decorator's artwork theme (Breeze on KDE), for our own
+                                              // title bar's controls; empty where the decorator has none of its own
 
 static const struct { const char *name; u32 rgb; } g_accents[] = {
     {"Blue", 0x4C9BFF}, {"Purple", 0x9D7CF4}, {"Pink", 0xE86AB8}, {"Red", 0xEF5B5B}, {"Orange", 0xF2913A},

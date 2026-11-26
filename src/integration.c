@@ -550,7 +550,7 @@ static void ig_picker_set(bool on) {
 // light, accent colour, icon theme) and listens for its changes, falling back to KDE's / GTK's config files; what
 // it finds goes to g_desktop on the main thread. Nothing is started otherwise, nor in self-tests.
 
-typedef struct { bool light; u32 accent, kde[KDE_COLORS]; char icons[64]; } DesktopLook;
+typedef struct { bool light; u32 accent, kde[KDE_COLORS]; char icons[64], deco[64]; } DesktopLook;
 
 static struct {
     atomic_bool running, stop;
@@ -681,6 +681,10 @@ static void dlook_get(void *conn, DesktopLook *d) {
         if (scheme <= 0 && dlook_ini(gtk[i], "Settings", "gtk-application-prefer-dark-theme", v, sizeof v)) scheme = atoi(v) || !strcasecmp(v, "true") ? 1 : 2;
     }
     if (!d->icons[0]) snprintf(d->icons, sizeof d->icons, "hicolor");
+    if (kde) { // KWin's own decoration theme: our controls follow its buttons (Breeze's are drawn in code, so its icon theme's symbols are the artwork)
+        if (!dlook_ini("kwinrc", "org.kde.kdecoration2", "theme", v, sizeof v) || !sysi_component(v)) snprintf(v, sizeof v, "Breeze");
+        snprintf(d->deco, sizeof d->deco, "%s", v);
+    }
     d->light = d->kde[KDE_VIEW] ? rgb_luma(d->kde[KDE_VIEW] & 0xFFFFFF) > 0.5f : scheme == 2; // (KDE: its scheme says)
     if (!d->accent) d->accent = d->kde[KDE_SELECTION];
 }
@@ -688,12 +692,13 @@ static void dlook_get(void *conn, DesktopLook *d) {
 static void dlook_apply(void *arg) { // (main thread)
     DesktopLook *d = arg;
     bool look = !g_desktop.known || g_desktop.light != d->light || g_desktop.accent != d->accent || memcmp(g_desktop.kde, d->kde, sizeof d->kde);
-    bool icons = strcmp(g_desktop.icons, d->icons) != 0;
+    bool icons = strcmp(g_desktop.icons, d->icons) != 0 || strcmp(g_desktop.deco, d->deco) != 0;
     g_desktop.known = true;
     g_desktop.light = d->light;
     g_desktop.accent = d->accent;
     memcpy(g_desktop.kde, d->kde, sizeof d->kde);
     snprintf(g_desktop.icons, sizeof g_desktop.icons, "%s", d->icons);
+    snprintf(g_desktop.deco, sizeof g_desktop.deco, "%s", d->deco);
     free(d);
     if (look && (theme_is_system() || g_accent_desktop)) theme_apply(); // (icons follow the new colours in icons_sync_theme)
     if (icons && icon_system_selected()) {
@@ -751,9 +756,10 @@ static void *dlook_thread(void *arg) {
     return NULL;
 }
 
-// Start or stop the watcher as Theme / the desktop's accent / File icons need it (after one changes, and at startup).
+// Start or stop the watcher as Theme / the desktop's accent / File icons / our own title bar need it (after one
+// changes, and at startup). Default mode's controls draw the desktop theme's window-control artwork.
 static void desktop_look_sync(void) {
-    bool want = !A.selftest && (theme_is_system() || g_accent_desktop || icon_system_selected());
+    bool want = !A.selftest && (theme_is_system() || g_accent_desktop || icon_system_selected() || A.csd);
     if (!want) { atomic_store(&g_dlook.stop, true); return; }
     atomic_store(&g_dlook.stop, false);
     if (atomic_load(&g_dlook.running)) return;

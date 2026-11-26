@@ -53,7 +53,7 @@ static const char *demo_setup(void) {
     snprintf(path, sizeof path, "%s/bin/lsblk", base);
     setenv("FE_LSBLK", path, 1);
     setenv("SHELL", "/bin/bash", 1); // its prompt comes from the demo home's .bashrc
-    setenv("FE_TITLE_BAR", "app", 1); // our own title bar, as on a desktop
+    setenv("FE_TITLE_BAR", "default", 1); // our own title bar, as on a desktop
     snprintf(path, sizeof path, "%s/config/file-explorer", base);
     mkdir_p(path, 0755);
     snprintf(path, sizeof path, "%s/config/file-explorer/settings.conf", base);
