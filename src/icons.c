@@ -463,6 +463,13 @@ static u8 *app_icon_raster(int px) {
     return g_app_icon_path[0] ? sysi_raster(g_app_icon_path, px, COL_ACCENT) : NULL;
 }
 
+// How pale icon id's pixels count for the light-surface contrast (icon_contrast_scale). The desktop's own icons are
+// drawn for light backgrounds already (Yaru's light grey bin has its outline): 0, they're never darkened.
+static f32 icon_raster_lightness(int id, int px, const u8 *buf) {
+    if (icon_system_selected() && sysi_pixels(id, px)) return 0;
+    return icon_pixel_lightness(buf, (size_t)px * px);
+}
+
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
     const u8 *sys = icon_system_selected() && w == h ? sysi_pixels(id, w) : NULL;
@@ -513,7 +520,7 @@ static Glyph *icon_glyph(int id, int px) {
     if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0; // crude eviction (atlas keeps the pixels)
     u8 *buf = icon_raster(id, px, px);
     if (!buf) return NULL;
-    f32 lightness = icon_pixel_lightness(buf, (size_t)px * px);
+    f32 lightness = icon_raster_lightness(id, px, buf);
     int ax, ay;
     if (!atlas_pack(px, px, &ax, &ay)) { free(buf); return NULL; }
     for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
@@ -690,7 +697,7 @@ static SDL_Texture *big_icon_tex(int id, int px) {
         SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
     }
-    f32 lightness = icon_pixel_lightness(buf, (size_t)px * px);
+    f32 lightness = icon_raster_lightness(id, px, buf);
     free(buf);
     if (!tex) return NULL;
     int k = g_nbig;
@@ -723,7 +730,7 @@ static void icons_replace(int id, int px, const u8 *rgba) {
         Glyph *g = &g_icon_cache[i].g;
         if (g_icon_cache[i].id != id || g_icon_cache[i].px != px) continue;
         for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(g->y + y) * ATLAS_SIZE + g->x) * 4], rgba + (size_t)y * px * 4, (size_t)px * 4);
-        g_icon_cache[i].lightness = icon_pixel_lightness(rgba, (size_t)px * px);
+        g_icon_cache[i].lightness = 0; // (the desktop's artwork: see icon_raster_lightness)
         g_dirty_x0 = MIN(g_dirty_x0, g->x);
         g_dirty_y0 = MIN(g_dirty_y0, g->y);
         g_dirty_x1 = MAX(g_dirty_x1, g->x + px);
