@@ -2295,7 +2295,7 @@ static int run_selftest_m7(void) {
         g_theme_cur = theme_find("Light");
         theme_apply();
         icons_sync_theme();
-        ST_CHECK(g_icon_main == COL_TEXT2 && !g_icon_img[tr] && icon_glyph(tr, 16));
+        ST_CHECK(g_icon_main == COL_TEXT_DIM && !g_icon_img[tr] && icon_glyph(tr, 16)); // (text2 is near black on light)
         g_theme_cur = saved;
         theme_apply();
         icons_sync_theme();
