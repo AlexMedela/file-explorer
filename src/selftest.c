@@ -10288,7 +10288,7 @@ static int run_selftest_admin(void) {
         ST_CHECK(op && op->kind == OP_TRASH && op->nerr == 1 && op->trash_broken && A.op_retry[ti2].w > 0);
         ST_CHECK(st_exists(ADM_BASE "/xdg/file-explorer/actions/note.action") && g_nua == nua); // (back in the list)
         st_shot("admin-notrash-card");
-        truncate(ADM_BASE "/tools/pkexec.log", 0);
+        unlink(ADM_BASE "/tools/pkexec.log"); // (the stand-in appends)
         st_click_rect(A.op_retry[ti2]);
         ST_CHECK(A.dlg.open && A.dlg.fn == admin_delete_cb && A.dlg.danger); // (the old card is dismissed and freed)
         A.dlg.open = false;
