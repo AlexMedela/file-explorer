@@ -1481,12 +1481,12 @@ static void connect_icon_picker_draw(void) {
     draw_text_fit(fs, r.x + pad + S(2), text_y(fs, fy, foot), gw, line, (int)strlen(line), C(hov >= 0 ? COL_TEXT : COL_TEXT_DIM), 0);
 }
 
-// "Display icon" row (Connect dialog, add-on sheets): a button showing the current icon; opens the picker.
+// Icon row (Connect dialog, add-on sheets): a button showing the current icon; opens the picker.
 static void sheet_icon_row(f32 x, f32 y, f32 cw, f32 rh, f32 lw0) {
     Sheet *s = &g_sheet;
     Font *f = &A.font, *fs = &A.font_small;
     f32 fh0 = roundf(S(30));
-    draw_text(fs, x + S(14), text_y(fs, y, rh), "Display icon", 12, C(COL_TEXT_DIM));
+    draw_text(fs, x + S(14), text_y(fs, y, rh), "Icon", 4, C(COL_TEXT_DIM));
     Rect ib = {x + lw0, roundf(y + (rh - fh0) * 0.5f), cw - lw0 - S(10), fh0};
     s->cn_ricon = ib;
     bool ih = hot(ib) || s->cn_pick;
@@ -1543,10 +1543,10 @@ static void connect_draw(void) {
     }
     // display name (optional): how the server is labelled in the sidebar
     {
-        y = props_heading(x, y, "Name");
+        y = props_heading(x, y, "Display");
         props_card(x, y, cw, 2, rh, 0);
         f32 lw0 = roundf(S(110)), fh0 = roundf(S(30));
-        draw_text(fs, x + S(14), text_y(fs, y, rh), "Display name", 12, C(COL_TEXT_DIM));
+        draw_text(fs, x + S(14), text_y(fs, y, rh), "Name", 4, C(COL_TEXT_DIM));
         Rect nr = {x + lw0, roundf(y + (rh - fh0) * 0.5f), cw - lw0 - S(10), fh0};
         s->cn_rf[CN_NAME] = nr;
         NetAddr na0;
