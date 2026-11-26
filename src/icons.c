@@ -306,11 +306,14 @@ static int folder_icon_for_name(const char *name) {
 
 // --- rasterization into the atlas ------------------------------------------
 
-// Icons may mark their main colour #FEFEFE (and #FDFDFD for a shade of it): it follows the UI theme (secondary
-// text colour), so they stay visible on light and dark themes alike (the trash bin).
+// Icons may mark their main colour #FEFEFE (and #FDFDFD for a shade of it): it follows the UI theme, so they stay
+// visible on light and dark themes alike (the trash bin). Secondary text on dark themes; on light ones that is near
+// black, so the dimmed text colour, which sits with the grey icons beside it.
 #define ICON_THEME_MARK "#FEFEFE"
 #define ICON_THEME_SHADE "#FDFDFD" // the same colour, mixed halfway towards the background
 static u32 g_icon_main = 0xFFFFFFFF, g_icon_bg; // colours behind the marks (re-rasterized when they change)
+
+static u32 icon_mark_colour(void) { return rgb_luma(COL_BG) > 0.5f ? COL_TEXT_DIM : COL_TEXT2; }
 
 // The logo follows the accent colour: its colours are hue-rotated from the default blue accent to the current
 // one (saturation scaled the same way, lightness kept), so the design is unchanged and Blue looks exactly as drawn.
@@ -390,12 +393,12 @@ static NSVGimage *icon_image(int id) {
         if (id == ICON_LOGO || id == ICON_LOGO_SMALL) logo_recolor(copy, g_logo_accent = COL_ACCENT);
         for (char *m = copy; (m = strstr(m, ICON_THEME_MARK)) != NULL; m += 7) {
             char hex[8];
-            snprintf(hex, sizeof hex, "#%06X", (unsigned)(COL_TEXT2 & 0xFFFFFF));
+            snprintf(hex, sizeof hex, "#%06X", (unsigned)(icon_mark_colour() & 0xFFFFFF));
             memcpy(m, hex, 7);
         }
         for (char *m = copy; (m = strstr(m, ICON_THEME_SHADE)) != NULL; m += 7) {
             char hex[8];
-            snprintf(hex, sizeof hex, "#%06X", (unsigned)(rgb_mix(COL_TEXT2, COL_BG, 0.55f) & 0xFFFFFF));
+            snprintf(hex, sizeof hex, "#%06X", (unsigned)(rgb_mix(icon_mark_colour(), COL_BG, 0.55f) & 0xFFFFFF));
             memcpy(m, hex, 7);
         }
         *slot = nsvgParse(copy, "px", 96.0f);
@@ -460,6 +463,13 @@ static u8 *app_icon_raster(int px) {
     return g_app_icon_path[0] ? sysi_raster(g_app_icon_path, px, COL_ACCENT) : NULL;
 }
 
+// How pale icon id's pixels count for the light-surface contrast (icon_contrast_scale). The desktop's own icons are
+// drawn for light backgrounds already (Yaru's light grey bin has its outline): 0, they're never darkened.
+static f32 icon_raster_lightness(int id, int px, const u8 *buf) {
+    if (icon_system_selected() && sysi_pixels(id, px)) return 0;
+    return icon_pixel_lightness(buf, (size_t)px * px);
+}
+
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
     const u8 *sys = icon_system_selected() && w == h ? sysi_pixels(id, w) : NULL;
@@ -510,7 +520,7 @@ static Glyph *icon_glyph(int id, int px) {
     if (g_icon_cache_n >= (int)ARRAY_COUNT(g_icon_cache)) g_icon_cache_n = 0; // crude eviction (atlas keeps the pixels)
     u8 *buf = icon_raster(id, px, px);
     if (!buf) return NULL;
-    f32 lightness = icon_pixel_lightness(buf, (size_t)px * px);
+    f32 lightness = icon_raster_lightness(id, px, buf);
     int ax, ay;
     if (!atlas_pack(px, px, &ax, &ay)) { free(buf); return NULL; }
     for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(ay + y) * ATLAS_SIZE + ax) * 4], buf + (size_t)y * px * 4, (size_t)px * 4);
@@ -687,7 +697,7 @@ static SDL_Texture *big_icon_tex(int id, int px) {
         SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
     }
-    f32 lightness = icon_pixel_lightness(buf, (size_t)px * px);
+    f32 lightness = icon_raster_lightness(id, px, buf);
     free(buf);
     if (!tex) return NULL;
     int k = g_nbig;
@@ -720,7 +730,7 @@ static void icons_replace(int id, int px, const u8 *rgba) {
         Glyph *g = &g_icon_cache[i].g;
         if (g_icon_cache[i].id != id || g_icon_cache[i].px != px) continue;
         for (int y = 0; y < px; y++) memcpy(&g_atlas[((size_t)(g->y + y) * ATLAS_SIZE + g->x) * 4], rgba + (size_t)y * px * 4, (size_t)px * 4);
-        g_icon_cache[i].lightness = icon_pixel_lightness(rgba, (size_t)px * px);
+        g_icon_cache[i].lightness = 0; // (the desktop's artwork: see icon_raster_lightness)
         g_dirty_x0 = MIN(g_dirty_x0, g->x);
         g_dirty_y0 = MIN(g_dirty_y0, g->y);
         g_dirty_x1 = MAX(g_dirty_x1, g->x + px);
@@ -750,9 +760,9 @@ static void icons_sync_theme(void) {
         g_logo_changed = true;
         atlas_reset();
     }
-    if (g_icon_main == COL_TEXT2 && g_icon_bg == COL_BG) return;
+    if (g_icon_main == icon_mark_colour() && g_icon_bg == COL_BG) return;
     bool first = g_icon_main == 0xFFFFFFFF;
-    g_icon_main = COL_TEXT2;
+    g_icon_main = icon_mark_colour();
     g_icon_bg = COL_BG;
     if (first) return;
     bool any = icon_system_selected(); // (the desktop's symbolic icons are drawn in the text colour)
