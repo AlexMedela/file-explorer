@@ -50,6 +50,8 @@ typedef struct {
     bool cn_remember, cn_remember_pw;
     int cn_edit; // editing saved server i (-1: a new connection)
     Rect cn_rsave;
+    Rect cn_body; // connect: the scrolling part between the title and the buttons
+    f32 cn_scroll, cn_max_scroll, cn_content; // (cn_content: the fields' height, measured in the last frame)
     Rect cn_rf[7], cn_rproto[8], cn_rremember, cn_rremember_pw, cn_rconnect, cn_rsaved[8], cn_rforget[8];
     DevJob *sec_job; // password prompt: the connection waiting for it
     BorgOpen *sec_borg; // ... or a Borg repository's passphrase
@@ -1507,12 +1509,17 @@ static void connect_draw(void) {
             roundf(S(48)) + (cn_field_visible(CN_PASS) && s->cn_edit < 0 ? roundf(S(28)) : 0) + roundf(S(32)) + pad +
             hh + rh * 2 + gap; // Name block (display name + icon)
     f32 w = roundf(MIN(S(560), A.W - S(40)));
+    if (s->cn_content > 0) h = MAX(h, s->cn_content + pad * 2 + roundf(S(62)) + roundf(S(16)) + roundf(S(32))); // last frame's content
     h = MIN(h, A.H - S(40));
     Rect r = {roundf((A.W - w) * 0.5f), roundf((A.H - h) * 0.42f), w, h};
     s->r = r;
     if (s->cn_edit >= 0 && s->cn_edit < A.nservers) sheet_frame(r, "Edit server", A.servers[s->cn_edit].name);
     else sheet_frame(r, "Connect to server", "Files on another computer, NAS or server");
-    f32 x = r.x + pad, cw = w - pad * 2, y = r.y + pad + roundf(S(62));
+    f32 x = r.x + pad, cw = w - pad * 2, bh = roundf(S(32));
+    s->cn_body = (Rect){x, r.y + pad + roundf(S(62)), cw, h - pad * 2 - roundf(S(62)) - bh - roundf(S(16))};
+    s->cn_scroll = CLAMP(s->cn_scroll, 0.f, s->cn_max_scroll);
+    f32 y = s->cn_body.y - s->cn_scroll;
+    ClipSave cs = draw_clip_push((SDL_Rect){(int)floorf(s->cn_body.x), (int)floorf(s->cn_body.y), (int)ceilf(s->cn_body.w), (int)ceilf(s->cn_body.h)});
     // saved servers
     for (int k = 0; k < 8; k++) s->cn_rsaved[k] = s->cn_rforget[k] = (Rect){0, 0, 0, 0};
     if (nsv) {
@@ -1615,12 +1622,14 @@ static void connect_draw(void) {
     cn_addr(&a);
     char uri[1024], line[1100];
     bool ok = net_proto_available(s->cn_proto);
+    bool preview = (ok && a.host[0]); // the line shows the URI we will connect to
     if (!ok) snprintf(line, sizeof line, "Not available: GVfs's %s backend (gvfsd-%s) isn't installed", g_net_protos[s->cn_proto].label,
                       g_net_protos[s->cn_proto].backend);
-    else if (a.host[0]) { net_uri(&a, uri, sizeof uri); snprintf(line, sizeof line, "%s", uri); }
-    else snprintf(line, sizeof line, "Enter a server name or address");
+    else if (preview) { net_uri(&a, uri, sizeof uri); snprintf(line, sizeof line, "%s", uri); }
+    else snprintf(line, sizeof line, "Enter a server name or address for preview");
     Font *fm = A.mono_path ? &A.font_mono : fs;
-    draw_text_fit(ok && a.host[0] ? fm : fs, x + S(2), y, cw, line, (int)strlen(line), C(ok ? COL_TEXT_DIM : COL_DANGER), 0);
+    u32 pc = !ok ? COL_DANGER : preview ? COL_TEXT_DIM : COL_WARN;
+    draw_text_fit(ok && preview ? fm : fs, x + S(2), y, cw, line, (int)strlen(line), C(pc), 0);
     y += roundf(fs->line_h + S(10));
     s->cn_rremember = (Rect){0, 0, 0, 0};
     if (s->cn_edit < 0) {
@@ -1634,7 +1643,19 @@ static void connect_draw(void) {
         sheet_check(s->cn_rremember_pw, secret_available() ? "Remember password in the system keyring" : "Remember password (no system keyring found)",
                     s->cn_remember_pw && secret_available());
     }
-    f32 bh = roundf(S(32)), bw = roundf(S(110));
+    draw_clip_pop(cs);
+    f32 content = y + roundf(S(22)) - (s->cn_body.y - s->cn_scroll);
+    s->cn_content = content;
+    s->cn_max_scroll = MAX(0.f, content - s->cn_body.h);
+    if (s->cn_max_scroll > 0) {
+        sheet_fade_edges(s->cn_body, s->cn_scroll, s->cn_max_scroll, pad);
+        f32 tw = roundf(S(4)), th = MAX(S(24), s->cn_body.h * s->cn_body.h / content);
+        bool sh;
+        f32 ty = sheet_scrollbar(&s->cn_scroll, s->cn_max_scroll, (Rect){s->cn_body.x + s->cn_body.w - S(12), s->cn_body.y, S(12), s->cn_body.h},
+                                 s->cn_body.y, s->cn_body.h, th, &sh);
+        draw_rrect(s->cn_body.x + s->cn_body.w - S(4) - tw * 0.5f, ty, tw, th, tw * 0.5f, C(sh ? COL_SCROLL_HOVER : COL_SCROLL));
+    }
+    f32 bw = roundf(S(110));
     s->cn_rconnect = (Rect){r.x + w - pad - bw, r.y + h - pad - bh, bw, bh};
     s->cn_rsave = (Rect){0, 0, 0, 0};
     f32 lx = s->cn_rconnect.x;
@@ -1770,6 +1791,17 @@ static void secret_prompt_draw(void) {
     sheet_button(s->cn_rconnect, bo ? "Open" : "Connect", true, true);
 }
 
+// Scrolls the body so field k (its rect from the last frame) is inside it.
+static void connect_reveal(int k) {
+    Sheet *s = &g_sheet;
+    Rect f = s->cn_rf[k];
+    if (f.w <= 0) return;
+    f32 top = s->cn_body.y + S(8), bottom = s->cn_body.y + s->cn_body.h - S(8);
+    if (f.y < top) s->cn_scroll -= top - f.y;
+    else if (f.y + f.h > bottom) s->cn_scroll += f.y + f.h - bottom;
+    s->cn_scroll = CLAMP(s->cn_scroll, 0.f, s->cn_max_scroll);
+}
+
 static void connect_focus_step(int dir) {
     Sheet *s = &g_sheet;
     static const int order[CN_ALL] = {CN_NAME, CN_HOST, CN_PORT, CN_PATH, CN_USER, CN_PASS, CN_DOMAIN};
@@ -1777,7 +1809,7 @@ static void connect_focus_step(int dir) {
     for (int k = 0; k < CN_ALL; k++) if (order[k] == s->cn_focus) i = k;
     for (int step = 0; step < CN_ALL; step++) {
         i = (i + dir + CN_ALL) % CN_ALL;
-        if (cn_field_visible(order[i])) { s->cn_focus = order[i]; return; }
+        if (cn_field_visible(order[i])) { s->cn_focus = order[i]; connect_reveal(order[i]); return; }
     }
 }
 
@@ -2484,29 +2516,31 @@ static void sheet_mouse(SDL_MouseButtonEvent *b) {
         if (in_rect(s->rcancel, x, y)) { secret_prompt_answer(false); return; }
         if (s->cn_rremember_pw.w > 0 && in_rect(s->cn_rremember_pw, x, y)) { s->cn_remember_pw = !s->cn_remember_pw; return; }
         break;
-    case SHEET_CONNECT:
-        if (in_rect(s->cn_ricon, x, y)) { s->cn_pick = true; s->cn_pick_scroll = 0; return; }
+    case SHEET_CONNECT: {
+        bool in_body = in_rect(s->cn_body, x, y); // the rows scrolled out of the body are not clickable
+        if (in_body && in_rect(s->cn_ricon, x, y)) { s->cn_pick = true; s->cn_pick_scroll = 0; return; }
         if (in_rect(s->cn_rconnect, x, y)) { connect_go(); return; }
         if (s->cn_rsave.w > 0 && in_rect(s->cn_rsave, x, y)) {
             if (connect_save_edit()) { toast("Saved"); sheet_close(); init_places(); }
             return;
         }
         if (in_rect(s->rcancel, x, y)) { sheet_close(); return; }
-        if (s->cn_rremember.w > 0 && in_rect(s->cn_rremember, x, y)) { s->cn_remember = !(s->cn_remember || s->cn_remember_pw); if (!s->cn_remember) s->cn_remember_pw = false; return; }
-        if (s->cn_rremember_pw.w > 0 && in_rect(s->cn_rremember_pw, x, y) && secret_available()) {
+        if (in_body && s->cn_rremember.w > 0 && in_rect(s->cn_rremember, x, y)) { s->cn_remember = !(s->cn_remember || s->cn_remember_pw); if (!s->cn_remember) s->cn_remember_pw = false; return; }
+        if (in_body && s->cn_rremember_pw.w > 0 && in_rect(s->cn_rremember_pw, x, y) && secret_available()) {
             s->cn_remember_pw = !s->cn_remember_pw;
             if (s->cn_remember_pw) s->cn_remember = true;
             return;
         }
-        for (int i = 0; i < NET_PROTO_COUNT; i++)
+        for (int i = 0; in_body && i < NET_PROTO_COUNT; i++)
             if (in_rect(s->cn_rproto[i], x, y)) {
                 s->cn_proto = i;
                 if (!cn_field_visible(s->cn_focus)) s->cn_focus = CN_HOST;
                 return;
             }
-        for (int k = 0; k < CN_ALL; k++)
+        for (int k = 0; in_body && k < CN_ALL; k++)
             if (s->cn_rf[k].w > 0 && in_rect(s->cn_rf[k], x, y)) { s->cn_focus = k; return; }
         break;
+    }
     case SHEET_OPENWITH:
         if (in_rect(s->ropen, x, y)) { openwith_go(); return; }
         if (in_rect(s->rcancel, x, y)) { sheet_close(); return; }
@@ -2597,6 +2631,7 @@ static void sheet_wheel(f32 dy) {
     Sheet *s = &g_sheet;
     if (s->kind == SHEET_OPTIONS) options_wheel(dy);
     else if ((s->kind == SHEET_CONNECT || s->kind == SHEET_ADDON || s->kind == SHEET_BORG) && s->cn_pick) glide_by(&s->cn_pick_scroll, -dy * S(48), 1e9f); // clamped when drawn
+    else if (s->kind == SHEET_CONNECT) s->cn_scroll = CLAMP(s->cn_scroll - dy * S(48), 0.f, s->cn_max_scroll);
     else if (s->kind == SHEET_OPENWITH) glide_by(&s->ow_scroll, -dy * s->row_h * 1.5f, 1e9f);
     else if (s->kind == SHEET_PROPS) glide_by(&s->pv_scroll, -dy * S(48), s->pv_content - s->rbody.h);
     else if (s->kind == SHEET_RENAME) glide_by(&s->rn_scroll, -dy * 3 * roundf(S(24)), 1e9f);
