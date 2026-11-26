@@ -5903,34 +5903,34 @@ static int run_selftest_m9(void) {
             ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
             st_frames(1); // the redraw shows the artwork
             // close from the theme, the other two from the canonical fallback (Adwaita's symbols)
-            ST_CHECK(wctl_sys_texture(WCTL_CLOSE, 16) && wctl_sys_texture(WCTL_MIN, 16) && wctl_sys_texture(WCTL_MAX, 16));
+            ST_CHECK(wctl_sys_texture(WCTL_CLOSE, WCTL_SYS_PX) && wctl_sys_texture(WCTL_MIN, WCTL_SYS_PX) && wctl_sys_texture(WCTL_MAX, WCTL_SYS_PX));
             // the lost re-ask: the ask was updated while busy (a draw saw the new theme first: its drop cleared the
             // textures), then the stale answer arrived and was dropped: ask == desktop again, nothing re-posts.
             snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl2");
-            g_wctl_sys_px = 16;
+            g_wctl_sys_px = WCTL_SYS_PX;
             snprintf(g_wctl_sys_theme, sizeof g_wctl_sys_theme, "FEWctl2"); // (the state the busy interleaving leaves)
             for (int i = 0; i < WCTL_NSYS; i++) g_wctl_sys[i] = NULL; // (dropped by that same mismatch draw)
             WctlSysReq *stale = xcalloc(1, sizeof *stale); // the lookup that went out for FEWctl before the switch
-            *stale = (WctlSysReq){.px = 16};
+            *stale = (WctlSysReq){.px = WCTL_SYS_PX};
             snprintf(stale->theme, sizeof stale->theme, "FEWctl");
             wctl_sys_done(stale); // (direct: the real interleaving would be a worker-timing race)
             st_frames(1);
             ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
             st_frames(1);
-            ST_CHECK(wctl_sys_texture(WCTL_CLOSE, 16)); // FEWctl2's artwork made it despite the switch
+            ST_CHECK(wctl_sys_texture(WCTL_CLOSE, WCTL_SYS_PX)); // FEWctl2's artwork made it despite the switch
             { // the window decorator's own artwork is asked before the desktop theme's (Breeze on KDE)
                 snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl");
                 snprintf(g_desktop.deco, sizeof g_desktop.deco, "FEWctl2"); // the decorator: its close is inset 2px
                 st_frames(1);
                 ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
                 st_frames(1);
-                SDL_Surface *shot = SDL_RenderReadPixels(A.ren, &(SDL_Rect){A.W - 31, 11, 16, 16}); // the close glyph
+                SDL_Surface *shot = SDL_RenderReadPixels(A.ren, &(SDL_Rect){A.W - 23 - WCTL_SYS_PX / 2, 19 - WCTL_SYS_PX / 2, WCTL_SYS_PX, WCTL_SYS_PX}); // the close glyph
                 ST_CHECK(shot != NULL);
                 if (shot) {
                     const u8 *p = shot->pixels;
                     int pitch = shot->pitch / 4;
-                    int edge_inked = p[(8 * pitch + 0) * 4] + p[(8 * pitch + 0) * 4 + 1] + p[(8 * pitch + 0) * 4 + 2] > 300;
-                    int mid_inked = p[(8 * pitch + 8) * 4] + p[(8 * pitch + 8) * 4 + 1] + p[(8 * pitch + 8) * 4 + 2] > 300;
+                    int edge_inked = p[(WCTL_SYS_PX / 2 * pitch + 0) * 4] + p[(WCTL_SYS_PX / 2 * pitch + 0) * 4 + 1] + p[(WCTL_SYS_PX / 2 * pitch + 0) * 4 + 2] > 300;
+                    int mid_inked = p[(WCTL_SYS_PX / 2 * pitch + WCTL_SYS_PX / 2) * 4] + p[(WCTL_SYS_PX / 2 * pitch + WCTL_SYS_PX / 2) * 4 + 1] + p[(WCTL_SYS_PX / 2 * pitch + WCTL_SYS_PX / 2) * 4 + 2] > 300;
                     ST_CHECK(mid_inked && !edge_inked); // the decorator's inset artwork won over the desktop theme's
                     SDL_DestroySurface(shot);
                 }
@@ -5941,7 +5941,7 @@ static int run_selftest_m9(void) {
                 st_frames(1);
                 ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
                 st_frames(1);
-                int gs = (int)roundf(S(16)); // the size the controls draw at
+                int gs = WCTL_SYS_PX; // the size the controls draw at
                 ST_CHECK(wctl_sys_texture(WCTL_MIN, gs) && wctl_sys_texture(WCTL_MAX, gs) && wctl_sys_texture(WCTL_CLOSE, gs));
                 ST_CHECK(A.csd && A.window_buttons && A.r_wctl.w > 0);
                 draw_rect(1, 1, 4, 4, (Color){1, 1, 1, 1}); // a stand-in for the row's background
@@ -5954,14 +5954,14 @@ static int run_selftest_m9(void) {
                 st_frames(1);
                 ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
                 st_frames(1);
-                ST_CHECK(wctl_sys_texture(WCTL_CLOSE, (int)roundf(S(16))));
+                ST_CHECK(wctl_sys_texture(WCTL_CLOSE, WCTL_SYS_PX));
             }
             { // where the desktop's theme has none, Adwaita's canonical symbols are the fallback (else the hand-drawn glyph)
                 snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl"); // it has the close symbol only
                 st_frames(1);
                 ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
                 st_frames(1);
-                ST_CHECK(wctl_sys_texture(WCTL_MIN, (int)roundf(S(16))) && wctl_sys_texture(WCTL_MAX, (int)roundf(S(16))));
+                ST_CHECK(wctl_sys_texture(WCTL_MIN, WCTL_SYS_PX) && wctl_sys_texture(WCTL_MAX, WCTL_SYS_PX));
             }
             { // a theme whose close symbol rasterizes to nothing: a miss, not an invisible texture
                 snprintf(g_desktop.icons, sizeof g_desktop.icons, "FEWctl3");
@@ -5969,19 +5969,19 @@ static int run_selftest_m9(void) {
                 ST_CHECK(st_wait_cond(c_wctl_settled, 5000));
                 st_frames(1);
                 st_frames(1); // the redraw shows the next theme's artwork
-                SDL_Surface *shot = SDL_RenderReadPixels(A.ren, &(SDL_Rect){A.W - 31, 11, 16, 16}); // the close glyph
+                SDL_Surface *shot = SDL_RenderReadPixels(A.ren, &(SDL_Rect){A.W - 23 - WCTL_SYS_PX / 2, 19 - WCTL_SYS_PX / 2, WCTL_SYS_PX, WCTL_SYS_PX}); // the close glyph
                 ST_CHECK(shot != NULL);
                 if (shot) {
                     const u8 *p = shot->pixels;
                     int pitch = shot->pitch / 4;
-                    int mid = p[(8 * pitch + 8) * 4] + p[(8 * pitch + 8) * 4 + 1] + p[(8 * pitch + 8) * 4 + 2];
+                    int mid = p[(WCTL_SYS_PX / 2 * pitch + WCTL_SYS_PX / 2) * 4] + p[(WCTL_SYS_PX / 2 * pitch + WCTL_SYS_PX / 2) * 4 + 1] + p[(WCTL_SYS_PX / 2 * pitch + WCTL_SYS_PX / 2) * 4 + 2];
                     ST_CHECK(mid > 300); // something is drawn: never the blank art
                     SDL_DestroySurface(shot);
                 }
             }
             snprintf(g_desktop.icons, sizeof g_desktop.icons, "%s", dsaved);
             st_frames(1);
-            ST_CHECK(!wctl_sys_texture(WCTL_CLOSE, 16)); // no desktop theme: hand-drawn again
+            ST_CHECK(!wctl_sys_texture(WCTL_CLOSE, WCTL_SYS_PX)); // no desktop theme: hand-drawn again
             if (wold[0]) setenv("XDG_DATA_DIRS", wold, 1); else unsetenv("XDG_DATA_DIRS");
             sysi_reset();
             A.tab_style = TABS_PILLS; // the controls share the toolbar row (46) on pills, the tab strip (38) on cards

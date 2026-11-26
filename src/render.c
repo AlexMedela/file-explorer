@@ -806,6 +806,7 @@ static void draw_preedit(void) {
 enum { WCTL_MIN, WCTL_MAX, WCTL_RESTORE, WCTL_CLOSE, WCTL_NSYS };
 static SDL_Texture *g_wctl_sys[WCTL_NSYS]; // the desktop's artwork per control; NULL while on its way / absent
 static int g_wctl_sys_px;
+#define WCTL_SYS_PX 22 // the box the artwork is drawn in: symbolic icons pad theirs, so 22 matches the drawn glyphs' size
 static char g_wctl_sys_theme[64];
 static char g_wctl_sys_deco[64]; // the window decorator's artwork theme (Breeze on KDE), asked before the desktop theme
 static bool g_wctl_sys_busy;
@@ -917,7 +918,7 @@ static void draw_window_controls(void) {
     }
     draw_rect(A.r_wctl.x, A.r_wctl.y, A.r_wctl.w, A.r_wctl.h, C(areac));
     bool max = window_maximized();
-    f32 lt = MAX(1.f, roundf(S(1))), is = roundf(S(10)), gs = roundf(S(16));
+    f32 lt = MAX(1.f, roundf(S(1))), is = roundf(S(10)), gs = roundf(S(WCTL_SYS_PX));
     for (int i = 0; A.r_wctl.w > 0 && i < 3; i++) {
         Rect b = wctl_button(i);
         bool hover = hand_if(A.mouse_in && A.drag == DRAG_NONE && in_rect(b, A.mx, A.my));
