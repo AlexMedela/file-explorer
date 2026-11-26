@@ -170,6 +170,8 @@ typedef struct {
 enum { VIEW_DETAILS, VIEW_LIST, VIEW_GRID };
 enum { TITLEBAR_SYSTEM, TITLEBAR_DEFAULT }; // A.title_bar
 enum { BRAND_APP, BRAND_HOST, BRAND_CUSTOM, BRAND_HIDDEN }; // A.brand_name: the name above the sidebar
+enum { REPO_TAG_FULL, REPO_TAG_ICON, REPO_TAG_HIDDEN }; // A.repo_tag: the repository tag's style
+enum { REPO_ICON_KEEP, REPO_ICON_MATCH }; // A.repo_icon: a repository folder wears the icon that matches it
 enum { EXEC_ASK, EXEC_RUN, EXEC_TERMINAL, EXEC_OPEN }; // A.exec_open: opening an executable file asks, runs it (here / in a terminal), or opens it as a document
 enum { TABS_CARDS, TABS_PILLS }; // A.tab_style: classic tabs above the navigation bar, pills below it
 static bool g_hide_single_tab = false; // Behavior: give the folder the tab row back when only one tab is open
@@ -612,7 +614,7 @@ static struct {
     u32 pal_gen;
     int pal_n, pal_sel, pal_top;
     Rect pal_r, pal_list;
-    int def_view, def_icon, def_list_icon, def_listv_icon, def_group; // (sizes: the last ones picked, per view)
+    int def_view, def_icon, def_list_icon, def_listv_icon, def_sidebar_icon, def_group; // (sizes: the last ones picked, per view)
     bool view_per_folder; // off: a tab keeps its view (layout, icon size) while browsing; new tabs start in def_view
     char icon_theme_name[64]; // from settings, applied once the renderer exists (custom themes are scanned first)
     Rect r_viewbtn[3], r_gear, r_feat, r_xfer;
@@ -718,6 +720,8 @@ static struct {
     bool round_corners; // round the window's corners with our own title bar (setting)
     bool window_buttons; // minimise / maximise / close in our own title bar (setting; off: the desktop's keys close it)
     bool brand_logo;     // the logo before the name above the sidebar (setting)
+    int repo_tag;        // REPO_TAG_*: the repository tag's style (setting)
+    int repo_icon;       // REPO_ICON_*: a repository folder wears the icon that matches it (setting)
     int brand_name;      // BRAND_*: which name is shown there (setting; hidden: the sidebar starts at the top)
     char brand_text[96]; // the name for BRAND_CUSTOM (setting)
     int tab_style;       // TABS_*: the open tab as a card joining the toolbar, or rounded pills centred in a box (setting)
@@ -1332,7 +1336,7 @@ static void layout(void) {
             A.r_preview.h -= bh2;
         }
     }
-    A.side_row_h = roundf(S(30));
+    A.side_row_h = roundf(S(MAX(30, (A.def_sidebar_icon ? A.def_sidebar_icon : 16) + 14)));
     A.side_top = roundf(S(8));
     places_layout();
 
@@ -2172,7 +2176,7 @@ static void remote_mounts_load(void) {
     strv_free(g_remote, g_nremote);
     g_remote = NULL;
     g_nremote = 0;
-    FILE *f = fopen("/proc/self/mounts", "r");
+    FILE *f = fopen(mounts_file(), "r"); // the same table the Borg mount is read from
     if (!f) return;
     char line[PATH_MAX * 2], src[PATH_MAX], mp[PATH_MAX], type[64];
     static const char *types[] = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "fuse.sshfs", "fuse.rclone", "fuse.gvfsd-fuse", "fuse.fe-device", "fuse.adbfs",
@@ -7716,7 +7720,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
             if (k >= 0 && borg_saved_of_mount(k) < 0) menu_add("Add to sidebar", "", ACT_BORG_SAVE, true);
             menu_add("Close backups", "", ACT_BORG_CLOSE, true);
             menu_sep();
-        } else if (pane_borg_repo(p)) {
+        } else if (pane_borg_repo(p) && !borgfs_mount_at(p->path)) { // (a mounted repository is not one to save)
             menu_add("Add to sidebar", "", ACT_BORG_SAVE, true);
             menu_sep();
         }
@@ -14243,6 +14247,7 @@ int main(int argc, char **argv) {
         addon_tick();
         cloud_tick();
         git_tick();
+        local_shares_tick(); // the share roots, re-read every ten seconds
         du_tick();
         cmp_tick();
         snap_tick();

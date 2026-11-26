@@ -2100,6 +2100,12 @@ static int run_selftest_m7(void) {
         ST_CHECK(icon_glyph(py, 16) != NULL);
         // badges: the theme's emblem-git.svg replaces the app's Git mark; no emblem-symbolic-link.svg: the app's own
         ST_CHECK(badge_icon(BADGE_GIT) == ICON_BADGE_BASE + BADGE_GIT && badge_icon(BADGE_LINK) < 0);
+        // the share badge, and the app's own artwork for every badge when no theme has one
+        ST_CHECK(BADGE_COUNT == 4 && !strcmp(g_badge_names[BADGE_SHARE], "emblem-symbolic-share")
+                 && !strcmp(g_badge_names[BADGE_BORG], "emblem-borg"));
+        ST_CHECK(badge_art_id(BADGE_SHARE) == ICON_BADGE_BASE + BADGE_SHARE);
+        ST_CHECK(icon_src(badge_art_id(BADGE_SHARE)) && strstr(icon_src(badge_art_id(BADGE_SHARE)), "<svg")); // no emblem: the app's own
+        ST_CHECK(icon_glyph(badge_art_id(BADGE_SHARE), 16) && icon_glyph(badge_art_id(BADGE_GIT), 16));
         ST_CHECK(icon_glyph(badge_icon(BADGE_GIT), 16) && big_icon_tex(badge_icon(BADGE_GIT), 82));
         ST_CHECK(icon_find("emblem-git") < 0 && xi != ICON_BADGE_BASE + BADGE_GIT); // (not a file icon, ids apart)
         settings_save();
@@ -2113,7 +2119,10 @@ static int run_selftest_m7(void) {
         if (system(path)) {}
         icon_themes_reload();
         ST_CHECK(icon_theme_find("TestIcons") < 0 && g_icon_theme == 0);
-        ST_CHECK(badge_icon(BADGE_GIT) < 0 && badge_icon(BADGE_LINK) < 0 && !icon_src(ICON_BADGE_BASE)); // built in: the app's marks
+        ST_CHECK(badge_icon(BADGE_GIT) < 0 && badge_icon(BADGE_LINK) < 0); // built in: no theme emblem
+        ST_CHECK(icon_src(ICON_BADGE_BASE) && strstr(icon_src(ICON_BADGE_BASE), "<svg")); // the app's own marks
+        ST_CHECK(icon_src(badge_art_id(BADGE_GIT)) && strstr(icon_src(badge_art_id(BADGE_GIT)), "#e64a19")); // the classic orange logo
+        ST_CHECK(icon_src(badge_art_id(BADGE_SHARE)) && strstr(icon_src(badge_art_id(BADGE_SHARE)), "stroke-width=\"3\"")); // drawn a little bolder
         ST_CHECK(trash_icon(true) == icon_find("trash-full") && trash_icon(false) == icon_find("trash")); // built in: both bins
     }
     { // File icons "System": the desktop's icon theme, looked up and drawn on a worker, over the bundled icon meanwhile
@@ -5053,6 +5062,14 @@ static int run_selftest_m9(void) {
         settings_load();
         init_places();
         ST_CHECK(!strcmp(g_app_icon_path, svg));
+        // the repository tag's style and the repository folder icon: they survive a save and a load
+        A.repo_tag = REPO_TAG_ICON;
+        A.repo_icon = REPO_ICON_MATCH;
+        settings_save();
+        settings_load();
+        ST_CHECK(A.repo_tag == REPO_TAG_ICON && A.repo_icon == REPO_ICON_MATCH);
+        A.repo_tag = REPO_TAG_FULL;
+        A.repo_icon = REPO_ICON_KEEP;
         opt_app_icon_chosen("");
         settings_save();
     }
@@ -5741,6 +5758,64 @@ static int run_selftest_m9(void) {
         ST_CHECK(!g_preedit[0]);
     }
 
+    { // the badges on a folder row: the share one, the symlink and the repository, stacked in that order
+        char sp[PATH_MAX];
+        snprintf(sp, sizeof sp, "/tmp/fe-m9-badges");
+        share_add(&g_local_shares, sp, LOCAL_SHARE_SMB);
+        int b[3];
+        GitSub g = {0};
+        snprintf(g.branch, sizeof g.branch, "main");
+        ST_CHECK(entry_badges(true, false, NULL, sp, false, b) == 1 && b[0] == BADGE_SHARE);
+        ST_CHECK(entry_badges(true, false, &g, sp, false, b) == 2 && b[1] == BADGE_GIT);
+        ST_CHECK(entry_badges(true, true, &g, sp, false, b) == 3 && b[0] == BADGE_SHARE && b[1] == BADGE_LINK && b[2] == BADGE_GIT);
+        ST_CHECK(entry_badges(false, true, NULL, NULL, false, b) == 1 && b[0] == BADGE_LINK); // a symlinked file: the link one only
+        ST_CHECK(entry_badges(true, false, NULL, "/tmp/fe-m9-badges-not-a-share", false, b) == 0);
+        GitSub bg = {0};
+        bg.borg = BORG_V2;
+        ST_CHECK(entry_badges(true, false, &bg, NULL, false, b) == 1 && b[0] == BADGE_BORG); // a Borg repository: its own mark
+        { // a mounted remote filesystem (NFS, CIFS, WebDAV, sshfs, rclone) is a share too
+            char mf[PATH_MAX];
+            snprintf(mf, sizeof mf, "/tmp/fe-m9-mounts");
+            FILE *f = fopen(mf, "w");
+            ST_CHECK(f != NULL);
+            if (f) {
+                fprintf(f, "server:/export /mnt/fe-nfs nfs4 rw 0 0\nlocal /mnt/fe-rclone fuse.rclone rw 0 0\ntmpfs /run tmpfs rw 0 0\n");
+                fclose(f);
+            }
+            setenv("FE_MOUNTS", mf, 1);
+            remote_mounts_load();
+            ST_CHECK(folder_is_share("/mnt/fe-nfs") && folder_is_share("/mnt/fe-rclone"));
+            { // a Borg repository is not a share: it wears its own mark
+                FILE *bf = fopen(mf, "a");
+                ST_CHECK(bf != NULL);
+                if (bf) {
+                    fprintf(bf, "borgfs /mnt/fe-borg fuse ro 0 0\n");
+                    fclose(bf);
+                }
+                remote_mounts_load();
+                ST_CHECK(!folder_is_share("/mnt/fe-borg"));
+                ST_CHECK(borgfs_mount_at("/mnt/fe-borg"));
+            }
+            ST_CHECK(!folder_is_share("/mnt/fe-nfs/sub") && !folder_is_share("/mnt/fe-other"));
+            unsetenv("FE_MOUNTS");
+            remote_mounts_load();
+        }
+    }
+    { // the repository tag: its style, and the folder icon that matches it
+        GitSub g = {0};
+        snprintf(g.branch, sizeof g.branch, "main");
+        ST_CHECK(A.repo_tag == REPO_TAG_FULL && A.repo_icon == REPO_ICON_KEEP); // the defaults
+        ST_CHECK(repo_pill_w(&g) > S(40)); // the tag with the branch name
+        A.repo_tag = REPO_TAG_ICON;
+        ST_CHECK(repo_pill_w(&g) < S(40)); // the mark alone
+        A.repo_tag = REPO_TAG_HIDDEN;
+        ST_CHECK(repo_pill_w(&g) == 0); // no tag: the name takes the room
+        A.repo_tag = REPO_TAG_FULL;
+        ST_CHECK(repo_folder_icon(&g) == icon_find("folder-git")); // a Git repository
+        g.borg = BORG_V2;
+        ST_CHECK(repo_folder_icon(&g) == icon_find("folder-backup")); // a Borg one
+        ST_CHECK(repo_color(&g) != repo_color(&(GitSub){0})); // the two kinds differ
+    }
     { // own title bar: buttons at the top right, drag areas, resize edges, the strip above the preview
         ST_CHECK(!A.csd); // headless: the system bar unless opted in
         ST_CHECK(opt_choice_count(OPT_TITLE_BAR) == 2 && !strcmp(opt_choice_label(OPT_TITLE_BAR, 0), "System")
@@ -10719,6 +10794,20 @@ static int run_selftest_borg(void) {
     ST_CHECK(borg_classify("something odd\n\n", err, sizeof err) == BORG_E_OTHER && !strcmp(err, "something odd"));
     ST_CHECK(borg_repo_kind(BORG_BASE "/home/repo1") == BORG_V1 && borg_repo_kind(BORG_BASE "/home/repo2") == BORG_V2);
     ST_CHECK(!borg_repo_kind(BORG_BASE "/home/fake") && !borg_repo_kind(BORG_BASE "/home/plain") && !borg_repo_kind(BORG_BASE "/nothing"));
+    // a repository mounted by someone else (borgfs, borgmatic): the mount table is what says so
+    char mf[PATH_MAX];
+    snprintf(mf, sizeof mf, "%s/mounts", BORG_BASE);
+    FILE *mfd = fopen(mf, "w");
+    ST_CHECK(mfd != NULL);
+    if (mfd) {
+        fprintf(mfd, "borgfs %s/borgfs-mount fuse ro,nosuid,nodev,relatime 0 0\nfuse.borgfs2 %s/borgfs2-mount fuse ro 0 0\ntmpfs /run tmpfs rw 0 0\n", BORG_BASE, BORG_BASE);
+        fclose(mfd);
+    }
+    setenv("FE_MOUNTS", mf, 1);
+    ST_CHECK(borgfs_mount_at(BORG_BASE "/borgfs-mount") && borgfs_mount_at(BORG_BASE "/borgfs-mount/inside"));
+    ST_CHECK(borgfs_mount_at(BORG_BASE "/borgfs2-mount"));
+    ST_CHECK(!borgfs_mount_at(BORG_BASE "/home/repo1") && !borgfs_mount_at(BORG_BASE "/nothing"));
+    unsetenv("FE_MOUNTS");
 
     // --- marked in their folder like git repositories (git status off: still marked)
     A.git_status = false;

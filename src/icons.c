@@ -31,14 +31,30 @@ static int g_icon_theme; // 0..ICON_THEMES-1 built in, then custom themes (icon_
 #define MAX_CUSTOM_ICON_THEMES 16
 // Badges on an icon's lower right that a custom theme may draw itself (freedesktop emblem names); there are no
 // built-in SVGs for them: without the theme's own, render.c draws its usual marks.
-enum { BADGE_LINK, BADGE_GIT, BADGE_COUNT };
-static const char *g_badge_names[BADGE_COUNT] = {"emblem-symbolic-link", "emblem-git"};
+enum { BADGE_LINK, BADGE_GIT, BADGE_SHARE, BADGE_BORG, BADGE_COUNT };
+static const char *g_badge_names[BADGE_COUNT] = {"emblem-symbolic-link", "emblem-git", "emblem-symbolic-share", "emblem-borg"};
+// Extra icons a custom theme may provide (not in the built-in icon set).
+enum { EXTRA_FOLDER_REMOTE, EXTRA_FOLDER_PUBLICSHARE, EXTRA_FOLDER_NETWORK,
+       EXTRA_DRIVE_HARDDISK, EXTRA_DRIVE_REMOVABLE, EXTRA_DRIVE_OPTICAL,
+       EXTRA_FOLDER_CLOUD, EXTRA_NETWORK_SERVER, EXTRA_COUNT };
+static const char *g_extra_names[EXTRA_COUNT] = {
+    "folder-remote", "folder-publicshare", "folder-network",
+    "drive-harddisk", "drive-removable-media", "drive-optical",
+    "folder-cloud", "network-server",
+};
+#define FOLDER_EXTRA_REMOTE EXTRA_FOLDER_REMOTE
+#define FOLDER_EXTRA_PUBLICSHARE EXTRA_FOLDER_PUBLICSHARE
+#define FOLDER_EXTRA_NETWORK EXTRA_FOLDER_NETWORK
+#define FOLDER_EXTRA_COUNT 3
 #define ICON_BADGE_BASE (ICON_COUNT + 3) // ids of the badges (after the logo and branch ids)
-#define ICON_EXT_BASE (ICON_BADGE_BASE + BADGE_COUNT) // ids of a custom theme's ext-*.svg icons
+#define ICON_EXTRA_BASE (ICON_BADGE_BASE + BADGE_COUNT)
+#define ICON_FOLDER_EXTRA_BASE ICON_EXTRA_BASE
+#define ICON_EXT_BASE (ICON_EXTRA_BASE + EXTRA_COUNT) // ids of a custom theme's ext-*.svg icons
 typedef struct {
     char name[64];
     int base;           // built-in theme for missing icons
     char *badge[BADGE_COUNT]; // emblem-*.svg (NULL = the app's own mark)
+    char *extra[EXTRA_COUNT]; // extra icons (folder-remote, drive-harddisk, ...)
     char *svg[ICON_COUNT]; // overrides (NULL = base)
     char (*ext)[32];    // ext-<x>.svg: extension (lowercase) ...
     char **ext_svg;     // ... and its SVG
@@ -95,16 +111,65 @@ static const char *icon_theme_name(int t) {
 static CustomIconTheme *icon_custom(void) { return g_icon_theme >= ICON_THEMES && g_icon_theme < ICON_THEMES + g_ncit ? &g_cit[g_icon_theme - ICON_THEMES] : NULL; }
 static int icon_id_limit(void) { CustomIconTheme *c = icon_custom(); return ICON_EXT_BASE + (c ? c->next : 0); }
 
+static int icon_find(const char *name); // below
+
+static const char *badge_icon_src(int badge); // below
+
+// The app's own badge artwork, for a theme that has none. Git keeps the classic orange logo; the other marks come
+// from the interface set (Lucide), drawn a little bolder so they still read at the smallest zoom.
+static const char *badge_bundled_src(int badge) {
+    if (badge == BADGE_GIT) return g_icon_svg[0][icon_find("git")]; // the classic orange logo
+    int ui = badge == BADGE_SHARE ? UI_SHARE_2 : badge == BADGE_LINK ? UI_LINK : UI_ROTATE_CCW_CLOCK;
+    const char *src = g_ui_icons[ui];
+    if (!src) return NULL;
+    static char buf[4096];
+    size_t n = strlen(src);
+    if (n + 8 >= sizeof buf) return src;
+    const char *sw = badge == BADGE_BORG ? "3.4" : "3";
+    const char *at = strstr(src, "stroke-width=\"2\"");
+    if (!at) return src;
+    size_t head = (size_t)(at - src);
+    snprintf(buf, sizeof buf, "%.*sstroke-width=\"%s\"%s", (int)head, src, sw, at + strlen("stroke-width=\"2\""));
+    return buf;
+}
+
 // SVG text of icon id in the current theme.
 static const char *icon_src(int id) {
     CustomIconTheme *c = icon_custom();
     if (id >= ICON_EXT_BASE) return c && id - ICON_EXT_BASE < c->next ? c->ext_svg[id - ICON_EXT_BASE] : NULL;
-    if (id >= ICON_BADGE_BASE) return c ? c->badge[id - ICON_BADGE_BASE] : NULL;
+    if (id >= ICON_EXTRA_BASE) {
+        int f = id - ICON_EXTRA_BASE;
+        return c && f >= 0 && f < EXTRA_COUNT ? c->extra[f] : NULL;
+    }
+    if (id >= ICON_BADGE_BASE) {
+        int b = id - ICON_BADGE_BASE;
+        if (b < 0 || b >= BADGE_COUNT) return NULL;
+        return c && c->badge[b] ? c->badge[b] : badge_bundled_src(b); // the theme's emblem, else the app's own
+    }
     if (!c) return g_icon_svg[g_icon_theme < ICON_THEMES ? g_icon_theme : 0][id]; // (System: Material until the desktop's arrive)
     return c->svg[id] ? c->svg[id] : g_icon_svg[c->base][id];
 }
+
+// Has this icon id real artwork in the current theme (a custom/system theme override, or a bundled SVG)? Used to
+// decide whether a special folder icon should replace the plain folder + badge.
+static bool icon_has_art(int id) {
+    if (id < 0) return false;
+    CustomIconTheme *c = icon_custom();
+    if (id >= ICON_EXT_BASE) return c && id - ICON_EXT_BASE < c->next && c->ext_svg[id - ICON_EXT_BASE];
+    if (id >= ICON_EXTRA_BASE) { int f = id - ICON_EXTRA_BASE; return f >= 0 && f < EXTRA_COUNT && ((c && c->extra[f]) || icon_system_selected()); }
+    if (id >= ICON_BADGE_BASE) {
+        int b = id - ICON_BADGE_BASE;
+        return b >= 0 && b < BADGE_COUNT && icon_src(id) != NULL;
+    }
+    if (c) return c->svg[id] || g_icon_svg[c->base][id];
+    return g_icon_svg[g_icon_theme < ICON_THEMES ? g_icon_theme : 0][id] != NULL;
+}
+
+static int extra_icon(int extra) { return (extra >= 0 && extra < EXTRA_COUNT) ? ICON_EXTRA_BASE + extra : -1; }
+static int folder_extra_icon(int extra) { return extra_icon(extra); }
 static NSVGimage *g_icon_img[ICON_COUNT]; // parsed lazily (current theme)
 static NSVGimage *g_badge_img[BADGE_COUNT];
+static NSVGimage *g_extra_img[EXTRA_COUNT];
 static NSVGrasterizer *g_rast;
 
 static int icon_find(const char *name) {
@@ -123,6 +188,9 @@ static int badge_icon(int badge) {
     CustomIconTheme *c = icon_custom();
     return c && c->badge[badge] ? ICON_BADGE_BASE + badge : -1;
 }
+
+// The badge's own id: its artwork is the theme's emblem, the desktop icon theme's, or the app's own.
+static int badge_art_id(int badge) { return ICON_BADGE_BASE + badge; }
 
 // The trash's own bin (sidebar, tab, path bar): full when something is in it. A custom theme with its own bin but
 // no trash-full.svg keeps its bin rather than mixing in the built-in full one.
@@ -380,7 +448,8 @@ static NSVGimage *icon_image(int id) {
         int k = id - ICON_EXT_BASE;
         if (k >= g_next_img) return NULL;
         slot = &g_ext_img[k];
-    } else if (id >= ICON_BADGE_BASE) slot = &g_badge_img[id - ICON_BADGE_BASE];
+    } else if (id >= ICON_EXTRA_BASE) slot = &g_extra_img[id - ICON_EXTRA_BASE];
+    else if (id >= ICON_BADGE_BASE) slot = &g_badge_img[id - ICON_BADGE_BASE];
     else slot = id == ICON_LOGO ? &g_logo_img : id == ICON_LOGO_SMALL ? &g_logo_small_img : id == ICON_BRANCH ? &g_branch_img : &g_icon_img[id];
     if (!*slot) {
         const char *src = nsrc ? nsrc : id == ICON_LOGO ? g_logo_svg : id == ICON_LOGO_SMALL ? g_logo_small_svg
@@ -462,7 +531,10 @@ static u8 *app_icon_raster(int px) {
 
 // RGBA pixels of icon id fitted (centred) into a w x h box; caller frees.
 static u8 *icon_raster(int id, int w, int h) {
-    const u8 *sys = icon_system_selected() && w == h ? sysi_pixels(id, w) : NULL;
+    bool extra = id >= ICON_EXTRA_BASE && id < ICON_EXTRA_BASE + EXTRA_COUNT;
+    CustomIconTheme *ct = icon_custom();
+    bool extra_custom = extra && ct && ct->extra[id - ICON_EXTRA_BASE];
+    const u8 *sys = (icon_system_selected() || id >= ICON_BADGE_BASE || (extra && !extra_custom)) && w == h ? sysi_pixels(id, w) : NULL;
     if (sys) {
         u8 *buf = xmalloc((size_t)w * h * 4);
         memcpy(buf, sys, (size_t)w * h * 4);
@@ -791,6 +863,10 @@ static void icons_flush(void) {
         if (g_badge_img[i]) nsvgDelete(g_badge_img[i]);
         g_badge_img[i] = NULL;
     }
+    for (int i = 0; i < EXTRA_COUNT; i++) {
+        if (g_extra_img[i]) nsvgDelete(g_extra_img[i]);
+        g_extra_img[i] = NULL;
+    }
     for (int i = 0; i < g_next_img; i++)
         if (g_ext_img[i]) nsvgDelete(g_ext_img[i]);
     free(g_ext_img);
@@ -824,6 +900,7 @@ static char *icon_read_svg(const char *path) {
 static void icon_custom_free(CustomIconTheme *c) {
     for (int i = 0; i < ICON_COUNT; i++) free(c->svg[i]);
     for (int i = 0; i < BADGE_COUNT; i++) free(c->badge[i]);
+    for (int i = 0; i < EXTRA_COUNT; i++) free(c->extra[i]);
     for (int k = 0; k < c->next; k++) free(c->ext_svg[k]);
     free(c->ext);
     free(c->ext_svg);
@@ -905,6 +982,12 @@ static void icon_themes_scan(const char *dir) {
                     if (!c->badge[b] && (c->badge[b] = icon_read_svg(path)) != NULL) found++;
                     continue;
                 }
+                int fe = 0;
+                while (fe < EXTRA_COUNT && strcmp(nm, g_extra_names[fe])) fe++;
+                if (fe < EXTRA_COUNT) {
+                    if (!c->extra[fe] && (c->extra[fe] = icon_read_svg(path)) != NULL) found++;
+                    continue;
+                }
                 int id = icon_find(nm);
                 if (id < 0 || c->svg[id]) continue;
                 if ((c->svg[id] = icon_read_svg(path)) != NULL) found++;
@@ -927,23 +1010,77 @@ static void icon_themes_readme(const char *dir) {
     snprintf(path, sizeof path, "%s/README.txt", dir);
     FILE *f = fopen(path, "w");
     if (!f) return;
-    fprintf(f, "Custom icon themes\n==================\n\n"
-               "Each folder here is an icon theme; its name appears under Options > Appearance > File icons.\n\n"
-               "  MyTheme/\n"
-               "    theme.conf        optional: base=Material | Catppuccin | Symbols | Monokai\n"
-               "                      (icons the theme doesn't have come from this set; Material by default)\n"
-               "    python.svg        replaces a built-in icon (names below)\n"
-               "    folder.svg        the plain folder; folder-src.svg, folder-docs.svg... for special folders\n"
-               "    ext-blend.svg     icon for one file extension (any extension, also ones the app doesn't know)\n"
-               "    trash-full.svg    the Trash's bin when something is in it (trash.svg: empty); with only\n"
-               "                      trash.svg, that one is used either way\n"
-               "    emblem-symbolic-link.svg  badge on links, emblem-git.svg  badge on Git repositories: drawn on\n"
-               "                      the icon's lower right (about a third of its size; both: the Git one above);\n"
-               "                      without them the app draws its usual marks\n"
-               "    net-homelab.svg   an extra icon for network locations (Connect to server > Icon), offered\n"
-               "                      whichever file icon theme is selected; a folder may hold only net-*.svg files\n\n"
-               "After adding or editing files, press \"Icon themes folder\" in Options again to reload.\n\n"
-               "Built-in icon names:\n");
+    fprintf(f,
+        "Custom icon themes\n"
+        "==================\n\n"
+        "Each subfolder here is one icon theme. Its folder name appears in\n"
+        "Options > Appearance > File icons.\n\n"
+        "Layout\n"
+        "------\n"
+        "  MyTheme/\n"
+        "    theme.conf\n"
+        "    *.svg\n\n"
+        "theme.conf (optional)\n"
+        "---------------------\n"
+        "  base=Material | Catppuccin | Symbols | Monokai\n"
+        "  Icons missing from this theme come from the selected base set.\n"
+        "  Default base: Material.\n\n"
+        "File/folder icon overrides (SVG)\n"
+        "--------------------------------\n"
+        "  <name>.svg\n"
+        "    Replaces a built-in icon. Use the exact built-in name listed below\n"
+        "    (for example: python.svg, image.svg, pdf.svg).\n\n"
+        "  folder.svg\n"
+        "    Default folder icon.\n\n"
+        "  folder-<name>.svg\n"
+        "    Special folder icon for known folder names (for example:\n"
+        "    folder-src.svg, folder-documents.svg, folder-downloads.svg,\n"
+        "    folder-git.svg). See the built-in folder-* names below.\n\n"
+        "  ext-<extension>.svg\n"
+        "    Icon for a file extension, including extensions the app does not\n"
+        "    know by default (for example: ext-blend.svg, ext-kicad_pcb.svg).\n"
+        "    Use lowercase extension name after ext-.\n\n"
+        "  trash.svg / trash-full.svg\n"
+        "    Trash icon. trash-full.svg is used when Trash is not empty.\n"
+        "    If only trash.svg exists, it is used for both states.\n\n"
+        "Badge overlays (drawn on lower-right; multiple badges stack upward)\n"
+        "-------------------------------------------------------------------\n"
+        "  emblem-symbolic-link.svg    Symlink/link badge\n"
+        "  emblem-git.svg              Git repository badge\n"
+        "  emblem-symbolic-share.svg   Shared folder badge (SMB/NFS/WebDAV, etc.)\n"
+        "  emblem-borg.svg             Borg/BorgBase/borgfs repository badge\n"
+        "  If an emblem is not provided by the custom theme, the app tries the\n"
+        "  desktop icon theme, then uses the built-in fallback badge.\n\n"
+        "Location/folder type icons\n"
+        "--------------------------\n"
+        "  folder-remote.svg\n"
+        "  folder-publicshare.svg\n"
+        "  folder-network.svg\n"
+        "    Used for shared/network folder types when present. These replace the\n"
+        "    plain folder + share badge for that folder icon.\n\n"
+        "Sidebar/device/place icons\n"
+        "--------------------------\n"
+        "  drive-harddisk.svg          Internal/system disks\n"
+        "  drive-removable-media.svg   Removable/USB drives\n"
+        "  drive-optical.svg           Optical discs\n"
+        "  folder-cloud.svg            Cloud place\n"
+        "  network-server.svg          Generic network server\n\n"
+        "Network location picker icons\n"
+        "-----------------------------\n"
+        "  net-<name>.svg\n"
+        "    Extra icon for Connect to server > Icon (for example:\n"
+        "    net-homelab.svg). These are offered regardless of selected file\n"
+        "    icon theme. A folder may contain only net-*.svg files.\n\n"
+        "Notes\n"
+        "-----\n"
+        "  - SVG files only.\n"
+        "  - Names are matched case-insensitively; prefer lowercase filenames.\n"
+        "  - After adding/editing files, press \"Icon themes folder\" in Options\n"
+        "    to reload.\n"
+        "  - Sidebar icon display size can be adjusted in Options > Appearance >\n"
+        "    Sidebar icon size (useful for themes with small/large variants).\n\n"
+        "Built-in icon names\n"
+        "-------------------\n");
     for (int i = 0; i < ICON_COUNT; i++) fprintf(f, "  %s\n", g_icon_names[i]);
     fclose(f);
 }

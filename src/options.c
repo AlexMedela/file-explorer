@@ -6,11 +6,11 @@ enum { OK_BOOL, OK_CHOICE, OK_INT, OK_ACCENT, OK_BUTTON, OK_TEXT };
 
 enum {
     OPT_THEME, OPT_THEME_LIGHT, OPT_THEME_DARK, OPT_ACCENT, OPT_ACCENT_DESKTOP, OPT_SCROLL_COLOR, OPT_ICON_THEME, OPT_APP_ICON, OPT_TITLE_ICON, OPT_FONT, OPT_FONT_SIZE, OPT_ROW_SPACING, OPT_ZOOM, OPT_DIM_INACTIVE,
-    OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
+    OPT_BRAND_LOGO, OPT_BRAND_NAME, OPT_BRAND_TEXT, OPT_SIDEBAR_ICON_SIZE, OPT_ALT_ROWS, OPT_SIZE_BARS, OPT_LOAD_TIMES, OPT_SMOOTH, OPT_THEME_NEW, OPT_THEME_FOLDER, OPT_ICON_FOLDER, OPT_TERM_LOOK,
     OPT_UNIFIED, OPT_BRIGHT_SIDEBAR, OPT_BRIGHT_HEADER, OPT_BRIGHT_FILES, OPT_BRIGHT_PREVIEW, OPT_BRIGHT_POPUP, OPT_BRIGHT_STATUS, OPT_BRIGHT_PATHBAR, OPT_BRIGHT_SEARCHBAR, OPT_TRANSPARENT_PATHBAR, OPT_PATH_TEXT, OPT_RIBBON, OPT_RIBBON_POS, OPT_RIBBON_OVERFLOW, OPT_SEPARATORS, OPT_NAV_SELECTION_OPACITY, OPT_NAV_SELECTOR_MARK, // (OPT_BRIGHT_*: SURF_* order)
     OPT_HIDDEN, OPT_FOLDER_SIZES, OPT_GIT_STATUS, OPT_SEARCH_SUB, OPT_RESTORE, OPT_PREVIEW, OPT_SINGLE_CLICK, OPT_DBLCLICK_UP, OPT_DROP_ASK, OPT_TRANSFERS, OPT_VERIFY, OPT_EXEC_OPEN, OPT_KEYS_RESET, OPT_SINGLE_INSTANCE, OPT_AUTOSTART, OPT_TRAY, OPT_HIDE_SINGLE_TAB,
     OPT_DEF_VIEW, OPT_VIEW_PER_FOLDER, OPT_DEF_SORT, OPT_SORT_DESC, OPT_FOLDERS_FIRST, OPT_DEF_GROUP,
-    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL_PATH,
+    OPT_RENDERER, OPT_SETTINGS_FILE, OPT_REINDEX, OPT_TAB_STYLE, OPT_TITLE_BAR, OPT_WINDOW_BUTTONS, OPT_ROUND_CORNERS, OPT_REPO_TAG, OPT_REPO_ICON, OPT_IG_DEFAULT_FM, OPT_IG_FM1, OPT_IG_PICKER, OPT_IG_UPDATES, OPT_TERMINAL_PATH,
     OPT_UPD_NOW, OPT_UPD_HOW, OPT_UPD_NOTES, OPT_UPD_AUTO,
 };
 
@@ -42,8 +42,11 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_TITLE_BAR, "Title bar", "Window buttons and dragging: the desktop's own title bar (System), or Explorer's own on every desktop (Default)"},
     {OC_APPEARANCE, OK_BOOL, OPT_WINDOW_BUTTONS, "Window buttons", "Minimise, maximise and close at the top right of Explorer's own title bar; without them, the desktop's keys close it"},
     {OC_APPEARANCE, OK_BOOL, OPT_ROUND_CORNERS, "Rounded corners", "Round the window's corners with a drop shadow"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_REPO_TAG, "Repository tag", "The tag on a repository folder: its branch, its icon alone, or none"},
+    {OC_APPEARANCE, OK_CHOICE, OPT_REPO_ICON, "Repository folder icon", "A repository folder keeps its own icon, or wears the one that matches it (Git, Borg)"},
     {OC_APPEARANCE, OK_CHOICE, OPT_BRAND_NAME, "Name above the sidebar", "Explorer, this computer's name, your own text, or none (the sidebar then starts at the top)"},
     {OC_APPEARANCE, OK_BOOL, OPT_BRAND_LOGO, "Logo", "Show the icon before the name above the sidebar; off hides a custom title bar icon too"},
+    {OC_APPEARANCE, OK_INT, OPT_SIDEBAR_ICON_SIZE, "Sidebar icon size", "Size of icons in the sidebar places list (16-32 px); useful for icon themes with small/large variants"},
     {OC_APPEARANCE, OK_TEXT, OPT_BRAND_TEXT, "Your own name", "Shown above the sidebar instead of Explorer"},
     {OC_APPEARANCE, OK_BOOL, OPT_UNIFIED, "Unified surfaces", "Sidebar, header, preview and status bar take the file area's background; the lines between them stay"},
     {OC_APPEARANCE, OK_BOOL, OPT_SEPARATORS, "Separator lines", "Lines between the sidebar, header, columns, preview and status bar (an edge you can drag shows on hover)"},
@@ -65,7 +68,7 @@ static const OptDef g_opts[] = {
     {OC_APPEARANCE, OK_CHOICE, OPT_TERM_LOOK, "Terminal appearance", "Font, colours, padding and cursor of terminal tabs (F4)"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_NEW, "Create theme from current colours", "Writes a JSON scheme you can edit"},
     {OC_APPEARANCE, OK_BUTTON, OPT_THEME_FOLDER, "Themes folder", "Open the folder and reload theme files"},
-    {OC_APPEARANCE, OK_BUTTON, OPT_ICON_FOLDER, "Icon themes folder", "Add your own file icons (SVG); opens the folder and reloads them"},
+    {OC_APPEARANCE, OK_BUTTON, OPT_ICON_FOLDER, "Icon themes folder", "Open the custom icon themes folder, write/update README.txt, and reload themes. Put SVG overrides in a named subfolder."},
     {OC_BEHAVIOUR, OK_BOOL, OPT_HIDDEN, "Show hidden files", "Files and folders starting with a dot (Ctrl+H)"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_FOLDER_SIZES, "Calculate folder sizes", "Fill the Size column for folders in the background"},
     {OC_BEHAVIOUR, OK_BOOL, OPT_GIT_STATUS, "Git status", "Mark changed, new and ignored files in Git repositories; branch in the status bar"},
@@ -145,6 +148,8 @@ static const int g_transfer_counts[] = {1, 2, 4, 0}; // A.transfers_at_once (0 =
 static const char *g_transfer_labels[] = {"One at a time", "Two at a time", "Four at a time", "All at once"};
 static const char *g_exec_labels[] = {"Ask", "Run", "Run in terminal", "Open as a document (programs still ask)"}; // EXEC_*
 static const char *g_tab_style_labels[] = {"Classic", "Pills"}; // TABS_*
+static const char *g_repo_tag_labels[] = {"Name and branch", "Icon only", "Hidden"}; // REPO_TAG_*
+static const char *g_repo_icon_labels[] = {"Keep its own", "Match the repository"}; // REPO_ICON_*
 static const char *g_ribbon_pos_labels[] = {"Below the path bar", "Above the path bar", "Bottom", "Left", "Right"}; // RP_*
 static const char *g_ribbon_overflow_labels[] = {"More menu", "Wrap onto more rows", "Scroll"}; // RO_*
 static const char *g_brand_labels[] = {APP_LABEL, "Computer name", "Your own", "None"}; // BRAND_*
@@ -286,6 +291,8 @@ static int opt_choice_count(int id) {
     case OPT_TITLE_BAR: return (int)ARRAY_COUNT(g_title_bar_labels);
     case OPT_BRAND_NAME: return (int)ARRAY_COUNT(g_brand_labels);
     case OPT_TAB_STYLE: return (int)ARRAY_COUNT(g_tab_style_labels);
+    case OPT_REPO_TAG: return (int)ARRAY_COUNT(g_repo_tag_labels);
+    case OPT_REPO_ICON: return (int)ARRAY_COUNT(g_repo_icon_labels);
     case OPT_RIBBON_POS: return (int)ARRAY_COUNT(g_ribbon_pos_labels);
     case OPT_RIBBON_OVERFLOW: return (int)ARRAY_COUNT(g_ribbon_overflow_labels);
     case OPT_FONT: opt_load_families(); return 1 + g_opt.nfamilies;
@@ -328,6 +335,8 @@ static const char *opt_choice_label(int id, int i) {
     case OPT_TITLE_BAR: return g_title_bar_labels[i];
     case OPT_BRAND_NAME: return g_brand_labels[i];
     case OPT_TAB_STYLE: return g_tab_style_labels[i];
+    case OPT_REPO_TAG: return g_repo_tag_labels[i];
+    case OPT_REPO_ICON: return g_repo_icon_labels[i];
     case OPT_RIBBON_POS: return g_ribbon_pos_labels[i];
     case OPT_RIBBON_OVERFLOW: return g_ribbon_overflow_labels[i];
     case OPT_TRANSFERS: return g_transfer_labels[i];
@@ -351,6 +360,8 @@ static int opt_choice_get(int id) {
     case OPT_TITLE_BAR: return A.title_bar;
     case OPT_BRAND_NAME: return A.brand_name;
     case OPT_TAB_STYLE: return A.tab_style;
+    case OPT_REPO_TAG: return A.repo_tag;
+    case OPT_REPO_ICON: return A.repo_icon;
     case OPT_RIBBON_POS: return A.ribbon_pos;
     case OPT_RIBBON_OVERFLOW: return A.ribbon_overflow;
     case OPT_FONT:
@@ -424,6 +435,8 @@ static void opt_choice_set(int id, int i) {
     case OPT_TERM_LOOK: g_term_look_setting = i; tc_reload_all(); break;
     case OPT_TITLE_BAR: A.title_bar = i; titlebar_apply(); break;
     case OPT_TAB_STYLE: A.tab_style = i; layout(); break;
+    case OPT_REPO_TAG: A.repo_tag = i; layout(); break;
+    case OPT_REPO_ICON: A.repo_icon = i; layout(); break;
     case OPT_RIBBON_POS: A.ribbon_pos = i; layout(); break;
     case OPT_RIBBON_OVERFLOW: A.ribbon_overflow = i; layout(); break;
     case OPT_BRAND_NAME:
@@ -568,6 +581,7 @@ static void opt_bool_toggle(int id) {
 static int opt_int_get(int id) {
     switch (id) {
     case OPT_FONT_SIZE: return A.font_size;
+    case OPT_SIDEBAR_ICON_SIZE: return A.def_sidebar_icon ? A.def_sidebar_icon : 16;
     case OPT_ZOOM: return (int)lroundf(A.zoom * 100);
     case OPT_NAV_SELECTION_OPACITY: return g_navigation_selection_opacity;
     }
@@ -580,6 +594,13 @@ static void opt_int_step(int id, int dir) {
     case OPT_FONT_SIZE:
         A.font_size = CLAMP(A.font_size + dir, 9, 24);
         reload_fonts();
+        break;
+    case OPT_SIDEBAR_ICON_SIZE:
+        A.def_sidebar_icon = CLAMP((A.def_sidebar_icon ? A.def_sidebar_icon : 16) + dir, 16, 32);
+        A.side_row_h = roundf(S(MAX(30, A.def_sidebar_icon + 14)));
+        places_layout();
+        A.settings_dirty = true;
+        A.redraw = true;
         break;
     case OPT_ZOOM: set_zoom(A.zoom + 0.1f * (f32)dir); break;
     case OPT_NAV_SELECTION_OPACITY:
