@@ -6885,7 +6885,8 @@ static void menu_hidden_write(FILE *f) {
     fprintf(f, "\n");
 }
 
-// Drop hidden entries
+// Drop the entries hidden in Options > Context menus (only the file / folder right-click menu: the same actions
+// stay in the ribbon, sidebar, drives and terminal menus)
 static void menu_filter_hidden(Menu *m) {
     int w = 0;
     for (int i = 0; i < m->n; i++) {
@@ -7819,6 +7820,7 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
         ua_menu_items(p, true);
         menu_add("Properties", "Alt+Enter", ACT_PROPERTIES, true);
     }
+    menu_filter_hidden(m);
     menu_finish(x, y);
     m->folder = !on_item;
 }
@@ -8770,7 +8772,6 @@ static void menu_layout(Menu *m, f32 x, f32 y, f32 x_left) {
 }
 
 static void menu_finish(f32 x, f32 y) {
-    menu_filter_hidden(&A.menu);
     g_menu_sub.open = false; // a new menu (or one rebuilt in place) starts without its submenu
     g_menu_sub_of = -1;
     menu_layout(&A.menu, x, y, -1);

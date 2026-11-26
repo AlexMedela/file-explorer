@@ -83,6 +83,11 @@ the executable bit (an AppImage just downloaded) always asks "Make executable an
 a document. Right-click > Run / Run in terminal runs a program or script without the question. Files in network folders
 are never run.
 
+**Context menus** (Options > Context menus) hides entries of the file and folder right-click menu (Open in new
+tab / split, Open with, Disk usage, Delete permanently, Compress to, the terminal entries, Views / Sort by / Group by,
+Properties, ...); `menu_hidden=` lists the hidden ones (e.g. `menu_hidden=open_split_down,disk_usage`). The ribbon,
+sidebar, drive and terminal-panel menus and the keyboard shortcuts are unchanged.
+
 **Updates** (Options > Updates) shows the version and how this copy gets new ones. The AppImage asks GitHub for the
 newest release once a day (`check_updates=0` turns it off; nothing but that request is sent) and shows a card once per
 new version: "Update now" downloads it next to the AppImage, checks it against the release's SHA-256 and replaces the
