@@ -4327,6 +4327,18 @@ static int run_selftest_m9(void) {
     }
     st_opt_click(st_opt_hit(HP_SWATCH, OPT_ACCENT, 0)); // theme default (idempotent)
     ST_CHECK(!g_accent_custom && T.accent == g_theme_light.accent);
+    { // the Blue preset applies Blue: under the System theme it isn't the theme's own accent (the desktop's is)
+        int saved = g_theme_cur; u32 de = g_desktop.accent; bool da = g_accent_desktop;
+        g_theme_cur = theme_find("System");
+        g_desktop.accent = 0x01000000u | 0x3584E4;
+        g_accent_desktop = true;
+        theme_apply();
+        st_frames(1);
+        st_opt_click(st_opt_hit(HP_SWATCH, OPT_ACCENT, 1)); // Blue
+        ST_CHECK(g_accent_custom == (0x01000000u | g_accents[0].rgb) && T.accent == g_accents[0].rgb);
+        g_theme_cur = saved; g_accent_custom = 0; g_desktop.accent = de; g_accent_desktop = da; theme_apply();
+        st_frames(1);
+    }
     { // the theme's own accent only gets its own swatch when it isn't a preset (Dark's is Blue: no duplicate)
         int saved = g_theme_cur, counts[2] = {0, 0};
         const char *names[2] = {"Dark", "Monokai"};

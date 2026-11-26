@@ -1062,15 +1062,17 @@ static void opt_draw_control(const OptDef *o, f32 x, f32 cy, f32 w) {
             Rect r = {x0 + (sz + gap) * (f32)k, roundf(cy - sz * 0.5f), sz, sz};
             u32 col = i == 0 ? tdef : g_accents[i - 1].rgb;
             bool is_default = i == 0 || i - 1 == same;
-            bool on = !g_accent_desktop && (is_default && !g_accent_custom ? true
-                                                                   : i > 0 && g_accent_custom == (0x01000000u | g_accents[i - 1].rgb));
+            // The selected swatch is the one showing the accent in use; with the desktop's accent driving, none is.
+            bool on = col == COL_ACCENT && !(g_accent_desktop && g_desktop.accent);
             if (opt_hover(r) || on)
                 draw_rrect_outline(r.x - S(3), r.y - S(3), sz + S(6), sz + S(6), (sz + S(6)) * 0.5f, MAX(1.f, S(1.5f)),
                                    C(on ? COL_TEXT : COL_TEXT_FAINT));
             draw_rrect(r.x, r.y, sz, sz, sz * 0.5f, C(col));
             if (i == 0) // the theme's own accent (not a preset): small dot
                 draw_rrect(r.x + sz * 0.35f, r.y + sz * 0.35f, sz * 0.3f, sz * 0.3f, sz * 0.15f, C(COL_POPUP));
-            opt_hit(r, HP_SWATCH, o->id, is_default ? 0 : i); // the theme default's preset clears the custom accent
+            // The System theme takes the desktop's accent, so a preset that happens to be the theme's own accent
+            // (Blue) is a plain preset there: clicking it picks that colour, not "the desktop's accent".
+            opt_hit(r, HP_SWATCH, o->id, is_default && !(theme_is_system() && i > 0) ? 0 : i);
         }
         if (g_accent_custom && !(g_accent_custom & 0x02000000u)) {
             bool preset = false;
