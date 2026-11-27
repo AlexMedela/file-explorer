@@ -7830,9 +7830,9 @@ static int run_selftest_m10(void) {
                 int nn = A.nnets;
                 NetMount saved[3];
                 memcpy(saved, A.nets, sizeof saved);
-                A.nets[0] = (NetMount){M10_BASE "/nfs", "nas:/exports/team", false};
-                A.nets[1] = (NetMount){M10_BASE "/drive", "gdrive:", false};
-                A.nets[2] = (NetMount){M10_BASE "/box", "me@box:/srv", true};
+                A.nets[0] = (NetMount){M10_BASE "/nfs", "nas:/exports/team", false, false};
+                A.nets[1] = (NetMount){M10_BASE "/drive", "gdrive:", false, true};
+                A.nets[2] = (NetMount){M10_BASE "/box", "me@box:/srv", true, false};
                 A.nnets = 3;
                 ST_CHECK(!ssh_target_for(M10_BASE "/nfs/a", &t) && !ssh_target_for(M10_BASE "/drive", &t));
                 ST_CHECK(ssh_target_for(M10_BASE "/box/www", &t) && !strcmp(t.host, "box") && !strcmp(t.user, "me") && !strcmp(t.path, "/srv/www"));
@@ -8153,6 +8153,24 @@ static int run_selftest_m10(void) {
                  st_file_has(up, "Description=Files cloud: gdrive (Google Drive)"));
         ST_CHECK(access(M10_BASE "/sd/file-explorer-cloud-gdrive.service.active", F_OK) == 0 && access(gdir, F_OK) == 0);
         ST_CHECK(g_cloud[0].state == CS_STARTING && g_cloud[0].unit && path_is_remote(gdir)); // active, not mounted yet
+        // while connecting, the fuse.rclone mount may show up in /proc/mounts before cloud status sets c->mount;
+        // it must stay in Cloud, not appear in Network
+        char nmp[PATH_MAX * 2];
+        snprintf(nmp, sizeof nmp, "gdrive: %s fuse.rclone rw,nosuid,nodev 0 0\n", gdir);
+        st_write_text(M10_BASE "/rc/netmounts", nmp);
+        setenv("FE_NET_MOUNTS", M10_BASE "/rc/netmounts", 1);
+        nets_reload();
+        init_places();
+        ST_CHECK(st_place_row(PK_CLOUD, "gdrive") >= 0);
+        {
+            bool in_net = false;
+            for (int i = 0; i < A.nplaces; i++)
+                if (A.places[i].kind == PK_NETWORK && strstr(A.places[i].path, "gdrive")) in_net = true;
+            ST_CHECK(!in_net);
+        }
+        unsetenv("FE_NET_MOUNTS");
+        nets_reload();
+        init_places();
         st_frames(2);
         st_shot("cloud-connecting");
         snprintf(mline, sizeof mline, "gdrive: %s fuse.rclone rw,nosuid,nodev 0 0\n", gdir);

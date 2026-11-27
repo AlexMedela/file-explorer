@@ -3186,6 +3186,12 @@ static void init_places(void) {
         int first_net = A.nplaces;
         for (int k = 0; k < A.nnets && !A.nets_collapsed; k++) {
             if (path_in_cloud(A.nets[k].path) || cloud_for_mount(A.nets[k].path)) continue; // listed under Cloud
+            if (A.nets[k].rclone) { // an rclone remote listed as a cloud: keep it in Cloud, even while connecting
+                char rn[96];
+                snprintf(rn, sizeof rn, "%.*s", (int)strcspn(A.nets[k].label, ":"), A.nets[k].label);
+                Cloud *cc = cloud_find(rn);
+                if (cc && cc->listed) continue;
+            }
             Place *p = place_row();
             if (!p) break;
             p->kind = PK_NETWORK;

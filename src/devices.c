@@ -414,7 +414,7 @@ static int disk_health_level(const DiskHealth *h, char *what, size_t cap) {
 
 // --- network mounts ------------------------------------------------------------
 
-typedef struct { char path[PATH_MAX]; char label[64]; bool sshfs; } NetMount; // sshfs: label is its "user@host:/dir"
+typedef struct { char path[PATH_MAX]; char label[64]; bool sshfs; bool rclone; } NetMount; // sshfs/rclone: label is the mount source
 
 // "smb-share:server=nas,share=media" -> "media on nas"; "sftp:host=box,user=me" -> "me@box"
 static void gvfs_label(const char *name, char *out, size_t cap) {
@@ -537,6 +537,7 @@ static int network_mounts(NetMount *out, int max) {
             path_join(out[n].path, sizeof out[n].path, gdir, de->d_name);
             gvfs_label(de->d_name, out[n].label, sizeof out[n].label);
             out[n].sshfs = false;
+            out[n].rclone = false;
             n++;
         }
         closedir(d);
@@ -553,6 +554,7 @@ static int network_mounts(NetMount *out, int max) {
             mount_unescape(mp, out[n].path, sizeof out[n].path);
             mount_unescape(src, out[n].label, sizeof out[n].label); // (sshfs: user@host:/dir, which can have spaces too)
             out[n].sshfs = !strcmp(type, "fuse.sshfs");
+            out[n].rclone = !strcmp(type, "fuse.rclone");
             n++;
         }
         fclose(f);
