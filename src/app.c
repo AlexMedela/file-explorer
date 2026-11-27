@@ -478,6 +478,7 @@ enum {
     ACT_IMG_MOUNT, ACT_IMG_BROWSE, // a disc / disk image file (.iso, .img): open it as a drive / an ISO's files like an archive's
     ACT_OW_APP_BASE = 520, // + index of an app in the Open with submenu (up to OW_MENU_APPS, below 540)
     ACT_CMP_DIALOG = 560,    // "Compare with...": the dialog with both folders
+    ACT_FOLLOW_LINK = 561, ACT_VISIT_LOCATION = 562, // symlink: go to its target. search result: go to where the file lives
     ACT_ADDON_BASE = 580, ACT_ADDON_LAST = 599, // add-ons' actions (addons.c)
     ACT_CLOUD_NEW = 540, ACT_CLOUD_REFRESH, ACT_CLOUD_SECTION_TOGGLE, ACT_CLOUD_CONNECT, ACT_CLOUD_CONNECT_TAB, ACT_CLOUD_DISCONNECT,
     ACT_CLOUD_LOGIN, ACT_CLOUD_RECONNECT, ACT_CLOUD_LOG, ACT_CLOUD_COPY_PATH,
@@ -6277,6 +6278,27 @@ static void borg_save(const char *repo, const char *dir, int kind);
 static void borg_forget(int i);
 static void borg_edit_open(int i); // ui_tools.c
 
+// Go to a path: a folder is entered, anything else is shown in its folder with it selected.
+static void pane_reveal(Pane *p, const char *target) {
+    struct stat st;
+    if (stat(target, &st) == 0 && S_ISDIR(st.st_mode)) {
+        pane_navigate(p, target, true);
+        return;
+    }
+
+    char par[PATH_MAX];
+    parent_of(target, par, sizeof par);
+    pane_navigate(p, par, strcmp(par, p->path) != 0); // close search
+    snprintf(p->select_name, sizeof p->select_name, "%s", path_basename(target));
+}
+
+// Fully resolved target of a symlink, false for a broken / remote one
+static bool link_target(const char *full, char *out) {
+    struct stat st;
+    if (path_is_remote(full) || lstat(full, &st) || !S_ISLNK(st.st_mode)) return false;
+    return realpath(full, out) != NULL;
+}
+
 static void do_action(Pane *p, int act) {
     int n = 0;
     char **paths = NULL;
@@ -6311,6 +6333,16 @@ static void do_action(Pane *p, int act) {
             char full[PATH_MAX];
             path_join(full, sizeof full, p->path, p->L->entries[p->order[p->cursor]].name);
             run_file(full, act == ACT_RUN_TERM);
+        }
+        break;
+    case ACT_FOLLOW_LINK:
+    case ACT_VISIT_LOCATION:
+        if (p->order && p->cursor >= 0 && p->cursor < (i64)p->count) {
+            char full[PATH_MAX], target[PATH_MAX];
+            path_join(full, sizeof full, p->path, p->L->entries[p->order[p->cursor]].name);
+            if (act == ACT_VISIT_LOCATION) pane_reveal(p, full);
+            else if (link_target(full, target)) pane_reveal(p, target);
+            else toast("Can't follow \xE2\x80\x9C%s\xE2\x80\x9D: the link is broken or not local", path_basename(full));
         }
         break;
     case ACT_CUT:
@@ -6871,6 +6903,8 @@ static const struct { const char *key, *label; int act; } g_menu_toggles[] = {
     {"open_split_right", "Open in right split",           ACT_OPEN_SPLIT_RIGHT},
     {"open_split_down",  "Open in bottom split",          ACT_OPEN_SPLIT_DOWN},
     {"open_with",        "Open with",                     ACT_OPEN_WITH},
+    {"visit_location",   "Visit location",                ACT_VISIT_LOCATION},
+    {"follow_link",      "Follow link",                   ACT_FOLLOW_LINK},
     {"search_inside",    "Search inside files here",      ACT_CS_HERE},
     {"disk_usage",       "Disk usage",                    ACT_DU_NEW_TAB},
     {"delete_permanent", "Delete permanently",            ACT_DELETE},
@@ -7751,6 +7785,10 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
             menu_add("Add to sidebar", "", ACT_BORG_SAVE, true);
         } else menu_add("Open", "Enter", ACT_OPEN, true);
         menu_add_open_with("Open with", mime_for_file(path_basename(e->name), dir), true);
+        if (!pane_is_archive(p) && (e->flags & ENT_LINK))
+            menu_add("Follow link", "", ACT_FOLLOW_LINK, true);
+        if (p->L->is_search && !pane_is_archive(p))
+            menu_add("Visit location", "", ACT_VISIT_LOCATION, true);
         if (!dir && !pane_is_archive(p) && !pane_is_trash(p) && !(e->flags & ENT_MATCH)) { // programs and scripts
             char full[PATH_MAX];
             bool exec;
@@ -8687,6 +8725,8 @@ static int menu_action_icon(const MenuItem *it) {
     case ACT_TERMINAL_EXTERNAL: return UI_SQUARE_TERMINAL;
     case ACT_RUN: return UI_PLAY;
     case ACT_RUN_TERM: return UI_SQUARE_TERMINAL;
+    case ACT_FOLLOW_LINK: return UI_LINK;
+    case ACT_VISIT_LOCATION: return UI_FOLDER_OPEN;
     case ACT_OPEN: case ACT_DU_OPEN: case ACT_SNAP_OPEN: case ACT_DEV_MOUNT: case ACT_IMG_MOUNT: case ACT_IMG_BROWSE: return UI_FOLDER_OPEN;
     case ACT_OPEN_WITH: return it->sub ? UI_FOLDER_OPEN : UI_ELLIPSIS; // the submenu / "Other app..."
     case ACT_OPEN_TAB: case ACT_PLACE_NEW_TAB: case ACT_DU_OPEN_TAB: case ACT_DEV_OPEN_TAB: case ACT_CLOUD_CONNECT_TAB:
