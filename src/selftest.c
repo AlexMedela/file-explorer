@@ -7830,9 +7830,9 @@ static int run_selftest_m10(void) {
                 int nn = A.nnets;
                 NetMount saved[3];
                 memcpy(saved, A.nets, sizeof saved);
-                A.nets[0] = (NetMount){M10_BASE "/nfs", "nas:/exports/team", false};
-                A.nets[1] = (NetMount){M10_BASE "/drive", "gdrive:", false};
-                A.nets[2] = (NetMount){M10_BASE "/box", "me@box:/srv", true};
+                A.nets[0] = (NetMount){M10_BASE "/nfs", "nas:/exports/team", false, false};
+                A.nets[1] = (NetMount){M10_BASE "/drive", "gdrive:", false, true};
+                A.nets[2] = (NetMount){M10_BASE "/box", "me@box:/srv", true, false};
                 A.nnets = 3;
                 ST_CHECK(!ssh_target_for(M10_BASE "/nfs/a", &t) && !ssh_target_for(M10_BASE "/drive", &t));
                 ST_CHECK(ssh_target_for(M10_BASE "/box/www", &t) && !strcmp(t.host, "box") && !strcmp(t.user, "me") && !strcmp(t.path, "/srv/www"));
