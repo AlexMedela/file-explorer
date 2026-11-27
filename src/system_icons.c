@@ -272,6 +272,33 @@ static u8 *sysi_raster(const char *path, int px, u32 ink) {
 
 // Freedesktop names for a bundled icon id, most specific first (the generic folder / document last).
 static int sysi_names(int id, const char **out) {
+    // the badges: the desktop theme's own emblems (the Git one is never taken from a theme: the app's logo is its own)
+    if (id >= ICON_BADGE_BASE && id < ICON_BADGE_BASE + BADGE_COUNT) {
+        static const char *const badge_names[BADGE_COUNT][4] = {
+            {"emblem-symbolic-link", "symbolic-link", NULL, NULL},
+            {NULL, NULL, NULL, NULL},
+            {"emblem-shared", "folder-publicshare", "folder-remote", "folder-network"},
+            {"emblem-borg", NULL, NULL, NULL},
+        };
+        int b = id - ICON_BADGE_BASE, n = 0;
+        for (int i = 0; i < 4 && badge_names[b][i]; i++) out[n++] = badge_names[b][i];
+        return n;
+    }
+    if (id >= ICON_EXTRA_BASE && id < ICON_EXTRA_BASE + EXTRA_COUNT) {
+        static const char *const extra_names[EXTRA_COUNT][6] = {
+            {"folder-remote", "folder-publicshare", "network-server", NULL, NULL, NULL},
+            {"folder-publicshare", "folder-remote", "network-server", NULL, NULL, NULL},
+            {"folder-network", "network-workgroup", "folder-remote", NULL, NULL, NULL},
+            {"drive-harddisk-system", "drive-harddisk-root", "drive-harddisk", "drive-harddisk-solidstate", "drive-harddisk-symbolic", NULL},
+            {"drive-removable-media-usb", "drive-removable-media", "drive-harddisk-usb", "drive-harddisk", "drive-removable-media-symbolic", NULL},
+            {"drive-optical", "drive-cdrom", "media-optical", "drive-removable-media", "media-optical-symbolic", NULL},
+            {"folder-cloud", "folder-gdrive", "folder-remote", "folder-network", NULL, NULL},
+            {"network-server", "network-workgroup", "folder-remote", "network-server-symbolic", NULL, NULL},
+        };
+        int e = id - ICON_EXTRA_BASE, n = 0;
+        for (int i = 0; i < 6 && extra_names[e][i]; i++) out[n++] = extra_names[e][i];
+        return n;
+    }
     static const IconMap map[] = {
         {"folder-shared", "folder-remote"}, {"folder-home", "user-home"}, {"folder-docs", "folder-documents"},
         {"folder-images", "folder-pictures"}, {"folder-audio", "folder-music"}, {"folder-video", "folder-videos"},
@@ -328,7 +355,7 @@ static void sysi_done(void *arg) { // (main thread)
 
 static void sysi_job(void *arg) { // (worker)
     SysIconReq *r = arg;
-    const char *names[4];
+    const char *names[6];
     int n = sysi_names(r->id, names);
     char path[PATH_MAX];
     for (int i = 0; i < n && !r->rgba; i++)
@@ -339,7 +366,7 @@ static void sysi_job(void *arg) { // (worker)
 // The desktop's pixels for bundled icon id at px, NULL while they're on their way or if it has none (draw the
 // bundled one). The first ask starts the lookup.
 static const u8 *sysi_pixels(int id, int px) {
-    if (id < 0 || id >= ICON_COUNT || !g_desktop.icons[0]) return NULL;
+    if (id < 0 || (id >= ICON_COUNT && (id < ICON_BADGE_BASE || id >= ICON_BADGE_BASE + BADGE_COUNT) && (id < ICON_EXTRA_BASE || id >= ICON_EXTRA_BASE + EXTRA_COUNT)) || !g_desktop.icons[0]) return NULL;
     for (int i = 0; i < g_nsysicons; i++)
         if (g_sysicons[i].id == id && g_sysicons[i].px == px) return g_sysicons[i].rgba;
     if (g_sysi_bytes > (32u << 20)) { // keep the memory bounded: drop what's drawn (asked again after an atlas reset)

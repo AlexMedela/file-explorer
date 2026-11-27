@@ -456,6 +456,7 @@ typedef struct {
     char remote[300]; // origin's URL (else the first remote's), "" without one
     char disp[320];   // the remote shortened for display ("github.com/me/x"), filled by the main thread
     int borg;         // BORG_V1 / BORG_V2: a Borg backup repository, not git (nothing above is set)
+    bool mounted;     // the path is already a borgfs mount: browse it as a folder, don't mount again
 } GitSub;
 
 typedef struct GitSubsJob {
@@ -466,6 +467,7 @@ typedef struct GitSubsJob {
     int nsubs;
     bool git;     // look for git repositories (else only Borg ones)
     int self_borg; // the folder itself is a Borg repository
+    bool self_borg_mounted; // the folder itself is an already-mounted borgfs
 } GitSubsJob;
 
 static void git_subs_done(void *arg); // app.c
@@ -505,6 +507,7 @@ static void git_subs_job(void *arg) {
     GitSubsJob *j = arg;
     int cap = 0;
     j->self_borg = borg_repo_kind(j->path);
+    if (!j->self_borg && borgfs_mount_at(j->path)) { j->self_borg = BORG_V1; j->self_borg_mounted = true; }
     for (int i = 0; i < j->n; i++) {
         char dir[PATH_MAX], probe[PATH_MAX + 8], gitdir[PATH_MAX];
         path_join(dir, sizeof dir, j->path, j->names[i]);
@@ -512,8 +515,10 @@ static void git_subs_job(void *arg) {
         struct stat st;
         if (!j->git || lstat(probe, &st)) {
             int bk = borg_repo_kind(dir);
+            bool mounted = false;
+            if (!bk && borgfs_mount_at(dir)) { bk = BORG_V1; mounted = true; }
             if (!bk) continue;
-            GitSub g = {.name = j->names[i], .borg = bk};
+            GitSub g = {.name = j->names[i], .borg = bk, .mounted = mounted};
             j->names[i] = NULL;
             if (j->nsubs == cap) { cap = cap ? cap * 2 : 8; j->subs = xrealloc(j->subs, (size_t)cap * sizeof *j->subs); }
             j->subs[j->nsubs++] = g;

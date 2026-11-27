@@ -64,6 +64,10 @@ desktops that close and tile windows from the keyboard; the tab strip then runs 
 `brand_name=app|host|custom|hidden` (Options -> Appearance -> Name above the sidebar) shows Explorer, this computer's
 name, your own `brand_text=` (typed under it in Options), or nothing: the sidebar then starts at the top.
 `brand_logo=0` (Options -> Appearance -> Logo) shows that name without the logo.
+`repo_tag=full|icon|hidden` (Options -> Appearance -> Repository tag) styles the tag on a repository folder: its
+branch, its mark alone, or none (the name then takes the room). `repo_icon=keep|match` (Options -> Appearance ->
+Repository folder icon) lets a repository folder keep its own icon or wear the one that matches it (the Git folder,
+the archive of a Borg backup).
 `round_corners=1` (Options -> Appearance -> Rounded corners, off by default) rounds the window's corners with Explorer's own title bar,
 and draws a drop shadow round it the way GTK apps do (square and without shadow when maximised or snapped). On X11 this
 needs a compositor (else the corners stay square) and the OpenGL renderer (Automatic picks it there); the shadow needs a
@@ -212,6 +216,7 @@ named like the built-in icons replace them (`python.svg`, `folder.svg`, `folder-
 sets the icon for any extension, and `theme.conf` (`base=Catppuccin`) picks the set the missing icons come from.
 `trash-full.svg` is the Trash's bin when something is in it (`trash.svg` when empty; a theme with only `trash.svg`
 uses it for both). `emblem-symbolic-link.svg` and `emblem-git.svg` replace the marks on links and Git
-repositories: drawn on the icon's lower right at about a third of its size (with both, the Git one sits above);
-without them the usual marks stay. `net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
+repositories, and `emblem-symbolic-share.svg` adds the mark on shared folders: drawn on the icon's lower right at
+about a third of its size (with more than one, the next one sits above); without them the desktop icon theme's own
+artwork is used, and the app's own when the theme has none either. `net-<name>.svg` adds an icon for network locations (offered whichever theme is selected). The folder's README.txt
 lists every icon name.
