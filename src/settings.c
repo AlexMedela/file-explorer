@@ -48,6 +48,8 @@ static void settings_defaults(void) {
     A.round_corners = false;
     A.window_buttons = true;
     A.brand_logo = true;
+    A.repo_tag = REPO_TAG_FULL;
+    A.repo_icon = REPO_ICON_KEEP;
     A.brand_name = BRAND_APP;
     A.brand_text[0] = 0;
     A.tab_style = TABS_CARDS;
@@ -74,6 +76,7 @@ static void settings_defaults(void) {
     A.def_view = VIEW_DETAILS;
     A.def_icon = 96;
     A.def_list_icon = A.def_listv_icon = 16;
+    A.def_sidebar_icon = 16;
     A.view_per_folder = false;
     A.def_group = GROUP_NONE;
     snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "Material");
@@ -328,6 +331,8 @@ static void settings_load(void) {
         else if (!strcmp(k, "round_corners")) A.round_corners = atoi(v);
         else if (!strcmp(k, "window_buttons")) A.window_buttons = atoi(v);
         else if (!strcmp(k, "brand_logo")) A.brand_logo = atoi(v);
+        else if (!strcmp(k, "repo_tag")) A.repo_tag = !strcmp(v, "icon") ? REPO_TAG_ICON : !strcmp(v, "hidden") ? REPO_TAG_HIDDEN : REPO_TAG_FULL;
+        else if (!strcmp(k, "repo_icon")) A.repo_icon = !strcmp(v, "match") ? REPO_ICON_MATCH : REPO_ICON_KEEP;
         else if (!strcmp(k, "brand_name")) A.brand_name = !strcmp(v, "host") ? BRAND_HOST : !strcmp(v, "custom") ? BRAND_CUSTOM : !strcmp(v, "hidden") ? BRAND_HIDDEN : BRAND_APP;
         else if (!strcmp(k, "brand_text")) snprintf(A.brand_text, sizeof A.brand_text, "%s", v);
         else if (!strcmp(k, "tab_style")) A.tab_style = !strcmp(v, "pills") ? TABS_PILLS : TABS_CARDS;
@@ -340,6 +345,7 @@ static void settings_load(void) {
         else if (!strcmp(k, "icon_size")) A.def_icon = CLAMP(atoi(v), 32, 256);
         else if (!strcmp(k, "list_icon_size")) A.def_list_icon = CLAMP(atoi(v), 16, 64);
         else if (!strcmp(k, "list_view_icon_size")) A.def_listv_icon = CLAMP(atoi(v), 16, 64);
+        else if (!strcmp(k, "sidebar_icon_size")) A.def_sidebar_icon = CLAMP(atoi(v), 16, 32);
         else if (!strcmp(k, "view_per_folder")) A.view_per_folder = atoi(v);
         else if (!strcmp(k, "group")) A.def_group = CLAMP(atoi(v), 0, GROUP_COUNT - 1);
         else if (!strcmp(k, "icon_theme")) snprintf(A.icon_theme_name, sizeof A.icon_theme_name, "%s", v);
@@ -614,8 +620,8 @@ static void settings_write(FILE *f) {
     fprintf(f, "navigation_selection_opacity=%d\nnavigation_selector_mark=%d\n", g_navigation_selection_opacity, g_nav_selector_mark);
     if (g_accent_custom) fprintf(f, "accent=#%06X\n", g_accent_custom & 0xFFFFFF);
     else fprintf(f, "accent=\n");
-    fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",
-            A.def_view == VIEW_GRID ? "grid" : A.def_view == VIEW_LIST ? "list" : "details", A.def_icon, A.def_list_icon, A.def_listv_icon, A.view_per_folder,
+    fprintf(f, "view=%s\nicon_size=%d\nlist_icon_size=%d\nlist_view_icon_size=%d\nsidebar_icon_size=%d\nview_per_folder=%d\ngroup=%d\n",
+            A.def_view == VIEW_GRID ? "grid" : A.def_view == VIEW_LIST ? "list" : "details", A.def_icon, A.def_list_icon, A.def_listv_icon, A.def_sidebar_icon, A.view_per_folder,
             A.def_group);
     fprintf(f, "verify_copies=%d\ntransfers_at_once=%d\n", A.verify_copies, A.transfers_at_once);
     fprintf(f, "integration_prev_folder_app=%s\nintegration_show_in_folder=%d\nintegration_asked=%d\n", A.ig_prev_fm, A.ig_fm1,
@@ -626,6 +632,8 @@ static void settings_write(FILE *f) {
     fprintf(f, "round_corners=%d\n", A.round_corners);
     fprintf(f, "window_buttons=%d\n", A.window_buttons);
     fprintf(f, "brand_logo=%d\n", A.brand_logo);
+    fprintf(f, "repo_tag=%s\nrepo_icon=%s\n", A.repo_tag == REPO_TAG_ICON ? "icon" : A.repo_tag == REPO_TAG_HIDDEN ? "hidden" : "full",
+            A.repo_icon == REPO_ICON_MATCH ? "match" : "keep");
     static const char *brand_names[] = {"app", "host", "custom", "hidden"}; // BRAND_*
     fprintf(f, "brand_name=%s\nbrand_text=%s\n", brand_names[CLAMP(A.brand_name, 0, BRAND_HIDDEN)], A.brand_text);
     fprintf(f, "tab_style=%s\n", A.tab_style == TABS_PILLS ? "pills" : "cards");
