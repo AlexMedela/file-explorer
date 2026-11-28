@@ -21,6 +21,14 @@ sudo apt update && sudo apt install file-explorer
 sudo dnf config-manager addrepo --from-repofile="https://download.opensuse.org/repositories/home:AlexMedela/Fedora_$(rpm -E %fedora)/home:AlexMedela.repo"
 sudo dnf install file-explorer
 ```
+Atomic desktops (Silverblue, Kinoite, Bazzite, ...): add the same repo file, then layer the package and reboot:
+```sh
+sudo curl -fsSL -o /etc/yum.repos.d/home:AlexMedela.repo "https://download.opensuse.org/repositories/home:AlexMedela/Fedora_$(rpm -E %fedora)/home:AlexMedela.repo"
+rpm-ostree refresh-md && sudo rpm-ostree install file-explorer
+```
+After upgrading to a new Fedora release, add the repo again so it points at the new version (with `dnf`, pass
+`--overwrite`; on atomic desktops just re-run the `curl` line). Otherwise the package for the old release is offered and
+fails with "nothing provides libfuse3.so...".
 
 ## openSUSE Tumbleweed / Leap 16.0
 ```sh
