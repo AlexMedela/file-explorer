@@ -6278,25 +6278,30 @@ static void borg_save(const char *repo, const char *dir, int kind);
 static void borg_forget(int i);
 static void borg_edit_open(int i); // ui_tools.c
 
-// Go to a path: a folder is entered, anything else is shown in its folder with it selected.
+// Show a path in its folder with it selected (a search result's "Visit location", a link to a file).
 static void pane_reveal(Pane *p, const char *target) {
-    struct stat st;
-    if (stat(target, &st) == 0 && S_ISDIR(st.st_mode)) {
-        pane_navigate(p, target, true);
-        return;
-    }
-
     char par[PATH_MAX];
     parent_of(target, par, sizeof par);
-    pane_navigate(p, par, strcmp(par, p->path) != 0); // close search
+    pane_navigate(p, par, true); // (also ends a search)
     snprintf(p->select_name, sizeof p->select_name, "%s", path_basename(target));
 }
 
-// Fully resolved target of a symlink, false for a broken / remote one
-static bool link_target(const char *full, char *out) {
-    struct stat st;
-    if (path_is_remote(full) || lstat(full, &st) || !S_ISLNK(st.st_mode)) return false;
-    return realpath(full, out) != NULL;
+// Where a symlink points, made absolute (lexically, relative to the link's folder). The target the listing already
+// read with the metadata when it has it (no disk access here); a search result's link is read (a local one only).
+static bool link_target(const Pane *p, u32 ei, const char *full, char *out, size_t cap) {
+    char t[PATH_MAX];
+    const Listing *L = p->L;
+    if (L->links && atomic_load(&L->entries[ei].meta) == META_READY && L->links[ei]) snprintf(t, sizeof t, "%s", L->links[ei]);
+    else {
+        ssize_t n = path_is_remote(full) ? -1 : readlink(full, t, sizeof t - 1);
+        if (n <= 0) return false;
+        t[n] = 0;
+    }
+    char dir[PATH_MAX];
+    parent_of(full, dir, sizeof dir);
+    path_join(out, cap, dir, t);
+    path_normalize(out);
+    return true;
 }
 
 static void do_action(Pane *p, int act) {
@@ -6336,13 +6341,19 @@ static void do_action(Pane *p, int act) {
         }
         break;
     case ACT_FOLLOW_LINK:
-    case ACT_VISIT_LOCATION:
-        if (p->order && p->cursor >= 0 && p->cursor < (i64)p->count) {
+    case ACT_VISIT_LOCATION: // (the shortcut: a search result's folder, else a link's target)
+        if (p->L && p->order && p->cursor >= 0 && p->cursor < (i64)p->count && !pane_is_archive(p)) {
+            u32 ei = content_file_of(p->L, p->order[p->cursor]); // a contents search's matching line: its file
+            const Entry *e = &p->L->entries[ei];
             char full[PATH_MAX], target[PATH_MAX];
-            path_join(full, sizeof full, p->path, p->L->entries[p->order[p->cursor]].name);
-            if (act == ACT_VISIT_LOCATION) pane_reveal(p, full);
-            else if (link_target(full, target)) pane_reveal(p, target);
-            else toast("Can't follow \xE2\x80\x9C%s\xE2\x80\x9D: the link is broken or not local", path_basename(full));
+            path_join(full, sizeof full, p->path, e->name);
+            if (act == ACT_VISIT_LOCATION && p->L->is_search) pane_reveal(p, full);
+            else if (!(e->flags & ENT_LINK)) {
+                if (act == ACT_FOLLOW_LINK) toast("\xE2\x80\x9C%s\xE2\x80\x9D is not a link", path_basename(full));
+            } else if (!link_target(p, ei, full, target, sizeof target))
+                toast("Can't follow \xE2\x80\x9C%s\xE2\x80\x9D: its target can't be read here", path_basename(full));
+            else if (e->flags & ENT_DIR) pane_navigate(p, target, true); // a link to a folder: into it
+            else pane_reveal(p, target); // to a file (or a broken link: its folder, if that exists)
         }
         break;
     case ACT_CUT:
@@ -6875,6 +6886,7 @@ static void menu_add(const char *label, const char *sc, int act, bool enabled) {
     // rebindable actions show their current key (tab-menu actions alias the tab commands)
     int cmd = act == ACT_TAB_NEW ? CMD_NEW_TAB : act == ACT_TAB_CLOSE ? CMD_CLOSE_TAB : act == ACT_TAB_WINDOW ? CMD_NEW_WINDOW : act;
     if (act == ACT_DELETE && !strcmp(sc, "Del")) cmd = ACT_TRASH; // trash view: the Trash key deletes permanently
+    if (act == ACT_FOLLOW_LINK && sc[0]) cmd = ACT_VISIT_LOCATION; // outside a search that key follows the link
     const char *k = keymap_label(cmd);
     if (k) {
         snprintf(m->scbuf[m->n], sizeof m->scbuf[m->n], "%s", k);
@@ -7785,10 +7797,10 @@ static void menu_open(Pane *p, f32 x, f32 y, bool on_item) {
             menu_add("Add to sidebar", "", ACT_BORG_SAVE, true);
         } else menu_add("Open", "Enter", ACT_OPEN, true);
         menu_add_open_with("Open with", mime_for_file(path_basename(e->name), dir), true);
-        if (!pane_is_archive(p) && (e->flags & ENT_LINK))
-            menu_add("Follow link", "", ACT_FOLLOW_LINK, true);
+        if (!pane_is_archive(p) && (e->flags & ENT_LINK) && !path_is_remote(p->path))
+            menu_add("Follow link", p->L->is_search ? "" : "Ctrl+Shift+L", ACT_FOLLOW_LINK, true); // (Visit location's key)
         if (p->L->is_search && !pane_is_archive(p))
-            menu_add("Visit location", "", ACT_VISIT_LOCATION, true);
+            menu_add("Visit location", "Ctrl+Shift+L", ACT_VISIT_LOCATION, true);
         if (!dir && !pane_is_archive(p) && !pane_is_trash(p) && !(e->flags & ENT_MATCH)) { // programs and scripts
             char full[PATH_MAX];
             bool exec;
@@ -12194,6 +12206,7 @@ static const CmdDef g_cmds[] = {
     {"Undo", "Ctrl+Z", ACT_UNDO},
     {"Select all", "Ctrl+A", ACT_SELECT_ALL},
     {"Copy path", "Ctrl+Shift+C", ACT_COPY_PATH},
+    {"Visit location (search result) / follow link", "Ctrl+Shift+L", ACT_VISIT_LOCATION},
     {"Open terminal tab here", "Shift+F4", ACT_TERMINAL},
     {"Terminal panel: show / hide", "F4", ACT_TERM_PANEL},
     {"Terminal panel: focus / back to the folder", "Ctrl+Shift+F4", ACT_TERM_FOCUS},
@@ -12250,7 +12263,7 @@ static void ql_toggle(void); // (preview panel section)
 
 static void run_command(int id) {
     Pane *p = active_pane();
-    if (id < 100 || (id >= ACT_ARC_BASE && id < ACT_COMPRESS_BASE + ARC_NFMT)) { A.menu_tab = cur_tab(); do_action(p, id); return; }
+    if (id < 100 || (id >= ACT_ARC_BASE && id < ACT_COMPRESS_BASE + ARC_NFMT) || id == ACT_VISIT_LOCATION) { A.menu_tab = cur_tab(); do_action(p, id); return; }
     switch (id) {
     case CMD_NEW_TAB: tab_new(p->path, A.cur + 1, true); break;
     case CMD_CLOSE_TAB: tab_close(A.cur); break;

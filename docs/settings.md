@@ -84,7 +84,7 @@ a document. Right-click > Run / Run in terminal runs a program or script without
 are never run.
 
 **Context menus** (Options > Context menus) hides entries of the file and folder right-click menu (Open in new
-tab / split, Open with, Disk usage, Delete permanently, Compress to, the terminal entries, Views / Sort by / Group by,
+tab / split, Open with, Visit location, Follow link, Disk usage, Delete permanently, Compress to, the terminal entries, Views / Sort by / Group by,
 Properties, ...); `menu_hidden=` lists the hidden ones (e.g. `menu_hidden=open_split_down,disk_usage`). The ribbon,
 sidebar, drive and terminal-panel menus and the keyboard shortcuts are unchanged.
 

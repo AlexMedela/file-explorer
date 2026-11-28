@@ -1023,6 +1023,22 @@ static bool c_search_done(void) {
     return p->L && p->L->is_search && !p->L_next && atomic_load(&p->L->state) == LST_COMPLETE;
 }
 
+static bool st_menu_has(int act);
+static const char *g_st_reveal_dir, *g_st_reveal_name; // c_revealed: the folder shown, the item under the cursor
+
+static bool c_revealed(void) {
+    Pane *p = active_pane();
+    if (!p->L || p->L->is_search || p->L_next || strcmp(p->path, g_st_reveal_dir) || atomic_load(&p->L->state) < LST_READY) return false;
+    if (!g_st_reveal_name) return true;
+    return p->order && p->cursor >= 0 && p->cursor < (i64)p->count && !strcmp(p->L->entries[p->order[p->cursor]].name, g_st_reveal_name);
+}
+
+static bool st_cursor_to(Pane *p, const char *name) {
+    for (u32 i = 0; p->order && i < p->count; i++)
+        if (!strcmp(p->L->entries[p->order[i]].name, name)) { p->cursor = i; return true; }
+    return false;
+}
+
 static bool c_has_new_ext(void) {
     Pane *p = active_pane();
     if (!p->order || p->L_next) return false;
@@ -1264,6 +1280,43 @@ static int run_selftest_m4(void) {
     }
     ST_CHECK(c_has_new_ext());
     ST_CHECK(!blank);
+
+    // Visit location: a search result shown in its folder, selected (a folder too, not entered); Follow link
+    A.search_recursive = true;
+    st_key(SDLK_F, SDL_KMOD_CTRL);
+    search_focus(p);
+    st_type("beta");
+    search_apply(p, true);
+    ST_CHECK(st_wait_cond(c_search_done, 3000));
+    ST_CHECK(st_cursor_to(p, "alpha/beta"));
+    menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+    ST_CHECK(A.menu.open && st_menu_has(ACT_VISIT_LOCATION) && !st_menu_has(ACT_FOLLOW_LINK));
+    A.menu.open = false;
+    do_action(p, ACT_VISIT_LOCATION);
+    g_st_reveal_dir = M4_BASE "/alpha", g_st_reveal_name = "beta";
+    ST_CHECK(st_wait_cond(c_revealed, 3000));
+    ST_CHECK(!p->search_q[0] && p->hist_n >= 2 && !strcmp(p->hist[p->hist_pos], M4_BASE "/alpha"));
+    A.search_recursive = false;
+    mkdir(M4_BASE "/lnk", 0755);
+    ST_CHECK(symlink("../alpha/beta/two.log", M4_BASE "/lnk/to_two") == 0 && symlink(M4_BASE "/alpha", M4_BASE "/lnk/to_alpha") == 0);
+    pane_navigate(p, M4_BASE "/lnk", true);
+    st_wait();
+    ST_CHECK(p->count == 2 && st_cursor_to(p, "to_two"));
+    menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+    ST_CHECK(A.menu.open && st_menu_has(ACT_FOLLOW_LINK) && !st_menu_has(ACT_VISIT_LOCATION));
+    A.menu.open = false;
+    st_key(SDLK_L, SDL_KMOD_CTRL | SDL_KMOD_SHIFT); // the shortcut follows a link outside a search
+    g_st_reveal_dir = M4_BASE "/alpha/beta", g_st_reveal_name = "two.log";
+    ST_CHECK(st_wait_cond(c_revealed, 3000));
+    pane_navigate(p, M4_BASE "/lnk", true);
+    st_wait();
+    ST_CHECK(st_cursor_to(p, "to_alpha"));
+    do_action(p, ACT_FOLLOW_LINK); // a link to a folder: into it
+    g_st_reveal_dir = M4_BASE "/alpha", g_st_reveal_name = NULL;
+    ST_CHECK(st_wait_cond(c_revealed, 3000));
+    st_rmrf(M4_BASE "/lnk");
+    pane_navigate(p, M4_BASE, true);
+    st_wait();
 
     // the folder we're in is deleted -> jump to the nearest existing parent
     pane_navigate(p, M4_BASE "/alpha/beta/gamma/deepfolder", true);
@@ -9154,6 +9207,19 @@ static int run_selftest_grep(void) {
     ST_CHECK(!A.search_recursive && p->L->nfiles == 1 && st_cs_row(p, "a.c", 0) >= 0);
     search_toggle_recursive(p);
     st_wait_cond(st_cs_done, 5000);
+
+    // Visit location on a matching line: its file, shown in its folder
+    {
+        i64 rl = st_cs_row(p, "sub/b.txt", 2);
+        ST_CHECK(rl >= 0);
+        p->cursor = rl;
+        menu_open(p, p->ly.list.x + S(40), p->ly.list.y + S(40), true);
+        ST_CHECK(A.menu.open && st_menu_has(ACT_VISIT_LOCATION));
+        A.menu.open = false;
+        do_action(p, ACT_VISIT_LOCATION);
+        g_st_reveal_dir = GREP_BASE "/tree/sub", g_st_reveal_name = "b.txt";
+        ST_CHECK(st_wait_cond(c_revealed, 3000));
+    }
 
     // --- the result limit: 20,000 lines, then it stops and says so
     pane_navigate(p, GREP_BASE "/many", true);

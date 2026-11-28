@@ -76,6 +76,7 @@ static KeyDef g_keys[] = {
     K(ACT_UNDO, "file.undo", false, "Ctrl+Z"),
     K(ACT_SELECT_ALL, "file.select_all", false, "Ctrl+A"),
     K(ACT_COPY_PATH, "file.copy_path", false, "Ctrl+Shift+C"),
+    K(ACT_VISIT_LOCATION, "file.visit_location", false, "Ctrl+Shift+L"),
     K(ACT_NEW_FOLDER, "file.new_folder", false, "Ctrl+Shift+N"),
     K(ACT_NEW_FILE, "file.new_file", false, "Ctrl+Alt+N"),
     K(ACT_TERMINAL, "file.terminal", false, "Shift+F4"),
